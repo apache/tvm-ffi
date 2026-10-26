@@ -36,6 +36,7 @@ jobs:
           - {os: ubuntu-24.04-arm, arch: aarch64, build: "cp312-manylinux_aarch64"}
           - {os: macos-14, arch: arm64, build: "cp312-macosx_arm64"}
           - {os: windows-latest, arch: AMD64, build: "cp312-win_amd64"}
+          - {os: windows-11-vs2026-arm, arch: ARM64, build: "cp312-win_arm64"}
 
     steps:
       - name: Checkout repository (for local composite action)
@@ -77,7 +78,7 @@ jobs:
           subject-path: dist/*
 
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
         with:
           attestations: true
           verbose: true

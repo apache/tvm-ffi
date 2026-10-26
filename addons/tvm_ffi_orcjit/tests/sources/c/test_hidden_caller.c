@@ -33,7 +33,10 @@
 #include <tvm/ffi/c_api.h>
 
 /* Same hidden declaration — compiler uses ADRP+ADD to take address */
-__attribute__((visibility("hidden"))) extern int64_t hidden_helper_add(int64_t a, int64_t b);
+#ifndef _MSC_VER
+__attribute__((visibility("hidden")))
+#endif
+extern int64_t hidden_helper_add(int64_t a, int64_t b);
 
 typedef int64_t (*binop_t)(int64_t, int64_t);
 

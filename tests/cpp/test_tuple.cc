@@ -195,9 +195,10 @@ TEST(Tuple, CPPFeatures) {
   {
     auto p = Tuple{Array<int>{0}};
     EXPECT_EQ(p.use_count(), 1);
-    // structured binding (rvalue)
-    // move out the only ownership
-    auto [q] = std::move(p);
+    // Spell out the tuple move and rvalue get to avoid a GCC 15.2 structured-binding ICE.
+    // Move out the only ownership.
+    auto moved = std::move(p);
+    auto q = get<0>(std::move(moved));
     EXPECT_EQ(q.use_count(), 1);
   }
 

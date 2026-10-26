@@ -711,7 +711,7 @@ inline void TVMFFIPyTpFree(void* self);
 inline void* TVMFFIPyAllocate(size_t size, size_t alignment, int32_t /*type_index*/,
                               void* /*context*/) {
   void* base_alloc =
-      ::tvm::ffi::details::AlignedAlloc(sizeof(PyCustomAllocHeader) + size, alignment);
+      ::tvm::ffi::detail::AlignedAlloc(sizeof(PyCustomAllocHeader) + size, alignment);
   auto* h = static_cast<PyCustomAllocHeader*>(base_alloc);
   h->tagged_pyobj = nullptr;  // Detached
   h->base.delete_space = &TVMFFIPyDeleteSpace;
@@ -969,7 +969,7 @@ inline void TVMFFIPyTpFree(void* self) {
     // continuation: none -- we are the last settler and free the block here.
     *chandle_ptr = nullptr;
     TVMFFIPyUnlockKeep(h, cur);
-    ::tvm::ffi::details::AlignedFree(static_cast<char*>(chandle) - sizeof(PyCustomAllocHeader));
+    ::tvm::ffi::detail::AlignedFree(static_cast<char*>(chandle) - sizeof(PyCustomAllocHeader));
   }
   PyObject* op = static_cast<PyObject*>(self);
   if (PyObject_IS_GC(op)) {
@@ -996,7 +996,7 @@ inline void TVMFFIPyDeleteSpace(void* ptr) {
   auto* h = static_cast<PyCustomAllocHeader*>(base_alloc);
   PyObject* cur0 = TVMFFIPyPeekWord(h);
   if (!TVMFFIPyTagIsInactive(cur0)) {  // Detached: lock-free free
-    ::tvm::ffi::details::AlignedFree(base_alloc);
+    ::tvm::ffi::detail::AlignedFree(base_alloc);
     return;
   }
   if (TVMFFIPyIsPythonAlive()) {
@@ -1025,7 +1025,7 @@ inline void TVMFFIPyDeleteSpace(void* ptr) {
     TVMFFIPyUnlockWord(h, TVMFFIPyTagClearInTransit(cur0));
     return;
   }
-  ::tvm::ffi::details::AlignedFree(base_alloc);
+  ::tvm::ffi::detail::AlignedFree(base_alloc);
 }
 
 /*!

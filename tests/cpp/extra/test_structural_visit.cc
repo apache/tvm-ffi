@@ -67,10 +67,10 @@ class TestVisitorObj : public StructuralVisitorObj {
       if (interrupt_on.defined() && value_ref.same_as(interrupt_on)) {
         Expected<Optional<VisitInterrupt>> interrupt =
             Optional<VisitInterrupt>(VisitInterrupt(String("stop")));
-        return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(interrupt));
+        return detail::ExpectedUnsafe::MoveToTVMFFIAny(std::move(interrupt));
       }
     }
-    return details::ExpectedUnsafe::MoveToTVMFFIAny(DefaultVisitExpected(value));
+    return detail::ExpectedUnsafe::MoveToTVMFFIAny(DefaultVisitExpected(value));
   }
 };
 

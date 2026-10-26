@@ -46,16 +46,22 @@ namespace ffi {
  */
 template <typename RefType, typename ObjectType>
 inline RefType GetRef(const ObjectType* ptr) {
-  if constexpr (object_ref_contains_v<RefType, ObjectType>) {
-    if constexpr (is_optional_type_v<RefType> || RefType::_type_is_nullable) {
+  if constexpr (is_optional_type_v<RefType>) {
+    using ValueType = typename RefType::value_type;
+    static_assert(object_ref_contains_v<ValueType, ObjectType>,
+                  "GetRef requires the Optional value type to contain every ObjectType instance");
+    if (ptr == nullptr) return std::nullopt;
+    return RefType(GetRef<ValueType>(ptr));
+  } else if constexpr (object_ref_contains_v<RefType, ObjectType>) {
+    if constexpr (RefType::_type_is_nullable) {
       if (ptr == nullptr) {
-        return details::ObjectUnsafe::ObjectRefFromObjectPtr<RefType>(nullptr);
+        return detail::ObjectUnsafe::ObjectRefFromObjectPtr<RefType>(nullptr);
       }
     } else {
       TVM_FFI_ICHECK_NOTNULL(ptr);
     }
-    return details::ObjectUnsafe::ObjectRefFromObjectPtr<RefType>(
-        details::ObjectUnsafe::ObjectPtrFromUnowned<Object>(
+    return detail::ObjectUnsafe::ObjectRefFromObjectPtr<RefType>(
+        detail::ObjectUnsafe::ObjectPtrFromUnowned<Object>(
             const_cast<Object*>(static_cast<const Object*>(ptr))));
   } else {
     static_assert(object_ref_contains_v<RefType, ObjectType>,
@@ -78,7 +84,7 @@ template <typename BaseType, typename ObjectType>
 inline ObjectPtr<BaseType> GetObjectPtr(ObjectType* ptr) {
   static_assert(std::is_base_of_v<BaseType, ObjectType>,
                 "Can only cast to the ref of same container type");
-  return details::ObjectUnsafe::ObjectPtrFromUnowned<BaseType>(ptr);
+  return detail::ObjectUnsafe::ObjectPtrFromUnowned<BaseType>(ptr);
 }
 }  // namespace ffi
 }  // namespace tvm

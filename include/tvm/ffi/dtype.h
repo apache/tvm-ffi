@@ -42,7 +42,7 @@ namespace ffi {
  */
 enum DLExtDataTypeCode { kDLExtCustomBegin = 129 };
 
-namespace details {
+namespace detail {
 
 /*
  * \brief Convert a DLDataTypeCode to a string.
@@ -113,7 +113,7 @@ inline const char* DLDataTypeCodeAsCStr(DLDataTypeCode type_code) {  // NOLINT(*
     }
   }
 }
-}  // namespace details
+}  // namespace detail
 
 /*!
  * \brief Convert a string to a DLDataType.

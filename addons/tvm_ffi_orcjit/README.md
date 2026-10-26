@@ -30,7 +30,7 @@ TVM-FFI exported functions.
 - **Symbol Isolation**: Separate `load_module` calls define independent symbol namespaces, so they can define the same symbol without conflicts
 - **Bounded-Range Memory**: A growable Linux slab pool keeps JIT code/data close enough for 32-bit PC-relative relocations and supports explicit drained-slab reclamation
 - **Init/Fini Support**: Handles static constructors/destructors across ELF (`.init_array`/`.ctors`), Mach-O (`__mod_init_func`), and COFF (`.CRT$XC*`/`.CRT$XT*`)
-- **Cross-Platform**: Linux (x86_64, aarch64), macOS (arm64), Windows (AMD64)
+- **Cross-Platform**: Linux (x86_64, aarch64), macOS (arm64), Windows (AMD64, ARM64)
 - **Multi-Compiler**: Tested with LLVM Clang, GCC, Apple Clang, MSVC, and clang-cl
 - **TVM-FFI Integration**: Seamlessly works with TVM-FFI's stable C ABI
 - **Python API**: Simple Pythonic interface for JIT compilation and execution
@@ -44,13 +44,18 @@ can be loaded and executed by the ORC JIT:
 | -------- | --------- | :-: | :-: |
 | Linux (x86_64, aarch64) | LLVM Clang, GCC | yes | yes |
 | macOS (arm64) | LLVM Clang, Apple Clang | yes | yes |
-| Windows (AMD64) | LLVM Clang, MSVC, clang-cl | yes | no |
+| Windows (AMD64, ARM64) | LLVM Clang, MSVC, clang-cl | yes | no |
 
 Windows is C-only across all compilers. C++ objects compiled with
 `TVM_FFI_DLL_EXPORT_TYPED_FUNC` use `try`/`catch` (via `TVM_FFI_SAFE_CALL_BEGIN/END`),
 which requires Itanium exception ABI symbols (`__cxa_begin_catch`,
 `__gxx_personality_v0`, etc.) that the MSVC-built host process cannot provide.
 Pure C objects using the `TVMFFISafeCallType` ABI work on all platforms.
+
+Windows ARM64 uses LLVM's `RTDyldObjectLinkingLayer` because LLVM 23.1.1
+does not implement COFF/AArch64 in JITLink. RuntimeDyld handles ARM64 relocations,
+long-branch stubs, and DLL-import slots; the addon preserves `.CRT$XC*` / `.CRT$XT*`
+constructor/destructor handling. Windows AMD64 continues to use JITLink.
 
 ## Installation
 
@@ -64,26 +69,18 @@ pip install apache-tvm-ffi apache-tvm_ffi_orcjit
 
 #### Prerequisites
 
-- Python 3.10+, CMake 3.20+, C++17 compiler
-- LLVM 23.1.1+ development libraries (`llvmdev`, `llvm-config`)
-- Static `zlib` and `zstd` libraries (in the same prefix as LLVM)
+- Python 3.10+, CMake 3.24+, C++17 compiler
 
-#### Install LLVM via conda-forge
+The build automatically installs [mlc-llvm-static](https://pypi.org/project/mlc-llvm-static/)
+from PyPI. It supplies LLVM 23.1.1, static zlib/zstd, and the Linux ORC runtime.
+CMake uses the SDK in the build environment and links its exported static targets.
+A separate LLVM installation is not used. The SDK is linked statically and is not a
+runtime dependency of the resulting addon wheel.
 
-The easiest way to get all dependencies is via conda-forge:
-
-```bash
-conda create -p /opt/llvm -c conda-forge \
-  llvmdev=23.1.1 clangdev=23.1.1 compiler-rt=23.1.1 zlib zstd-static -y
-export LLVM_PREFIX=/opt/llvm
-```
-
-On Windows:
-
-```cmd
-conda create -p C:\opt\llvm -c conda-forge llvmdev=23.1.1 zlib zstd-static -y
-set LLVM_PREFIX=C:\opt\llvm
-```
+The base SDK contains the native backend used by ORC JIT.
+`mlc-llvm-static-extra-targets` adds cross-compilation backends and is not required
+for this addon. Clang and other compilers are separate tools; the SDK does not
+include them.
 
 #### Build and install
 
@@ -99,9 +96,9 @@ cd addons/tvm_ffi_orcjit
 pip install -e .
 ```
 
-The `LLVM_PREFIX` environment variable tells CMake where to find LLVM. If
-LLVM is installed in a conda env or a standard system path, CMake can
-auto-discover it and `LLVM_PREFIX` is not needed.
+For a build with `--no-build-isolation`, install the build requirements, including
+`mlc-llvm-static==23.1.1.post0`, into the same Python environment first. `LLVM_PREFIX`
+and `LLVM_DIR` do not select a different SDK.
 
 On Linux, each `load_module` call follows the same default compiler selection
 as `tvm_ffi.cpp.build`: `$CXX`, or `c++` when unset. ORC asks that compiler for
@@ -235,7 +232,7 @@ tvm_ffi_orcjit/
 
 ## CI
 
-Runs on Linux (x86_64, aarch64), macOS (arm64), Windows (AMD64) via
+Runs on Linux (x86_64, aarch64), macOS (arm64), Windows (AMD64, ARM64) via
 `cibuildwheel`. Each platform builds test objects with multiple compilers
 and runs the full test suite. See the `orcjit` job in `.github/workflows/ci_test.yml`.
 
@@ -259,12 +256,14 @@ for C++, or `__tvm_ffi_` prefix for C).
 MSVC/clang-cl objects must be compiled with `/GS-` to disable buffer security
 checks (`__security_cookie`) which are CRT symbols the JIT cannot resolve.
 
-### LLVM version mismatch
+### LLVM SDK discovery failure
 
-The package requires LLVM 23.1.1+. Set `LLVM_PREFIX` to the LLVM install prefix:
+Source builds require the pinned `mlc-llvm-static` package in the build
+interpreter's environment. Normal isolated builds install it automatically.
+For builds with `--no-build-isolation`, install it explicitly:
 
 ```bash
-export LLVM_PREFIX=/path/to/llvm
+pip install mlc-llvm-static==23.1.1
 ```
 
 ### Reclaiming unused JIT memory on Linux

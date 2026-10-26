@@ -19,6 +19,7 @@
 name = "tvm-ffi-macros"
 description = "Procedural macro crate for tvm-ffi"
 
+# Development placeholder; publish_crates.yml sets the release version from the Git tag.
 version = "0.1.0-alpha.0"
 edition = "2021"
 license = "Apache-2.0"

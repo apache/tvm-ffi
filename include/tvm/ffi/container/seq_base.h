@@ -315,7 +315,7 @@ struct SeqTypeTraitsBase : public ObjectRefTypeTraitsBase<SeqRef> {
     } else {
       const SeqBaseObj* n = reinterpret_cast<const SeqBaseObj*>(src->v_obj);
       for (const Any& any_v : *n) {
-        if (!details::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
+        if (!detail::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
       }
       return true;
     }
@@ -330,10 +330,10 @@ struct SeqTypeTraitsBase : public ObjectRefTypeTraitsBase<SeqRef> {
       const SeqBaseObj* n = reinterpret_cast<const SeqBaseObj*>(src->v_obj);
       for (size_t i = 0; i < n->size(); i++) {
         const Any& any_v = n->at(static_cast<int64_t>(i));
-        if (details::AnyUnsafe::CheckAnyStrict<T>(any_v)) continue;
+        if (detail::AnyUnsafe::CheckAnyStrict<T>(any_v)) continue;
         if (any_v.try_cast<T>()) continue;
         return std::string(Derived::kTypeName) + "[index " + std::to_string(i) + ": " +
-               details::AnyUnsafe::GetMismatchTypeInfo<T>(any_v) + "]";
+               detail::AnyUnsafe::GetMismatchTypeInfo<T>(any_v) + "]";
       }
     }
     TVM_FFI_THROW(InternalError) << "Cannot reach here";
@@ -349,7 +349,7 @@ struct SeqTypeTraitsBase : public ObjectRefTypeTraitsBase<SeqRef> {
     if constexpr (!std::is_same_v<T, Any>) {
       bool storage_check = [&]() {
         for (const Any& any_v : *n) {
-          if (!details::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
+          if (!detail::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
         }
         return true;
       }();
@@ -380,7 +380,7 @@ struct SeqTypeTraitsBase : public ObjectRefTypeTraitsBase<SeqRef> {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
-    return std::string(Derived::kTypeName) + "<" + details::Type2Str<T>::v() + ">";
+    return std::string(Derived::kTypeName) + "<" + detail::Type2Str<T>::v() + ">";
   }
 
  private:

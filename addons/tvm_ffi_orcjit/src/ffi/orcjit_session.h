@@ -146,6 +146,9 @@ class ORCJITExecutionSessionObj : public Object {
   struct InitFiniEntry {
     llvm::orc::ExecutorAddr address;
     int priority;
+    // RTDyld reports section addresses before relocation. Read the relocated
+    // function pointer from this slot when running the entry after emission.
+    bool indirect{false};
   };
 
   /*!
@@ -164,7 +167,7 @@ class ORCJITExecutionSessionObj : public Object {
   /*! \brief Run drained init/fini entries in order. Call with the lock released. */
   static void RunInitFiniEntries(const std::vector<InitFiniEntry>& entries);
 
-  // Called by InitFiniPlugin during materialization, which the triggering
+  // Called by the lifecycle observer during materialization, which the triggering
   // GetSymbol runs while already holding mutex_ — so these do not lock.
   void AddPendingInitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
   void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);

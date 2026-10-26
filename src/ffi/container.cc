@@ -26,7 +26,10 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/device.h>
+#include <tvm/ffi/extra/dataclass.h>
+#include <tvm/ffi/extra/serialization.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/native_function.h>
 #include <tvm/ffi/reflection/registry.h>
 
 #include <sstream>
@@ -103,44 +106,57 @@ class MapForwardIterFunctor {
   ffi::MapObj::iterator end_;
 };
 
+int64_t BigIntAnyHash(const Any& value) {
+  return detail::int_ops::BitcastToInt64(value.as_or_throw<BigInt>().hash());
+}
+
+bool BigIntAnyEqual(const Any& lhs, const Any& rhs) {
+  return lhs.as_or_throw<BigInt>() == rhs.as_or_throw<BigInt>();
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::EnsureTypeAttrColumn(refl::type_attr::kAnyHash);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kAnyEqual);
-  refl::ObjectDef<details::BigIntObj>()
-      .def_type_attr(refl::type_attr::kAnyHash,
-                     [](const BigInt& value) -> int64_t {
-                       return details::int_ops::BitcastToInt64(value.hash());
+  refl::EnsureTypeAttrColumn(type_attr::kAnyHash);
+  refl::EnsureTypeAttrColumn(type_attr::kAnyEqual);
+  refl::ObjectDef<detail::BigIntObj>()
+      .def_type_attr(
+          type_attr::kAnyHash.name,
+          reflection::NativeFunctionView<int64_t(const Any&)>::FromNative<&BigIntAnyHash>())
+      .def_type_attr(type_attr::kAnyEqual.name,
+                     reflection::NativeFunctionView<bool(
+                         const Any&, const Any&)>::FromNative<&BigIntAnyEqual>())
+      .def_type_attr(type_attr::kEq.name,
+                     [](const Object* lhs, const Object* rhs, const Function&) {
+                       return AnyView(lhs).as_or_throw<BigInt>() ==
+                              AnyView(rhs).as_or_throw<BigInt>();
                      })
-      .def_type_attr(refl::type_attr::kAnyEqual,
-                     [](const BigInt& lhs, const BigInt& rhs) { return lhs == rhs; })
-      .def_type_attr(refl::type_attr::kEq, [](const BigInt& lhs, const BigInt& rhs,
-                                              const Function&) { return lhs == rhs; })
-      .def_type_attr(refl::type_attr::kCompare,
-                     [](const BigInt& lhs, const BigInt& rhs, const Function&) {
-                       return details::int_ops::CompareFallback(
-                           details::BigIntUnsafe::GetArrayView(lhs),
-                           details::BigIntUnsafe::GetArrayView(rhs));
+      .def_type_attr(type_attr::kCompare.name,
+                     [](const Object* lhs, const Object* rhs, const Function&) {
+                       return detail::int_ops::CompareFallback(
+                           detail::BigIntUnsafe::GetArrayView(AnyView(lhs).as_or_throw<BigInt>()),
+                           detail::BigIntUnsafe::GetArrayView(AnyView(rhs).as_or_throw<BigInt>()));
                      })
-      .def_type_attr(refl::type_attr::kHash,
-                     [](const BigInt& value, const Function&) -> int64_t {
-                       return details::int_ops::BitcastToInt64(value.hash());
-                     })
-      .def_type_attr(refl::type_attr::kDataToJson,
-                     [](const BigInt& value) -> String {
+      .def_type_attr(
+          type_attr::kHash.name,
+          [](const Object* value, const Function&) -> int64_t {
+            return detail::int_ops::BitcastToInt64(AnyView(value).as_or_throw<BigInt>().hash());
+          })
+      .def_type_attr(type_attr::kDataToJson.name,
+                     [](AnyView value) -> Any {
                        std::ostringstream stream;
-                       stream << value;
-                       return stream.str();
+                       stream << value.as_or_throw<BigInt>();
+                       return String(stream.str());
                      })
-      .def_type_attr(refl::type_attr::kDataFromJson, [](const String& data) -> BigInt {
+      .def_type_attr(type_attr::kDataFromJson.name, [](AnyView value) -> Any {
+        String data = value.as_or_throw<String>();
         std::istringstream stream(static_cast<std::string>(data));
-        BigInt value;
-        stream >> std::noskipws >> value;
+        BigInt result;
+        stream >> std::noskipws >> result;
         // A graph payload must be one complete decimal integer, without whitespace or junk.
         if (stream.fail() || !stream.eof()) {
           TVM_FFI_THROW(ValueError) << "Invalid decimal string for ffi.BigInt";
         }
-        return value;
+        return result;
       });
   refl::GlobalDef()
       .def_packed("ffi.Array",
@@ -212,6 +228,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              }
            })
       .def("ffi.ListClear", [](ffi::List<Any> n) -> void { n.clear(); })
+      .def("ffi.ListReserve",
+           [](ffi::List<Any> n, int64_t capacity) -> void { n.reserve(capacity); })
       .def_packed("ffi.Map",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);

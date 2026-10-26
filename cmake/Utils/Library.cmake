@@ -74,6 +74,7 @@ function (tvm_ffi_add_msvc_flags target_name)
     # per-object section limit (C1128). Apply /bigobj to every target that uses these flags so
     # growth in any TU doesn't break the Windows build.
     target_compile_options(${target_name} PRIVATE "/bigobj")
+    target_compile_options(${target_name} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:/Zc:inline>")
   endif ()
 endfunction ()
 
@@ -87,7 +88,8 @@ endfunction ()
 # exports of libtvm_ffi.so and unexpectedly interpose with symbols from downstream libraries.
 #
 # Linux, Android, and BSD targets generally use GNU-compatible linkers that support this through
-# `--exclude-libs,ALL`. Other platforms are left unchanged.
+# `--exclude-libs,ALL`. Darwin uses -load_hidden for direct archive dependencies; call this helper
+# after adding the target's link libraries. Other platforms are left unchanged.
 #
 # Parameters:
 #   target_name: CMake target to modify
@@ -97,6 +99,35 @@ function (tvm_ffi_hide_static_linked_lib_symbols target_name)
                                                                            MATCHES "GNU|Clang"
   )
     target_link_options(${target_name} PRIVATE "-Wl,--exclude-libs,ALL")
+  elseif (APPLE)
+    # CMake evaluates link features in the caller's directory scope, after this function returns.
+    set(CMAKE_LINK_LIBRARY_USING_tvm_ffi_hidden
+        "LINKER:-load_hidden,<LIBRARY>"
+        PARENT_SCOPE
+    )
+    set(CMAKE_LINK_LIBRARY_USING_tvm_ffi_hidden_SUPPORTED
+        TRUE
+        PARENT_SCOPE
+    )
+    get_target_property(linked_libs ${target_name} LINK_LIBRARIES)
+    foreach (lib IN LISTS linked_libs)
+      if (TARGET ${lib})
+        # Shared, interface and object targets do not provide dependency archives to hide.
+        get_target_property(lib_type ${lib} TYPE)
+        if (lib_type STREQUAL "STATIC_LIBRARY" OR lib_type STREQUAL "UNKNOWN_LIBRARY")
+          # UNKNOWN imports may resolve to a shared library; inspect the selected configuration's
+          # file.
+          set(is_archive "$<STREQUAL:$<PATH:GET_EXTENSION,LAST_ONLY,$<TARGET_FILE:${lib}>>,.a>")
+          set_property(
+            TARGET ${target_name} PROPERTY LINK_LIBRARY_OVERRIDE_${lib}
+                                           "$<IF:${is_archive},tvm_ffi_hidden,DEFAULT>"
+          )
+        endif ()
+      elseif (lib MATCHES "[.]a$")
+        # Some dependency finders supply archive paths directly, without imported CMake targets.
+        set_property(TARGET ${target_name} PROPERTY LINK_LIBRARY_OVERRIDE_${lib} tvm_ffi_hidden)
+      endif ()
+    endforeach ()
   endif ()
 endfunction ()
 

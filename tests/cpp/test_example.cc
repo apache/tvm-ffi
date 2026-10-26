@@ -255,7 +255,7 @@ class MyIntPair : public tvm::ffi::ObjectRef {
   explicit MyIntPair(int64_t a, int64_t b) { data_ = tvm::ffi::make_object<MyIntPairObj>(a, b); }
 
   // Required: define object reference methods
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(MyIntPair, tvm::ffi::ObjectRef, MyIntPairObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(MyIntPair, tvm::ffi::ObjectRef, MyIntPairObj);
 };
 
 void ExampleObjectPtr() {

@@ -17,13 +17,13 @@
  * under the License.
  */
 /*!
- * \file tvm/ffi/base_details.h
+ * \file tvm/ffi/base_detail.h
  * \brief Internal detail utils that can be used by files in tvm/ffi.
- * \note details headers are for internal use only
+ * \note detail headers are for internal use only
  *       and not to be directly used by user.
  */
-#ifndef TVM_FFI_BASE_DETAILS_H_
-#define TVM_FFI_BASE_DETAILS_H_
+#ifndef TVM_FFI_BASE_DETAIL_H_
+#define TVM_FFI_BASE_DETAIL_H_
 
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/endian.h>
@@ -225,7 +225,7 @@
 
 namespace tvm {
 namespace ffi {
-namespace details {
+namespace detail {
 
 // for each iterator
 struct for_each_dispatcher {
@@ -373,8 +373,13 @@ struct TypeSchemaImpl;
 template <typename T>
 using TypeSchema = TypeSchemaImpl<std::remove_const_t<std::remove_reference_t<T>>>;
 
-}  // namespace details
+}  // namespace detail
+
+// Backward compatibility.
+// TODO(tvm-ffi): Remove after updating the remaining downstream uses.
+namespace details = detail;
+
 }  // namespace ffi
 }  // namespace tvm
 /// \endcond
-#endif  // TVM_FFI_BASE_DETAILS_H_
+#endif  // TVM_FFI_BASE_DETAIL_H_

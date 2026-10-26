@@ -111,7 +111,7 @@ creates the underlying object can wrap :cpp:func:`tvm::ffi::make_object`.
    Define a nullable reference class.
 
  :c:macro:`TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TypeName, ParentType, ObjectName) <TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE>`
-   Define a non-nullable reference class.
+   Define a non-nullable reference class. Use this for ordinary concrete wrappers.
 
 For example, a non-nullable reference class ``MyObject`` can be defined as follows:
 

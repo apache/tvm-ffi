@@ -36,11 +36,11 @@ constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
 static_assert(!std::is_convertible_v<BigInt, bool>);
 static_assert(!std::is_convertible_v<double, BigInt>);
 static_assert(sizeof(BigInt) == sizeof(TVMFFIAny));
-static_assert(!std::is_copy_constructible_v<details::BigIntObj>);
-static_assert(!std::is_default_constructible_v<details::BigIntObj>);
+static_assert(!std::is_copy_constructible_v<detail::BigIntObj>);
+static_assert(!std::is_default_constructible_v<detail::BigIntObj>);
 
 void ExpectInline(const BigInt& value, int64_t expected) {
-  EXPECT_TRUE(details::BigIntUnsafe::CheckInt64(value));
+  EXPECT_TRUE(detail::BigIntUnsafe::CheckInt64(value));
   EXPECT_EQ(static_cast<int64_t>(value), expected);
 }
 
@@ -54,13 +54,13 @@ TEST(BigInt, RepresentationAndOwnership) {
   BigInt zero;
   ExpectInline(zero, 0);
   BigInt small(kMin);
-  auto repr = details::BigIntUnsafe::GetArrayView(small);
+  auto repr = detail::BigIntUnsafe::GetArrayView(small);
   ASSERT_EQ(repr.size(), 1);
   EXPECT_EQ(repr[0], kMin);
-  EXPECT_EQ(details::BigIntUnsafe::GetInt64(small), kMin);
+  EXPECT_EQ(detail::BigIntUnsafe::GetInt64(small), kMin);
   BigInt large = BigInt(1) << 255;
-  ASSERT_FALSE(details::BigIntUnsafe::CheckInt64(large));
-  repr = details::BigIntUnsafe::GetArrayView(large);
+  ASSERT_FALSE(detail::BigIntUnsafe::CheckInt64(large));
+  repr = detail::BigIntUnsafe::GetArrayView(large);
   ASSERT_EQ(repr.size(), 5);
   EXPECT_EQ(repr[4], 0);
   EXPECT_EQ(repr[3], kMin);
@@ -132,7 +132,7 @@ TEST(BigInt, SwapOwnership) {
 
 TEST(BigInt, PromotionDemotionAndMixedOperands) {
   BigInt high = BigInt(kMax) + 1;
-  EXPECT_FALSE(details::BigIntUnsafe::CheckInt64(high));
+  EXPECT_FALSE(detail::BigIntUnsafe::CheckInt64(high));
   EXPECT_EQ(PrintBigInt(high), "9223372036854775808");
   ExpectInline(high - 1, kMax);
   ExpectInline(-high, kMin);
@@ -337,16 +337,16 @@ TEST(BigInt, NativeWordContent) {
                           -(BigInt(1) << 255), BigInt(std::numeric_limits<uint64_t>::max())}) {
     TVMFFIAny input = AnyView(x).CopyToTVMFFIAny(), decoded;
     TVMFFIByteArray bytes = TVMFFIBigIntGetContentByteArray(&input);
-    auto view = details::BigIntUnsafe::GetArrayView(x);
+    auto view = detail::BigIntUnsafe::GetArrayView(x);
     ASSERT_EQ(bytes.size, view.size() * sizeof(int64_t));
     EXPECT_EQ(std::memcmp(bytes.data, &view[0], bytes.size), 0);
-    if (details::BigIntUnsafe::CheckInt64(x)) {
+    if (detail::BigIntUnsafe::CheckInt64(x)) {
       EXPECT_EQ(bytes.data, reinterpret_cast<const char*>(&input.v_int64));
     } else {
       EXPECT_EQ(bytes.data, reinterpret_cast<const char*>(&view[0]));
     }
     ASSERT_EQ(TVMFFIBigIntFromByteArray(&bytes, &decoded), 0);
-    Any owner = details::AnyUnsafe::MoveTVMFFIAnyRawToAny(decoded);
+    Any owner = detail::AnyUnsafe::MoveTVMFFIAnyRawToAny(decoded);
     EXPECT_EQ(owner.cast<BigInt>(), x);
   }
   for (int64_t value : {int64_t{0}, int64_t{-1}, kMin, kMax}) {
@@ -369,29 +369,29 @@ TEST(BigInt, NativeWordContent) {
 }
 
 TEST(BigInt, ConstructionAndNormalization) {
-  auto zeros = make_inplace_array_object<details::BigIntObj, int64_t>(4, 4);
-  std::fill_n(details::BigIntUnsafe::GetMutableData(zeros), 4, 0);
-  BigInt zero = details::BigIntUnsafe::Normalize(std::move(zeros));
+  auto zeros = make_inplace_array_object<detail::BigIntObj, int64_t>(4, 4);
+  std::fill_n(detail::BigIntUnsafe::GetMutableData(zeros), 4, 0);
+  BigInt zero = detail::BigIntUnsafe::Normalize(std::move(zeros));
   ExpectInline(zero, 0);
   for (const BigInt& x : {zero, BigInt(1), BigInt(-1), BigInt(1) << 192, -(BigInt(1) << 192)}) {
-    auto view = details::BigIntUnsafe::GetArrayView(x);
-    EXPECT_EQ(details::int_ops::IsNormalizedZero(view), x == 0);
-    EXPECT_EQ(details::int_ops::IsNegative(view), x < 0);
+    auto view = detail::BigIntUnsafe::GetArrayView(x);
+    EXPECT_EQ(detail::int_ops::IsNormalizedZero(view), x == 0);
+    EXPECT_EQ(detail::int_ops::IsNegative(view), x < 0);
   }
-  auto ptr = make_inplace_array_object<details::BigIntObj, int64_t>(6, 6);
+  auto ptr = make_inplace_array_object<detail::BigIntObj, int64_t>(6, 6);
   auto* original = ptr.get();
-  int64_t* data = details::BigIntUnsafe::GetMutableData(ptr);
+  int64_t* data = detail::BigIntUnsafe::GetMutableData(ptr);
   data[0] = 7;
   data[1] = 1;
   std::fill_n(data + 2, 4, 0);
-  BigInt value = details::BigIntUnsafe::Normalize(std::move(ptr));
-  auto repr = details::BigIntUnsafe::GetArrayView(value);
+  BigInt value = detail::BigIntUnsafe::Normalize(std::move(ptr));
+  auto repr = detail::BigIntUnsafe::GetArrayView(value);
   EXPECT_EQ(repr.size(), 2);
   EXPECT_EQ(&repr[0], reinterpret_cast<const int64_t*>(original + 1));
   EXPECT_EQ(value, (BigInt(1) << 64) + 7);
-  auto negative = make_inplace_array_object<details::BigIntObj, int64_t>(4, 4);
-  std::fill_n(details::BigIntUnsafe::GetMutableData(negative), 4, -1);
-  ExpectInline(details::BigIntUnsafe::Normalize(std::move(negative)), -1);
+  auto negative = make_inplace_array_object<detail::BigIntObj, int64_t>(4, 4);
+  std::fill_n(detail::BigIntUnsafe::GetMutableData(negative), 4, -1);
+  ExpectInline(detail::BigIntUnsafe::Normalize(std::move(negative)), -1);
 }
 
 TEST(BigInt, PortableWordMultiply) {
@@ -428,8 +428,8 @@ TEST(BigInt, DirectSignedMultiplyAndDivRem) {
                           {dividend, -divisor, -quotient, 7},
                           {-dividend, -divisor, quotient, -7},
                           {BigInt(kMin) << 128, BigInt(1) << 64, -(BigInt(1) << 127), 0}}) {
-    auto qr = details::int_ops::DivRemFallback(details::BigIntUnsafe::GetArrayView(row.a),
-                                               details::BigIntUnsafe::GetArrayView(row.b));
+    auto qr = detail::int_ops::DivRemFallback(detail::BigIntUnsafe::GetArrayView(row.a),
+                                              detail::BigIntUnsafe::GetArrayView(row.b));
     EXPECT_EQ(qr.first, row.q);
     EXPECT_EQ(qr.second, row.r);
   }
@@ -463,8 +463,8 @@ TEST(BigInt, MultiwordDivisionEstimates) {
          wide_remainder},
         {divisor - 1, divisor, 0, divisor - 1},
         {divisor, divisor, 1, 0}}) {
-    auto qr = details::int_ops::DivRemFallback(details::BigIntUnsafe::GetArrayView(row.a),
-                                               details::BigIntUnsafe::GetArrayView(row.b));
+    auto qr = detail::int_ops::DivRemFallback(detail::BigIntUnsafe::GetArrayView(row.a),
+                                              detail::BigIntUnsafe::GetArrayView(row.b));
     EXPECT_EQ(qr.first, row.q);
     EXPECT_EQ(qr.second, row.r);
   }
@@ -503,8 +503,8 @@ TEST(BigInt, ScalarDivRemBoundaries) {
         {BigInt(1) << 64, kHalfMax + 2, kHalfMax, 1},
         {(BigInt(kCorrectionDivisor) << 64) - 1, kCorrectionDivisor, word_quotient,
          kCorrectionDivisor - 1}}) {
-    auto qr = details::int_ops::DivRemFallback(details::BigIntUnsafe::GetArrayView(row.a),
-                                               details::BigIntUnsafe::GetArrayView(row.b));
+    auto qr = detail::int_ops::DivRemFallback(detail::BigIntUnsafe::GetArrayView(row.a),
+                                              detail::BigIntUnsafe::GetArrayView(row.b));
     EXPECT_EQ(qr.first, row.q);
     ExpectInline(qr.second, row.r);
   }
@@ -514,8 +514,8 @@ TEST(BigInt, ScalarDivRemBoundaries) {
   EXPECT_EQ(floormod(-dividend, int64_t{3}), 1);
   BigInt minimum = kMin;
   const int64_t zero = 0;
-  EXPECT_THROW(details::int_ops::DivRemFallback(details::BigIntUnsafe::GetArrayView(minimum),
-                                                details::BigIntUnsafe::GetArrayView(zero)),
+  EXPECT_THROW(detail::int_ops::DivRemFallback(detail::BigIntUnsafe::GetArrayView(minimum),
+                                               detail::BigIntUnsafe::GetArrayView(zero)),
                Error);
 }
 

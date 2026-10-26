@@ -161,7 +161,7 @@ TEST(VisitErrorContext, MacroPreExistingPayloadWrap) {
   ASSERT_TRUE(err.extra_context().has_value());
 
   // First push: existing payload is not a VisitErrorContext → wrapped.
-  tvm::ffi::details::UpdateVisitErrorContext(err, leaf);
+  tvm::ffi::detail::UpdateVisitErrorContext(err, leaf);
 
   Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context.has_value());
@@ -171,7 +171,7 @@ TEST(VisitErrorContext, MacroPreExistingPayloadWrap) {
   EXPECT_TRUE(visit_context.value()->prev_error_context.value().same_as(existing_payload));
 
   // Second push: context already exists → node appended; prev_error_context unchanged.
-  tvm::ffi::details::UpdateVisitErrorContext(err, root);
+  tvm::ffi::detail::UpdateVisitErrorContext(err, root);
 
   Optional<VisitErrorContext> visit_context_after = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context_after.has_value());
@@ -635,8 +635,8 @@ TEST(VisitErrorContext, TryGetFromError) {
   EXPECT_FALSE(no_context.has_value());
 
   // Attach context via UpdateVisitErrorContext.
-  tvm::ffi::details::UpdateVisitErrorContext(err, leaf);
-  tvm::ffi::details::UpdateVisitErrorContext(err, root);
+  tvm::ffi::detail::UpdateVisitErrorContext(err, leaf);
+  tvm::ffi::detail::UpdateVisitErrorContext(err, root);
 
   Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context.has_value());

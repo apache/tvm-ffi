@@ -123,6 +123,9 @@ __attribute__((section("__DATA,__mod_init_func"), used)) static ctor_t mod_init_
 
 static void __cdecl crt_init_a(void) { puts_log("<crt.XCA>"); }
 __declspec(allocate(".CRT$XCA")) ctor_t __tvm_test_crt_init_a = crt_init_a;
+/* CRT boundary slots may be null or all-bits-one sentinels. */
+__declspec(allocate(".CRT$XCA")) ctor_t __tvm_test_crt_init_null = NULL;
+__declspec(allocate(".CRT$XCA")) ctor_t __tvm_test_crt_init_sentinel = (ctor_t)(intptr_t)-1;
 
 static void __cdecl crt_init_b(void) { puts_log("<crt.XCB>"); }
 __declspec(allocate(".CRT$XCB")) ctor_t __tvm_test_crt_init_b = crt_init_b;

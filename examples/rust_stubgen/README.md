@@ -75,7 +75,8 @@ directly under it gets an `object/<type_key>` block in this file on the next
 run, and a `skip` line (`// tvm-ffi-stubgen(skip): rust_stubgen.Internal`)
 leaves one out. Add a second object to `int_pair.cc` and rebuild, and its block
 appears after `IntPair`; delete a block and it comes back, so dropping a binding
-means writing `skip`. Code outside the blocks is never touched.
+means writing `skip`. Remove the object from the C++ side and its block is
+removed on the next run. Code outside the blocks is never touched.
 
 Nothing requires a `generated/` directory: the blocks can live in any `.rs`
 file the command line points at. This example keeps them under
@@ -84,7 +85,7 @@ file the command line points at. This example keeps them under
 ## Hand-written constructors
 
 `IntPair::new` is hand-written. The `custom-new` directive makes the generator
-name its lossless allocator `from_complete_fields` instead of `new`, and the
+name its lossless allocator `from_fields` instead of `new`, and the
 hand-written constructor calls it after deriving `kind` from the operands:
 
 ```rust
@@ -93,7 +94,7 @@ hand-written constructor calls it after deriving `kind` from the operands:
 impl IntPair {
     pub fn new(a: i64, b: i64) -> Self {
         let kind = if a <= b { PairKind::Ordered } else { PairKind::Unordered };
-        Self::from_complete_fields(a, b, kind)
+        Self::from_fields(a, b, kind)
     }
 }
 ```
@@ -121,12 +122,15 @@ and `upcast` adds a conversion to a hand-written typed view
 
 Every type an object refers to (its parent, its ancestors, the types of its
 fields) has to be provided in the same `tvm-ffi-stubgen` run: `ffi.*` types
-come from the `tvm-ffi` crate, an `object/<key>` block in any processed file
+come from the `tvm-ffi` crate (a field of an `ffi.*` type the crate does not
+bind is read as `Any`), an `object/<key>` block in any processed file
 generates it, and a `ty-map` points at a hand-written binding whose object
 struct is named `<Name>Obj`
 (`// tvm-ffi-stubgen(ty-map): rust_stubgen.IntPair -> crate::hand::IntPair`).
 Anything else is an error listing the missing keys, so a partial binding never
-references a module that does not exist.
+references a module that does not exist. A hand-written binding may sit next to
+the generated ones: the file of its own module refers to it by name instead of
+importing it.
 
 ## Workflow
 
@@ -143,4 +147,7 @@ references a module that does not exist.
    ```
 
 4. In CI, run the same command with `--check`. It writes nothing and exits with
-   status 1 when a block is out of date (2 when a file fails to process).
+   status 1 when a block is out of date (2 when a file fails to process). A
+   block whose type is no longer registered, outside a `prefix` file's own
+   namespace, fails its file; every such block of the file is listed with its
+   line.

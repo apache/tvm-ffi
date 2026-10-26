@@ -139,7 +139,7 @@ class ListObj : public SeqBaseObj {
  *
  * \tparam T The content Value type, must be compatible with tvm::ffi::Any
  */
-template <typename T, typename = typename std::enable_if_t<details::storage_enabled_v<T>>>
+template <typename T, typename = typename std::enable_if_t<detail::storage_enabled_v<T>>>
 class List : public ObjectRef {
  public:
   /*! \brief The value type of the list */
@@ -212,7 +212,9 @@ class List : public ObjectRef {
   }
 
   /*! \brief Constructor from pointer */
-  explicit List(ObjectPtr<Object> n) : ObjectRef(std::move(n)) {}
+  explicit List(ObjectPtr<Object> n) : ObjectRef(std::move(n)) {
+    TVM_FFI_ICHECK_NOTNULL(data_.get());
+  }
 
   /*!
    * \brief Constructor from iterator
@@ -249,14 +251,14 @@ class List : public ObjectRef {
   /// \cond Doxygen_Suppress
   struct ValueConverter {
     using ResultType = T;
-    static T convert(const Any& n) { return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(n); }
+    static T convert(const Any& n) { return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(n); }
   };
   /// \endcond
 
   /*! \brief The iterator type of the list */
-  using iterator = details::IterAdapter<ValueConverter, const Any*>;
+  using iterator = detail::IterAdapter<ValueConverter, const Any*>;
   /*! \brief The reverse iterator type of the list */
-  using reverse_iterator = details::ReverseIterAdapter<ValueConverter, const Any*>;
+  using reverse_iterator = detail::ReverseIterAdapter<ValueConverter, const Any*>;
 
   /*! \return begin iterator */
   iterator begin() const { return iterator(GetListObj()->begin()); }
@@ -279,7 +281,7 @@ class List : public ObjectRef {
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null list";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->at(i));
+    return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->at(i));
   }
 
   /*! \return The size of the list */
@@ -303,7 +305,7 @@ class List : public ObjectRef {
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null list";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->front());
+    return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->front());
   }
 
   /*! \return The last element of the list */
@@ -312,7 +314,7 @@ class List : public ObjectRef {
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null list";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->back());
+    return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->back());
   }
 
  public:
@@ -465,6 +467,7 @@ class List : public ObjectRef {
   /// \cond Doxygen_Suppress
   using ContainerType = ListObj;
   static constexpr bool _type_container_is_exact = false;
+  static constexpr bool _type_is_nullable = false;
   /// \endcond
 
  private:
@@ -514,7 +517,7 @@ struct TypeTraits<List<T>> : public SeqTypeTraitsBase<TypeTraits<List<T>>, List<
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":")" << kStaticTypeKey << R"(","args":[)";
-    oss << details::TypeSchema<T>::v();
+    oss << detail::TypeSchema<T>::v();
     oss << "]}";
     return oss.str();
   }

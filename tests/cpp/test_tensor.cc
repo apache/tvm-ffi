@@ -40,7 +40,7 @@ inline Tensor EmptyStrided(const Shape& shape, const Shape& strides, DLDataType 
 int TestEnvTensorAllocator(DLTensor* prototype, TVMFFIObjectHandle* out) {
   Shape shape(prototype->shape, prototype->shape + prototype->ndim);
   Tensor nd = Empty(shape, prototype->dtype, prototype->device);
-  *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(nd));
+  *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(nd));
   return 0;
 }
 

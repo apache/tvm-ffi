@@ -223,7 +223,7 @@ TEST(Any, Device) {
   EXPECT_EQ(dtype_v1.device_id, 1);
 
   Any any2 = DLDevice{kDLCPU, 0};
-  TVMFFIAny ffi_v2 = details::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(any2));
+  TVMFFIAny ffi_v2 = detail::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(any2));
   EXPECT_EQ(ffi_v2.type_index, TypeIndex::kTVMFFIDevice);
   EXPECT_EQ(ffi_v2.v_device.device_type, kDLCPU);
   EXPECT_EQ(ffi_v2.v_device.device_id, 0);
@@ -275,10 +275,10 @@ TEST(Any, Object) {
   AnyView view2 = any1;
   EXPECT_EQ(v1.use_count(), 2);
 
-  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyAfterCheck(any1), v1.get());
-  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyAfterCheck<TIntObj>(any1), v1.get());
-  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck(view2), v1.get());
-  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<TIntObj>(view2), v1.get());
+  EXPECT_EQ(detail::AnyUnsafe::RawObjectPtrFromAnyAfterCheck(any1), v1.get());
+  EXPECT_EQ(detail::AnyUnsafe::RawObjectPtrFromAnyAfterCheck<TIntObj>(any1), v1.get());
+  EXPECT_EQ(detail::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck(view2), v1.get());
+  EXPECT_EQ(detail::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<TIntObj>(view2), v1.get());
 
   // convert to weak raw object ptr
   const TIntObj* v1_ptr = view2.cast<const TIntObj*>();
@@ -576,13 +576,13 @@ TEST(Any, AnyEqualHash) {
 TEST(Any, CustomAnyHash) {
   // Covers the OpaquePtr custom hash branch.
   Any int_src = TInt(7);
-  uint64_t int_expected = details::StableHashCombine(
+  uint64_t int_expected = detail::StableHashCombine(
       int_src.type_index(), static_cast<uint64_t>(TInt::CustomAnyHash(int_src)));
   EXPECT_EQ(AnyHash()(int_src), int_expected);
 
   // Covers the ffi.Function custom hash branch.
   Any float_src = TFloat(3.5);
-  uint64_t float_expected = details::StableHashCombine(
+  uint64_t float_expected = detail::StableHashCombine(
       float_src.type_index(), static_cast<uint64_t>(TFloat::CustomAnyHash(float_src)));
   EXPECT_EQ(AnyHash()(float_src), float_expected);
 }

@@ -32,7 +32,7 @@ from . import consts as PC
 from .utils import ImportItem, PythonImports
 
 if TYPE_CHECKING:
-    from collections.abc import Container
+    from collections.abc import Mapping
     from pathlib import Path
 
     from ..file_utils import CodeBlock
@@ -79,6 +79,10 @@ class PythonGenerator:
         """Whether the ``tvm_ffi`` package binds ``type_key`` itself."""
         return type_key in C.BUILTIN_TYPE_KEYS
 
+    def check_view(self, code_blocks: list[CodeBlock]) -> tuple[str, ...]:
+        """Return the whole text: any change to a stub block makes the file stale."""
+        return tuple(line for code in code_blocks for line in code.lines)
+
     # --- per-block generation (mutates `code.lines`) ------------------------
 
     def generate_global_funcs_block(
@@ -99,7 +103,7 @@ class PythonGenerator:
         imports: PythonImports,
         opt: Options,
         obj_info: ObjectInfo,
-        declared: Container[str] = frozenset(),
+        declared: Mapping[str, Path],
     ) -> None:
         """Emit a Python class definition for an ``object/<key>`` block."""
         G.generate_python_object(code, ty_map, imports.items, opt, obj_info)

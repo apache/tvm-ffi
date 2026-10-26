@@ -32,7 +32,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def_packed("ffi.Shape", [](ffi::PackedArgs args, Any* ret) {
     int64_t* mutable_data;
-    ObjectPtr<ShapeObj> shape = details::MakeEmptyShape(args.size(), &mutable_data);
+    ObjectPtr<ShapeObj> shape = detail::MakeEmptyShape(args.size(), &mutable_data);
     for (int i = 0; i < args.size(); ++i) {
       if (auto opt_int = args[i].try_cast<int64_t>()) {
         mutable_data[i] = *opt_int;
@@ -40,7 +40,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
         TVM_FFI_THROW(ValueError) << "Expect shape to take list of int arguments";
       }
     }
-    *ret = details::ObjectUnsafe::ObjectRefFromObjectPtr<Shape>(shape);
+    *ret = detail::ObjectUnsafe::ObjectRefFromObjectPtr<Shape>(shape);
   });
 }
 
@@ -51,7 +51,7 @@ int TVMFFITensorCreateUnsafeView(TVMFFIObjectHandle source, const DLTensor* prot
                                  TVMFFIObjectHandle* out) {
   TVM_FFI_SAFE_CALL_BEGIN();
   tvm::ffi::ObjectPtr<tvm::ffi::TensorObj> source_tensor =
-      tvm::ffi::details::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::TensorObj>(
+      tvm::ffi::detail::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::TensorObj>(
           static_cast<tvm::ffi::Object*>(source));
 
   class ViewNDAlloc {
@@ -69,10 +69,10 @@ int TVMFFITensorCreateUnsafeView(TVMFFIObjectHandle source, const DLTensor* prot
   size_t num_extra_i64_at_tail = static_cast<size_t>(prototype->ndim) * 2;
   ViewNDAlloc alloc(source_tensor);
   tvm::ffi::Tensor ret_tensor(
-      tvm::ffi::make_inplace_array_object<tvm::ffi::details::TensorObjFromNDAlloc<ViewNDAlloc>,
+      tvm::ffi::make_inplace_array_object<tvm::ffi::detail::TensorObjFromNDAlloc<ViewNDAlloc>,
                                           int64_t>(num_extra_i64_at_tail, alloc, *prototype,
                                                    source_data_ptr));
-  *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(ret_tensor));
+  *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(ret_tensor));
   TVM_FFI_SAFE_CALL_END();
 }
 
@@ -81,7 +81,7 @@ int TVMFFITensorFromDLPack(DLManagedTensor* from, int32_t min_alignment, int32_t
   TVM_FFI_SAFE_CALL_BEGIN();
   tvm::ffi::Tensor tensor =
       tvm::ffi::Tensor::FromDLPack(from, static_cast<size_t>(min_alignment), require_contiguous);
-  *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(tensor));
+  *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(tensor));
   TVM_FFI_SAFE_CALL_END();
 }
 
@@ -90,13 +90,13 @@ int TVMFFITensorFromDLPackVersioned(DLManagedTensorVersioned* from, int32_t min_
   TVM_FFI_SAFE_CALL_BEGIN();
   tvm::ffi::Tensor tensor = tvm::ffi::Tensor::FromDLPackVersioned(
       from, static_cast<size_t>(min_alignment), require_contiguous);
-  *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(tensor));
+  *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(tensor));
   TVM_FFI_SAFE_CALL_END();
 }
 
 int TVMFFITensorToDLPack(TVMFFIObjectHandle from, DLManagedTensor** out) {
   TVM_FFI_SAFE_CALL_BEGIN();
-  *out = tvm::ffi::details::ObjectUnsafe::RawObjectPtrFromUnowned<tvm::ffi::TensorObj>(
+  *out = tvm::ffi::detail::ObjectUnsafe::RawObjectPtrFromUnowned<tvm::ffi::TensorObj>(
              static_cast<TVMFFIObject*>(from))
              ->ToDLPack();
   TVM_FFI_SAFE_CALL_END();
@@ -104,7 +104,7 @@ int TVMFFITensorToDLPack(TVMFFIObjectHandle from, DLManagedTensor** out) {
 
 int TVMFFITensorToDLPackVersioned(TVMFFIObjectHandle from, DLManagedTensorVersioned** out) {
   TVM_FFI_SAFE_CALL_BEGIN();
-  *out = tvm::ffi::details::ObjectUnsafe::RawObjectPtrFromUnowned<tvm::ffi::TensorObj>(
+  *out = tvm::ffi::detail::ObjectUnsafe::RawObjectPtrFromUnowned<tvm::ffi::TensorObj>(
              static_cast<TVMFFIObject*>(from))
              ->ToDLPackVersioned();
   TVM_FFI_SAFE_CALL_END();

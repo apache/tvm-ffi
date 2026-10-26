@@ -24,7 +24,7 @@
 #ifndef TVM_FFI_STRING_H_
 #define TVM_FFI_STRING_H_
 
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
@@ -60,7 +60,7 @@
 
 namespace tvm {
 namespace ffi {
-namespace details {
+namespace detail {
 /*!
  * \brief Base class for bytes and string objects.
  */
@@ -122,7 +122,7 @@ class BytesBaseCell {
 
   BytesBaseCell(const BytesBaseCell& other) : data_(other.data_) {  // NOLINT(*)
     if (data_.type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
-      details::ObjectUnsafe::IncRefObjectHandle(data_.v_obj);
+      detail::ObjectUnsafe::IncRefObjectHandle(data_.v_obj);
     }
   }
 
@@ -142,7 +142,7 @@ class BytesBaseCell {
 
   ~BytesBaseCell() {
     if (data_.type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
-      details::ObjectUnsafe::DecRefObjectHandle(data_.v_obj);
+      detail::ObjectUnsafe::DecRefObjectHandle(data_.v_obj);
     }
   }
 
@@ -191,7 +191,7 @@ class BytesBaseCell {
     data_.zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(&data_);
     ObjectPtr<LargeObj> ptr = make_object<BytesObjStdImpl<LargeObj>>(std::move(other));
-    data_.v_obj = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(ptr));
+    data_.v_obj = detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(ptr));
     data_.type_index = large_type_index;
   }
 
@@ -220,7 +220,7 @@ class BytesBaseCell {
       ptr->data = dest_data;
       ptr->size = size;
       TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(&data_);
-      data_.v_obj = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(ptr));
+      data_.v_obj = detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(ptr));
       // now reset the type index to str
       data_.type_index = large_type_index;
       return dest_data;
@@ -241,7 +241,7 @@ class BytesBaseCell {
   static BytesBaseCell CopyFromAnyView(const TVMFFIAny* src) {
     BytesBaseCell result(*src);
     if (result.data_.type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
-      details::ObjectUnsafe::IncRefObjectHandle(result.data_.v_obj);
+      detail::ObjectUnsafe::IncRefObjectHandle(result.data_.v_obj);
     }
     return result;
   }
@@ -259,7 +259,7 @@ class BytesBaseCell {
   /*! \brief internal backing data */
   TVMFFIAny data_;
 };
-}  // namespace details
+}  // namespace detail
 
 /*!
  * \brief Managed reference of byte array.
@@ -297,7 +297,7 @@ class Bytes {
    * \param other a char array.
    */
   Bytes(std::string&& other) {  // NOLINT(*)
-    data_.InitFromStd<details::BytesObj>(std::move(other), TypeIndex::kTVMFFIBytes);
+    data_.InitFromStd<detail::BytesObj>(std::move(other), TypeIndex::kTVMFFIBytes);
   }
   /*!
    * \brief Swap this String with another string
@@ -379,12 +379,12 @@ class Bytes {
   template <typename, typename>
   friend class Optional;
   // internal backing cell
-  details::BytesBaseCell data_;
+  detail::BytesBaseCell data_;
   // create a new String from TVMFFIAny, must keep private
-  explicit Bytes(details::BytesBaseCell data) : data_(std::move(data)) {}
+  explicit Bytes(detail::BytesBaseCell data) : data_(std::move(data)) {}
   char* InitSpaceForSize(size_t size) {
-    return data_.InitSpaceForSize<details::BytesObj>(size, TypeIndex::kTVMFFISmallBytes,
-                                                     TypeIndex::kTVMFFIBytes);
+    return data_.InitSpaceForSize<detail::BytesObj>(size, TypeIndex::kTVMFFISmallBytes,
+                                                    TypeIndex::kTVMFFIBytes);
   }
   void InitData(const char* data, size_t size) {
     char* dest_data = InitSpaceForSize(size);
@@ -498,7 +498,7 @@ class String {
   String(std::string&& other) {  // NOLINT(*)
     // exception safety, first set to none so if exception is thrown
     // destructor works correctly
-    data_.InitFromStd<details::StringObj>(std::move(other), TypeIndex::kTVMFFIStr);
+    data_.InitFromStd<detail::StringObj>(std::move(other), TypeIndex::kTVMFFIStr);
   }
 
   /*!
@@ -765,17 +765,17 @@ class String {
   template <typename, typename>
   friend class Optional;
   // internal backing cell
-  details::BytesBaseCell data_;
+  detail::BytesBaseCell data_;
   // create a new String from TVMFFIAny, must keep private
-  explicit String(details::BytesBaseCell data) : data_(std::move(data)) {}
+  explicit String(detail::BytesBaseCell data) : data_(std::move(data)) {}
   /*!
    * \brief Create a new empty space for a string
    * \param size The size of the string
    * \return A pointer to the empty space
    */
   char* InitSpaceForSize(size_t size) {
-    return data_.InitSpaceForSize<details::StringObj>(size, TypeIndex::kTVMFFISmallStr,
-                                                      TypeIndex::kTVMFFIStr);
+    return data_.InitSpaceForSize<detail::StringObj>(size, TypeIndex::kTVMFFISmallStr,
+                                                     TypeIndex::kTVMFFIStr);
   }
   void InitData(const char* data, size_t size) {
     char* dest_data = InitSpaceForSize(size);
@@ -1020,11 +1020,11 @@ struct TypeTraits<Bytes> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Bytes CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    return Bytes(details::BytesBaseCell::CopyFromAnyView(src));
+    return Bytes(detail::BytesBaseCell::CopyFromAnyView(src));
   }
 
   TVM_FFI_INLINE static Bytes MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return Bytes(details::BytesBaseCell::MoveFromAny(src));
+    return Bytes(detail::BytesBaseCell::MoveFromAny(src));
   }
 
   TVM_FFI_INLINE static std::optional<Bytes> TryCastFromAnyView(const TVMFFIAny* src) {
@@ -1033,7 +1033,7 @@ struct TypeTraits<Bytes> : public TypeTraitsBase {
     }
     if (src->type_index == TypeIndex::kTVMFFISmallBytes ||
         src->type_index == TypeIndex::kTVMFFIBytes) {
-      return Bytes(details::BytesBaseCell::CopyFromAnyView(src));
+      return Bytes(detail::BytesBaseCell::CopyFromAnyView(src));
     }
     return std::nullopt;
   }
@@ -1067,11 +1067,11 @@ struct TypeTraits<String> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static String CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    return String(details::BytesBaseCell::CopyFromAnyView(src));
+    return String(detail::BytesBaseCell::CopyFromAnyView(src));
   }
 
   TVM_FFI_INLINE static String MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return String(details::BytesBaseCell::MoveFromAny(src));
+    return String(detail::BytesBaseCell::MoveFromAny(src));
   }
 
   TVM_FFI_INLINE static std::optional<String> TryCastFromAnyView(const TVMFFIAny* src) {
@@ -1079,7 +1079,7 @@ struct TypeTraits<String> : public TypeTraitsBase {
       return String(src->v_c_str);
     }
     if (src->type_index == TypeIndex::kTVMFFISmallStr || src->type_index == TypeIndex::kTVMFFIStr) {
-      return String(details::BytesBaseCell::CopyFromAnyView(src));
+      return String(detail::BytesBaseCell::CopyFromAnyView(src));
     }
     return std::nullopt;
   }

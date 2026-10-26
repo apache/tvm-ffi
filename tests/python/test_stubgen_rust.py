@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Container, Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -41,7 +41,14 @@ from tvm_ffi.stub.rust_generator.codegen import (
     generate_rust_object,
 )
 from tvm_ffi.stub.rust_generator.directives import Directives, EnumSpec
-from tvm_ffi.stub.rust_generator.utils import RustImports, RustUse, render_rust_type, rust_ident
+from tvm_ffi.stub.rust_generator.utils import (
+    RustImports,
+    RustUse,
+    check_tokens,
+    render_rust_type,
+    rust_ident,
+    rust_module_path,
+)
 from tvm_ffi.stub.utils import InitConfig, NamedTypeSchema, ObjectInfo, Options
 
 RUST = get_generator("rust")
@@ -119,20 +126,47 @@ def _object_block(type_key: str) -> CodeBlock:
     )
 
 
-class _Everything:
+def _module_of(type_key: str) -> tuple[str, ...]:
+    """Return the module a test places a type key's block in: its namespace under ``crate``."""
+    return ("crate", *type_key.split(".")[:-1])
+
+
+class _Everything(Mapping[str, tuple[str, ...]]):
     """Stands in for the run's declared type keys when a test does not care: all are asked for."""
+
+    def __getitem__(self, key: str) -> tuple[str, ...]:
+        return _module_of(key)
 
     def __contains__(self, key: object) -> bool:
         return True
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(())
+
+    def __len__(self) -> int:
+        return 0
 
 
 ALL_DECLARED = _Everything()
 
 
+def _declared(*type_keys: str) -> dict[str, tuple[str, ...]]:
+    """Only ``type_keys`` have a block in the run, each in the module of its namespace."""
+    return {key: _module_of(key) for key in type_keys}
+
+
+def _crate(root: Path) -> Path:
+    """Make ``root`` a Cargo crate; return its ``src`` directory."""
+    (root / "Cargo.toml").write_text('[package]\nname = "demo"\n', encoding="utf-8")
+    src = root / "src"
+    src.mkdir(exist_ok=True)
+    return src
+
+
 def _render(
     info: ObjectInfo,
     imports: RustImports | None = None,
-    declared: Container[str] = ALL_DECLARED,
+    declared: Mapping[str, tuple[str, ...]] = ALL_DECLARED,
 ) -> tuple[str, RustImports]:
     """Render ``info`` into a fresh object block; return the body text and the collector."""
     imports = RustImports() if imports is None else imports
@@ -197,6 +231,10 @@ def test_render_rust_type_value_positions() -> None:
     text, imports = _render_type(TypeSchema("Map", (TypeSchema("str"), TypeSchema("Array"))))
     assert text == "Map<String, Array<Any>>"
     assert _uses(imports) == {"tvm_ffi::Map", "tvm_ffi::String", "tvm_ffi::Array", "tvm_ffi::Any"}
+    text, imports = _render_type(TypeSchema("List", (TypeSchema("int"),)))
+    assert text == "List<i64>"
+    assert _uses(imports) == {"tvm_ffi::List"}
+    assert _render_type(TypeSchema.from_json_str('{"type":"ffi.List"}'))[0] == "List<Any>"
 
 
 @pytest.mark.parametrize(
@@ -205,7 +243,7 @@ def test_render_rust_type_value_positions() -> None:
         TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),
         TypeSchema("Dict", (TypeSchema("str"), TypeSchema("int"))),
         TypeSchema("tuple"),
-        TypeSchema("Array", (TypeSchema("List", (TypeSchema("int"),)),)),
+        TypeSchema("List", (TypeSchema("Dict", (TypeSchema("str"), TypeSchema("int"))),)),
         TypeSchema("Optional", (TypeSchema("ctypes.c_void_p"),)),
     ],
 )
@@ -227,6 +265,32 @@ def test_rust_ident() -> None:
     assert rust_ident("crate") == "crate_"
     assert rust_ident("base") == "base_"  # the parent slot of every generated object struct
     assert rust_ident("data") == "data"  # the wrapper slot is `base`, so `data` is free
+
+
+def test_check_tokens_ignores_spelling() -> None:
+    generated = [
+        "use super::super::ir::ExprObj;",
+        "/// Complete: every field is mirrored.",
+        "#[derive(tvm_ffi::derive::Object)]",
+        "pub struct AddObj { base: ExprObj, pub a: i64, pub b: i64 }",
+        "const _: () = assert!(::core::mem::size_of::<AddObj>() == 40);",
+        "tvm_ffi::impl_object_upcast!(Add => super::super::ir::Expr);",
+    ]
+    respelled = [
+        "use crate::ir::Expr;",
+        "#[derive(Object)]",
+        "pub struct AddObj {",
+        "    base: crate::ir::ExprObj,",
+        "    pub a: i64,",
+        "    pub b: i64,",
+        "}",
+        "const _: () = assert!(core::mem::size_of::<AddObj>() == 40);",
+        "impl_object_upcast!(Add => Expr);",
+    ]
+    assert check_tokens(generated) == check_tokens(respelled)
+    for drift in [("a: i64", "a: i32"), ("40", "48"), ("ExprObj,", "StmtObj,"), ("Expr)", "Stmt)")]:
+        changed = [line.replace(*drift) for line in respelled]
+        assert check_tokens(generated) != check_tokens(changed), drift
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +467,7 @@ def test_render_derived_object_cross_module() -> None:
     text, imports = _render(info)
     assert "    base: ExprObj," in text
     assert text.endswith("tvm_ffi::impl_object_upcast!(Add => Expr);")
-    assert {"super::ir::ExprObj", "super::ir::Expr"} <= _uses(imports)
+    assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
 
 
 def test_render_object_under_builtin_parent() -> None:
@@ -604,8 +668,8 @@ def test_render_iter_var_golden() -> None:
     assert {
         "tvm_ffi::Error",
         "tvm_ffi::VALUE_ERROR",
-        "super::ir::Range",
-        "super::ir::Span",
+        "crate::ir::Range",
+        "crate::ir::Span",
     } <= _uses(imports)
 
 
@@ -693,7 +757,7 @@ impl Deref for Expr {
 }
 
 impl ExprObj {
-    pub(crate) fn new(span: Option<Span>, ty: Type) -> Self {
+    pub fn new(span: Option<Span>, ty: Type) -> Self {
         let base = Object::new();
         Self { base, span, ty }
     }
@@ -701,9 +765,19 @@ impl ExprObj {
 
 impl Expr {
     /// Lossless complete-field allocation.
-    pub fn new(span: Option<Span>, ty: Type) -> Self {
-        let obj = ExprObj::new(span, ty);
+    pub fn new(span: impl Into<Option<Span>>, ty: impl Into<Type>) -> Self {
+        let obj = ExprObj::new(span.into(), ty.into());
         Self { base: ObjectArc::new(obj) }
+    }
+}
+
+impl ShallowCopy for ExprObj {
+    fn shallow_copy(&self) -> Self {
+        Self {
+            base: ShallowCopy::shallow_copy(&self.base),
+            span: Clone::clone(&self.span),
+            ty: Clone::clone(&self.ty),
+        }
     }
 }"""
 
@@ -753,8 +827,13 @@ impl AddObj {
 
 impl Add {
     /// Lossless complete-field allocation.
-    pub fn new(span: Option<Span>, ty: PrimType, a: PrimExpr, b: PrimExpr) -> Self {
-        let obj = AddObj::new(span, ty, a, b);
+    pub fn new(
+        span: impl Into<Option<Span>>,
+        ty: impl Into<PrimType>,
+        a: impl Into<PrimExpr>,
+        b: impl Into<PrimExpr>,
+    ) -> Self {
+        let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());
         Self { base: ObjectArc::new(obj) }
     }
 }
@@ -768,15 +847,33 @@ def test_render_complete_expr_golden() -> None:
     RUST.add_directive(imports, "nullable", "ir.Expr.span", 1)
     text, imports = _render(_expr(), imports)
     assert text == EXPR_EXPECTED
-    assert _uses(imports) == {"std::ops::Deref", "tvm_ffi::Object", "tvm_ffi::ObjectArc"}
+    assert _uses(imports) == {
+        "std::ops::Deref",
+        "tvm_ffi::Object",
+        "tvm_ffi::ObjectArc",
+        "tvm_ffi::ShallowCopy",
+    }
+
+
+def test_render_shallow_copy_that_fits_is_one_line() -> None:
+    """A `ShallowCopy` within 100 columns is on one line, as rustfmt keeps it."""
+    text, _ = _render(_info("ir.Stmt", (_field("span", "ir.Span", 24, 8),), total_size=32))
+    assert (
+        "impl ShallowCopy for StmtObj {\n"
+        "    fn shallow_copy(&self) -> Self {\n"
+        "        Self { base: ShallowCopy::shallow_copy(&self.base), "
+        "span: Clone::clone(&self.span) }\n"
+        "    }\n"
+        "}"
+    ) in text
 
 
 def test_render_complete_add_golden() -> None:
     """`tirx.Add` as tvm-rust-ext hand-writes it, on top of a complete `ir.Expr`.
 
     `field` directives narrow `a` / `b` and the inherited allocator parameter
-    `ty` (upcast with `.into()` on the way to `ExprObj::new`); `upcast` adds
-    the `PrimExpr` view.
+    `ty` (upcast with `.into()` on the way to `ExprObj::new`, which takes `Type`
+    as it is); `upcast` adds the `PrimExpr` view.
     """
     _register(_expr())
     imports = RUST.new_imports()
@@ -790,10 +887,10 @@ def test_render_complete_add_golden() -> None:
     assert _uses(imports) == {
         "std::ops::Deref",
         "tvm_ffi::ObjectArc",
-        "super::ir::ExprObj",
-        "super::ir::Expr",
-        "super::ir::Span",
-        "super::ir::Type",
+        "crate::ir::ExprObj",
+        "crate::ir::Expr",
+        "crate::ir::Span",
+        "crate::ir::Type",
     }
 
 
@@ -861,7 +958,7 @@ def test_render_complete_enum_field() -> None:
     RUST.add_directive(imports, "enum", "demo.Pair.kind -> Kind(i32) { A=0, B=1 }", 1)
     text, imports = _render(info, imports)
     assert "    pub kind: Kind,\n" in text
-    assert "    pub fn new(a: i64, kind: Kind) -> Self {" in text
+    assert "    pub fn new(a: i64, kind: impl Into<Kind>) -> Self {" in text
     assert {"tvm_ffi::Result", "tvm_ffi::Error", "tvm_ffi::VALUE_ERROR"} <= _uses(imports)
     assert "tvm_ffi::FieldGetter" not in _uses(imports)
 
@@ -882,6 +979,22 @@ def test_complete_optional_field_mirrors() -> None:
     assert "pub name: Optional<String>," in text
     assert "pub items: Option<Array<Any>>," in text
     assert "tvm_ffi::Optional" in _uses(imports)
+
+
+def test_complete_list_field_mirrors() -> None:
+    """A `List<T>` field is an object handle and mirrors like `Array<T>`."""
+    info = _info(
+        "demo.Table",
+        (
+            _field("rows", TypeSchema("List", (TypeSchema("int"),)), 24, 8),
+            _field("cells", TypeSchema("List", (TypeSchema("Array"),)), 32, 8),
+        ),
+        total_size=40,
+    )
+    text, imports = _render(info)
+    assert "pub rows: List<i64>," in text
+    assert "pub cells: List<Array<Any>>," in text
+    assert {"tvm_ffi::List", "tvm_ffi::Array", "tvm_ffi::Any"} <= _uses(imports)
 
 
 def test_complete_big_int_field_mirrors() -> None:
@@ -907,7 +1020,10 @@ def test_complete_big_int_field_mirrors() -> None:
         "    pub count: i64,\n"
         "}"
     ) in text
-    assert "    pub fn new(value: BigInt, maybe: Optional<BigInt>, count: i64) -> Self {" in text
+    assert (
+        "    pub fn new(value: impl Into<BigInt>, maybe: impl Into<Optional<BigInt>>, count: i64)"
+        " -> Self {"
+    ) in text
     assert "assert!(::core::mem::size_of::<BigObj>() == 64);" in text
     assert {"tvm_ffi::BigInt", "tvm_ffi::Optional"} <= _uses(imports)
 
@@ -992,6 +1108,7 @@ def test_registry_big_int_fields_are_mirrored(big_int_holder: ObjectInfo) -> Non
         _field("x", TypeSchema("Optional", (TypeSchema("int"),)), 24, 8),  # not the 16-byte cell
         _field("x", TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))), 24, 16),
         _field("x", "ctypes.c_void_p", 24, 8),
+        _field("x", "ffi.VisitInterrupt", 24, 8),
     ],
 )
 def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> None:
@@ -1006,7 +1123,7 @@ def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> Non
 
 
 def test_custom_new_renames_the_wrapper_allocator() -> None:
-    """`custom-new`: `Add::new` stays hand-written, the allocator is `from_complete_fields`."""
+    """`custom-new`: `Add::new` stays hand-written, the allocator is `from_fields`."""
     _register(_expr())
     imports = RUST.new_imports()
     RUST.add_directive(imports, "custom-new", "tirx.Add", 1)
@@ -1017,12 +1134,36 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
     )
     assert (
         "impl Add {\n    /// Lossless complete-field allocation.\n"
-        "    pub fn from_complete_fields(span: Span, ty: Type, a: Expr, b: Expr) -> Self {\n"
-        "        let obj = AddObj::new(span, ty, a, b);\n"
+        "    pub fn from_fields(\n"
+        "        span: impl Into<Span>,\n"
+        "        ty: impl Into<Type>,\n"
+        "        a: impl Into<Expr>,\n"
+        "        b: impl Into<Expr>,\n"
+        "    ) -> Self {\n"
+        "        let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());\n"
         "        Self { base: ObjectArc::new(obj) }\n"
         "    }\n}"
     ) in text
     assert "    pub fn new(" not in text
+
+
+def test_allocator_body_wraps_like_rustfmt() -> None:
+    """Past 100 columns a `let` first moves its call to the next line; the rest go one per line."""
+
+    def render(width: int) -> tuple[str, str]:
+        name = "f" * width
+        text, _ = _render(_info("demo.W", (_field(name, "int", 24, 8),), total_size=32))
+        return name, text
+
+    name, text = render(70)  # the `let` is exactly 100 columns
+    assert f"        let obj = WObj::new({name});\n" in text
+    name, text = render(76)  # 106 columns; the call alone is exactly 100
+    assert f"        let obj =\n            WObj::new({name});\n" in text
+    name, text = render(77)  # the call alone is 101 columns; `Self { .. }` is exactly 100
+    assert f"        let obj = WObj::new(\n            {name},\n        );\n" in text
+    assert f"        Self {{ base, {name} }}\n" in text
+    name, text = render(78)
+    assert f"        Self {{\n            base,\n            {name},\n        }}\n" in text
 
 
 def test_upcast_directive_adds_typed_views() -> None:
@@ -1104,7 +1245,7 @@ def test_directive_disagreeing_with_bytes_is_an_error(
 
 def test_import_section_dedups_sorts_and_filters_defined_types() -> None:
     imports = RustImports()
-    for name in ("tvm_ffi::ObjectArc", "std::ops::Deref", "tvm_ffi::ObjectArc", "super::ir::Expr"):
+    for name in ("tvm_ffi::ObjectArc", "std::ops::Deref", "tvm_ffi::ObjectArc", "crate::ir::Expr"):
         imports.record(name)
     block = CodeBlock(
         kind="import-section",
@@ -1113,7 +1254,7 @@ def test_import_section_dedups_sorts_and_filters_defined_types() -> None:
         lineno_end=2,
         lines=[f"{C.RUST_SYNTAX.begin} import-section", C.RUST_SYNTAX.end],
     )
-    generate_rust_import_section(block, imports, Options(), defined_types={"super::ir::Expr"})
+    generate_rust_import_section(block, imports, Options(), defined_types={"crate::ir::Expr"})
     assert block.lines[1:-1] == ["use std::ops::Deref;", "use tvm_ffi::ObjectArc;"]
 
 
@@ -1170,7 +1311,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
     # The allocator flattens the chain; a signature over 100 columns wraps.
     assert (
         "impl TestCxxClassDerivedDerivedObj {\n"
-        "    pub(crate) fn new(\n"
+        "    pub fn new(\n"
         "        v_i64: i64,\n"
         "        v_i32: i32,\n"
         "        v_f64: f64,\n"
@@ -1183,11 +1324,31 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "    }\n"
         "}"
     ) in dd
+    # The wrapper's `new` takes a field that is not a scalar from anything that converts into it.
+    assert (
+        "        v_str: impl Into<String>,\n"
+        "        v_bool: bool,\n"
+        "    ) -> Self {\n"
+        "        let obj =\n"
+        "            TestCxxClassDerivedDerivedObj::new(v_i64, v_i32, v_f64, v_f32, v_str.into(), v_bool);\n"
+    ) in dd
+    # Not final, under generated ancestors: a Rust subtype can copy its parent's object.
+    assert (
+        "impl ShallowCopy for TestCxxClassDerivedDerivedObj {\n"
+        "    fn shallow_copy(&self) -> Self {\n"
+        "        Self {\n"
+        "            base: ShallowCopy::shallow_copy(&self.base),\n"
+        "            v_str: Clone::clone(&self.v_str),\n"
+        "            v_bool: Clone::clone(&self.v_bool),\n"
+        "        }\n"
+        "    }\n"
+        "}"
+    ) in dd
     assert dd.endswith(
         "tvm_ffi::impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     )
-    assert "tvm_ffi::String" in _uses(imports)
+    assert {"tvm_ffi::String", "tvm_ffi::ShallowCopy"} <= _uses(imports)
 
 
 def test_registry_hidden_field_and_vptr_stay_opaque() -> None:
@@ -1202,7 +1363,8 @@ def test_registry_hidden_field_and_vptr_stay_opaque() -> None:
 
 
 def test_stage_3_applies_directives_to_a_registered_type(tmp_path: Path) -> None:
-    src = tmp_path / "mod.rs"
+    root = _crate(tmp_path)
+    src = root / "mod.rs"
     src.write_text(
         "\n".join(
             [
@@ -1226,6 +1388,7 @@ def test_stage_3_applies_directives_to_a_registered_type(tmp_path: Path) -> None
 
 
 def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _crate(tmp_path)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -1238,12 +1401,12 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
             "demo_shared",
             "--init-prefix",
             "testing.",
-            str(tmp_path),
+            str(root),
         ],
     )
     assert stub_cli.__main__() == 0
-    assert (tmp_path / "mod.rs").read_text(encoding="utf-8") == "pub mod testing;\n"
-    text = (tmp_path / "testing" / "mod.rs").read_text(encoding="utf-8")
+    assert (root / "mod.rs").read_text(encoding="utf-8") == "pub mod testing;\n"
+    text = (root / "testing" / "mod.rs").read_text(encoding="utf-8")
     assert text.startswith("#![allow(dead_code, unused_imports)]\n")
     assert "use tvm_ffi::FieldGetter;" in text  # the opaque fixtures read through getters
     assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
@@ -1262,12 +1425,13 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert "pub struct TestCxxStrEnumObj {\n    base: FfiStrEnumObj,\n}" in text
     # Running again over the generated tree is a no-op.
     assert stub_cli.__main__() == 0
-    assert (tmp_path / "testing" / "mod.rs").read_text(encoding="utf-8") == text
+    assert (root / "testing" / "mod.rs").read_text(encoding="utf-8") == text
 
 
 def test_cli_check_reports_stale_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    root = _crate(tmp_path)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -1280,13 +1444,13 @@ def test_cli_check_reports_stale_files(
             "demo_shared",
             "--init-prefix",
             "testing.",
-            str(tmp_path),
+            str(root),
         ],
     )
     assert stub_cli.__main__() == 0
-    mod_rs = tmp_path / "testing" / "mod.rs"
+    mod_rs = root / "testing" / "mod.rs"
     fresh = mod_rs.read_text(encoding="utf-8")
-    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
+    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)]
     # An up-to-date tree passes the check.
     monkeypatch.setattr("sys.argv", check)
     assert stub_cli.__main__() == 0
@@ -1299,15 +1463,75 @@ def test_cli_check_reports_stale_files(
     assert f"[Stale] {mod_rs}" in capsys.readouterr().out
     assert mod_rs.read_text(encoding="utf-8") == stale
     # Running in place repairs it; the check passes again.
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(root)])
     assert stub_cli.__main__() == 0
     assert mod_rs.read_text(encoding="utf-8") == fresh
     monkeypatch.setattr("sys.argv", check)
     assert stub_cli.__main__() == 0
 
 
+def test_cli_check_ignores_how_a_binding_is_spelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _crate(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tvm-ffi-stubgen",
+            "--target",
+            "rust",
+            "--init-pypkg",
+            "demo",
+            "--init-lib",
+            "demo_shared",
+            "--init-prefix",
+            "testing.",
+            str(root),
+        ],
+    )
+    assert stub_cli.__main__() == 0
+    mod_rs = root / "testing" / "mod.rs"
+    fresh = mod_rs.read_text(encoding="utf-8")
+    # Imports, paths, comments and wrapping differ from what a run writes; the bindings do not.
+    respelled = fresh
+    for old, new in [
+        ("use tvm_ffi::String;\n", ""),
+        ("use std::ops::Deref;\n", "use std::ops::Deref;\nuse crate::testing::TestCompare;\n"),
+        ("    base: Object,\n", "    base: tvm_ffi::Object,\n"),
+        ("/// Complete: ", "/// Mirrored: "),
+        (
+            "    pub fn new(\n"
+            "        p_required: i64,\n"
+            "        p_default: i64,\n"
+            "        k_required: i64,\n"
+            "        k_default: i64,\n"
+            "        hidden: i64,\n"
+            "    ) -> Self {\n",
+            "    pub fn new(p_required: i64, p_default: i64, k_required: i64, "
+            "k_default: i64, hidden: i64) -> Self {\n",
+        ),
+    ]:
+        assert old in respelled, old
+        respelled = respelled.replace(old, new)
+    mod_rs.write_text(respelled, encoding="utf-8")
+    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)]
+    monkeypatch.setattr("sys.argv", check)
+    assert stub_cli.__main__() == 0
+    assert "[Stale]" not in capsys.readouterr().out
+    assert mod_rs.read_text(encoding="utf-8") == respelled
+    # A layout that no longer matches the registry is stale.
+    drifted = respelled.replace(
+        "size_of::<TestCompareObj>() == 56", "size_of::<TestCompareObj>() == 48"
+    )
+    assert drifted != respelled
+    mod_rs.write_text(drifted, encoding="utf-8")
+    assert stub_cli.__main__() == 1
+    assert f"[Stale] {mod_rs}" in capsys.readouterr().out
+
+
 def test_cli_failed_file_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (tmp_path / "mod.rs").write_text(
+    root = _crate(tmp_path)
+    (root / "mod.rs").write_text(
         "\n".join(
             [
                 f"{C.RUST_SYNTAX.directive('bogus')} testing.TestCxxClassBase",
@@ -1319,9 +1543,7 @@ def test_cli_failed_file_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         encoding="utf-8",
     )
     for extra in ([], ["--check"]):
-        monkeypatch.setattr(
-            "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *extra, str(tmp_path)]
-        )
+        monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *extra, str(root)])
         assert stub_cli.__main__() == 2
 
 
@@ -1358,12 +1580,72 @@ def test_unasked_dependencies_are_an_error() -> None:
         r"`tirx.Add` \(line 1\) depends on `ir.Expr`, `tirx.Var`, which this run does not ask"
     )
     with pytest.raises(ValueError, match=expected):
-        _render(info, declared=frozenset({"tirx.Add"}))
-    # Declared in another file of the run: reached by module path, as before.
-    text, imports = _render(info, declared=frozenset({"tirx.Add", "ir.Expr", "tirx.Var"}))
+        _render(info, declared=_declared("tirx.Add"))
+    # Declared in another file of the run: reached by the `crate::` path of its module.
+    text, imports = _render(info, declared=_declared("tirx.Add", "ir.Expr", "tirx.Var"))
     assert "    base: ExprObj," in text
     assert "pub fn a(&self) -> Result<Var> {" in text  # same module: a bare name
-    assert {"super::ir::ExprObj", "super::ir::Expr"} <= _uses(imports)
+    assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
+
+
+def test_module_path_follows_the_file_under_src(tmp_path: Path) -> None:
+    src = _crate(tmp_path)
+    (src / "ir" / "prim").mkdir(parents=True)
+    cases = {
+        "lib.rs": ("crate",),
+        "main.rs": ("crate",),
+        "ir.rs": ("crate", "ir"),
+        "ir/mod.rs": ("crate", "ir"),
+        "ir/prim.rs": ("crate", "ir", "prim"),
+        "ir/prim/mod.rs": ("crate", "ir", "prim"),
+        "ir/lib.rs": ("crate", "ir", "lib"),  # `lib.rs` is the crate root only directly in `src`
+        "ir/type.rs": ("crate", "ir", "r#type"),
+    }
+    for name, module in cases.items():
+        (src / name).write_text("", encoding="utf-8")
+        assert rust_module_path(src / name) == module, name
+    (tmp_path / "build.rs").write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="is not under"):
+        rust_module_path(tmp_path / "build.rs")
+    loose = tmp_path.parent / f"{tmp_path.name}_loose.rs"
+    loose.write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="is in no Cargo crate"):
+        rust_module_path(loose)
+
+
+def test_blocks_are_named_by_the_module_of_their_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A block's module is where its file is, whatever its type key; elsewhere it is `crate::`."""
+    src = _crate(tmp_path)
+    (src / "deep").mkdir()
+
+    def blocks(*keys: str) -> str:
+        lines = [f"{C.RUST_SYNTAX.begin} import-section", C.RUST_SYNTAX.end]
+        for key in keys:
+            lines += [f"{C.RUST_SYNTAX.begin} object/{key}", C.RUST_SYNTAX.end]
+        return "\n".join([*lines, ""])
+
+    lib, nested = src / "lib.rs", src / "deep" / "nested.rs"
+    lib.write_text(blocks("testing.TestCxxClassBase"), encoding="utf-8")
+    nested.write_text(blocks("testing.TestCxxClassDerived"), encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(src)])
+    assert stub_cli.__main__() == 0
+    text = nested.read_text(encoding="utf-8")
+    assert "use crate::TestCxxClassBase;\nuse crate::TestCxxClassBaseObj;\n" in text
+    assert "    base: TestCxxClassBaseObj," in text
+    assert "tvm_ffi::impl_object_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
+    assert "super::" not in text
+    # Moving the parent's block moves the path, not the type key.
+    lib.write_text("", encoding="utf-8")
+    (src / "deep" / "mod.rs").write_text(blocks("testing.TestCxxClassBase"), encoding="utf-8")
+    assert stub_cli.__main__() == 0
+    text = nested.read_text(encoding="utf-8")
+    assert "use crate::deep::TestCxxClassBaseObj;" in text
+    # A file in no crate cannot be named, so its blocks fail.
+    (tmp_path / "Cargo.toml").unlink()
+    rust_module_path.cache_clear()
+    assert stub_cli.__main__() == 2
 
 
 def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
@@ -1371,7 +1653,7 @@ def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
     ty_map = {**RUST.default_ty_map(), "ir.Expr": "crate::ir::Expr"}
     block = _object_block("tirx.Add")
     imports = RustImports()
-    generate_rust_object(block, ty_map, imports, Options(), info, frozenset({"tirx.Add"}))
+    generate_rust_object(block, ty_map, imports, Options(), info, _declared("tirx.Add"))
     text = "\n".join(block.lines[1:-1])
     assert "    base: ExprObj," in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
@@ -1380,8 +1662,47 @@ def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
     assert not any(path.startswith("super::") for path in _uses(imports))
 
 
+def test_allocator_hands_a_ty_map_parent_its_own_types() -> None:
+    """`<Leaf>Obj::new` takes each field as its own type, as a hand-written parent's `new` does.
+
+    A narrowed inherited scalar upcasts with `.into()`, whose target the parent's
+    `i32` names; only the wrapper's `new` takes `impl Into`.
+    """
+    _register(
+        _info(
+            "demo.Base",
+            (_field("name", "str", 24, 16), _field("kind", "int", 40, 4)),
+            total_size=48,
+        )
+    )
+    info = _info(
+        "demo.Child",
+        (_field("n", "int", 48, 8),),
+        parent="demo.Base",
+        total_size=56,
+        is_final=True,
+    )
+    ty_map = {**RUST.default_ty_map(), "demo.Base": "crate::hand::Base"}
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "field", "demo.Child.kind -> Kind", 1)
+    block = _object_block("demo.Child")
+    generate_rust_object(block, ty_map, imports, Options(), info, _declared("demo.Child"))
+    text = "\n".join(block.lines[1:-1])
+    assert (
+        "impl ChildObj {\n"
+        "    pub(crate) fn new(name: String, kind: Kind, n: i64) -> Self {\n"
+        "        let base = BaseObj::new(name, kind.into());\n"
+        "        Self { base, n }\n"
+    ) in text
+    assert (
+        "    pub fn new(name: impl Into<String>, kind: impl Into<Kind>, n: i64) -> Self {\n"
+        "        let obj = ChildObj::new(name.into(), kind.into(), n);\n"
+    ) in text
+
+
 def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
-    src = tmp_path / "mod.rs"
+    root = _crate(tmp_path)
+    src = root / "mod.rs"
     blocks = [
         f"{C.RUST_SYNTAX.begin} import-section",
         C.RUST_SYNTAX.end,
@@ -1389,7 +1710,7 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
         C.RUST_SYNTAX.end,
         "",
     ]
-    declared = frozenset({"testing.TestCxxClassDerived"})
+    declared = {"testing.TestCxxClassDerived": src}
     src.write_text("\n".join(blocks), encoding="utf-8")
     info = FileInfo.from_file(src)
     assert info is not None
@@ -1406,6 +1727,80 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
     text = "\n".join(line for block in info.code_blocks for line in block.lines)
     assert "    base: TestCxxClassBaseObj," in text
     assert "use crate::hand::TestCxxClassBaseObj;" in text
+    # Not final: public `new`; a hand-written parent may lack `ShallowCopy`, so the type has none.
+    assert "impl TestCxxClassDerivedObj {\n    pub fn new(" in text
+    assert "ShallowCopy" not in text
+
+
+# ---------------------------------------------------------------------------
+# Name resolution corner cases
+# ---------------------------------------------------------------------------
+
+
+def test_ffi_field_type_off_the_default_ty_map_reads_as_any() -> None:
+    """Of the `ffi.*` keys, only those on the default `ty-map` name a type the crate binds."""
+    text, imports = _render(_info("demo.Doc", (_field("path", "ffi.reflection.AccessPath"),)))
+    assert "    pub fn path(&self) -> Result<AccessPath> {" in text
+    assert "tvm_ffi::reflection::AccessPath" in _uses(imports)
+    text, imports = _render(_info("demo.Doc", (_field("interrupt", "ffi.VisitInterrupt"),)))
+    assert (
+        "    pub fn interrupt(&self) -> Result<Any> {\n"
+        '        FieldGetter::new(Self::type_index(), "interrupt")?.get_any(self)\n'
+    ) in text
+    assert not any("VisitInterrupt" in path for path in _uses(imports))
+
+
+def test_parent_with_the_objects_own_name_is_spelled_in_full() -> None:
+    """A parent in another module sharing the leaf would collide with the block's own names."""
+    info = _info("demo.s.Frame", parent="demo.t.Frame", ancestors=["ffi.Object", "demo.t.Frame"])
+    text, imports = _render(info)
+    parent = "crate::demo::t::Frame"
+    assert f"    base: {parent}Obj," in text
+    assert f"    type Target = {parent}Obj;" in text
+    assert text.endswith(f"tvm_ffi::impl_object_upcast!(Frame => {parent});")
+    assert not any(path.startswith(f"{parent}") for path in _uses(imports))
+
+
+def test_any_field_of_an_opaque_type_reads_through_get_any() -> None:
+    text, _ = _render(_info("demo.Literal", (_field("value", "Any"),)))
+    assert (
+        "    pub fn value(&self) -> Result<Any> {\n"
+        '        FieldGetter::new(Self::type_index(), "value")?.get_any(self)\n'
+    ) in text
+
+
+def test_non_snake_case_fields_allow_the_lint() -> None:
+    fields = (_field("M", "int", 24, 8), _field("n", "int", 32, 8))
+    text, _ = _render(_info("demo.Tile", fields, total_size=40))
+    assert "#[allow(non_snake_case)]\n#[repr(C)]\n" in text
+    assert text.count("    #[allow(non_snake_case)]\n    pub") == 2  # both allocators
+    text, _ = _render(_info("demo.Tile", (_field("n", "int", 24, 8),), total_size=32))
+    assert "allow(non_snake_case)" not in text
+    text, _ = _render(_info("demo.Tile", (_field("M", "int"),)))
+    assert "    #[allow(non_snake_case)]\n    pub fn M(&self) -> Result<i64> {" in text
+
+
+def test_ty_map_target_in_the_files_own_module_is_not_imported() -> None:
+    """`ir.Op -> crate::ir::Op` names a hand-written binding next to the generated ones."""
+    ty_map = {**RUST.default_ty_map(), "ir.Op": "crate::ir::Op"}
+
+    def render(info: ObjectInfo) -> tuple[str, RustImports]:
+        assert info.type_key is not None
+        block = _object_block(info.type_key)
+        imports = RustImports()
+        generate_rust_object(block, ty_map, imports, Options(), info, ALL_DECLARED)
+        return "\n".join(block.lines[1:-1]), imports
+
+    text, imports = render(_info("ir.Call", (_field("op", "ir.Op"),)))
+    assert "    pub fn op(&self) -> Result<Op> {" in text
+    assert "crate::ir::Op" not in _uses(imports)
+    text, imports = render(_info("ir.Special", parent="ir.Op", ancestors=["ffi.Object", "ir.Op"]))
+    assert "    base: OpObj," in text
+    assert text.endswith("tvm_ffi::impl_object_upcast!(Special => Op);")
+    assert not any(path.startswith("crate::") for path in _uses(imports))
+    # Elsewhere the target is imported as written.
+    text, imports = render(_info("tirx.Call", (_field("op", "ir.Op"),)))
+    assert "crate::ir::Op" in _uses(imports)
 
 
 # ---------------------------------------------------------------------------
@@ -1416,7 +1811,8 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
 def test_prefix_directive_rolls_out_a_namespace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    src = tmp_path / "testing.rs"
+    root = _crate(tmp_path)
+    src = root / "testing.rs"
     src.write_text(
         "\n".join(
             [
@@ -1433,10 +1829,10 @@ def test_prefix_directive_rolls_out_a_namespace(
         ),
         encoding="utf-8",
     )
-    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
+    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)]
     monkeypatch.setattr("sys.argv", check)
     assert stub_cli.__main__() == 1  # the blocks still to be added make the file stale
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(root)])
     assert stub_cli.__main__() == 0
     text = src.read_text(encoding="utf-8")
     begins = [line for line in text.splitlines() if line.startswith(C.RUST_SYNTAX.begin)]
@@ -1457,19 +1853,17 @@ def test_prefix_directive_rolls_out_a_namespace(
 def test_prefix_declared_twice_is_a_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    root = _crate(tmp_path)
     for name in ("a.rs", "b.rs"):
-        (tmp_path / name).write_text(
-            f"{C.RUST_SYNTAX.directive('prefix')} testing\n", encoding="utf-8"
-        )
-    monkeypatch.setattr(
-        "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
-    )
+        (root / name).write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
     assert stub_cli.__main__() == 2
 
 
 def test_roll_out_matches_the_prefix_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    root = _crate(tmp_path)
     monkeypatch.setattr(
         stub_cli,
         "collect_type_keys",
@@ -1481,7 +1875,7 @@ def test_roll_out_matches_the_prefix_exactly(
         lambda keys: [ObjectInfo(fields=[], methods=[], type_key=key) for key in sorted(keys)],
     )
     begin, end = C.RUST_SYNTAX.begin, C.RUST_SYNTAX.end
-    src = tmp_path / "a.rs"
+    src = root / "a.rs"
     src.write_text(
         "\n".join(
             [
@@ -1520,18 +1914,73 @@ def test_roll_out_matches_the_prefix_exactly(
 
 def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`--init` rewrites the file on disk and reloads it; the roll-out must come after that."""
-    (tmp_path / "testing").mkdir()
-    mod_rs = tmp_path / "testing" / "mod.rs"
+    root = _crate(tmp_path)
+    (root / "testing").mkdir()
+    mod_rs = root / "testing" / "mod.rs"
     skip = f"{C.RUST_SYNTAX.directive('skip')} testing.TestCxxClassDerivedDerived"
     mod_rs.write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n{skip}\n", encoding="utf-8")
     init = ["--init-pypkg", "demo", "--init-lib", "demo_shared", "--init-prefix", "testing."]
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *init, str(tmp_path)])
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *init, str(root)])
     assert stub_cli.__main__() == 0
     text = mod_rs.read_text(encoding="utf-8")
     assert text.startswith(f"{C.RUST_SYNTAX.directive('prefix')} testing\n")
     assert "pub struct TestCxxClassDerivedObj {" in text
     assert "object/testing.TestCxxClassDerivedDerived" not in text  # `--init` honours `skip`
-    monkeypatch.setattr(
-        "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
-    )
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
     assert stub_cli.__main__() == 0
+
+
+# ---------------------------------------------------------------------------
+# Blocks whose type is no longer registered
+# ---------------------------------------------------------------------------
+
+
+def test_prefix_removes_blocks_of_unregistered_types(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _crate(tmp_path)
+    src = root / "testing.rs"
+    gone = f"{C.RUST_SYNTAX.begin} object/testing.NoLongerRegistered"
+    src.write_text(
+        "\n".join(
+            [f"{C.RUST_SYNTAX.directive('prefix')} testing", "", gone, C.RUST_SYNTAX.end, ""]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(root)])
+    assert stub_cli.__main__() == 0
+    out = capsys.readouterr().out
+    assert "[Removed]" in out and "`object/testing.NoLongerRegistered` (line 3)" in out
+    text = src.read_text(encoding="utf-8")
+    assert "NoLongerRegistered" not in text
+    assert "pub struct TestCxxClassBaseObj {" in text  # the rest of the namespace is rolled out
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
+    assert stub_cli.__main__() == 0
+
+
+def test_explicit_blocks_of_unregistered_types_are_reported_together(tmp_path: Path) -> None:
+    root = _crate(tmp_path)
+    src = root / "mod.rs"
+    blocks = [
+        f"{C.RUST_SYNTAX.begin} import-section",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.begin} object/demo.Gone",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.begin} object/demo.AlsoGone",
+        C.RUST_SYNTAX.end,
+        "",
+    ]
+    src.write_text("\n".join(blocks), encoding="utf-8")
+    info = FileInfo.from_file(src)
+    assert info is not None
+    expected = (
+        r"`object/demo\.Gone` \(line 3\), `object/demo\.AlsoGone` \(line 7\): "
+        r"the type is no longer registered"
+    )
+    with pytest.raises(ValueError, match=expected):
+        _stage_3(info, Options(), RUST.default_ty_map(), {}, RUST)
+    text = src.read_text(encoding="utf-8")
+    assert "pub struct TestCxxClassBaseObj {" in text  # the other blocks are still written
+    assert f"{C.RUST_SYNTAX.begin} object/demo.Gone\n{C.RUST_SYNTAX.end}" in text

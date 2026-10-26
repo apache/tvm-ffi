@@ -22,7 +22,7 @@
  *        builtin default allocator behind it. See ObjAllocatorBase /
  *        Handler::New in <tvm/ffi/memory.h> for the allocator contract.
  */
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
@@ -40,15 +40,14 @@ constexpr size_t kBuiltinDefaultBodyOffset = alignof(std::max_align_t);
 static_assert(kBuiltinDefaultBodyOffset >= sizeof(TVMFFIObjectAllocHeader));
 
 void BuiltinDefaultDeleteSpace(void* ptr) {
-  details::AlignedFree(static_cast<char*>(ptr) - kBuiltinDefaultBodyOffset);
+  detail::AlignedFree(static_cast<char*>(ptr) - kBuiltinDefaultBodyOffset);
 }
 
 void* BuiltinDefaultAllocate(size_t size, size_t alignment, int32_t /*type_index*/,
                              void* /*context*/) {
-  void* base_alloc = details::AlignedAlloc(kBuiltinDefaultBodyOffset + size, alignment);
+  void* base_alloc = detail::AlignedAlloc(kBuiltinDefaultBodyOffset + size, alignment);
   void* ptr = static_cast<char*>(base_alloc) + kBuiltinDefaultBodyOffset;
-  details::ObjectUnsafe::GetObjectAllocHeaderFromPtr(ptr)->delete_space =
-      &BuiltinDefaultDeleteSpace;
+  detail::ObjectUnsafe::GetObjectAllocHeaderFromPtr(ptr)->delete_space = &BuiltinDefaultDeleteSpace;
   return ptr;
 }
 

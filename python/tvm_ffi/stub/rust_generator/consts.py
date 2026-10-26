@@ -34,6 +34,7 @@ RUST_TY_MAP_DEFAULTS = {
     "Any": "tvm_ffi::Any",
     "Callable": "tvm_ffi::Function",
     "Array": "tvm_ffi::Array",  # the crate's own Array<T>, NOT Vec
+    "List": "tvm_ffi::List",  # the crate's own List<T>, NOT Vec
     "Map": "tvm_ffi::Map",  # the crate's own Map<K, V>, NOT HashMap
     # An object value is the `ObjectRef` handle; `Object` only appears as an embedded `base`.
     "Object": "tvm_ffi::object::ObjectRef",
@@ -52,10 +53,12 @@ RUST_TY_MAP_DEFAULTS = {
     "ffi.Tensor": "tvm_ffi::Tensor",
     "ffi.Shape": "tvm_ffi::Shape",
     "ffi.Function": "tvm_ffi::Function",
+    "ffi.reflection.AccessPath": "tvm_ffi::reflection::AccessPath",
+    "ffi.reflection.AccessStep": "tvm_ffi::reflection::AccessStep",
 }
 
 #: Origins without a crate mirror; such a field is read as ``tvm_ffi::Any``.
-RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "List", "Union", "tuple"})
+RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "Union", "tuple"})
 
 #: Mirror scalar by ``(origin, reflected size)``: the schema erases widths and signedness.
 RUST_SCALAR_BY_SIZE = {
@@ -81,6 +84,13 @@ RUST_SCALAR_WIDTHS = {
     "u64": 8,
     "f64": 8,
 }
+
+#: Parameters of the wrapper's allocator taken as their own type, as ``#[rs_class]``'s
+#: ``new`` takes them: a literal infers only from its exact type. Any other parameter is
+#: ``impl Into<T>``; ``<Leaf>Obj::new`` takes every one as its own type.
+RUST_EXACT_PARAMS = frozenset(
+    {"bool", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "f32", "f64"}
+)
 
 #: Size of an object reference field; ``nullable`` may only wrap those.
 RUST_POINTER_SIZE = 8

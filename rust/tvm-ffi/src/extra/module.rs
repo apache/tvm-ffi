@@ -20,6 +20,7 @@ use crate::derive::{Object, ObjectRef};
 use crate::error::Result;
 use crate::function::Function;
 use crate::object::{Object, ObjectArc};
+use crate::string::String;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 
 //-----------------------------------------------------
@@ -69,6 +70,72 @@ impl Module {
         let name = crate::string::String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunction")
             .call_tuple_with_len::<3, _>((self, name, true))?
+            .try_into()
+    }
+
+    /// Check whether the module implements a function.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the function
+    /// * `query_imports` - Whether to also check the modules this module imports
+    ///
+    /// # Returns
+    /// * `Result<bool>` - Whether the function exists
+    pub fn implements_function<Str: AsRef<str>>(
+        &self,
+        name: Str,
+        query_imports: bool,
+    ) -> Result<bool> {
+        let name = String::from(name);
+        crate::cached_global_func!("ffi.ModuleImplementsFunction")
+            .call_tuple_with_len::<3, _>((self, name, query_imports))?
+            .try_into()
+    }
+
+    /// Get the metadata of a function the module exports.
+    ///
+    /// The metadata is a JSON object whose `type_schema` entry is the
+    /// function's type schema, as C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports
+    /// it with `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the function
+    /// * `query_imports` - Whether to also check the modules this module imports
+    ///
+    /// # Returns
+    /// * `Result<Option<String>>` - The metadata as a JSON string, or `None`
+    ///   if the function has no metadata
+    pub fn get_function_metadata<Str: AsRef<str>>(
+        &self,
+        name: Str,
+        query_imports: bool,
+    ) -> Result<Option<String>> {
+        let name = String::from(name);
+        crate::cached_global_func!("ffi.ModuleGetFunctionMetadata")
+            .call_tuple_with_len::<3, _>((self, name, query_imports))?
+            .try_into()
+    }
+
+    /// Get the doc string of a function the module exports.
+    ///
+    /// The doc string is the one C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`
+    /// exports.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the function
+    /// * `query_imports` - Whether to also check the modules this module imports
+    ///
+    /// # Returns
+    /// * `Result<Option<String>>` - The doc string, or `None` if the function
+    ///   has none
+    pub fn get_function_doc<Str: AsRef<str>>(
+        &self,
+        name: Str,
+        query_imports: bool,
+    ) -> Result<Option<String>> {
+        let name = String::from(name);
+        crate::cached_global_func!("ffi.ModuleGetFunctionDoc")
+            .call_tuple_with_len::<3, _>((self, name, query_imports))?
             .try_into()
     }
 }

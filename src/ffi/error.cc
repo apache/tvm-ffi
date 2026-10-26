@@ -20,7 +20,7 @@
  * \file src/ffi/error.cc
  * \brief Error handling implementation
  */
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
 
@@ -33,12 +33,12 @@ class SafeCallContext {
  public:
   void SetRaised(TVMFFIObjectHandle error) {
     last_error_ =
-        details::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(static_cast<TVMFFIObject*>(error));
+        detail::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(static_cast<TVMFFIObject*>(error));
   }
 
   void SetRaisedByCstr(const char* kind, const char* message, const TVMFFIByteArray* backtrace) {
     Error error(kind, message, backtrace);
-    last_error_ = details::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
+    last_error_ = detail::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
   }
 
   void SetRaisedByCstrParts(const char* kind, const char** message_parts, int32_t num_parts,
@@ -57,11 +57,11 @@ class SafeCallContext {
       }
     }
     Error error(kind, message, backtrace);
-    last_error_ = details::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
+    last_error_ = detail::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
   }
 
   void MoveFromRaised(TVMFFIObjectHandle* result) {
-    result[0] = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(last_error_));
+    result[0] = detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(last_error_));
   }
 
   static SafeCallContext* ThreadLocal() {
@@ -105,7 +105,7 @@ int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* messag
     tvm::ffi::Error error(std::string(kind->data, kind->size),
                           std::string(message->data, message->size),
                           std::string(backtrace->data, backtrace->size));
-    *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(error));
+    *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(error));
     return 0;
   } catch (const std::bad_alloc& e) {
     return -1;
@@ -121,15 +121,15 @@ int TVMFFIErrorCreateWithCauseAndExtraContext(
   try {
     std::optional<tvm::ffi::Error> cause_chain_error;
     if (cause_chain != nullptr) {
-      cause_chain_error = tvm::ffi::details::ObjectUnsafe::ObjectRefFromObjectPtr<tvm::ffi::Error>(
-          tvm::ffi::details::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::ErrorObj>(
+      cause_chain_error = tvm::ffi::detail::ObjectUnsafe::ObjectRefFromObjectPtr<tvm::ffi::Error>(
+          tvm::ffi::detail::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::ErrorObj>(
               static_cast<tvm::ffi::ErrorObj*>(cause_chain)));
     }
     std::optional<tvm::ffi::ObjectRef> extra_context_ref;
     if (extra_context != nullptr) {
       extra_context_ref =
-          tvm::ffi::details::ObjectUnsafe::ObjectRefFromObjectPtr<tvm::ffi::ObjectRef>(
-              tvm::ffi::details::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::Object>(
+          tvm::ffi::detail::ObjectUnsafe::ObjectRefFromObjectPtr<tvm::ffi::ObjectRef>(
+              tvm::ffi::detail::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::Object>(
                   static_cast<tvm::ffi::Object*>(extra_context)));
     }
 
@@ -137,7 +137,7 @@ int TVMFFIErrorCreateWithCauseAndExtraContext(
                           std::string(message->data, message->size),
                           std::string(backtrace->data, backtrace->size),
                           std::move(cause_chain_error), std::move(extra_context_ref));
-    *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(error));
+    *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(error));
     return 0;
   } catch (const std::bad_alloc& e) {
     return -1;

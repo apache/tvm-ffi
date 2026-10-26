@@ -27,7 +27,7 @@ set(TEST_OBJ_INSTALL_SUFFIX
     CACHE STRING "Suffix for install subdirectory (e.g., -gcc)"
 )
 
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+if (NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   add_compile_options(-mno-outline-atomics)
 endif ()
 

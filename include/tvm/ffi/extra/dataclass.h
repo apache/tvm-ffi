@@ -26,7 +26,9 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/extra/base.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ffi/optional.h>
+#include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/string.h>
 
 #include <ostream>
@@ -135,6 +137,51 @@ template <typename T>
 inline std::ostream& operator<<(std::ostream& os, const Optional<T>& value) {
   return os << ReprPrint(Any(value));
 }
+
+namespace type_attr {
+/*!
+ * \brief Custom recursive repr hook.
+ *
+ * If registered, ``RecursiveRepr`` (Python ``__repr__``) calls this instead
+ * of the default field-by-field formatting.  The hook receives a callback
+ * ``fn_repr`` to recursively format nested values, avoiding infinite loops.
+ */
+inline constexpr reflection::AttrKey<
+    TypedFunction<String(const Object*, const TypedFunction<String(AnyView)>&)>>
+    kRepr{"__ffi_repr__"};
+/*!
+ * \brief Custom recursive hash hook.
+ *
+ * If registered, ``RecursiveHash`` (Python ``hash()``) calls this instead
+ * of the default field-by-field hashing.  The hook receives a callback
+ * ``fn_hash`` to recursively hash nested values, with cycle detection.
+ */
+inline constexpr reflection::AttrKey<
+    TypedFunction<int64_t(const Object*, const TypedFunction<int64_t(AnyView)>&)>>
+    kHash{"__ffi_hash__"};
+/*!
+ * \brief Custom recursive equality hook.
+ *
+ * If registered, ``RecursiveEq`` (Python ``==``) calls this instead of the
+ * default field-by-field comparison.  Falls back to ``kCompare`` if only the
+ * compare hook is present.  The hook receives a callback ``fn_eq`` to
+ * recursively compare nested values.
+ */
+inline constexpr reflection::AttrKey<
+    TypedFunction<bool(const Object*, const Object*, const TypedFunction<bool(AnyView, AnyView)>&)>>
+    kEq{"__ffi_eq__"};
+/*!
+ * \brief Custom recursive three-way comparison hook.
+ *
+ * If registered, ``RecursiveCompare`` (Python ``<``, ``<=``, ``>``, ``>=``)
+ * calls this.  Also used as fallback for ``RecursiveEq`` when ``kEq`` is not
+ * registered.  The hook receives a callback ``fn_cmp`` to recursively
+ * compare nested values, returning < 0, == 0, or > 0.
+ */
+inline constexpr reflection::AttrKey<TypedFunction<int32_t(
+    const Object*, const Object*, const TypedFunction<int32_t(AnyView, AnyView)>&)>>
+    kCompare{"__ffi_compare__"};
+}  // namespace type_attr
 
 }  // namespace ffi
 }  // namespace tvm

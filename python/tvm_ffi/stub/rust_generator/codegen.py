@@ -22,16 +22,22 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
 
 - *complete*: the struct mirrors every physical field at its real offset and
   width, pinned by a ``const`` size/alignment assertion. ``<Leaf>Obj::new``
-  (crate-private) and the wrapper's ``new`` take every field root to leaf;
-  ``custom-new`` leaves the wrapper's ``new`` to hand-written code and names
-  the generated one ``from_complete_fields``.
+  and the wrapper's ``new`` take every field root to leaf: the former each as
+  its own type, the latter a scalar as its own type and anything else as
+  ``impl Into``. ``custom-new`` leaves the wrapper's ``new`` to hand-written
+  code and names the generated one ``from_fields``. A type that is not final
+  can be the parent of a type defined in Rust (``tvm_ffi::rs_class``): its
+  ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` when
+  every ancestor's is generated too (a ``ty-map``'d one is hand-written and
+  may not). ``<Leaf>Obj::new`` of a final type is crate-private.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
-A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, ...)
-makes the type opaque and is read as ``Any``; an ``opaque`` directive vetoes a
-reproducible layout; a scalar width named by a directive is checked against the
-reflected field size. A builtin parent (``ffi.IntEnum``, say) has no
+A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, an
+``ffi.*`` type the default ``ty-map`` does not list, ...) makes the type opaque
+and is read as ``Any``; an ``opaque`` directive vetoes a reproducible layout; a
+scalar width named by a directive is checked against the reflected field size.
+A builtin parent (``ffi.IntEnum``, say) has no
 ``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
 per builtin ancestor so ``derive(Object)`` computes the registry's
 ``TYPE_DEPTH``, and everything under such a parent stays opaque (``no-mirror``).
@@ -41,6 +47,9 @@ provided in the same run: ``ffi.*`` by the crate, a ``ty-map`` by a hand-written
 binding whose object struct is ``<Name>Obj``, anything else by an ``object/``
 block in one of the processed files. Otherwise the block is an error naming the
 missing keys, so a partial binding never references a module that does not exist.
+A generated type is named from the module of the file its block is in (see
+:func:`~.utils.rust_module_path`), not from its type key: the bare name in that
+module, a ``crate::`` path anywhere else.
 """
 
 from __future__ import annotations
@@ -61,7 +70,7 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Container
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
 
     from ..file_utils import CodeBlock
@@ -70,12 +79,34 @@ if TYPE_CHECKING:
 
 
 def _call_lines(open_: str, items: list[str], close: str) -> list[str]:
-    """``open_ + items + close`` on one line, or one item per line when it would overflow."""
+    """``open_ + items + close`` on one line, or wrapped the way rustfmt does when it would overflow.
+
+    A ``let`` first moves its call to the next line; anything else, and a call that
+    still does not fit, takes one item per line.
+    """
     line = f"{open_}{', '.join(items)}{close}"
     if len(line) <= C_RUST.RUST_MAX_WIDTH:
         return [line]
     indent = open_[: len(open_) - len(open_.lstrip())]
-    return [open_, *[f"{indent}    {item}," for item in items], f"{indent}{close}"]
+    let, eq, call = open_.partition(" = ")
+    moved = f"{indent}    {call}{', '.join(items)}{close}"
+    if eq and len(moved) <= C_RUST.RUST_MAX_WIDTH:
+        return [f"{let} =", moved]
+    return [
+        open_.rstrip(),
+        *[f"{indent}    {item}," for item in items],
+        f"{indent}{close.lstrip()}",
+    ]
+
+
+def _param_type(rust_type: str) -> str:
+    """Type a parameter of the wrapper's allocator: a scalar as itself, anything else as ``impl Into``."""
+    return rust_type if rust_type in C_RUST.RUST_EXACT_PARAMS else f"impl Into<{rust_type}>"
+
+
+def _forward(ident: str, rust_type: str) -> str:
+    """Pass a parameter of the wrapper's allocator to ``<Leaf>Obj::new``, which takes ``rust_type``."""
+    return ident if rust_type in C_RUST.RUST_EXACT_PARAMS else f"{ident}.into()"
 
 
 def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
@@ -87,6 +118,13 @@ def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int
         )
 
 
+def _allow_non_snake_case(idents: Iterable[str]) -> list[str]:
+    """``#[allow(non_snake_case)]`` when rustc would warn on one of the Rust ``idents``."""
+    if any(ident.removeprefix("r#") != ident.removeprefix("r#").lower() for ident in idents):
+        return ["#[allow(non_snake_case)]"]
+    return []
+
+
 @dataclasses.dataclass
 class _ObjectRenderer:
     """Renders one ``object/<key>`` block into Rust source lines."""
@@ -94,10 +132,10 @@ class _ObjectRenderer:
     info: ObjectInfo
     imports: RustImports
     ty_map: dict[str, str]
-    #: Module segments of the file this object lands in (``tirx.transform.X`` -> ``("tirx", "transform")``).
-    mod_segments: tuple[str, ...]
-    #: Type keys with an ``object/`` block somewhere in this run (see :meth:`_provider`).
-    declared: Container[str]
+    #: Module of the file this object lands in (``src/tirx/transform.rs`` -> ``("crate", "tirx", "transform")``).
+    module: tuple[str, ...]
+    #: Type keys with an ``object/`` block somewhere in this run, to the module of the block's file.
+    declared: Mapping[str, tuple[str, ...]]
     #: Referenced type keys nobody provides; reported together once the body is built.
     missing: set[str] = dataclasses.field(default_factory=set)
 
@@ -126,15 +164,26 @@ class _ObjectRenderer:
 
         A ``ty-map`` entry for the type key the schema was parsed from wins over the origin.
         """
-        mapped = self.ty_map.get(type_key) if type_key is not None else None
-        if mapped is None:
-            mapped = self.ty_map.get(origin)
+        key = type_key if type_key in self.ty_map else origin
+        mapped = self.ty_map.get(key)
         if mapped is None:
             if "." not in origin or origin.startswith("ctypes."):
                 return None
-            self._provider(origin)  # the crate or this run; a key nobody provides is recorded
-            mapped = self._generated_type_path(origin)
-        return imports.record(mapped)
+            if self._provider(origin) == "crate":  # a key nobody provides is recorded
+                return None  # an `ffi.*` key off the default `ty-map`: no crate type, read as `Any`
+            return imports.record(self._generated_type_path(origin))
+        return self._record_mapped(key, mapped, imports)
+
+    def _record_mapped(self, type_key: str, path: str, imports: RustImports) -> str:
+        """Record the ``ty-map`` target of ``type_key``; one in this file's own module is in scope.
+
+        A hand-written binding next to the generated ones (``ir.Op -> crate::ir::Op``
+        in ``crate::ir``) must not import itself.
+        """
+        module, _, name = path.rpartition("::")
+        if module == "::".join(self.module):
+            return name
+        return imports.record(path)
 
     def _ty_render(self, origin: str, type_key: str | None = None) -> str | None:
         return self._resolve(origin, self.imports, type_key)
@@ -142,17 +191,18 @@ class _ObjectRenderer:
     def _generated_type_path(self, type_key: str) -> str:
         """Spell a generated type key from this file.
 
-        Same module: the bare leaf. Elsewhere: ``super::`` per segment of this
-        file's module, then the full path (edition 2021 rejects ``use ir::Expr``).
+        Same module: the bare leaf. Elsewhere: the ``crate::`` path of the module its block is in.
         """
         head, _, _ = type_key.partition(".")
         if head in C_RUST.RUST_MOD_MAP:
             return type_key
-        mod, _, type_leaf = type_key.rpartition(".")
-        if tuple(mod.split(".")) == self.mod_segments:
+        type_leaf = type_key.rpartition(".")[2]
+        if type_key not in self.declared:  # missing: reported once the body is built
             return type_leaf
-        supers = "super::" * len(self.mod_segments)
-        return f"{supers or 'self::'}{type_key.replace('.', '::')}"
+        module = self.declared[type_key]
+        if module == self.module:
+            return type_leaf
+        return "::".join((*module, type_leaf))
 
     def _provider(self, type_key: str) -> str | None:
         """Who provides the binding of ``type_key``; a key nobody does is recorded in :attr:`missing`.
@@ -179,7 +229,7 @@ class _ObjectRenderer:
         if parent is not None:
             provider = self._provider(parent)
             if provider == "mapped":
-                return self.imports.record(self.ty_map[parent] + "Obj"), True
+                return self._record_mapped(parent, self.ty_map[parent] + "Obj", self.imports), True
             if provider != "crate":  # generated in this run, or missing (reported after the body)
                 return self.imports.record(self._generated_type_path(parent) + "Obj"), True
         chain = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
@@ -288,10 +338,12 @@ class _ObjectRenderer:
         target = f"{self.type_key}.{field.name}"
         name = rust_ident(field.name)
         getter = f'FieldGetter::new(Self::type_index(), "{field.name}")?'
+        allow = _allow_non_snake_case([name])
 
         enum = directives.enums.get(target)
         if enum is not None:
             return [
+                *allow,
                 f"pub fn {name}(&self) -> Result<{enum.name}> {{",
                 f"    let raw: i64 = {getter}.get(self)?;",
                 f"    {enum.name}::try_from(raw)",
@@ -300,18 +352,26 @@ class _ObjectRenderer:
         override = directives.field_types.get(target)
         if override is not None:
             rust_type = self.imports.record(override) if "::" in override else override
+        elif field.origin == "Any":
+            rust_type = None  # `FieldGetter::get` does not take the infallible `Any` -> `Any`
         else:
             rust_type = render_rust_type(field, self._ty_render)
         if rust_type is None:
             any_type = self.imports.record("tvm_ffi::Any")
             return [
+                *allow,
                 f"pub fn {name}(&self) -> Result<{any_type}> {{",
                 f"    {getter}.get_any(self)",
                 "}",
             ]
         if target in directives.nullable and not rust_type.startswith("Option<"):
             rust_type = f"Option<{rust_type}>"
-        return [f"pub fn {name}(&self) -> Result<{rust_type}> {{", f"    {getter}.get(self)", "}"]
+        return [
+            *allow,
+            f"pub fn {name}(&self) -> Result<{rust_type}> {{",
+            f"    {getter}.get(self)",
+            "}",
+        ]
 
     def _enum_lines(self, spec: EnumSpec) -> list[str]:
         """Render the open integer newtype an ``enum`` directive declares."""
@@ -361,7 +421,7 @@ class _ObjectRenderer:
         for key in self.info.ancestors:
             provider = self._provider(key)
             if provider == "mapped":
-                targets.append(self.imports.record(self.ty_map[key]))
+                targets.append(self._record_mapped(key, self.ty_map[key], self.imports))
             elif provider != "crate":
                 targets.append(self.imports.record(self._generated_type_path(key)))
         for view in self.imports.directives.upcasts.get(self.type_key, []):
@@ -394,6 +454,7 @@ class _ObjectRenderer:
             members.append(f"    pub {rust_ident(field.name)}: {mirror},")
         return [
             f"/// Complete: {verdict.detail}.",
+            *_allow_non_snake_case(rust_ident(f.name) for f in self.info.fields),
             *header,
             *members,
             "}",
@@ -436,22 +497,41 @@ class _ObjectRenderer:
         return self.imports.record(override) if "::" in override else override
 
     def _fn_lines(
-        self, head: str, params: list[tuple[str, str]], call: tuple[str, list[str]], result: str
+        self,
+        head: str,
+        params: list[tuple[str, str]],
+        call: tuple[str, list[str]],
+        init: list[str],
+        *,
+        generic: bool = False,
     ) -> list[str]:
-        """Render ``<head>(<params>) -> Self { let <call>; <result> }`` inside an ``impl`` block."""
-        plist = [f"{rust_ident(name)}: {rust_type}" for name, rust_type in params]
+        """Render ``<head>(<params>) -> Self { let <call>; Self { <init> } }`` in an ``impl`` block.
+
+        ``generic`` takes a parameter that is not a scalar as ``impl Into`` (:func:`_param_type`).
+        """
+        plist = [
+            f"{rust_ident(name)}: {_param_type(rust_type) if generic else rust_type}"
+            for name, rust_type in params
+        ]
         binding, args = call
         return [
+            *[f"    {line}" for line in _allow_non_snake_case(rust_ident(n) for n, _ in params)],
             *_call_lines(f"    {head}(", plist, ") -> Self {"),
             *_call_lines(f"        let {binding}(", args, ");"),
-            f"        {result}",
+            *_call_lines("        Self { ", init, " }"),
             "    }",
         ]
 
     def _allocator_sections(self, base: str, has_parent: bool) -> list[list[str]]:
         """``<Leaf>Obj::new`` and the wrapper's ``new``.
 
-        ``custom-new`` names the wrapper's allocator ``from_complete_fields`` instead.
+        ``<Leaf>Obj::new`` takes every field as its own type, so the parent's, generated
+        or hand-written, takes what it hands on. The wrapper's ``new`` takes a scalar
+        field as its own type and any other as ``impl Into`` (:func:`_param_type`), as
+        ``#[rs_class]``'s ``new`` does, and converts it on the way to ``<Leaf>Obj::new``.
+        ``custom-new`` names the wrapper's allocator ``from_fields`` instead.
+        ``<Leaf>Obj::new`` of a type that is not final is public: a subtype defined in Rust
+        builds its parent's object with it.
         """
         inherited: list[tuple[str, str]] = []
         if has_parent:
@@ -463,16 +543,16 @@ class _ObjectRenderer:
             f"{rust_ident(name)}.into()" if rust_type != parent_type else rust_ident(name)
             for (name, rust_type), (_, parent_type) in zip(params, inherited)
         ]
-        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
-        forward = [rust_ident(name) for name, _ in params]
+        own = [rust_ident(name) for name, _ in params[len(inherited) :]]
+        forward = [_forward(rust_ident(name), rust_type) for name, rust_type in params]
         sections = [
             [
                 f"impl {self.obj_struct} {{",
                 *self._fn_lines(
-                    "pub(crate) fn new",
+                    "pub(crate) fn new" if self.info.is_final else "pub fn new",
                     params,
                     (f"base = {base}::new", to_parent),
-                    f"Self {{ {', '.join(['base', *own])} }}",
+                    ["base", *own],
                 ),
                 "}",
             ]
@@ -483,18 +563,47 @@ class _ObjectRenderer:
                 f"impl {self.leaf} {{",
                 "    /// Lossless complete-field allocation.",
                 *self._fn_lines(
-                    "pub fn from_complete_fields" if custom else "pub fn new",
+                    "pub fn from_fields" if custom else "pub fn new",
                     params,
                     (f"obj = {self.obj_struct}::new", forward),
-                    "Self { base: ObjectArc::new(obj) }",
+                    ["base: ObjectArc::new(obj)"],
+                    generic=True,
                 ),
                 "}",
             ]
         )
         return sections
 
+    def _shallow_copy_lines(self) -> list[str] | None:
+        """``ShallowCopy``, which a subtype defined in Rust needs of its parent's object.
+
+        The parent's shallow copy and a clone of every field, as ``derive(Object)``
+        implements it, for a type that is not final and whose ancestors below
+        ``ffi.Object`` are all generated: each of those implements it by this rule,
+        while a ``ty-map``'d one is hand-written and may not.
+        """
+        if self.info.is_final:
+            return None
+        ancestors = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
+        if not all(self._provider(key) == "generated" for key in ancestors):
+            return None
+        shallow_copy = self.imports.record("tvm_ffi::ShallowCopy")
+        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
+        init = [
+            f"base: {shallow_copy}::shallow_copy(&self.base)",
+            *[f"{name}: Clone::clone(&self.{name})" for name in own],
+        ]
+        return [
+            f"impl {shallow_copy} for {self.obj_struct} {{",
+            "    fn shallow_copy(&self) -> Self {",
+            *_call_lines("        Self { ", init, " }"),
+            "    }",
+            "}",
+        ]
+
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
+        self.imports.reserved.update((self.leaf, self.obj_struct))
         verdict = self.classify()
         # Derive macros are spelled by full path: their leaves collide with `Object` / `ObjectRef`.
         self.imports.record("std::ops::Deref")
@@ -542,6 +651,9 @@ class _ObjectRenderer:
             )
         elif verdict.is_complete:
             sections += self._allocator_sections(base, has_parent)
+            shallow_copy = self._shallow_copy_lines()
+            if shallow_copy:
+                sections.append(shallow_copy)
         upcasts = self._upcast_lines()
         if upcasts:
             sections.append(upcasts)
@@ -560,11 +672,13 @@ def generate_rust_object(
     imports: RustImports,
     opt: Options,
     obj_info: ObjectInfo,
-    declared: Container[str],
+    declared: Mapping[str, tuple[str, ...]],
 ) -> None:
     """Emit the Rust binding of ``obj_info`` into an ``object/<key>`` block.
 
-    Raises ``ValueError`` when it refers to a type key this run does not provide.
+    ``declared`` maps each type key with an ``object/`` block in this run, ``obj_info``'s
+    own among them, to the module of the file the block is in. Raises ``ValueError`` when
+    the binding refers to a type key this run does not provide.
     """
     assert len(code.lines) >= 2
     assert isinstance(obj_info.type_key, str)
@@ -572,7 +686,7 @@ def generate_rust_object(
         info=obj_info,
         imports=imports,
         ty_map=ty_map,
-        mod_segments=tuple(obj_info.type_key.split(".")[:-1]),
+        module=declared[obj_info.type_key],
         declared=declared,
     )
     body = renderer.body()

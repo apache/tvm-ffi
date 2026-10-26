@@ -277,7 +277,7 @@ TEST(Expected, RegisterExpectedReturning) {
   };
 
   // Verify the FunctionInfo extracts Expected<int> as return type
-  using FuncInfo = tvm::ffi::details::FunctionInfo<decltype(safe_divide)>;
+  using FuncInfo = tvm::ffi::detail::FunctionInfo<decltype(safe_divide)>;
   static_assert(std::is_same_v<FuncInfo::RetType, Expected<int>>,
                 "Return type should be Expected<int>");
 
@@ -416,19 +416,18 @@ TEST(Expected, ExpectedUnsafeGetDataCompatibleStorageType) {
   Expected<Variant<String, bool>> result = Variant<String, bool>(false);
 
   EXPECT_EQ(result.type_index(), TypeIndex::kTVMFFIBool);
-  EXPECT_FALSE(details::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(
-      details::ExpectedUnsafe::GetData(result)));
+  EXPECT_FALSE(
+      detail::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(detail::ExpectedUnsafe::GetData(result)));
 
   Expected<Variant<String, bool>> true_result = Variant<String, bool>(true);
-  EXPECT_TRUE(details::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(
-      details::ExpectedUnsafe::GetData(true_result)));
+  EXPECT_TRUE(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(
+      detail::ExpectedUnsafe::GetData(true_result)));
 }
 
 TEST(Expected, ExpectedUnsafeMoveBetweenExpectedStorageTypes) {
   Expected<String> src = String("hello");
-  TVMFFIAny raw = details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(src));
-  Expected<Optional<String>> dst =
-      details::ExpectedUnsafe::MoveFromTVMFFIAny<Optional<String>>(raw);
+  TVMFFIAny raw = detail::ExpectedUnsafe::MoveToTVMFFIAny(std::move(src));
+  Expected<Optional<String>> dst = detail::ExpectedUnsafe::MoveFromTVMFFIAny<Optional<String>>(raw);
 
   ASSERT_TRUE(dst.is_ok());
   ASSERT_TRUE(dst.value().has_value());

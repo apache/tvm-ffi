@@ -30,9 +30,6 @@ use crate::dlpack::DLDevice;
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TVMFFITypeIndex {
-    /// Any value, which never appears as the type index of a value, but may
-    /// appear in field annotations during reflection
-    kTVMFFIAny = -1,
     /// None/nullptr value
     kTVMFFINone = 0,
     /// POD int value
@@ -98,13 +95,6 @@ pub enum TVMFFITypeIndex {
     kTVMFFIStaticObjectEnd = 79,
     /// Start of dynamically allocated object type indices.
     kTVMFFIDynObjectBegin = 128,
-}
-
-impl TVMFFITypeIndex {
-    /// Object, the root of the object type hierarchy, which shares its index
-    /// with `kTVMFFIStaticObjectBegin`
-    #[allow(non_upper_case_globals)]
-    pub const kTVMFFIObject: TVMFFITypeIndex = TVMFFITypeIndex::kTVMFFIStaticObjectBegin;
 }
 
 #[repr(i32)]

@@ -26,13 +26,17 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/native_function.h>
 #include <tvm/ffi/type_traits.h>
 
+#include <optional>
 #include <string>
 
 namespace tvm {
 namespace ffi {
 namespace reflection {
+template <typename T>
+struct AttrKey;
 
 /*!
  * \brief helper function to get reflection field info by type key and field name
@@ -177,6 +181,10 @@ class TypeAttrColumn {
       TVM_FFI_THROW(RuntimeError) << "Cannot find type attribute " << attr_name;
     }
   }
+  /*! \brief Look up a typed key's column while preserving erased entry access. */
+  template <typename T>
+  explicit TypeAttrColumn(AttrKey<T> key) : TypeAttrColumn(key.name) {}
+
   /*!
    * \brief Get the type attribute column by type index.
    * \param type_index The type index.
@@ -326,12 +334,52 @@ inline bool ForEachFieldInfoWithEarlyStop(const TypeInfo* type_info,
 }
 
 /*!
+ * \brief C++17 constexpr helper: convert a ``const char*`` to ``TVMFFIByteArray``.
+ * \param s A null-terminated string literal.
+ * \return A ``TVMFFIByteArray`` whose ``data`` points to *s* and ``size`` equals ``strlen(s)``.
+ */
+inline constexpr TVMFFIByteArray AsByteArray(const char* s) {
+  return {s, std::char_traits<char>::length(s)};
+}
+
+/*!
+ * \brief A typed attribute name. Null-terminated name storage must outlive the key.
+ *
+ * \code{.cpp}
+ * // In namespace tvm::ffi:
+ * namespace type_attr {
+ * inline constexpr reflection::AttrKey<bool> kSerializable{"example.serializable"};
+ * }
+ * reflection::TypeAttrDef<MyObject>().attr(type_attr::kSerializable, true);
+ * \endcode
+ */
+template <typename T>
+struct AttrKey {
+  /*! \brief The value type associated with this key. */
+  using ValueType = T;
+  /*! \brief Borrowed null-terminated attribute name; its storage must outlive the key. */
+  const char* name;
+
+  /*!
+   * \brief Extract a present value strictly; None denotes an absent entry.
+   * \throws Error if a present value has the wrong type. No fallback conversion is run.
+   * \note Borrowed results remain valid only while the source value's owner remains alive.
+   */
+  TVM_FFI_INLINE std::optional<ValueType> ValueFrom(AnyView value) const {
+    if (value == nullptr) return std::nullopt;
+    return value.template as_or_throw<ValueType>();
+  }
+};
+
+}  // namespace reflection
+
+/*!
  * \brief Type attribute names used by the reflection system.
  *
- * Each constant names a TypeAttrColumn — a sparse, type-indexed slot that
+ * Each key names a TypeAttrColumn — a sparse, type-indexed slot that
  * stores a ``Function`` or any other Any-compliant value.
  *
- *  - ``TypeAttrDef<T>.def(type_attr::kFoo, ...)`` to register a hook,
+ *  - ``TypeAttrDef<T>.def(type_attr::kFoo.name, ...)`` to register a hook,
  *  - ``TypeAttrColumn(type_attr::kFoo)[type_index]`` to look one up,
  *
  */
@@ -342,10 +390,8 @@ namespace type_attr {
  * Allocates a zero-initialised object of the registered type.  For C++ types
  * this wraps ``metadata->creator``; for Python ``@py_class`` types it is a
  * ``calloc``-based allocator.
- *
- * Signature: ``() -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
  */
-inline constexpr const char* kNew = "__ffi_new__";
+inline constexpr reflection::AttrKey<TypedFunction<ObjectRef()>> kNew{"__ffi_new__"};
 /*!
  * \brief Packed constructor — creates **and** initialises a new object.
  *
@@ -356,21 +402,17 @@ inline constexpr const char* kNew = "__ffi_new__";
  * For C++ types with ``refl::init<Args...>()``, the function is the explicit
  * init; otherwise ``ffi._RegisterFFIInit`` generates a default one using reflection.
  *
- * Signature: ``(*args, **kwargs) -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
- *
  * Keyword arguments are packed as ``[KWARGS, key0, val0, key1, val1, ...]``.
  */
-inline constexpr const char* kInit = "__ffi_init__";
+inline constexpr reflection::AttrKey<Function> kInit{"__ffi_init__"};
 /*!
  * \brief Convert ``AnyView`` to a specific reflected ``TSelf`` type.
  *
  * Registered via ``TypeAttrDef<TObj>().def_convert<TSelf>()`` or
  * ``ObjectDef<TObj>().def_convert<TSelf>()``. Used by the Python type converter
  * to marshal values into the correct ``TSelf`` subclass.
- *
- * Signature: ``(AnyView src) -> TSelf``, where ``TSelf`` has a registered TypeTraits converter.
  */
-inline constexpr const char* kConvert = "__ffi_convert__";
+inline constexpr reflection::AttrKey<TypedFunction<Any(AnyView)>> kConvert{"__ffi_convert__"};
 /*!
  * \brief Type schema accepted by ``kConvert`` before it returns ``TSelf``.
  *
@@ -378,230 +420,52 @@ inline constexpr const char* kConvert = "__ffi_convert__";
  * generation uses this attribute to render widened input annotations while
  * keeping output annotations precise.
  */
-inline constexpr const char* kConvertTypeSchema = "__ffi_convert_type_schema__";
+inline constexpr reflection::AttrKey<Any> kConvertTypeSchema{"__ffi_convert_type_schema__"};
 /*!
  * \brief Shallow-copy factory.
  *
  * Allocates a new object and copies all reflected field values from the
  * source.  Used by Python ``copy.copy()`` via ``__copy__`` and by
  * ``copy.replace()`` via ``__replace__``.
- *
- * Signature: ``(TSelf self) -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
  */
-inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
-/*!
- * \brief Custom recursive repr hook.
- *
- * If registered, ``RecursiveRepr`` (Python ``__repr__``) calls this instead
- * of the default field-by-field formatting.  The hook receives a callback
- * ``fn_repr`` to recursively format nested values, avoiding infinite loops.
- *
- * Signature: ``(TSelf self, fn_repr: FnRepr) -> String``, where ``TSelf`` is a subclass of
- * ObjectRef, and ``FnRepr: (AnyView value) -> String`` formats a nested value.
- */
-inline constexpr const char* kRepr = "__ffi_repr__";
-/*!
- * \brief Custom recursive hash hook.
- *
- * If registered, ``RecursiveHash`` (Python ``hash()``) calls this instead
- * of the default field-by-field hashing.  The hook receives a callback
- * ``fn_hash`` to recursively hash nested values, with cycle detection.
- *
- * Signature: ``(TSelf self, fn_hash: FnHash) -> int64``, where ``TSelf`` is a subclass of
- * ObjectRef, and ``FnHash: (AnyView value) -> int64`` hashes a nested value.
- */
-inline constexpr const char* kHash = "__ffi_hash__";
-/*!
- * \brief Custom recursive equality hook.
- *
- * If registered, ``RecursiveEq`` (Python ``==``) calls this instead of the
- * default field-by-field comparison.  Falls back to ``kCompare`` if only the
- * compare hook is present.  The hook receives a callback ``fn_eq`` to
- * recursively compare nested values.
- *
- * Signature: ``(TSelf lhs, TSelf rhs, fn_eq: FnEq) -> bool``, where ``TSelf`` is a subclass of
- * ObjectRef, and ``FnEq: (AnyView lhs, AnyView rhs) -> bool`` compares nested values.
- */
-inline constexpr const char* kEq = "__ffi_eq__";
-/*!
- * \brief Custom recursive three-way comparison hook.
- *
- * If registered, ``RecursiveCompare`` (Python ``<``, ``<=``, ``>``, ``>=``)
- * calls this.  Also used as fallback for ``RecursiveEq`` when ``kEq`` is not
- * registered.  The hook receives a callback ``fn_cmp`` to recursively
- * compare nested values.
- *
- * Signature: ``(TSelf lhs, TSelf rhs, fn_cmp: FnCmp) -> int32``, where ``TSelf`` is a subclass of
- * ObjectRef, and ``FnCmp: (TSelf lhs, TSelf rhs) -> int32`` returns < 0, == 0, or > 0.
- */
-inline constexpr const char* kCompare = "__ffi_compare__";
-/*!
- * \brief Custom Any-level hash for use as ``Map``/``Dict`` key.
- *
- * Unlike ``kHash`` (which operates on ``ObjectRef`` and is recursive), this
- * hook operates at the ``Any`` level — it is called by ``AnyHash`` whenever
- * an ``Any`` holding an object of this type is used as a container key.
- *
- * Can be either a raw C function pointer (fast path, no boxing overhead) or
- * a ``Function`` object.
- *
- * Raw pointer signature: ``int64_t (*)(const Any& src)``
- *
- * Function signature: ``(Any src) -> int64``
- */
-inline constexpr const char* kAnyHash = "__any_hash__";
-/*!
- * \brief Custom Any-level equality for use as ``Map``/``Dict`` key.
- *
- * Unlike ``kEq`` (which operates on ``ObjectRef``), this hook operates at the
- * ``Any`` level — called by ``AnyEqual`` for container key comparison.
- *
- * Can be either a raw C function pointer (fast path) or a ``Function`` object.
- *
- * Raw pointer signature: ``bool (*)(const Any& lhs, const Any& rhs)``
- *
- * Function signature: ``(Any lhs, Any rhs) -> bool``
- */
-inline constexpr const char* kAnyEqual = "__any_equal__";
-/*!
- * \brief Custom structural hash hook (used by ``StructuralHash``).
- *
- * Unlike ``kHash`` (which is for ``RecursiveHash`` / Python ``hash()``),
- * this is for the ``StructuralHash`` system that supports def/use region
- * semantics (``map_free_vars``).  The hook receives the current accumulated
- * hash and a callback to recursively hash sub-values.
- *
- * Signature: ``(TSelf self, int64 init_hash, Function hash_cb) -> int64``, where
- * ``TSelf`` is a subclass of ``ObjectRef``.
- *
- * ``hash_cb(AnyView val, int64 init_hash, bool def_region) -> int64``
- * recursively hashes a sub-value; ``def_region`` controls free-variable
- * mapping.
- */
-inline constexpr const char* kSHash = "__s_hash__";
-/*!
- * \brief Custom structural equality hook (used by ``StructuralEqual``).
- *
- * Unlike ``kEq`` (which is for ``RecursiveEq`` / Python ``==``), this is for
- * the ``StructuralEqual`` system that supports def/use region semantics and
- * alpha-equivalence of bound variables.  The hook receives a callback to
- * recursively compare sub-values.
- *
- * Signature: ``(TSelf lhs, TSelf rhs, Function eq_cb) -> bool``, where ``TSelf`` is a
- * subclass of ``ObjectRef``.
- *
- * ``eq_cb(AnyView lhs, AnyView rhs, bool def_region, AnyView field_name) -> bool``
- * recursively compares sub-values; ``def_region`` controls free-variable
- * mapping; ``field_name`` is used for mismatch path reporting.
- */
-inline constexpr const char* kSEqual = "__s_equal__";
-/*!
- * \brief Custom structural visitor hook (used by ``StructuralVisitor``).
- *
- * The hook receives the active visitor and the current object value. Opaque
- * pointer hooks return a ``TVMFFIAny`` that stores an
- * ``Expected<Optional<VisitInterrupt>>`` result.
- *
- * Value type: either an opaque function pointer to a C++ structural visit hook
- *
- * ``TVMFFIAny (*)(StructuralVisitorObj* visitor, AnyView value) noexcept``
- *
- * or an ``ffi::Function`` with signature
- *
- * ``(StructuralVisitor visitor, Any value) -> Optional<VisitInterrupt>``.
- *
- * On success, the hook returns ``None`` for no interrupt, or a
- * ``VisitInterrupt`` to halt traversal. On failure, it returns an ``Error``.
- * The ``visitor`` parameter is the active traversal context used to recursively
- * visit structural children.
- */
-inline constexpr const char* kStructuralVisit = "__s_visit__";
-
-/*!
- * \brief Custom structural mutation hook used by ``StructuralMutator``.
- *
- * The hook receives the active mutator and the input value. It should recursively mutate structural
- * children through the mutator, return the input unchanged if no fields are changed, and avoid
- * intentionally mutating the source object. The input is borrowed and remains valid for the
- * duration of the call.
- *
- * Value type: either an opaque function pointer to a C++ structural mutation hook
- *
- * ``TVMFFIAny (*)(StructuralMutatorObj* mutator, AnyView value) noexcept``
- *
- * returning raw ``Expected<Any>`` storage, or an ``ffi::Function`` with signature
- *
- * ``(StructuralMutator mutator, Any value) -> Any``.
- *
- * This is the canonical mutation hook. A type that defines
- * ``kStructuralMaybeInplaceMutate`` must also define this attribute.
- */
-inline constexpr const char* kStructuralMutate = "__s_mutate__";
-/*!
- * \brief Optional custom mutation hook that may reuse its input object.
- *
- * The hook receives the active mutator and a borrowed input value that is safe to mutate in place.
- * Callers must route shared objects through non-in-place mutation instead. The hook may mutate and
- * return the source object, delegate to non-in-place mutation, or return another replacement.
- *
- * Value type: either an opaque function pointer to a C++ structural mutation hook
- *
- * ``TVMFFIAny (*)(StructuralMutatorObj* mutator, AnyView value) noexcept``
- *
- * returning raw ``Expected<Any>`` storage, or an
- * ``ffi::Function`` with signature
- *
- * ``(StructuralMutator mutator, Any value) -> Any``.
- *
- * This hook is optional. When it is absent, ``DefaultMutateExpected`` with
- * ``inplace_mode=InplaceMode::kAllow`` falls back to non-in-place mutation through
- * ``kStructuralMutate`` or reflected structural fields. In-place mutation is therefore explicitly
- * opt-in and is never inferred from ownership by the reflected fallback.
- */
-inline constexpr const char* kStructuralMaybeInplaceMutate = "__s_maybe_inplace_mutate__";
-
-/*!
- * \brief Serialize object data to a JSON-compatible value.
- *
- * If registered, ``ToJSONGraph`` calls this instead of the default
- * field-by-field serialization.  Allows types with non-trivial internal
- * state (e.g. ``TInt`` storing a plain ``int64_t``) to define a compact
- * custom JSON representation.
- *
- * Signature: ``(TSelf self) -> Any``, where ``TSelf`` is a subclass of ``ObjectRef``.
- */
-inline constexpr const char* kDataToJson = "__data_to_json__";
-/*!
- * \brief Deserialize object data from a JSON-compatible value.
- *
- * Counterpart to ``kDataToJson``.  If registered, ``FromJSONGraph`` calls
- * this to reconstruct the object from its serialized representation
- * instead of using field-by-field deserialization.
- *
- * Signature: ``(Any json_data) -> TSelf``, where ``TSelf`` is a subclass of ``ObjectRef``.
- */
-inline constexpr const char* kDataFromJson = "__data_from_json__";
-/*! \brief Per-class enum state: ordered entries, canonical indices, and extensible attrs. */
-inline constexpr const char* kEnumState = "__ffi_enum__";
+inline constexpr reflection::AttrKey<TypedFunction<ObjectRef(const Object*)>> kShallowCopy{
+    "__ffi_shallow_copy__"};
 /*!
  * \brief Whether the class is declared final (``Class::_type_final``).
  *
  * Registered as a ``bool`` by every ``ObjectDef<Class>``. A final class can
  * never gain a subtype, so a binding generator may store it by value.
  */
-inline constexpr const char* kTypeFinal = "__ffi_type_final__";
+inline constexpr reflection::AttrKey<bool> kTypeFinal{"__ffi_type_final__"};
+/*!
+ * \brief Custom Any-level hash for use as ``Map``/``Dict`` key.
+ *
+ * Unlike ``kHash`` (which operates on objects and is recursive), this
+ * hook operates at the ``Any`` level — it is called by ``AnyHash`` whenever
+ * an ``Any`` holding an object of this type is used as a container key.
+ *
+ * Register a native hook with ``TypeAttrDef<T>::native_fn_attr<&Fn>(key)``
+ * or a packed ``Function`` object through the name-based registration API.
+ *
+ * Native adapters use a context-free noexcept ABI and return raw ``TVMFFIAny`` storage.
+ */
+inline constexpr reflection::AttrKey<reflection::NativeFunctionView<int64_t(const Any&)>> kAnyHash{
+    "__any_hash__"};
+/*!
+ * \brief Custom Any-level equality for use as ``Map``/``Dict`` key.
+ *
+ * Unlike ``kEq`` (which operates on objects), this hook operates at the
+ * ``Any`` level — called by ``AnyEqual`` for container key comparison.
+ *
+ * Register a native hook with ``TypeAttrDef<T>::native_fn_attr<&Fn>(key)``
+ * or a packed ``Function`` object through the name-based registration API.
+ *
+ * Native adapters use a context-free noexcept ABI and return raw ``TVMFFIAny`` storage.
+ */
+inline constexpr reflection::AttrKey<reflection::NativeFunctionView<bool(const Any&, const Any&)>>
+    kAnyEqual{"__any_equal__"};
 }  // namespace type_attr
 
-/*!
- * \brief C++17 constexpr helper: convert a ``const char*`` to ``TVMFFIByteArray``.
- * \param s A null-terminated string literal.
- * \return A ``TVMFFIByteArray`` whose ``data`` points to *s* and ``size`` equals ``strlen(s)``.
- */
-inline constexpr TVMFFIByteArray AsByteArray(const char* s) {
-  return {s, std::char_traits<char>::length(s)};
-}
-
-}  // namespace reflection
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_REFLECTION_ACCESSOR_H_

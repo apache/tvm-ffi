@@ -144,13 +144,13 @@ int TVMFFIEnvTensorAlloc(DLTensor* prototype, TVMFFIObjectHandle* out) {
   TVM_FFI_CHECK(dlpack_tensor != nullptr, RuntimeError)
       << "TVMFFIEnvTensorAlloc: failed to allocate a tensor from the allocator";
   if (dlpack_tensor->dl_tensor.strides != nullptr || dlpack_tensor->dl_tensor.ndim == 0) {
-    *out = tvm::ffi::details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(
-        tvm::ffi::make_object<tvm::ffi::details::TensorObjFromDLPack<DLManagedTensorVersioned>>(
+    *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(
+        tvm::ffi::make_object<tvm::ffi::detail::TensorObjFromDLPack<DLManagedTensorVersioned>>(
             dlpack_tensor, /*extra_strides_at_tail=*/false));
   } else {
-    *out = tvm::ffi::details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(
+    *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(
         tvm::ffi::make_inplace_array_object<
-            tvm::ffi::details::TensorObjFromDLPack<DLManagedTensorVersioned>, int64_t>(
+            tvm::ffi::detail::TensorObjFromDLPack<DLManagedTensorVersioned>, int64_t>(
             dlpack_tensor->dl_tensor.ndim, dlpack_tensor,
             /*extra_strides_at_tail=*/true));
   }

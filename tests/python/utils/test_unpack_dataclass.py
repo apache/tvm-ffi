@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import dataclasses
 import sys
-from typing import Any
+from collections import namedtuple
+from typing import Any, NamedTuple
 
 import pytest
 from tvm_ffi.utils.unpack_dataclass import (
@@ -35,6 +36,11 @@ from tvm_ffi.utils.unpack_dataclass import (
 class _ExtractConfig:
     x: int
     y: int
+
+
+class _UnpackNamedTuple(NamedTuple):
+    cfg: _ExtractConfig
+    leaf: Any
 
 
 @dataclasses.dataclass
@@ -221,6 +227,31 @@ def test_validate_dataclass_to_tuple_schema() -> None:
     # Invalid: nested schema with bad key
     with pytest.raises(ValueError, match="not a valid Python identifier"):
         _validate_dataclass_to_tuple_schema({"cfg": {"x": None, "y!": None}})
+
+
+@pytest.mark.parametrize("values", [(), (1,), (1, 2)])
+def test_unpack_namedtuple_arity(values: tuple[int, ...]) -> None:
+    record_type = namedtuple("Record", [f"field_{i}" for i in range(len(values))])
+    record = record_type(*values)
+
+    result = unpack_dataclass_to_tuple(record)
+    assert type(result) is record_type
+    assert result == record
+
+
+@pytest.mark.parametrize("record_type", [namedtuple("Record", "cfg leaf"), _UnpackNamedTuple])
+def test_unpack_nested_namedtuple(record_type: Any) -> None:
+    leaf = object()
+    record = record_type(_ExtractConfig(1, 2), leaf)
+    value = _ExtractWithAny(data={"records": [record]}, scale=3)
+
+    # Exercise both the initial and cached dataclass unpacker.
+    for _ in range(2):
+        result = unpack_dataclass_to_tuple(value)
+        unpacked = result[0]["records"][0]
+        assert result == ({"records": [record_type((1, 2), leaf)]}, 3)
+        assert type(unpacked) is record_type
+        assert unpacked.leaf is leaf
 
 
 @pytest.mark.xfail(

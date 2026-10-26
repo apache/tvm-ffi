@@ -807,17 +807,18 @@ Example (C++)
            .def_ro("params", &MyNodeObj::params)
            .def_ro("body", &MyNodeObj::body);
        refl::TypeAttrDef<MyNodeObj>()
-           .def(refl::type_attr::kSEqual, &MyNodeObj::SEqual)
-           .def(refl::type_attr::kSHash, &MyNodeObj::SHash);
+           .def(type_attr::kSEqual.name, &MyNodeObj::SEqual)
+           .def(type_attr::kSHash.name, &MyNodeObj::SHash);
      }
 
      static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
      TVM_FFI_DECLARE_OBJECT_INFO_FINAL("my.Node", MyNodeObj, Object);
    };
 
-See :cpp:var:`tvm::ffi::reflection::type_attr::kSEqual` and
-:cpp:var:`tvm::ffi::reflection::type_attr::kSHash` in
-``include/tvm/ffi/reflection/accessor.h`` for the full reference.
+See :cpp:var:`tvm::ffi::type_attr::kSEqual` and
+:cpp:var:`tvm::ffi::type_attr::kSHash` in
+``include/tvm/ffi/extra/structural_equal.h`` and
+``include/tvm/ffi/extra/structural_hash.h`` for the full reference.
 
 
 All Kinds at a Glance

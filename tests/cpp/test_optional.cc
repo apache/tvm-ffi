@@ -55,7 +55,7 @@ static_assert(sizeof(Optional<Function>) == sizeof(Function));
 static_assert(alignof(Optional<Function>) == alignof(Function));
 static_assert(sizeof(Optional<Optional<int>>) == sizeof(Any));
 static_assert(sizeof(Optional<Optional<TInt>>) == sizeof(Any));
-static_assert(details::storage_enabled_v<Optional<int>>);
+static_assert(detail::storage_enabled_v<Optional<int>>);
 
 TEST(Optional, StorageEnabledPassThrough) {
   // Optional<int> is storage-enabled, so a nested Optional round-trips through
@@ -76,7 +76,7 @@ TEST(Optional, TInt) {
   EXPECT_EQ(x.value_or(TInt(12))->value, 12);
 
   EXPECT_TRUE(y.has_value());
-  EXPECT_EQ(y.value_or(TInt(12))->value, 11);
+  EXPECT_EQ(y.as_or_throw<TInt>()->value, 11);
 
   Any z_any = std::move(y);
   EXPECT_TRUE(z_any != nullptr);
@@ -97,7 +97,7 @@ TEST(Optional, ObjectRefPointerABI) {
   ObjectRef value = TInt(19);
   Optional<ObjectRef> present = value;
   ASSERT_TRUE(present.has_value());
-  EXPECT_TRUE(present.same_as(value));
+  EXPECT_EQ(present.as<TIntObj>(), value.as<TIntObj>());
   EXPECT_EQ(present.use_count(), value.use_count());
 
   Any encoded = present;
@@ -121,7 +121,7 @@ TEST(Optional, double) {
   EXPECT_TRUE(x != 12);
 
   EXPECT_TRUE(y.has_value());
-  EXPECT_EQ(y.value_or(12), 11);
+  EXPECT_EQ(y.as_or_throw<double>(), 11);
   EXPECT_TRUE(y == 11);
   EXPECT_TRUE(y != 12);
 }
@@ -152,7 +152,7 @@ TEST(Optional, AnyConvertArray) {
 
   auto arr1 = view0.cast<Optional<Array<Array<TNumber>>>>();
   EXPECT_EQ(arr_nested.use_count(), 3);
-  EXPECT_EQ(arr1.value()[1][1].as<TFloatObj>()->value, 2);
+  EXPECT_EQ(arr1.as_or_throw<Array<Array<TNumber>>>()[1][1].as<TFloatObj>()->value, 2);
 
   Any any1;
   auto arr2 = any1.cast<Optional<Array<Array<TNumber>>>>();
@@ -211,10 +211,14 @@ TEST(Optional, OptionalOfOptional) {
 
 TEST(Optional, ValueMove) {
   Optional<TInt> y = TInt(11);
-  TInt x = std::move(y).value();
+  EXPECT_THROW(std::move(y).as_or_throw<TFloat>(), Error);
+  // A failed strict cast leaves the value available for a subsequent move.
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  TInt x = std::move(y).as_or_throw<TInt>();
   // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_TRUE(!y.has_value());
   EXPECT_EQ(x->value, 11);
+  EXPECT_EQ(x.use_count(), 1);
 
   Optional<TInt> opt_tint = TInt(21);
   EXPECT_TRUE(opt_tint.has_value());
@@ -253,10 +257,15 @@ TEST(Optional, String) {
 
   opt_str = "hello";
   EXPECT_TRUE(opt_str.has_value());
+  EXPECT_THROW(std::move(opt_str).as_or_throw<Bytes>(), Error);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(opt_str.value(), "hello");
   EXPECT_TRUE(opt_str == "hello");
   EXPECT_TRUE(opt_str == String("hello"));
   EXPECT_TRUE(opt_str != std::nullopt);
+  EXPECT_EQ(std::move(opt_str).as_or_throw<String>(), "hello");
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  EXPECT_FALSE(opt_str.has_value());
   static_assert(sizeof(Optional<String>) == sizeof(Any));
 }
 

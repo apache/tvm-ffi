@@ -48,7 +48,7 @@ class StructEqualHandler {
   StructEqualHandler() = default;
 
   bool CompareAny(ffi::Any lhs, ffi::Any rhs) {
-    using ffi::details::AnyUnsafe;
+    using ffi::detail::AnyUnsafe;
     const TVMFFIAny* lhs_data = AnyUnsafe::TVMFFIAnyPtrFromAny(lhs);
     const TVMFFIAny* rhs_data = AnyUnsafe::TVMFFIAnyPtrFromAny(rhs);
     if (lhs_data->type_index != rhs_data->type_index) {
@@ -59,26 +59,26 @@ class StructEqualHandler {
       }
       // small string and normal string comparison
       if (lhs_data->type_index == kTVMFFIStr && rhs_data->type_index == kTVMFFISmallStr) {
-        const details::BytesObjBase* lhs_str =
-            details::AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(lhs);
+        const detail::BytesObjBase* lhs_str =
+            detail::AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(lhs);
         return Bytes::memequal(lhs_str->data, rhs_data->v_bytes, lhs_str->size,
                                rhs_data->small_str_len);
       }
       if (lhs_data->type_index == kTVMFFISmallStr && rhs_data->type_index == kTVMFFIStr) {
-        const details::BytesObjBase* rhs_str =
-            details::AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(rhs);
+        const detail::BytesObjBase* rhs_str =
+            detail::AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(rhs);
         return Bytes::memequal(lhs_data->v_bytes, rhs_str->data, lhs_data->small_str_len,
                                rhs_str->size);
       }
       if (lhs_data->type_index == kTVMFFIBytes && rhs_data->type_index == kTVMFFISmallBytes) {
-        const details::BytesObjBase* lhs_bytes =
-            details::AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(lhs);
+        const detail::BytesObjBase* lhs_bytes =
+            detail::AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(lhs);
         return Bytes::memequal(lhs_bytes->data, rhs_data->v_bytes, lhs_bytes->size,
                                rhs_data->small_str_len);
       }
       if (lhs_data->type_index == kTVMFFISmallBytes && rhs_data->type_index == kTVMFFIBytes) {
-        const details::BytesObjBase* rhs_bytes =
-            details::AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(rhs);
+        const detail::BytesObjBase* rhs_bytes =
+            detail::AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(rhs);
         return Bytes::memequal(lhs_data->v_bytes, rhs_bytes->data, lhs_data->small_str_len,
                                rhs_bytes->size);
       }
@@ -96,16 +96,16 @@ class StructEqualHandler {
     }
     switch (lhs_data->type_index) {
       case TypeIndex::kTVMFFIBigInt: {
-        return details::int_ops::EqualFallback(details::BigIntUnsafe::GetArrayView(lhs_data),
-                                               details::BigIntUnsafe::GetArrayView(rhs_data));
+        return detail::int_ops::EqualFallback(detail::BigIntUnsafe::GetArrayView(lhs_data),
+                                              detail::BigIntUnsafe::GetArrayView(rhs_data));
       }
       case TypeIndex::kTVMFFIStr:
       case TypeIndex::kTVMFFIBytes: {
         // compare bytes
-        const details::BytesObjBase* lhs_str =
-            AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(lhs);
-        const details::BytesObjBase* rhs_str =
-            AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(rhs);
+        const detail::BytesObjBase* lhs_str =
+            AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(lhs);
+        const detail::BytesObjBase* rhs_str =
+            AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(rhs);
         return Bytes::memequal(lhs_str->data, rhs_str->data, lhs_str->size, rhs_str->size);
       }
       case TypeIndex::kTVMFFIArray: {
@@ -213,10 +213,11 @@ class StructEqualHandler {
   // clamp — the caller (CompareObject) handles that for the FreeVar case.
   bool CompareFields(const ObjectRef& lhs, const ObjectRef& rhs, const TVMFFITypeInfo* type_info) {
     static reflection::TypeAttrColumn custom_s_equal =
-        reflection::TypeAttrColumn(reflection::type_attr::kSEqual);
+        reflection::TypeAttrColumn(type_attr::kSEqual);
 
     bool success = true;
-    if (custom_s_equal[type_info->type_index] == nullptr) {
+    auto hook = type_attr::kSEqual.ValueFrom(custom_s_equal[type_info->type_index]);
+    if (!hook) {
       // We recursively compare the fields the object
       reflection::ForEachFieldInfoWithEarlyStop(type_info, [&](const TVMFFIFieldInfo* field_info) {
         // skip fields that are marked as structural eq hash ignore
@@ -291,9 +292,7 @@ class StructEqualHandler {
               return sub_success;
             });
       }
-      success = custom_s_equal[type_info->type_index]
-                    .cast<ffi::Function>()(lhs, rhs, s_equal_callback_)
-                    .cast<bool>();
+      success = (*hook)(lhs.get(), rhs.get(), s_equal_callback_);
     }
     return success;
   }
@@ -425,7 +424,7 @@ class StructEqualHandler {
     if (lhs.type_index() < TypeIndex::kTVMFFIStaticObjectBegin) {
       return lhs;
     }
-    ObjectRef lhs_obj = ffi::details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(lhs));
+    ObjectRef lhs_obj = ffi::detail::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(lhs));
     auto it = equal_map_lhs_.find(lhs_obj);
     if (it != equal_map_lhs_.end()) {
       return it->second;
@@ -437,7 +436,7 @@ class StructEqualHandler {
     if (rhs.type_index() < TypeIndex::kTVMFFIStaticObjectBegin) {
       return rhs;
     }
-    ObjectRef rhs_obj = ffi::details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(rhs));
+    ObjectRef rhs_obj = ffi::detail::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(rhs));
     auto it = equal_map_rhs_.find(rhs_obj);
     if (it != equal_map_rhs_.end()) {
       return it->second;
@@ -456,7 +455,7 @@ class StructEqualHandler {
   std::vector<reflection::AccessStep>* mismatch_lhs_reverse_path_ = nullptr;
   std::vector<reflection::AccessStep>* mismatch_rhs_reverse_path_ = nullptr;
   // lazily initialize custom equal function
-  ffi::Function s_equal_callback_ = nullptr;
+  ffi::TypedFunction<bool(AnyView, AnyView, int, AnyView)> s_equal_callback_ = nullptr;
   // map from lhs to rhs
   std::unordered_map<ObjectRef, ObjectRef, ObjectPtrHash, ObjectPtrEqual> equal_map_lhs_;
   // map from rhs to lhs
@@ -499,7 +498,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("ffi.StructuralEqual", StructuralEqual::Equal)
       .def("ffi.GetFirstStructuralMismatch", StructuralEqual::GetFirstMismatch);
   // ensure the type attribute column is presented in the system even if it is empty.
-  refl::EnsureTypeAttrColumn(refl::type_attr::kSEqual);
+  refl::EnsureTypeAttrColumn(type_attr::kSEqual);
 }
 
 }  // namespace ffi

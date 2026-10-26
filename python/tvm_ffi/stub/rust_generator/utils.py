@@ -19,12 +19,17 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from . import consts as C
 from .directives import Directives
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from tvm_ffi.core import TypeSchema
 
 
@@ -63,6 +68,28 @@ def is_crate_type_key(type_key: str) -> bool:
     return type_key.partition(".")[0] in C.RUST_MOD_MAP
 
 
+@functools.cache
+def rust_module_path(path: Path) -> tuple[str, ...]:
+    """Return the module a ``.rs`` file defines, from its place under its crate's ``src/``.
+
+    The crate is the nearest ancestor directory with a ``Cargo.toml``. ``src/lib.rs`` and
+    ``src/main.rs`` are ``crate``; ``src/ir.rs`` and ``src/ir/mod.rs`` are ``crate::ir``.
+    A keyword segment is a raw identifier (``src/ir/type.rs`` is ``crate::ir::r#type``).
+    Raises ``ValueError`` for a file outside a crate's ``src/``.
+    """
+    path = path.resolve()
+    crate = next((d for d in path.parents if (d / "Cargo.toml").is_file()), None)
+    if crate is None:
+        raise ValueError(f"{path} is in no Cargo crate: no `Cargo.toml` above it")
+    src = crate / "src"
+    if src not in path.parents:
+        raise ValueError(f"{path} is not under `{src}`, so it is in no module of the crate")
+    segments = list(path.relative_to(src).with_suffix("").parts)
+    if segments[-1] == "mod" or (len(segments) == 1 and segments[0] in ("lib", "main")):
+        segments.pop()
+    return ("crate", *(f"r#{s}" if s in C.RUST_KEYWORDS else s for s in segments))
+
+
 def builtin_mirror_name(type_key: str) -> str:
     """Name of the header-only stand-in for a builtin type (``ffi.IntEnum -> FfiIntEnumObj``).
 
@@ -81,6 +108,8 @@ class RustImports:
     directives: Directives = dataclasses.field(default_factory=Directives)
     builtin_mirrors: dict[str, str] = dataclasses.field(default_factory=dict)
     """Builtin ancestors mirrored in this file, root first: type key -> the base each embeds."""
+    reserved: set[str] = dataclasses.field(default_factory=set)
+    """Names the file's ``object/`` blocks define; an import may not take one."""
 
     def record_builtin_base(self, chain: list[str]) -> str:
         """Record the stand-ins for the builtin ``chain`` (root side first); return the last name.
@@ -96,7 +125,7 @@ class RustImports:
     def record(self, name: str) -> str:
         """Record a ``use`` (deduped) and return the name to spell in code.
 
-        The leaf, or the full path when another path already claimed that leaf.
+        The leaf, or the full path when another path or an object already claimed that leaf.
         """
         probe = RustUse(name)
         if not probe.as_use_line():
@@ -104,7 +133,7 @@ class RustImports:
         for item in self.items:
             if item.path == probe.path:
                 return item.leaf
-        if any(item.leaf == probe.leaf for item in self.items):
+        if probe.leaf in self.reserved or any(item.leaf == probe.leaf for item in self.items):
             return probe.path
         self.items.append(probe)
         return probe.leaf
@@ -121,9 +150,9 @@ def render_rust_type(
     origin, args = schema.origin, schema.args
     if origin in C.RUST_UNSUPPORTED_ORIGINS:
         return None
-    if origin == "Array":
+    if origin in ("Array", "List"):
         assert args  # TypeSchema's post_init fills a missing element type.
-        return _generic(ty_render("Array", None), render_rust_type(args[0], ty_render))
+        return _generic(ty_render(origin, None), render_rust_type(args[0], ty_render))
     if origin == "Map":
         assert len(args) == 2  # TypeSchema's post_init fills a bare Map to (Any, Any).
         key = render_rust_type(args[0], ty_render)
@@ -141,6 +170,27 @@ def _generic(base: str | None, *params: str | None) -> str | None:
     if base is None or any(p is None for p in params):
         return None
     return f"{base}<{', '.join(p for p in params if p is not None)}>"
+
+
+#: The module qualifier of a path (``crate::ir::``, ``super::super::``, ``::core::mem::``).
+_MODULE_QUALIFIER = re.compile(r"(?<![\w:])(?:::)?(?:[a-z_][a-z0-9_]*::)+(?=[A-Za-z_])")
+
+
+def check_tokens(lines: Iterable[str]) -> tuple[str, ...]:
+    """Return the tokens of generated Rust ``lines`` that ``--check`` compares.
+
+    ``use`` lines, comment lines and module qualifiers are dropped, and so is a
+    trailing comma, so neither the import paths nor how rustfmt wraps a call count.
+    """
+    text = " ".join(
+        line for line in (raw.strip() for raw in lines) if not line.startswith(("use ", "//"))
+    )
+    tokens = re.findall(r"\w+|\S", _MODULE_QUALIFIER.sub("", text))
+    return tuple(
+        token
+        for token, after in zip(tokens, [*tokens[1:], ""])
+        if not (token == "," and after in (")", "]", "}"))
+    )
 
 
 def rust_ident(name: str) -> str:

@@ -40,6 +40,7 @@ pub use tvm_ffi_sys;
 pub use crate::any::{Any, AnyView};
 pub use crate::big_int::BigInt;
 pub use crate::collections::array::Array;
+pub use crate::collections::list::List;
 pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor, TensorView};
@@ -71,11 +72,13 @@ pub use crate::object::{
     Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity, ObjectRefCore,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
-pub use crate::reflection::{get_type_attr, FieldGetter, TypeAttrColumn};
+pub use crate::reflection::{
+    get_type_attr, FieldFlags, FieldGetter, SEqHashKind, ShallowCopy, TypeAttrColumn,
+};
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
-pub use tvm_ffi_macros::{dispatch, match_any};
+pub use tvm_ffi_macros::{def_object_ref, dispatch, match_any, rs_class};
 
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 pub use tvm_ffi_sys::{

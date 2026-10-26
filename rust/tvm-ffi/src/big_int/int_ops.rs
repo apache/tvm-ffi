@@ -20,7 +20,7 @@
 //!
 //! Every fallback takes canonical two's-complement words, least-significant
 //! first, and returns a canonical `BigInt`. The functions mirror C++
-//! `details::int_ops` in `include/tvm/ffi/big_int.h` one for one; keep them in
+//! `detail::int_ops` in `include/tvm/ffi/big_int.h` one for one; keep them in
 //! sync. Word arithmetic wraps modulo 2^64 on purpose, hence the explicit
 //! `wrapping_*`/`overflowing_*` forms. As in C++, a result whose words are each
 //! computed once is written straight into a fresh object and pruned in place

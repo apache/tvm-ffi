@@ -48,11 +48,11 @@ Add to your `Cargo.toml`:
 tvm-ffi = { path = "path/to/tvm-ffi/rust/tvm-ffi" }
 ```
 
-For published versions (when available):
+For published versions:
 
 ```toml
 [dependencies]
-tvm-ffi = "0.1.0-alpha.0"
+tvm-ffi = "0.1.14"
 ```
 
 ### Environment Setup
@@ -87,6 +87,21 @@ fn main() -> Result<()> {
     let add_fn = module.get_function("add_one_cpu")?;
 
     Ok(())
+}
+```
+
+A module also reports whether it implements a function, and reads the
+metadata and doc string a function was exported with, as
+`Module.implements_function`, `Module.get_function_metadata` and
+`Module.get_function_doc` do in Python. The second argument says whether to
+also look in the modules it imports:
+
+```rust
+let module = Module::load_from_file("build/add_one_cpu.so")?;
+if module.implements_function("add_one_cpu", false)? {
+    // A JSON object such as {"type_schema": "..."}, if it was exported
+    let metadata = module.get_function_metadata("add_one_cpu", false)?;
+    let doc = module.get_function_doc("add_one_cpu", false)?;
 }
 ```
 
@@ -209,31 +224,28 @@ assert_eq!(i64::try_from(result)?, 3);
 `Function::from_type_method(type_index, name)` performs the same lookup when
 the type index is already known (e.g. from `Any::type_index`).
 
-### Defining Object Types
+### Defining Reflected Object Types
 
-A Rust crate defines an object type of its own with `#[derive(Object)]` and
-`#[type_register]`, and registers its reflection along with it, as C++
-`refl::ObjectDef` does, so that Python reads its fields and calls its methods
-as for a C++ type. Mark fields with `#[def_ro]` (or `#[def_rw]` in a type
-marked `#[type_mutable]`), and name a function that registers methods with
-`#[type_reflection(...)]`:
+An object type defined in Rust registers its type key with `#[type_register]`
+and its fields with `#[reflect]`, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` and
+`refl::ObjectDef<T>().def_ro(...)` do. The registration runs on the type's
+first `type_index()`, which allocating an instance calls:
 
 ```rust
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::reflection::ObjectDef;
-use tvm_ffi::{Object, ObjectArc, Result};
+use tvm_ffi::{Object, ObjectArc};
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "my_ext.Point"]
+#[type_key = "my.Point"]
 #[type_register]
-#[type_reflection(PointObj::register_reflection)]
+#[type_s_eq_hash_kind = "TreeNode"]
 pub struct PointObj {
-    object: Object,
-    #[def_ro(doc = "The x coordinate")]
-    x: i64,
-    #[def_ro]
-    y: i64,
+    base: Object,
+    #[reflect]
+    pub x: i64,
+    #[reflect(writable, seq_hash_ignore)]
+    pub label: tvm_ffi::String,
 }
 
 #[repr(C)]
@@ -241,18 +253,61 @@ pub struct PointObj {
 pub struct Point {
     data: ObjectArc<PointObj>,
 }
-
-impl PointObj {
-    fn register_reflection(def: &mut ObjectDef<Self>) {
-        // An instance method takes the object first.
-        def.def("norm1", |p: Point| -> Result<i64> { Ok(p.data.x.abs() + p.data.y.abs()) }, "");
-    }
-}
 ```
 
-The type and its reflection are registered on first use of
-`PointObj::type_index()`, before any object of the type exists. Each field and
-method records its type schema, so the stub generator sees their types.
+Each reflected field gets a C ABI getter and setter and its type schema, so
+C++ structural equality and hashing, `ffi.ReprPrint`, `ffi.DeepCopy` and
+Python see it. The flags in `#[reflect(...)]` name
+`tvm_ffi::FieldFlags` constants. Without `#[type_s_eq_hash_kind]`, a type
+keeps its nearest reflected ancestor's kind. The derive also implements
+`ShallowCopy` and registers it as `__ffi_shallow_copy__`, which requires the
+parent to implement `ShallowCopy` and the other fields to be `Clone`.
+
+### Defining Object Types from Their Fields
+
+`#[rs_class]` defines such a type from its object struct, like Python's
+`py_class`. The first field, `base`, is the parent's object; every other field
+is reflected, and `#[reflect(...)]` sets its flags.
+`def_object_ref!(TypeName, ParentType, ObjectName)` defines the reference, as
+C++ `TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE` does:
+
+```rust
+use tvm_ffi::object::ObjectRef;
+use tvm_ffi::{def_object_ref, rs_class, Object};
+
+#[rs_class("my.Point", s_eq_hash_kind = "TreeNode")]
+pub struct PointObj {
+    base: Object,
+    pub x: i64,
+    #[reflect(writable, seq_hash_ignore)]
+    pub label: tvm_ffi::String,
+}
+
+def_object_ref!(pub Point, ObjectRef, PointObj);
+
+#[rs_class("my.Point3", final)]
+pub struct Point3Obj {
+    base: PointObj,
+    pub z: i64,
+}
+
+def_object_ref!(pub Point3, Point, Point3Obj);
+
+let point3 = Point3::from(Point3Obj::new(PointObj::new(Object::new(), 1, "p"), 3));
+assert_eq!((point3.x, point3.z), (1, 3));
+let point: Point = point3.into();
+```
+
+`#[rs_class]` adds `#[repr(C)]`, `Deref` to the parent's object and
+`Point3Obj::new`, which takes the parent's object, then the fields: a scalar
+(`bool`, an integer or a float) as its own type, so that a literal infers as it,
+and any other field from anything that converts into it, as the `new` of a type
+bound by `tvm-ffi-stubgen` does. The parent's object must implement
+`ShallowCopy`, as `rs_class` types and non-final C++ types bound by
+`tvm-ffi-stubgen` do. The reference dereferences to the object, and the object
+converts into it. The reference also converts into `ParentType`, the reference
+to its parent (`ObjectRef` for a type under `ffi.Object`);
+`impl_object_upcast!` converts it into the references to further ancestors.
 
 ### Converting Borrowed Values into `Any`
 

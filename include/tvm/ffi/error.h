@@ -24,7 +24,7 @@
 #ifndef TVM_FFI_ERROR_H_
 #define TVM_FFI_ERROR_H_
 
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
@@ -72,10 +72,10 @@ class ErrorObj : public Object, public TVMFFIErrorCell {
 
   ~ErrorObj() {
     if (this->cause_chain != nullptr) {
-      details::ObjectUnsafe::DecRefObjectHandle(this->cause_chain);
+      detail::ObjectUnsafe::DecRefObjectHandle(this->cause_chain);
     }
     if (this->extra_context != nullptr) {
-      details::ObjectUnsafe::DecRefObjectHandle(this->extra_context);
+      detail::ObjectUnsafe::DecRefObjectHandle(this->extra_context);
     }
   }
 
@@ -85,7 +85,7 @@ class ErrorObj : public Object, public TVMFFIErrorCell {
   /// \endcond
 };
 
-namespace details {
+namespace detail {
 class ErrorObjFromStd : public ErrorObj {
  public:
   ErrorObjFromStd(std::string kind, std::string message, std::string backtrace)
@@ -122,7 +122,7 @@ class ErrorObjFromStd : public ErrorObj {
   std::string message_data_;
   std::string backtrace_data_;
 };
-}  // namespace details
+}  // namespace detail
 
 /*!
  * \brief Managed reference to ErrorObj
@@ -137,8 +137,8 @@ class TVM_FFI_DLL Error : public ObjectRef, public std::exception {
    * \param backtrace The backtrace of the error.
    */
   Error(std::string kind, std::string message, std::string backtrace) {
-    data_ = make_object<details::ErrorObjFromStd>(std::move(kind), std::move(message),
-                                                  std::move(backtrace));
+    data_ = make_object<detail::ErrorObjFromStd>(std::move(kind), std::move(message),
+                                                 std::move(backtrace));
   }
 
   /*!
@@ -151,15 +151,15 @@ class TVM_FFI_DLL Error : public ObjectRef, public std::exception {
    */
   Error(std::string kind, std::string message, std::string backtrace,
         std::optional<Error> cause_chain, std::optional<ObjectRef> extra_context) {
-    ObjectPtr<ErrorObj> error_obj = make_object<details::ErrorObjFromStd>(
+    ObjectPtr<ErrorObj> error_obj = make_object<detail::ErrorObjFromStd>(
         std::move(kind), std::move(message), std::move(backtrace));
     if (cause_chain.has_value()) {
       error_obj->cause_chain =
-          details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(*std::move(cause_chain));
+          detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(*std::move(cause_chain));
     }
     if (extra_context.has_value()) {
       error_obj->extra_context =
-          details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(*std::move(extra_context));
+          detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(*std::move(extra_context));
     }
     data_ = std::move(error_obj);
   }
@@ -199,8 +199,8 @@ class TVM_FFI_DLL Error : public ObjectRef, public std::exception {
   std::optional<Error> cause_chain() const {
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
     if (obj->cause_chain != nullptr) {
-      return details::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
-          details::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(
+      return detail::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
+          detail::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(
               static_cast<Object*>(obj->cause_chain)));
     } else {
       return std::nullopt;
@@ -214,8 +214,8 @@ class TVM_FFI_DLL Error : public ObjectRef, public std::exception {
   std::optional<ObjectRef> extra_context() const {
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
     if (obj->extra_context != nullptr) {
-      return details::ObjectUnsafe::ObjectRefFromObjectPtr<ObjectRef>(
-          details::ObjectUnsafe::ObjectPtrFromUnowned<Object>(
+      return detail::ObjectUnsafe::ObjectRefFromObjectPtr<ObjectRef>(
+          detail::ObjectUnsafe::ObjectPtrFromUnowned<Object>(
               static_cast<Object*>(obj->extra_context)));
     } else {
       return std::nullopt;
@@ -315,7 +315,7 @@ class TVM_FFI_DLL Error : public ObjectRef, public std::exception {
  */
 inline Error EnvErrorAlreadySet() { return Error("EnvErrorAlreadySet", "", ""); }
 
-namespace details {
+namespace detail {
 
 /*!
  * \brief Move the last raised safe-call error from TLS.
@@ -324,8 +324,8 @@ namespace details {
 TVM_FFI_INLINE Error MoveFromSafeCallRaised() {
   TVMFFIObjectHandle handle;
   TVMFFIErrorMoveFromRaised(&handle);
-  return details::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
-      details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle)));
+  return detail::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
+      detail::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle)));
 }
 
 /*!
@@ -333,7 +333,7 @@ TVM_FFI_INLINE Error MoveFromSafeCallRaised() {
  * \param error The error to be raised.
  */
 TVM_FFI_INLINE void SetSafeCallRaised(const Error& error) {
-  TVMFFIErrorSetRaised(details::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(error));
+  TVMFFIErrorSetRaised(detail::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(error));
 }
 
 class ErrorBuilder {
@@ -386,7 +386,7 @@ class ErrorBuilder {
   std::optional<ObjectRef> extra_context_;
 };
 
-}  // namespace details
+}  // namespace detail
 
 /*!
  * \brief Helper macro to throw an error with backtrace and message
@@ -397,10 +397,10 @@ class ErrorBuilder {
  * }
  * \endcode
  */
-#define TVM_FFI_THROW(ErrorKind)                                                              \
-  ::tvm::ffi::details::ErrorBuilder(#ErrorKind,                                               \
-                                    TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), \
-                                    TVM_FFI_ALWAYS_LOG_BEFORE_THROW)                          \
+#define TVM_FFI_THROW(ErrorKind)                                                             \
+  ::tvm::ffi::detail::ErrorBuilder(#ErrorKind,                                               \
+                                   TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), \
+                                   TVM_FFI_ALWAYS_LOG_BEFORE_THROW)                          \
       .stream()
 
 /*!
@@ -410,15 +410,15 @@ class ErrorBuilder {
  *  cannot be caught, and it is better to have a clear log message.
  *  In most cases, we should use use TVM_FFI_THROW.
  */
-#define TVM_FFI_LOG_AND_THROW(ErrorKind)                                          \
-  ::tvm::ffi::details::ErrorBuilder(                                              \
-      #ErrorKind, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), true) \
+#define TVM_FFI_LOG_AND_THROW(ErrorKind)                                                           \
+  ::tvm::ffi::detail::ErrorBuilder(#ErrorKind,                                                     \
+                                   TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), true) \
       .stream()
 
 // Glog style checks with TVM_FFI prefix
 // NOTE: we explicitly avoid glog style generic macros (LOG/CHECK) in tvm ffi
 // to avoid potential conflict of downstream users who might have their own GLOG style macros
-namespace details {
+namespace detail {
 
 template <typename X, typename Y>
 TVM_FFI_INLINE std::unique_ptr<std::string> LogCheckFormat(const X& x, const Y& y) {
@@ -461,11 +461,11 @@ TVM_FFI_CHECK_FUNC(_NE, !=)
 #elif defined(_MSC_VER)  // MSVC
 #pragma warning(pop)
 #endif
-}  // namespace details
+}  // namespace detail
 
 #define TVM_FFI_CHECK_BINARY_OP(name, op, x, y, ErrorKind)                \
   if (auto __tvm_ffi_log_err = /* NOLINT(bugprone-reserved-identifier) */ \
-      ::tvm::ffi::details::LogCheck##name(x, y))                          \
+      ::tvm::ffi::detail::LogCheck##name(x, y))                           \
   TVM_FFI_THROW(ErrorKind) << "Check failed: " << #x " " #op " " #y << *__tvm_ffi_log_err << ": "
 
 #define TVM_FFI_CHECK(cond, ErrorKind) \

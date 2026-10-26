@@ -167,7 +167,7 @@ class MyIntPair : public tvm::ffi::ObjectRef {
 
   // Required: define object reference methods
   // This macro provides the necessary methods for ObjectRef functionality
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(MyIntPair, tvm::ffi::ObjectRef, MyIntPairObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(MyIntPair, tvm::ffi::ObjectRef, MyIntPairObj);
 };
 
 void ExampleObjectRef() {
@@ -711,11 +711,13 @@ with copy-on-write semantics. Use `Dict<K, V>` when you need mutable in-place op
 ### Optional
 
 `Optional<T>` provides a safe way to handle values that may or may not exist.
-We specialize Optional for `ffi::String` and Object types to be more compact,
-using nullptr to indicate non-existence.
+For object references, `Optional<T>` owns one nullable object pointer without inheriting
+from `ObjectRef`. Access the contained reference explicitly with `value()` or `operator*`.
+A null `ObjectRef`, `Function`, or `Tensor` converts to an empty optional; ordinary
+concrete references and containers use `Optional<T>` to represent absence.
 
 ```cpp
-#include <tvm/ffi/container/optional.h>
+#include <tvm/ffi/optional.h>
 
 void ExampleOptional() {
   namespace ffi = tvm::ffi;

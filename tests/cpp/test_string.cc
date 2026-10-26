@@ -430,8 +430,8 @@ TEST(String, BytesHash) {
   char* data2_ptr = reinterpret_cast<char*>(data2.data()) + 1;
   std::memcpy(data2_ptr, data1.data(), data1.size() * sizeof(int64_t));
   // has of aligned and unaligned data should be the same
-  uint64_t hash1 = details::StableHashBytes(data1_ptr, data1.size() * sizeof(int64_t));
-  uint64_t hash2 = details::StableHashBytes(data2_ptr, data1.size() * sizeof(int64_t));
+  uint64_t hash1 = detail::StableHashBytes(data1_ptr, data1.size() * sizeof(int64_t));
+  uint64_t hash2 = detail::StableHashBytes(data2_ptr, data1.size() * sizeof(int64_t));
   EXPECT_EQ(hash1, hash2);
 }
 

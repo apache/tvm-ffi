@@ -23,7 +23,7 @@
 #ifndef TVM_FFI_TYPE_TRAITS_H_
 #define TVM_FFI_TYPE_TRAITS_H_
 
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 
 #include <optional>

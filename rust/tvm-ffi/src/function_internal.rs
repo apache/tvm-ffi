@@ -71,18 +71,6 @@ where
     Fun::type_schema()
 }
 
-/// The metadata C++ records for a function or field of type schema
-/// `type_schema`: `{"type_schema":<type_schema as a JSON string>}`.
-///
-/// The string is escaped by the runtime's JSON writer, which escapes as C++
-/// `EscapeStringJSON` does, so the metadata matches the C++ one byte for byte.
-pub(crate) fn type_schema_metadata(type_schema: &str) -> Result<std::string::String> {
-    let escaped: String = crate::cached_global_func!("ffi.json.Stringify")
-        .call_tuple_with_len::<2, _>((String::from(type_schema), ()))?
-        .try_into()?;
-    Ok(format!(r#"{{"type_schema":{}}}"#, escaped.as_str()))
-}
-
 /// Writes `text` to `result` as a string allocated by the runtime, so that it
 /// outlives the library that wrote it, as the getters that
 /// `TVM_FFI_DLL_EXPORT_TYPED_FUNC` and `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`
@@ -112,7 +100,8 @@ pub fn exported_metadata<Fun, I, O>(func: &Fun) -> Result<std::string::String>
 where
     Fun: AsPackedCallable<I, O>,
 {
-    type_schema_metadata(&type_schema_of(func))
+    let type_schema = type_schema_of(func);
+    Ok(crate::type_traits::type_schema_metadata(&type_schema))
 }
 
 #[inline]
@@ -411,6 +400,31 @@ impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for crate::Map<K, V> {
 }
 impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for &crate::Map<K, V> {
     type Target = crate::Map<K, V>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T: ContainerElement> IntoArgHolder for crate::List<T> {
+    type Target = crate::List<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<'a, T: ContainerElement> IntoArgHolder for &'a crate::List<T> {
+    type Target = &'a crate::List<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement> ArgIntoRef for crate::List<T> {
+    type Target = crate::List<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement> ArgIntoRef for &crate::List<T> {
+    type Target = crate::List<T>;
     fn to_ref(&self) -> &Self::Target {
         self
     }

@@ -48,7 +48,7 @@ class StructuralHashHandler {
   StructuralHashHandler() = default;
 
   uint64_t HashAny(ffi::Any src) {
-    using ffi::details::AnyUnsafe;
+    using ffi::detail::AnyUnsafe;
     const TVMFFIAny* src_data = AnyUnsafe::TVMFFIAnyPtrFromAny(src);
 
     if (src_data->type_index < TypeIndex::kTVMFFIStaticObjectBegin) {
@@ -57,32 +57,32 @@ class StructuralHashHandler {
       if (src_data->type_index == TypeIndex::kTVMFFIFloat && std::isnan(src_data->v_float64)) {
         TVMFFIAny temp = *src_data;
         temp.v_float64 = std::numeric_limits<double>::quiet_NaN();
-        return details::StableHashCombine(temp.type_index, temp.v_uint64);
+        return detail::StableHashCombine(temp.type_index, temp.v_uint64);
       }
       if (src_data->type_index == TypeIndex::kTVMFFISmallStr) {
         // for small string, we use the same type key hash as normal string
         // so heap allocated string and on stack string will have the same hash
-        return details::StableHashCombine(TypeIndex::kTVMFFIStr,
-                                          details::StableHashSmallStrBytes(src_data));
+        return detail::StableHashCombine(TypeIndex::kTVMFFIStr,
+                                         detail::StableHashSmallStrBytes(src_data));
       }
       // this is POD data, we can just hash the value
-      return details::StableHashCombine(src_data->type_index, src_data->v_uint64);
+      return detail::StableHashCombine(src_data->type_index, src_data->v_uint64);
     }
 
     switch (src_data->type_index) {
       case TypeIndex::kTVMFFIBigInt: {
-        auto words = details::BigIntUnsafe::GetArrayView(src_data);
-        return details::StableHashCombine(
-            src_data->type_index, details::StableHashBytes(reinterpret_cast<const char*>(&words[0]),
-                                                           words.size() * sizeof(int64_t)));
+        auto words = detail::BigIntUnsafe::GetArrayView(src_data);
+        return detail::StableHashCombine(
+            src_data->type_index, detail::StableHashBytes(reinterpret_cast<const char*>(&words[0]),
+                                                          words.size() * sizeof(int64_t)));
       }
       case TypeIndex::kTVMFFIStr:
       case TypeIndex::kTVMFFIBytes: {
         // return same hash as AnyHash
-        const details::BytesObjBase* src_str =
-            AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(src);
-        return details::StableHashCombine(src_data->type_index,
-                                          details::StableHashBytes(src_str->data, src_str->size));
+        const detail::BytesObjBase* src_str =
+            AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(src);
+        return detail::StableHashCombine(src_data->type_index,
+                                         detail::StableHashBytes(src_str->data, src_str->size));
       }
       case TypeIndex::kTVMFFIArray: {
         return HashArray(AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(src)));
@@ -158,7 +158,7 @@ class StructuralHashHandler {
       def_region_kind_ = saved_def_region_kind;
       if (def_region_kind_ != kTVMFFIDefRegionKindNone) {
         // use lexical order of free var and its type
-        hash_value = details::StableHashCombine(hash_value, free_var_counter_++);
+        hash_value = detail::StableHashCombine(hash_value, free_var_counter_++);
       } else {
         // Fallback to pointer hash; we are not in a def region.
         hash_value = std::hash<const Object*>()(obj.get());
@@ -168,7 +168,7 @@ class StructuralHashHandler {
     // if it is a DAG node, also record the lexical order of graph counter
     // this helps to distinguish DAG from trees.
     if (structural_eq_hash_kind == kTVMFFISEqHashKindDAGNode) {
-      hash_value = details::StableHashCombine(hash_value, graph_node_counter_++);
+      hash_value = detail::StableHashCombine(hash_value, graph_node_counter_++);
     }
     // record the hash value for this object
     hash_memo_[obj] = hash_value;
@@ -179,10 +179,10 @@ class StructuralHashHandler {
   // callback). Does not touch the FreeVar def-region clamp — that lives
   // inline in HashObject's FreeVar branch, which wraps this helper.
   uint64_t HashFields(const ObjectRef& obj, const TVMFFITypeInfo* type_info, uint64_t init_hash) {
-    static reflection::TypeAttrColumn custom_s_hash =
-        reflection::TypeAttrColumn(reflection::type_attr::kSHash);
+    static reflection::TypeAttrColumn custom_s_hash = reflection::TypeAttrColumn(type_attr::kSHash);
 
-    if (custom_s_hash[type_info->type_index] == nullptr) {
+    auto hook = type_attr::kSHash.ValueFrom(custom_s_hash[type_info->type_index]);
+    if (!hook) {
       // go over the content and hash the fields
       reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* field_info) {
         // skip fields that are marked as structural eq hash ignore
@@ -202,10 +202,10 @@ class StructuralHashHandler {
               new_kind = kTVMFFIDefRegionKindPattern;
             }
             std::swap(new_kind, def_region_kind_);
-            init_hash = details::StableHashCombine(init_hash, HashAny(field_value));
+            init_hash = detail::StableHashCombine(init_hash, HashAny(field_value));
             std::swap(new_kind, def_region_kind_);
           } else {
-            init_hash = details::StableHashCombine(init_hash, HashAny(field_value));
+            init_hash = detail::StableHashCombine(init_hash, HashAny(field_value));
           }
         }
       });
@@ -230,12 +230,11 @@ class StructuralHashHandler {
               // we explicitly bitcast the result from `uint64_t` to `int64_t`.
               // The range of `uint64_t` is too large to fit as `int64_t`, so if we don't bitcast,
               // it will trigger an overflow error in `uint64_t` -> `Any` conversion.
-              return static_cast<int64_t>(details::StableHashCombine(inner_init, hv));
+              return static_cast<int64_t>(detail::StableHashCombine(inner_init, hv));
             });
       }
-      init_hash = custom_s_hash[type_info->type_index]
-                      .cast<ffi::Function>()(obj, static_cast<int64_t>(init_hash), s_hash_callback_)
-                      .cast<uint64_t>();
+      init_hash = static_cast<uint64_t>(
+          (*hook)(obj.get(), static_cast<int64_t>(init_hash), s_hash_callback_));
     }
     return init_hash;
   }
@@ -249,9 +248,9 @@ class StructuralHashHandler {
   template <typename SeqType>
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   uint64_t HashSequence(SeqType seq) {
-    uint64_t hash_value = details::StableHashCombine(seq->GetTypeKeyHash(), seq.size());
+    uint64_t hash_value = detail::StableHashCombine(seq->GetTypeKeyHash(), seq.size());
     for (const auto& elem : seq) {
-      hash_value = details::StableHashCombine(hash_value, HashAny(elem));
+      hash_value = detail::StableHashCombine(hash_value, HashAny(elem));
     }
     return hash_value;
   }
@@ -261,35 +260,35 @@ class StructuralHashHandler {
   // of the order we hash the content at the current context.
   // This property is needed to support stable hash for map.
   std::optional<uint64_t> FindOrderIndependentHash(const Any& src) {
-    using ffi::details::AnyUnsafe;
+    using ffi::detail::AnyUnsafe;
     const TVMFFIAny* src_data = AnyUnsafe::TVMFFIAnyPtrFromAny(src);
 
     if (src_data->type_index < TypeIndex::kTVMFFIStaticObjectBegin) {
       if (src_data->type_index == TypeIndex::kTVMFFISmallStr) {
         // for small string, we use the same type key hash as normal string
         // so heap allocated string and on stack string will have the same hash
-        return details::StableHashCombine(
+        return detail::StableHashCombine(
             TypeIndex::kTVMFFIStr,
-            details::StableHashBytes(src_data->v_bytes, src_data->small_str_len));
+            detail::StableHashBytes(src_data->v_bytes, src_data->small_str_len));
       }
       // this is POD data, we can just hash the value
-      return details::StableHashCombine(src_data->type_index, src_data->v_uint64);
+      return detail::StableHashCombine(src_data->type_index, src_data->v_uint64);
     } else {
       if (src_data->type_index == TypeIndex::kTVMFFIStr ||
           src_data->type_index == TypeIndex::kTVMFFIBytes) {
-        const details::BytesObjBase* src_str =
-            AnyUnsafe::CopyFromAnyViewAfterCheck<const details::BytesObjBase*>(src);
+        const detail::BytesObjBase* src_str =
+            AnyUnsafe::CopyFromAnyViewAfterCheck<const detail::BytesObjBase*>(src);
         // return same hash as AnyHash
-        return details::StableHashCombine(src_data->type_index,
-                                          details::StableHashBytes(src_str->data, src_str->size));
+        return detail::StableHashCombine(src_data->type_index,
+                                         detail::StableHashBytes(src_str->data, src_str->size));
       } else {
         // Canonical integer words give the same value hash before or after visiting an alias.
         if (src_data->type_index == TypeIndex::kTVMFFIBigInt) {
-          auto words = details::BigIntUnsafe::GetArrayView(src_data);
-          return details::StableHashCombine(
+          auto words = detail::BigIntUnsafe::GetArrayView(src_data);
+          return detail::StableHashCombine(
               src_data->type_index,
-              details::StableHashBytes(reinterpret_cast<const char*>(&words[0]),
-                                       words.size() * sizeof(int64_t)));
+              detail::StableHashBytes(reinterpret_cast<const char*>(&words[0]),
+                                      words.size() * sizeof(int64_t)));
         }
         // Identity-mapped keys retain their traversal-context hash.
         auto it = hash_memo_.find(src.cast<ObjectRef>());
@@ -308,7 +307,7 @@ class StructuralHashHandler {
 
   uint64_t HashMapBase(const MapBaseObj* map) {
     // Compute a deterministic hash value for the map.
-    uint64_t hash_value = details::StableHashCombine(map->GetTypeKeyHash(), map->size());
+    uint64_t hash_value = detail::StableHashCombine(map->GetTypeKeyHash(), map->size());
     std::vector<std::pair<uint64_t, Any>> items;
     for (const auto& [key, value] : *map) {
       // if we cannot find order independent hash, we skip the key
@@ -329,11 +328,11 @@ class StructuralHashHandler {
       // to make sure that the hash value is deterministic.
       if (k == i + 1) {
         // no ties, we just hash the key and value
-        hash_value = details::StableHashCombine(hash_value, items[i].first);
-        hash_value = details::StableHashCombine(hash_value, HashAny(items[i].second));
+        hash_value = detail::StableHashCombine(hash_value, items[i].first);
+        hash_value = detail::StableHashCombine(hash_value, HashAny(items[i].second));
       } else {
         // ties occur, we skip the value hash to make sure that the hash value is deterministic.
-        hash_value = details::StableHashCombine(hash_value, items[i].first);
+        hash_value = detail::StableHashCombine(hash_value, items[i].first);
       }
       i = k;
     }
@@ -342,31 +341,31 @@ class StructuralHashHandler {
 
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   uint64_t HashShape(Shape shape) {
-    uint64_t hash_value = details::StableHashCombine(shape->GetTypeKeyHash(), shape.size());
+    uint64_t hash_value = detail::StableHashCombine(shape->GetTypeKeyHash(), shape.size());
     for (int64_t i : shape) {
-      hash_value = details::StableHashCombine(hash_value, i);
+      hash_value = detail::StableHashCombine(hash_value, i);
     }
     return hash_value;
   }
 
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   uint64_t HashTensor(Tensor tensor) {
-    uint64_t hash_value = details::StableHashCombine(tensor->GetTypeKeyHash(), tensor.ndim());
+    uint64_t hash_value = detail::StableHashCombine(tensor->GetTypeKeyHash(), tensor.ndim());
     for (int i = 0; i < tensor.ndim(); ++i) {
-      hash_value = details::StableHashCombine(hash_value, tensor.size(i));
+      hash_value = detail::StableHashCombine(hash_value, tensor.size(i));
     }
     TVMFFIAny temp;
     temp.v_uint64 = 0;
     temp.v_dtype = tensor.dtype();
-    hash_value = details::StableHashCombine(hash_value, temp.v_int64);
+    hash_value = detail::StableHashCombine(hash_value, temp.v_int64);
 
     if (!skip_tensor_content_) {
       TVM_FFI_ICHECK_EQ(tensor.device().device_type, kDLCPU) << "can only hash CPU tensor";
       TVM_FFI_ICHECK(tensor.IsContiguous()) << "Can only hash contiguous tensor";
       size_t data_size = GetDataSize(tensor.numel(), tensor.dtype());
       uint64_t data_hash =
-          details::StableHashBytes(static_cast<const char*>(tensor.data_ptr()), data_size);
-      hash_value = details::StableHashCombine(hash_value, data_hash);
+          detail::StableHashBytes(static_cast<const char*>(tensor.data_ptr()), data_size);
+      hash_value = detail::StableHashCombine(hash_value, data_hash);
     }
     return hash_value;
   }
@@ -382,7 +381,7 @@ class StructuralHashHandler {
   // graph node counter.
   uint32_t graph_node_counter_{0};
   // lazily initialize custom hash function
-  ffi::Function s_hash_callback_ = nullptr;
+  ffi::TypedFunction<int64_t(AnyView, int64_t, int)> s_hash_callback_ = nullptr;
   // map from lhs to rhs
   std::unordered_map<ObjectRef, uint64_t, ObjectPtrHash, ObjectPtrEqual> hash_memo_;
 };
@@ -405,7 +404,7 @@ static int64_t FFIStructuralHash(const Any& value, bool map_free_vars, bool skip
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("ffi.StructuralHash", FFIStructuralHash);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kSHash);
+  refl::EnsureTypeAttrColumn(type_attr::kSHash);
 }
 
 }  // namespace ffi

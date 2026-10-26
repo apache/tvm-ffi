@@ -18,11 +18,11 @@
  */
 
 /*!
- * \file tvm/ffi/container/container_details.h
+ * \file tvm/ffi/container/container_detail.h
  * \brief Common utilities for typed container types.
  */
-#ifndef TVM_FFI_CONTAINER_CONTAINER_DETAILS_H_
-#define TVM_FFI_CONTAINER_CONTAINER_DETAILS_H_
+#ifndef TVM_FFI_CONTAINER_CONTAINER_DETAIL_H_
+#define TVM_FFI_CONTAINER_CONTAINER_DETAIL_H_
 
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/memory.h>
@@ -35,7 +35,7 @@
 
 namespace tvm {
 namespace ffi {
-namespace details {
+namespace detail {
 
 /*!
  * \brief iterator adapter that adapts TIter to return another type.
@@ -212,7 +212,7 @@ std::string ContainerTypeStr(const char* name) {
   return ss.str();
 }
 
-}  // namespace details
+}  // namespace detail
 }  // namespace ffi
 }  // namespace tvm
-#endif  // TVM_FFI_CONTAINER_CONTAINER_DETAILS_H_
+#endif  // TVM_FFI_CONTAINER_CONTAINER_DETAIL_H_

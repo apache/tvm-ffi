@@ -47,7 +47,7 @@ class SerializationEnumObj : public EnumObj {
 
 class SerializationEnum : public Enum {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SerializationEnum, Enum, SerializationEnumObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(SerializationEnum, Enum, SerializationEnumObj);
 };
 
 class SerializationIntEnumObj : public IntEnumObj {
@@ -58,8 +58,8 @@ class SerializationIntEnumObj : public IntEnumObj {
 
 class SerializationIntEnum : public IntEnum {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SerializationIntEnum, IntEnum,
-                                             SerializationIntEnumObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(SerializationIntEnum, IntEnum,
+                                                SerializationIntEnumObj);
 };
 
 class SerializationStrEnumObj : public StrEnumObj {
@@ -70,15 +70,19 @@ class SerializationStrEnumObj : public StrEnumObj {
 
 class SerializationStrEnum : public StrEnum {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SerializationStrEnum, StrEnum,
-                                             SerializationStrEnumObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(SerializationStrEnum, StrEnum,
+                                                SerializationStrEnumObj);
 };
+
+constexpr reflection::AttrKey<reflection::NativeFunctionView<int(int)>> kEnumIncrement{
+    "test.enum.increment"};
+int EnumIncrement(int value) { return value + 1; }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<SerializationEnumObj>(refl::init(false));  // NOLINT(bugprone-unused-raii)
   refl::TypeAttrDef<SerializationEnumObj>().def_convert<SerializationEnum>();
-  refl::EnumDef<SerializationEnumObj>("Alpha");  // NOLINT(bugprone-unused-raii)
+  refl::EnumDef<SerializationEnumObj>("Alpha").set_native_fn_attr<&EnumIncrement>(kEnumIncrement);
 
   refl::ObjectDef<SerializationIntEnumObj>(refl::init(false)).def_convert<SerializationIntEnum>();
   refl::EnumDef<SerializationIntEnumObj>("Seven", 7);  // NOLINT(bugprone-unused-raii)
@@ -100,6 +104,13 @@ TEST(Serialization, EnumSingletonIdentity) {
   EXPECT_TRUE(StructuralEqual()(ToJSONGraph(original), expected));
   Enum restored = FromJSONGraph(expected).cast<Enum>();
   EXPECT_TRUE(restored.same_as(original));
+  reflection::TypeAttrColumn states(type_attr::kEnumState);
+  EnumState state = states[original->type_index()].as_or_throw<EnumState>();
+  auto hook = kEnumIncrement.ValueFrom(state->attrs.at(kEnumIncrement.name).at(restored));
+  EXPECT_TRUE(hook.has_value());
+  if (hook) {
+    EXPECT_EQ((*hook)(4), 5);
+  }
 }
 
 TEST(Serialization, PayloadEnumSingletonIdentity) {

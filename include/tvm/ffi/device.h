@@ -36,7 +36,7 @@
 
 namespace tvm {
 namespace ffi {
-namespace details {
+namespace detail {
 
 TVM_FFI_INLINE static std::optional<DLDeviceType> TryParseDLDeviceType(std::string_view name) {
   if (name == "cpu") return kDLCPU;
@@ -88,7 +88,7 @@ TVM_FFI_INLINE static std::optional<DLDevice> TryStringViewToDLDevice(std::strin
   return DLDevice{device_type.value(), device_id};
 }
 
-}  // namespace details
+}  // namespace detail
 
 // Device
 template <>
@@ -126,7 +126,7 @@ struct TypeTraits<DLDevice> : public TypeTraitsBase {
       return src->v_device;
     }
     if (auto opt_str = TypeTraits<String>::TryCastFromAnyView(src)) {
-      return details::TryStringViewToDLDevice(std::string_view(opt_str->data(), opt_str->size()));
+      return detail::TryStringViewToDLDevice(std::string_view(opt_str->data(), opt_str->size()));
     }
     return std::nullopt;
   }

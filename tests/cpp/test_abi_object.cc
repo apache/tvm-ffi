@@ -38,7 +38,7 @@ inline constexpr bool tvm::ffi::is_object_subclass_v<::abi_object_test::Recursiv
 
 static_assert(::tvm::ffi::is_object_subclass_v<::abi_object_test::RecursiveObj>);
 static_assert(
-    ::tvm::ffi::details::storage_enabled_v<::tvm::ffi::Arc<::abi_object_test::RecursiveObj>>);
+    ::tvm::ffi::detail::storage_enabled_v<::tvm::ffi::Arc<::abi_object_test::RecursiveObj>>);
 
 namespace abi_object_test {
 

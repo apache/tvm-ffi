@@ -73,27 +73,27 @@ class ObjectGraphSerializer {
       }
       case TypeIndex::kTVMFFIBool: {
         node.Set("type", ffi::StaticTypeKey::kTVMFFIBool);
-        node.Set("data", details::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(value));
+        node.Set("data", detail::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(value));
         break;
       }
       case TypeIndex::kTVMFFIInt: {
         node.Set("type", ffi::StaticTypeKey::kTVMFFIInt);
-        node.Set("data", details::AnyUnsafe::CopyFromAnyViewAfterCheck<int64_t>(value));
+        node.Set("data", detail::AnyUnsafe::CopyFromAnyViewAfterCheck<int64_t>(value));
         break;
       }
       case TypeIndex::kTVMFFIFloat: {
         node.Set("type", ffi::StaticTypeKey::kTVMFFIFloat);
-        node.Set("data", details::AnyUnsafe::CopyFromAnyViewAfterCheck<double>(value));
+        node.Set("data", detail::AnyUnsafe::CopyFromAnyViewAfterCheck<double>(value));
         break;
       }
       case TypeIndex::kTVMFFIDataType: {
-        DLDataType dtype = details::AnyUnsafe::CopyFromAnyViewAfterCheck<DLDataType>(value);
+        DLDataType dtype = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<DLDataType>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIDataType);
         node.Set("data", DLDataTypeToString(dtype));
         break;
       }
       case TypeIndex::kTVMFFIDevice: {
-        DLDevice device = details::AnyUnsafe::CopyFromAnyViewAfterCheck<DLDevice>(value);
+        DLDevice device = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<DLDevice>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIDevice);
         node.Set("data", json::Array{
                              static_cast<int64_t>(device.device_type),
@@ -103,26 +103,26 @@ class ObjectGraphSerializer {
       }
       case TypeIndex::kTVMFFISmallStr:
       case TypeIndex::kTVMFFIStr: {
-        String str = details::AnyUnsafe::CopyFromAnyViewAfterCheck<String>(value);
+        String str = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<String>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIStr);
         node.Set("data", str);
         break;
       }
       case TypeIndex::kTVMFFISmallBytes:
       case TypeIndex::kTVMFFIBytes: {
-        Bytes bytes = details::AnyUnsafe::CopyFromAnyViewAfterCheck<Bytes>(value);
+        Bytes bytes = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<Bytes>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIBytes);
         node.Set("data", Base64Encode(bytes));
         break;
       }
       case TypeIndex::kTVMFFIArray: {
-        Array<Any> array = details::AnyUnsafe::CopyFromAnyViewAfterCheck<Array<Any>>(value);
+        Array<Any> array = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<Array<Any>>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIArray);
         node.Set("data", CreateSequenceData(array));
         break;
       }
       case TypeIndex::kTVMFFIList: {
-        List<Any> list = details::AnyUnsafe::CopyFromAnyViewAfterCheck<List<Any>>(value);
+        List<Any> list = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<List<Any>>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIList);
         const void* list_ptr = static_cast<const void*>(list.get());
         if (!active_lists_.insert(list_ptr).second) {
@@ -134,13 +134,13 @@ class ObjectGraphSerializer {
         break;
       }
       case TypeIndex::kTVMFFIMap: {
-        Map<Any, Any> map = details::AnyUnsafe::CopyFromAnyViewAfterCheck<Map<Any, Any>>(value);
+        Map<Any, Any> map = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<Map<Any, Any>>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIMap);
         node.Set("data", CreateMapBaseData(static_cast<const MapBaseObj*>(map.get())));
         break;
       }
       case TypeIndex::kTVMFFIDict: {
-        Dict<Any, Any> dict = details::AnyUnsafe::CopyFromAnyViewAfterCheck<Dict<Any, Any>>(value);
+        Dict<Any, Any> dict = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<Dict<Any, Any>>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIDict);
         const void* dict_ptr = static_cast<const void*>(dict.get());
         if (!active_lists_.insert(dict_ptr).second) {
@@ -152,7 +152,7 @@ class ObjectGraphSerializer {
         break;
       }
       case TypeIndex::kTVMFFIShape: {
-        ffi::Shape shape = details::AnyUnsafe::CopyFromAnyViewAfterCheck<ffi::Shape>(value);
+        ffi::Shape shape = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<ffi::Shape>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIShape);
         node.Set("data", Array<int64_t>(shape->data, shape->data + shape->size));
         break;
@@ -201,9 +201,9 @@ class ObjectGraphSerializer {
     if (obj->IsInstance<IntEnumObj>()) return static_cast<const EnumObj*>(obj)->_int_index;
     if (obj->IsInstance<EnumObj>()) return static_cast<const EnumObj*>(obj)->_str_index;
     static reflection::TypeAttrColumn data_to_json =
-        reflection::TypeAttrColumn(reflection::type_attr::kDataToJson);
-    if (data_to_json[value.type_index()] != nullptr) {
-      return data_to_json[value.type_index()].cast<Function>()(value);
+        reflection::TypeAttrColumn(type_attr::kDataToJson);
+    if (auto hook = type_attr::kDataToJson.ValueFrom(data_to_json[value.type_index()])) {
+      return (*hook)(value);
     }
     // NOTE: invariant: lhs and rhs are already the same type
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(value.type_index());
@@ -227,19 +227,19 @@ class ObjectGraphSerializer {
           break;
         }
         case TypeIndex::kTVMFFIBool: {
-          data.Set(field_name, details::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(field_value));
+          data.Set(field_name, detail::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(field_value));
           break;
         }
         case TypeIndex::kTVMFFIInt: {
-          data.Set(field_name, details::AnyUnsafe::CopyFromAnyViewAfterCheck<int64_t>(field_value));
+          data.Set(field_name, detail::AnyUnsafe::CopyFromAnyViewAfterCheck<int64_t>(field_value));
           break;
         }
         case TypeIndex::kTVMFFIFloat: {
-          data.Set(field_name, details::AnyUnsafe::CopyFromAnyViewAfterCheck<double>(field_value));
+          data.Set(field_name, detail::AnyUnsafe::CopyFromAnyViewAfterCheck<double>(field_value));
           break;
         }
         case TypeIndex::kTVMFFIDataType: {
-          DLDataType dtype = details::AnyUnsafe::CopyFromAnyViewAfterCheck<DLDataType>(field_value);
+          DLDataType dtype = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<DLDataType>(field_value);
           data.Set(field_name, DLDataTypeToString(dtype));
           break;
         }
@@ -387,16 +387,16 @@ class ObjectGraphDeserializer {
   }
 
   Any DecodeObjectData(int32_t type_index, const json::Value& data) {
-    if (details::IsObjectInstance<IntEnumObj>(type_index)) {
+    if (detail::IsObjectInstance<IntEnumObj>(type_index)) {
       return EnumObj::_GetByIntIndex(type_index, data.cast<int64_t>());
     }
-    if (details::IsObjectInstance<EnumObj>(type_index)) {
+    if (detail::IsObjectInstance<EnumObj>(type_index)) {
       return EnumObj::_GetByStrIndex(type_index, data.cast<String>());
     }
     static reflection::TypeAttrColumn data_from_json =
-        reflection::TypeAttrColumn(reflection::type_attr::kDataFromJson);
-    if (data_from_json[type_index] != nullptr) {
-      return data_from_json[type_index].cast<Function>()(data);
+        reflection::TypeAttrColumn(type_attr::kDataFromJson);
+    if (auto hook = type_attr::kDataFromJson.ValueFrom(data_from_json[type_index])) {
+      return (*hook)(data);
     }
     // otherwise, we go over the fields and create the data.
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
@@ -489,8 +489,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("ffi.ToJSONGraphString", ToJSONGraphString)
       .def("ffi.FromJSONGraph", FromJSONGraph)
       .def("ffi.FromJSONGraphString", FromJSONGraphString);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kDataToJson);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kDataFromJson);
+  refl::EnsureTypeAttrColumn(type_attr::kDataToJson);
+  refl::EnsureTypeAttrColumn(type_attr::kDataFromJson);
 }
 
 }  // namespace ffi

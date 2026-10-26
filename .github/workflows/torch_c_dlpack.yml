@@ -23,6 +23,7 @@ on:
       branch:
         description: "Branch or tag to publish (manual run)"
         required: true
+        type: string
 
 jobs:
   build_wheels_linux:
@@ -37,8 +38,7 @@ jobs:
         if: ${{ matrix.arch == 'x86_64'}}
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -76,8 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -104,8 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -123,8 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -160,7 +157,7 @@ jobs:
         with:
           subject-path: dist/*
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
         with:
           attestations: true
           verbose: true

@@ -93,10 +93,10 @@ PREDEFINED             += TVM_FFI_DLL= TVM_FFI_DLL_EXPORT= TVM_FFI_INLINE= \
                           TVM_FFI_COLD_CODE= \
                           TVM_FFI_PREDICT_FALSE(x)=x TVM_FFI_PREDICT_TRUE(x)=x \
                           __cplusplus=201703
-EXCLUDE_SYMBOLS        += *details*  *TypeTraits* std \
+EXCLUDE_SYMBOLS        += *detail*  *TypeTraits* std \
                          *use_default_type_traits_v* *is_optional_type_v* *operator* \
                          tvm::ffi::reflection::default_ tvm::ffi::reflection::default_factory
-EXCLUDE_PATTERNS       += */function_details.h */container_details.h
+EXCLUDE_PATTERNS       += */function_detail.h */container_detail.h
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 WARNINGS               = YES

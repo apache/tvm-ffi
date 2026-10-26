@@ -133,7 +133,8 @@ uv run --no-project --with "clang-tidy==21.1.1" \
 - Header guards: `#ifndef TVM_FFI_<PATH>_H_`.
 - Object pattern: `FooObj` (data) + `Foo` (ref wrapper extending `ObjectRef`).
   - `TVM_FFI_DECLARE_OBJECT_INFO("key", FooObj, ParentObj)` in the Obj class.
-  - `TVM_FFI_DEFINE_OBJECT_REF_METHODS(Foo, ParentRef, FooObj)` in the Ref class.
+  - `TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Foo, ParentRef, FooObj)` in the Ref class.
+  - Use `Optional<Foo>` for absence; `ObjectRef`, `Function`, and `Tensor` retain nullable handles.
 - Errors: `TVM_FFI_THROW(ErrorType) << "message"`.
 - Doc comments: Doxygen (`/*! \brief ... */`).
 - Every file needs an Apache 2.0 license header.

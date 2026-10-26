@@ -27,7 +27,7 @@
 #define TVM_FFI_CONTAINER_ARRAY_H_
 
 #include <tvm/ffi/any.h>
-#include <tvm/ffi/container/container_details.h>
+#include <tvm/ffi/container/container_detail.h>
 #include <tvm/ffi/container/seq_base.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
@@ -193,7 +193,7 @@ inline constexpr bool is_valid_iterator_v = is_valid_iterator<T, IterType>::valu
  * operator[] only provides const access, use Set to mutate the content.
  * \tparam T The content Value type, must be compatible with tvm::ffi::Any
  */
-template <typename T, typename = typename std::enable_if_t<details::storage_enabled_v<T>>>
+template <typename T, typename = typename std::enable_if_t<detail::storage_enabled_v<T>>>
 class Array : public ObjectRef {
  public:
   /*! \brief The value type of the array */
@@ -276,7 +276,9 @@ class Array : public ObjectRef {
    * \brief Constructor from pointer
    * \param n the container pointer
    */
-  explicit Array(ObjectPtr<Object> n) : ObjectRef(std::move(n)) {}
+  explicit Array(ObjectPtr<Object> n) : ObjectRef(std::move(n)) {
+    TVM_FFI_ICHECK_NOTNULL(data_.get());
+  }
 
   /*!
    * \brief Constructor from iterator
@@ -324,14 +326,14 @@ class Array : public ObjectRef {
      * \param n The any value to convert
      * \return The converted value
      */
-    static T convert(const Any& n) { return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(n); }
+    static T convert(const Any& n) { return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(n); }
   };
   /// \endcond
 
   /*! \brief The iterator type of the array */
-  using iterator = details::IterAdapter<ValueConverter, const Any*>;
+  using iterator = detail::IterAdapter<ValueConverter, const Any*>;
   /*! \brief The reverse iterator type of the array */
-  using reverse_iterator = details::ReverseIterAdapter<ValueConverter, const Any*>;
+  using reverse_iterator = detail::ReverseIterAdapter<ValueConverter, const Any*>;
 
   /*! \return begin iterator */
   iterator begin() const { return iterator(GetArrayObj()->begin()); }
@@ -363,7 +365,7 @@ class Array : public ObjectRef {
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->at(i));
+    return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->at(i));
   }
 
   /*! \return The size of the array */
@@ -387,7 +389,7 @@ class Array : public ObjectRef {
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->front());
+    return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->front());
   }
 
   /*! \return The last element of the array */
@@ -396,7 +398,7 @@ class Array : public ObjectRef {
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->back());
+    return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->back());
   }
 
  public:
@@ -655,6 +657,7 @@ class Array : public ObjectRef {
   /// \cond Doxygen_Suppress
   using ContainerType = ArrayObj;
   static constexpr bool _type_container_is_exact = false;
+  static constexpr bool _type_is_nullable = false;
   /// \endcond
 
   /*!
@@ -745,7 +748,7 @@ class Array : public ObjectRef {
         // no other shared copies of the array.
         auto arr = static_cast<ArrayObj*>(data.get());
         for (auto it = arr->MutableBegin(); it != arr->MutableEnd(); it++) {
-          T value = details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it);
+          T value = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it);
           // reset the original value to nullptr, to ensure unique ownership
           it->reset();
           T mapped = fmap(std::move(value));
@@ -770,7 +773,7 @@ class Array : public ObjectRef {
       // `T`.
       bool all_identical = true;
       for (; it != arr->end(); it++) {
-        U mapped = fmap(details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it));
+        U mapped = fmap(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it));
         if (!(*it).same_as(mapped)) {
           // At least one mapped element is different than the
           // original.  Therefore, prepare the output array,
@@ -824,7 +827,7 @@ class Array : public ObjectRef {
     // so we can either start or resume the iteration from that point,
     // with no further checks on the result.
     for (; it != arr->end(); it++) {
-      U mapped = fmap(details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it));
+      U mapped = fmap(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it));
       output->SetItem(it - arr->begin(), std::move(mapped));
     }
 
@@ -873,7 +876,7 @@ struct TypeTraits<Array<T>> : public SeqTypeTraitsBase<TypeTraits<Array<T>>, Arr
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":")" << kStaticTypeKey << R"(","args":[)";
-    oss << details::TypeSchema<T>::v();
+    oss << detail::TypeSchema<T>::v();
     oss << "]}";
     return oss.str();
   }

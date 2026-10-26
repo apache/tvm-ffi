@@ -25,11 +25,14 @@
 
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/extra/base.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/reflection/access_path.h>
+#include <tvm/ffi/reflection/accessor.h>
 
 namespace tvm {
 namespace ffi {
+
 /*!
  * \brief Structural equality comparators
  */
@@ -72,6 +75,23 @@ class StructuralEqual {
     return Equal(lhs, rhs, false, false);
   }
 };
+
+namespace type_attr {
+/*!
+ * \brief Custom structural equality hook (used by ``StructuralEqual``).
+ *
+ * Unlike ``kEq`` (which is for ``RecursiveEq`` / Python ``==``), this is for
+ * the ``StructuralEqual`` system that supports def/use region semantics and
+ * alpha-equivalence of bound variables.  The hook receives a callback to
+ * recursively compare sub-values.
+ *
+ * ``eq_cb`` recursively compares sub-values; its integer ``TVMFFIDefRegionKind``
+ * argument controls free-variable mapping; ``field_name`` is used for mismatch path reporting.
+ */
+inline constexpr reflection::AttrKey<TypedFunction<bool(
+    const Object*, const Object*, const TypedFunction<bool(AnyView, AnyView, int, AnyView)>&)>>
+    kSEqual{"__s_equal__"};
+}  // namespace type_attr
 
 }  // namespace ffi
 }  // namespace tvm

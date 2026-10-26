@@ -40,12 +40,17 @@ namespace testing {
 
 class TIntOrFloatRef : public ObjectRef {
  public:
-  TIntOrFloatRef() = default;
   explicit TIntOrFloatRef(UnsafeInit tag) : ObjectRef(tag) {}
 
-  static constexpr bool _type_is_nullable = true;
+  static constexpr bool _type_is_nullable = false;
   static constexpr bool _type_container_is_exact = false;
   using ContainerType = Object;
+};
+
+class TPositiveIntRef : public ObjectRef {
+ public:
+  static constexpr bool _type_container_is_exact = false;
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TPositiveIntRef, ObjectRef, TIntObj);
 };
 
 }  // namespace testing
@@ -56,6 +61,15 @@ struct TypeTraits<testing::TIntOrFloatRef>
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
     return TypeTraits<testing::TInt>::CheckAnyStrict(src) ||
            TypeTraits<testing::TFloat>::CheckAnyStrict(src);
+  }
+};
+
+template <>
+struct TypeTraits<testing::TPositiveIntRef>
+    : public ObjectRefTypeTraitsBase<testing::TPositiveIntRef> {
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    return ObjectRefTypeTraitsBase<testing::TPositiveIntRef>::CheckAnyStrict(src) &&
+           detail::ObjectUnsafe::RawObjectPtrFromUnowned<testing::TIntObj>(src->v_obj)->value > 0;
   }
 };
 
@@ -82,9 +96,8 @@ inline constexpr bool object_ref_contains_is_enabled_v<
 static_assert(ObjectRef::_type_container_is_exact);
 static_assert(TNumber::_type_container_is_exact);
 static_assert(TInt::_type_container_is_exact);
-// ObjectRef optionals retain the original ObjectRef/ObjectPtr representation
-// and continue to participate in the ObjectRef container concept.
-static_assert(std::is_base_of_v<ObjectRef, Optional<TInt>>);
+// ObjectRef optionals retain pointer storage without inheriting ObjectRef.
+static_assert(!std::is_base_of_v<ObjectRef, Optional<TInt>>);
 static_assert(!TIntOrFloatRef::_type_container_is_exact);
 static_assert(!Array<TInt>::_type_container_is_exact);
 static_assert(!List<TInt>::_type_container_is_exact);
@@ -95,14 +108,14 @@ static_assert(!Variant<TInt, TFloat>::_type_container_is_exact);
 
 static_assert(object_ref_contains_v<TNumber, TIntObj>);
 static_assert(object_ref_contains_v<TInt, TIntObj>);
-static_assert(object_ref_contains_v<Optional<TInt>, TIntObj>);
+static_assert(object_ref_contains_v<Optional<TInt>::value_type, TIntObj>);
 static_assert(!object_ref_contains_v<TInt, TFloatObj>);
 static_assert(!object_ref_contains_v<Array<TInt>, ArrayObj>);
 static_assert(object_ref_contains_v<TIntOrFloatRef, TIntObj>);
 static_assert(object_ref_contains_v<TIntOrFloatRef, TFloatObj>);
 static_assert(!object_ref_contains_v<TIntOrFloatRef, TNumberObj>);
 static_assert(object_ref_contains_is_enabled_v<TInt, TIntObj>);
-static_assert(object_ref_contains_is_enabled_v<Optional<TInt>, TIntObj>);
+static_assert(!object_ref_contains_is_enabled_v<Optional<TInt>, TIntObj>);
 static_assert(object_ref_contains_is_enabled_v<TIntOrFloatRef, TIntObj>);
 static_assert(!object_ref_contains_is_enabled_v<int, TIntObj>);
 static_assert(!object_ref_contains_is_enabled_v<TIntObj, TIntObj>);
@@ -227,7 +240,7 @@ TEST(ObjectRef, as) {
   EXPECT_TRUE(c.as<TIntObj>() == nullptr);
   EXPECT_TRUE(c.as<TFloatObj>() == nullptr);
   EXPECT_TRUE(c.as<TNumberObj>() == nullptr);
-  auto null_number = c.as<TNumber>();
+  auto null_number = c.as<ObjectRef>();
   ASSERT_TRUE(null_number.has_value()) << "Expected nullable null ObjectRef cast to succeed";
   EXPECT_TRUE(!(*null_number).defined());  // NOLINT(bugprone-unchecked-optional-access)
   EXPECT_TRUE(!c.as<TInt>().has_value());
@@ -249,6 +262,13 @@ TEST(ObjectRef, AsUsesTypeTraitsCheckAnyStrict) {
   EXPECT_NE((*float_like).as<TFloatObj>(), nullptr);  // NOLINT(bugprone-unchecked-optional-access)
 }
 
+TEST(ObjectRef, StrictOnlyTraits) {
+  Any invalid = TInt(-1);
+  Any valid = TInt(1);
+  EXPECT_FALSE(invalid.try_cast<TPositiveIntRef>().has_value());
+  EXPECT_EQ(valid.cast<TPositiveIntRef>()->value, 1);
+}
+
 TEST(ObjectRef, GetRefUsesObjectRefContainment) {
   ObjectPtr<TIntObj> int_object = make_object<TIntObj>(10);
   TIntOrFloatRef int_or_float = GetRef<TIntOrFloatRef>(int_object.get());
@@ -268,7 +288,7 @@ TEST(ObjectRef, AsOrThrow) {
   EXPECT_EQ(a.as<TIntObj>()->value, 10);
   EXPECT_EQ(a.as_or_throw<TInt>()->value, 10);
   EXPECT_EQ(b.as<TFloatObj>()->value, 20);
-  EXPECT_TRUE(!c.as_or_throw<TNumber>().defined());
+  EXPECT_TRUE(!c.as_or_throw<ObjectRef>().defined());
   auto const_as = const_a.as<TInt>();
   ASSERT_TRUE(const_as.has_value()) << "Expected const ObjectRef as<TInt>() to succeed";
   EXPECT_EQ((*const_as).get()->value, 30);  // NOLINT(bugprone-unchecked-optional-access)
@@ -322,7 +342,7 @@ TEST(ObjectRef, UnsafeInit) {
 
 TEST(Object, CAPIAccessor) {
   ObjectRef a = TInt(10);
-  TVMFFIObjectHandle obj = details::ObjectUnsafe::RawObjectPtrFromObjectRef(a);
+  TVMFFIObjectHandle obj = detail::ObjectUnsafe::RawObjectPtrFromObjectRef(a);
   int32_t type_index = TVMFFIObjectGetTypeIndex(obj);
   EXPECT_EQ(type_index, TIntObj::RuntimeTypeIndex());
 }
@@ -480,7 +500,7 @@ TEST(Object, OpaqueObject) {
   TVM_FFI_CHECK_SAFE_CALL(TVMFFIObjectCreateOpaque(new DummyOpaqueObject(10), kTVMFFIOpaquePyObject,
                                                    DummyOpaqueObject::Deleter, &handle));
   ObjectPtr<Object> a =
-      details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<Object*>(handle));
+      detail::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<Object*>(handle));
   EXPECT_EQ(a->type_index(), kTVMFFIOpaquePyObject);
   EXPECT_EQ(static_cast<DummyOpaqueObject*>(TVMFFIOpaqueObjectGetCellPtr(a.get())->handle)->value,
             10);
@@ -652,7 +672,14 @@ TEST(ObjectPtrStorage, OptionalAndVariantComposition) {
   OptionalNumberOrInt variant = optional_number;
   OptionalNumber variant_value = variant.get<OptionalNumber>();
   ASSERT_TRUE(variant_value.has_value());
-  EXPECT_EQ(variant_value.value(), number);
+  EXPECT_THROW(std::move(variant_value).as_or_throw<ObjectPtr<TFloatObj>>(), Error);
+  int use_count = number.use_count();
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  NumberPtr moved_value = std::move(variant_value).as_or_throw<NumberPtr>();
+  EXPECT_EQ(moved_value, number);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  EXPECT_FALSE(variant_value.has_value());
+  EXPECT_EQ(number.use_count(), use_count);
 
   OptionalNumberOrIntValue optional_variant = Variant<NumberPtr, int64_t>(number);
   Any encoded = optional_variant;

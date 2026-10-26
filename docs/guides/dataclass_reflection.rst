@@ -320,7 +320,7 @@ type-level attributes via :cpp:class:`~tvm::ffi::reflection::TypeAttrDef`:
 
    // Custom hash: only hash the "key" field
    refl::TypeAttrDef<MyObj>().def(
-       refl::type_attr::kHash,
+       type_attr::kHash.name,
        [](const Object* self, const Function& fn_hash) -> int64_t {
          auto* obj = static_cast<const MyObj*>(self);
          return fn_hash(AnyView(obj->key)).cast<int64_t>();
@@ -328,7 +328,7 @@ type-level attributes via :cpp:class:`~tvm::ffi::reflection::TypeAttrDef`:
 
    // Custom equality: only compare "key" fields
    refl::TypeAttrDef<MyObj>().def(
-       refl::type_attr::kEq,
+       type_attr::kEq.name,
        [](const Object* lhs, const Object* rhs, const Function& fn_eq) -> bool {
          auto* a = static_cast<const MyObj*>(lhs);
          auto* b = static_cast<const MyObj*>(rhs);
@@ -337,7 +337,7 @@ type-level attributes via :cpp:class:`~tvm::ffi::reflection::TypeAttrDef`:
 
    // Custom three-way comparison
    refl::TypeAttrDef<MyObj>().def(
-       refl::type_attr::kCompare,
+       type_attr::kCompare.name,
        [](const Object* lhs, const Object* rhs, const Function& fn_cmp) -> int32_t {
          auto* a = static_cast<const MyObj*>(lhs);
          auto* b = static_cast<const MyObj*>(rhs);
@@ -346,7 +346,7 @@ type-level attributes via :cpp:class:`~tvm::ffi::reflection::TypeAttrDef`:
 
    // Custom repr
    refl::TypeAttrDef<MyObj>().def(
-       refl::type_attr::kRepr,
+       type_attr::kRepr.name,
        [](const Object* self, const Function& fn_repr) -> String {
          auto* obj = static_cast<const MyObj*>(self);
          return "MyObj(key=" + fn_repr(AnyView(obj->key)).cast<String>() + ")";

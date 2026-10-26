@@ -25,7 +25,7 @@
 #define TVM_FFI_CONTAINER_VARIANT_H_
 
 #include <tvm/ffi/any.h>
-#include <tvm/ffi/container/container_details.h>
+#include <tvm/ffi/container/container_detail.h>
 #include <tvm/ffi/optional.h>
 
 #include <string>
@@ -46,7 +46,7 @@ template <typename... V>
 class Variant {
  public:
   /// \cond Doxygen_Suppress
-  static_assert(details::all_storage_enabled_v<V...>,
+  static_assert(detail::all_storage_enabled_v<V...>,
                 "All types used in Variant<...> must be compatible with Any");
   /// \cond Doxygen_Suppress
   static constexpr bool _type_container_is_exact = false;
@@ -173,7 +173,7 @@ class Variant {
     static_assert(all_object_v,
                   "All types used in Variant<...> must be derived from ObjectRef "
                   "to enable ObjectPtrHash/ObjectPtrEqual");
-    return details::AnyUnsafe::RawObjectPtrFromAnyAfterCheck(this->data_);
+    return detail::AnyUnsafe::RawObjectPtrFromAnyAfterCheck(this->data_);
   }
   TVM_FFI_INLINE AnyView ToAnyView() const { return data_.operator AnyView(); }
   TVM_FFI_INLINE Any MoveToAny() && { return std::move(data_); }
@@ -191,7 +191,7 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static void MoveToAny(Variant<V...> src, TVMFFIAny* result) {
-    *result = details::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(src).MoveToAny());
+    *result = detail::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(src).MoveToAny());
   }
 
   TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
@@ -207,7 +207,7 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Variant<V...> MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return Variant<V...>(details::AnyUnsafe::MoveTVMFFIAnyToAny(src));
+    return Variant<V...>(detail::AnyUnsafe::MoveTVMFFIAnyToAny(src));
   }
 
   TVM_FFI_INLINE static std::optional<Variant<V...>> TryCastFromAnyView(const TVMFFIAny* src) {
@@ -230,12 +230,12 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
     return std::nullopt;
   }
 
-  TVM_FFI_INLINE static std::string TypeStr() { return details::ContainerTypeStr<V...>("Variant"); }
+  TVM_FFI_INLINE static std::string TypeStr() { return detail::ContainerTypeStr<V...>("Variant"); }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":"Variant","args":[)";
     const char* sep = "";
-    ((oss << sep << details::TypeSchema<V>::v(), sep = ","), ...);
+    ((oss << sep << detail::TypeSchema<V>::v(), sep = ","), ...);
     oss << "]}";
     return oss.str();
   }

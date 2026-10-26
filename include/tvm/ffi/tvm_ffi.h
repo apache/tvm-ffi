@@ -28,11 +28,11 @@
 #define TVM_FFI_TVM_FFI_H_
 
 #include <tvm/ffi/any.h>
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/container/array.h>
-#include <tvm/ffi/container/container_details.h>
+#include <tvm/ffi/container/container_detail.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
@@ -46,7 +46,7 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/expected.h>
 #include <tvm/ffi/function.h>
-#include <tvm/ffi/function_details.h>
+#include <tvm/ffi/function_detail.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/optional.h>

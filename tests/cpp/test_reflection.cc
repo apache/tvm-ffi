@@ -25,6 +25,7 @@
 #include <tvm/ffi/reflection/access_path.h>
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/creator.h>
+#include <tvm/ffi/reflection/enum_def.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
@@ -34,7 +35,7 @@
 
 /*! \brief Look up __ffi_init__ from the TypeAttrColumn (not the method table). */
 static tvm::ffi::Function GetInitAttr(const char* type_key) {
-  static tvm::ffi::reflection::TypeAttrColumn col(tvm::ffi::reflection::type_attr::kInit);
+  static tvm::ffi::reflection::TypeAttrColumn col(tvm::ffi::type_attr::kInit);
   return col[tvm::ffi::TypeKeyToIndex(type_key)].cast<tvm::ffi::Function>();
 }
 
@@ -42,6 +43,8 @@ namespace {
 
 using namespace tvm::ffi;
 using namespace tvm::ffi::testing;
+
+constexpr reflection::AttrKey<bool> kFlag{"test.attr.typed.flag"};
 
 struct TestObjA : public Object {
   int64_t x;
@@ -59,13 +62,18 @@ struct TestObjADerived : public TestObjA {
 };
 
 struct TestObjRefADerived : public ObjectRef {
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestObjRefADerived, ObjectRef, TestObjADerived);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestObjRefADerived, ObjectRef, TestObjADerived);
 };
 
 struct PrefixLookupObj : public Object {
   int64_t stage;
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.PrefixLookup", PrefixLookupObj, Object);
+};
+
+class QueryEnumObj : public EnumObj {
+ public:
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.QueryEnum", QueryEnumObj, EnumObj);
 };
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -94,6 +102,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_type_attr("test.attr.object.int", int64_t{7})
       .def_type_attr("test.attr.object.bool", true)
       .def_type_attr("test.attr.object.func", [](int64_t value) -> int64_t { return value + 1; });
+  refl::TypeAttrDef<TestObjA>().attr(kFlag, false);
   refl::ObjectDef<TestObjADerived>()
       .def(refl::init<int64_t, int64_t, int64_t>())
       .def_ro("z", &TestObjADerived::z);
@@ -111,6 +120,35 @@ TEST(Reflection, GetFieldByteOffset) {
   EXPECT_EQ(reflection::GetFieldByteOffsetToObject(&TestObjA::x), sizeof(TVMFFIObject));
   EXPECT_EQ(reflection::GetFieldByteOffsetToObject(&TestObjA::y), 8 + sizeof(TVMFFIObject));
   EXPECT_EQ(reflection::GetFieldByteOffsetToObject(&TIntObj::value), sizeof(TVMFFIObject));
+}
+
+TEST(Reflection, EnumIsDefined) {
+  using Definition = reflection::EnumDef<QueryEnumObj>;
+  reflection::TypeAttrColumn states(type_attr::kEnumState);
+  int32_t type_index = QueryEnumObj::_GetOrAllocRuntimeTypeIndex();
+  EXPECT_FALSE(Definition::IsDefined("Alpha"));
+  EXPECT_EQ(states[type_index], nullptr);
+
+  Definition("Alpha").set_attr("description", String("first"));
+  Enum original = EnumObj::_GetByStrIndex<QueryEnumObj>("Alpha");
+  EnumState state = states[type_index].cast<EnumState>();
+  EXPECT_TRUE(Definition::IsDefined("Alpha"));
+  EXPECT_FALSE(Definition::IsDefined("alpha"));
+  EXPECT_FALSE(Definition::IsDefined("Beta"));
+  EXPECT_FALSE(Definition::IsDefined("0"));
+  EXPECT_FALSE(Definition::IsDefined(String("Alpha\0suffix", 12)));
+  EXPECT_TRUE(states[type_index].cast<EnumState>().same_as(state));
+  EXPECT_EQ(state->entries.size(), 1);
+  EXPECT_EQ(state->indexes.size(), 2);
+  EXPECT_EQ(state->attrs.size(), 1);
+  EXPECT_EQ(state->attrs.at("description").size(), 1);
+  EXPECT_EQ(state->attrs.at("description").at(original).cast<String>(), "first");
+  EXPECT_TRUE(EnumObj::_GetByStrIndex<QueryEnumObj>("Alpha").same_as(original));
+  EXPECT_TRUE(EnumObj::_GetByIntIndex<QueryEnumObj>(0).same_as(original));
+  Definition("Beta");  // NOLINT(bugprone-unused-raii)
+  EXPECT_TRUE(Definition::IsDefined("Beta"));
+  EXPECT_TRUE(EnumObj::_GetByStrIndex<QueryEnumObj>("Beta").same_as(
+      EnumObj::_GetByIntIndex<QueryEnumObj>(1)));
 }
 
 TEST(Reflection, FieldGetter) {
@@ -328,6 +366,23 @@ TEST(Reflection, TypeAttrColumn) {
   EXPECT_EQ(size_attr[TIntObj::RuntimeTypeIndex()].cast<int>(), sizeof(TIntObj));
 }
 
+TEST(Reflection, AttrKey) {
+  namespace refl = reflection;
+  refl::TypeAttrColumn column(kFlag);
+  auto flag = kFlag.ValueFrom(column[TestObjA::RuntimeTypeIndex()]);
+  EXPECT_EQ(flag, std::optional<bool>(false));
+  EXPECT_FALSE(kFlag.ValueFrom(column[-1]).has_value());
+  EXPECT_THROW(kFlag.ValueFrom(AnyView(1)), Error);
+
+  // Raw names retain dynamic value storage alongside typed registration.
+  constexpr refl::AttrKey<int64_t> count{"test.attr.typed.count"};
+  refl::TypeAttrDef<TestObjA>().attr(count, int64_t{7});
+  refl::TypeAttrDef<TestObjADerived>().attr(count.name, Any("dynamic"));
+  refl::TypeAttrColumn counts(count);
+  EXPECT_EQ(count.ValueFrom(counts[TestObjA::RuntimeTypeIndex()]), 7);
+  EXPECT_THROW(count.ValueFrom(counts[TestObjADerived::RuntimeTypeIndex()]), Error);
+}
+
 TEST(Reflection, TypeAttrColumnBeginIndex) {
   // Get the column and verify begin_index
   TVMFFIByteArray attr_name = {"test.size", std::char_traits<char>::length("test.size")};
@@ -377,7 +432,7 @@ TEST(Reflection, TypeAttrDefDirectValues) {
 }
 
 TEST(Reflection, ObjectDefPublishesTypeFinal) {
-  reflection::TypeAttrColumn final_attr(reflection::type_attr::kTypeFinal);
+  reflection::TypeAttrColumn final_attr(type_attr::kTypeFinal);
 
   EXPECT_FALSE(final_attr[TestObjA::RuntimeTypeIndex()].cast<bool>());
   EXPECT_TRUE(final_attr[TestObjADerived::RuntimeTypeIndex()].cast<bool>());

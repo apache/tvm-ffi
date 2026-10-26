@@ -39,6 +39,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ExecutionEngine/JITLink/JITLink.h>
 #include <llvm/ExecutionEngine/JITLink/x86_64.h>
+#include <llvm/ExecutionEngine/Orc/AbsoluteSymbols.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Error.h>
@@ -126,6 +127,14 @@ llvm::Error DLLImportDefinitionGenerator::tryToGenerate(
   }
   if (Resolved.empty()) return llvm::Error::success();
 
+  if (L_ == nullptr) {
+    llvm::orc::SymbolMap Symbols;
+    for (auto& [Name, Addr] : Resolved) {
+      Symbols[Name] = llvm::orc::ExecutorSymbolDef(Addr, llvm::JITSymbolFlags::Exported);
+    }
+    return JD.define(llvm::orc::absoluteSymbols(std::move(Symbols)));
+  }
+
   // Step 2: Build a LinkGraph with __imp_ pointers and PLT jump stubs.
   auto G = std::make_unique<llvm::jitlink::LinkGraph>(
       "<DLL_IMPORT_STUBS>", ES_.getSymbolStringPool(), ES_.getTargetTriple(),
@@ -149,7 +158,7 @@ llvm::Error DLLImportDefinitionGenerator::tryToGenerate(
     G->addDefinedSymbol(StubBlock, 0, *InternedName, StubBlock.getSize(),
                         llvm::jitlink::Linkage::Strong, llvm::jitlink::Scope::Default, true, false);
   }
-  return L_.add(JD, std::move(G));
+  return L_->add(JD, std::move(G));
 }
 
 }  // namespace orcjit

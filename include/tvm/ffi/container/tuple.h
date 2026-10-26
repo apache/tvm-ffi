@@ -45,7 +45,7 @@ namespace ffi {
 template <typename... Types>
 class Tuple : public ObjectRef {
  public:
-  static_assert(details::all_storage_enabled_v<Types...>,
+  static_assert(detail::all_storage_enabled_v<Types...>,
                 "All types used in Tuple<...> must be compatible with Any");
   /*! \brief Default constructor */
   Tuple() : ObjectRef(MakeDefaultTupleNode()) {}
@@ -147,7 +147,7 @@ class Tuple : public ObjectRef {
     static_assert(I < sizeof...(Types), "Tuple index out of bounds");
     using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
     const Any* ptr = GetArrayObj()->begin() + I;
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<ReturnType>(*ptr);
+    return detail::AnyUnsafe::CopyFromAnyViewAfterCheck<ReturnType>(*ptr);
   }
 
   /*!
@@ -166,7 +166,7 @@ class Tuple : public ObjectRef {
     static_assert(I < sizeof...(Types), "Tuple index out of bounds");
     using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
     Any* ptr = GetArrayObj()->MutableBegin() + I;
-    return details::AnyUnsafe::MoveFromAnyAfterCheck<ReturnType>(std::move(*ptr));
+    return detail::AnyUnsafe::MoveFromAnyAfterCheck<ReturnType>(std::move(*ptr));
   }
 
   /*!
@@ -193,6 +193,7 @@ class Tuple : public ObjectRef {
   /// \cond Doxygen_Suppress
   using ContainerType = ArrayObj;
   static constexpr bool _type_container_is_exact = false;
+  static constexpr bool _type_is_nullable = false;
   /// \endcond
 
  private:
@@ -257,10 +258,10 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
   TVM_FFI_INLINE static std::string GetMismatchTypeInfoHelper(const Any* arr) {
     if constexpr (!std::is_same_v<T, Any>) {
       const Any& any_v = arr[I];
-      if (!details::AnyUnsafe::CheckAnyStrict<T>(any_v) && !(any_v.try_cast<T>().has_value())) {
+      if (!detail::AnyUnsafe::CheckAnyStrict<T>(any_v) && !(any_v.try_cast<T>().has_value())) {
         // now report the accurate mismatch information
         return "Array[index " + std::to_string(I) + ": " +
-               details::AnyUnsafe::GetMismatchTypeInfo<T>(any_v) + "]";
+               detail::AnyUnsafe::GetMismatchTypeInfo<T>(any_v) + "]";
       }
     }
     if constexpr (sizeof...(Rest) > 0) {
@@ -303,8 +304,8 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
     Array<Any> arr = TypeTraits<Array<Any>>::CopyFromAnyViewAfterCheck(src);
     Any* ptr = arr.CopyOnWrite()->MutableBegin();
     if (TryConvertElements<0, Types...>(ptr)) {
-      return details::ObjectUnsafe::ObjectRefFromObjectPtr<Tuple<Types...>>(
-          details::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(arr));
+      return detail::ObjectUnsafe::ObjectRefFromObjectPtr<Tuple<Types...>>(
+          detail::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(arr));
     }
     return std::nullopt;
   }
@@ -326,13 +327,13 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
-    return details::ContainerTypeStr<Types...>("Tuple");
+    return detail::ContainerTypeStr<Types...>("Tuple");
   }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":"Tuple","args":[)";
     const char* sep = "";
-    ((oss << sep << details::TypeSchema<Types>::v(), sep = ","), ...);
+    ((oss << sep << detail::TypeSchema<Types>::v(), sep = ","), ...);
     oss << "]}";
     return oss.str();
   }

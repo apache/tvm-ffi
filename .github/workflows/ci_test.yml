@@ -212,22 +212,21 @@ jobs:
 
       # Build the Rust stubgen example against the installed package. Its post-build
       # step refreshes the bindings in place, so a diff means the checked-in file was stale.
+      # Pass the venv interpreter explicitly: from CMake 4.4, FindPython skips free-threaded
+      # interpreters (3.14t) by default and would pick a system Python without tvm_ffi.
       - name: Run rust stubgen example
         if: ${{ matrix.os == 'ubuntu-latest' }}
         working-directory: examples/rust_stubgen
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DPython_EXECUTABLE="$(which python)" -DPython3_EXECUTABLE="$(which python)"
           cmake --build build
           git diff --exit-code -- rust/src/generated
           cd rust && cargo run
 
-  # Build + test the orcjit wheel. On Linux the action downloads a prebuilt LLVM
-  # tarball from a GitHub Release (built from source under the manylinux
-  # gcc-toolset so the ABI stays under the floor); macOS/Windows install LLVM via
-  # conda inside the action. The LLVM release is produced out-of-band (rarely, on
-  # version bump) by mlc-ai/package's build_llvm workflow -- not on every CI run.
+  # Build and test the OrcJIT wheel using the LLVM static SDK from PyPI.
   orcjit:
     needs: [lint, prepare]
     if: >
@@ -237,11 +236,7 @@ jobs:
     name: orcjit ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     env:
-      LLVM_VERSION: "23.1.1"
-      # Repo hosting the prebuilt LLVM release assets consumed on Linux. Built
-      # out-of-band from source in a manylinux image so the ABI stays under the
-      # manylinux_2_28 floor; see that repo's build_llvm workflow.
-      LLVM_RELEASE_REPO: "mlc-ai/package"
+      LLVM_VERSION: "23.1.1.post0"
     strategy:
       fail-fast: false
       matrix:
@@ -250,6 +245,7 @@ jobs:
           - {os: ubuntu-24.04-arm, arch: aarch64, build: "cp312-manylinux_aarch64"}
           - {os: macos-14, arch: arm64, build: "cp312-macosx_arm64"}
           - {os: windows-latest, arch: AMD64, build: "cp312-win_amd64"}
+          - {os: windows-11-vs2026-arm, arch: ARM64, build: "cp312-win_arm64"}
 
     steps:
       - uses: actions/checkout@v5
@@ -263,7 +259,6 @@ jobs:
           build: ${{ matrix.build }}
           checkout_ref: ${{ github.sha }}
           llvm_version: ${{ env.LLVM_VERSION }}
-          llvm_release_repo: ${{ env.LLVM_RELEASE_REPO }}
 
       - uses: actions/upload-artifact@v4
         with:

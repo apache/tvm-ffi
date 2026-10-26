@@ -31,7 +31,7 @@ parameter instead. ``nullable`` wraps it in ``Option``; ``enum`` declares an ope
 integer newtype for it; ``opaque`` keeps a type opaque even when its layout is
 reproducible. ``upcast`` adds a typed view outside the ancestor chain;
 ``custom-new`` says the wrapper's ``new`` is hand-written; the generated one is
-named ``from_complete_fields`` instead.
+named ``from_fields`` instead.
 """
 
 from __future__ import annotations

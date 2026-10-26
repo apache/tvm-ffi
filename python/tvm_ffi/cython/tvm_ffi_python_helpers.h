@@ -37,9 +37,9 @@
 #endif
 
 // Local mirror of TVM_FFI_COLD_CODE / TVM_FFI_PREDICT_* from
-// <tvm/ffi/base_details.h>. The Cython helper deliberately avoids that header
+// <tvm/ffi/base_detail.h>. The Cython helper deliberately avoids that header
 // (keeps the include surface c-headers-only), so we duplicate the macro
-// definitions here. Keep these in sync with base_details.h: same expansion on
+// definitions here. Keep these in sync with base_detail.h: same expansion on
 // GCC/Clang, no-op on MSVC.
 #ifndef TVM_FFI_COLD_CODE
 #if defined(__GNUC__) || defined(__clang__)

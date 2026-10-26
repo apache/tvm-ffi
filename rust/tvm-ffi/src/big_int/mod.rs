@@ -57,7 +57,7 @@ pub struct BigInt {
 }
 
 // BigIntObj for heap-allocated integers: the word count, then the canonical
-// two's-complement words as trailing items. Mirrors C++ `details::BigIntObj`.
+// two's-complement words as trailing items. Mirrors C++ `detail::BigIntObj`.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.BigInt"]

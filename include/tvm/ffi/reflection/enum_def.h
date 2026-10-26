@@ -49,6 +49,26 @@ template <typename EnumClsObj, typename = std::enable_if_t<std::is_base_of_v<Enu
 class EnumDef : public ReflectionDefBase {
  public:
   /*!
+   * \brief Check whether a canonical name is defined without registering enum state or entries.
+   * \param name The canonical string index.
+   * \return Whether the name is defined for this enum type.
+   */
+  static bool IsDefined(const String& name) {
+    constexpr TVMFFIByteArray column_name = AsByteArray(type_attr::kEnumState.name);
+    if (TVMFFIGetTypeAttrColumn(&column_name) == nullptr) return false;
+    AnyView value =
+        TypeAttrColumn(type_attr::kEnumState)[EnumClsObj::_GetOrAllocRuntimeTypeIndex()];
+    if (value == nullptr) return false;
+    if (value.type_index() != EnumStateObj::_GetOrAllocRuntimeTypeIndex()) {
+      TVM_FFI_THROW(TypeError) << "Expected `" << EnumStateObj::_type_key
+                               << "` in enum state column, but got `" << value.GetTypeKey() << "`";
+    }
+    // Avoid cast<EnumState> because its inline type index may not be initialized yet.
+    const auto* state = static_cast<const EnumStateObj*>(value.cast<ObjectRef>().get());
+    return state->indexes.count(name) != 0;
+  }
+
+  /*!
    * \brief Register an enum singleton with an automatically assigned integer index.
    *
    * The integer index is assigned from the singleton's registration order.
@@ -93,6 +113,18 @@ class EnumDef : public ReflectionDefBase {
     return *this;
   }
 
+  /*! \brief Set an enum attribute using its key's declared value type. */
+  template <typename T, typename Value>
+  EnumDef& set_attr(AttrKey<T> key, Value&& value) {
+    return set_attr(key.name, T(std::forward<Value>(value)));
+  }
+
+  /*! \brief Set a named native callback using its key's declared adapter. */
+  template <auto Fn, typename T>
+  EnumDef& set_native_fn_attr(AttrKey<T> key) {
+    return set_attr(key, T::template FromNative<Fn>());
+  }
+
  private:
   void Register(const EnumState& state, int64_t int_index, String str_index) {
     List<ObjectRef> entries = state->entries;
@@ -104,10 +136,10 @@ class EnumDef : public ReflectionDefBase {
                                 << "`";
     }
     ObjectPtr<EnumClsObj> obj = make_object<EnumClsObj>();
-    ::tvm::ffi::details::ObjectUnsafe::GetHeader(obj.get())->type_index = type_index_;
+    ::tvm::ffi::detail::ObjectUnsafe::GetHeader(obj.get())->type_index = type_index_;
     obj->_int_index = int_index;
     obj->_str_index = std::move(str_index);
-    instance_ = Enum(ObjectPtr<EnumObj>(std::move(obj)));
+    instance_ = ::tvm::ffi::detail::ObjectUnsafe::ObjectRefFromObjectPtr<Enum>(std::move(obj));
     entries.push_back(instance_);
     indexes.Set(int_key, instance_);
     indexes.Set(str_key, instance_);
@@ -124,22 +156,23 @@ class EnumDef : public ReflectionDefBase {
       }
       // Avoid cast<EnumState> here because it reads the same deferred inline type index.
       TVMFFIAny value_any = value.CopyToTVMFFIAny();
-      return ::tvm::ffi::details::ObjectUnsafe::ObjectRefFromObjectPtr<EnumState>(
-          ::tvm::ffi::details::ObjectUnsafe::ObjectPtrFromUnowned<Object>(value_any.v_obj));
+      return ::tvm::ffi::detail::ObjectUnsafe::ObjectRefFromObjectPtr<EnumState>(
+          ::tvm::ffi::detail::ObjectUnsafe::ObjectPtrFromUnowned<Object>(value_any.v_obj));
     }
     ObjectPtr<EnumStateObj> state_obj = make_object<EnumStateObj>();
     // GCC runs attribute constructors before dynamic initialization of inline type indices.
     // Set the header explicitly so the state is not packed as `None` during static init.
-    ::tvm::ffi::details::ObjectUnsafe::GetHeader(state_obj.get())->type_index = state_type_index;
-    EnumState state(std::move(state_obj));
-    constexpr TVMFFIByteArray name = AsByteArray(type_attr::kEnumState);
+    ::tvm::ffi::detail::ObjectUnsafe::GetHeader(state_obj.get())->type_index = state_type_index;
+    EnumState state =
+        ::tvm::ffi::detail::ObjectUnsafe::ObjectRefFromObjectPtr<EnumState>(std::move(state_obj));
+    constexpr TVMFFIByteArray name = AsByteArray(type_attr::kEnumState.name);
     TVMFFIAny value_any = AnyView(state).CopyToTVMFFIAny();
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &name, &value_any));
     return state;
   }
 
   int32_t type_index_;
-  Enum instance_;
+  Enum instance_{UnsafeInit{}};
 };
 
 }  // namespace reflection

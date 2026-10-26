@@ -239,8 +239,8 @@ def _validate_native_schema(schema: TypeSchema, raw: dict[str, object]) -> None:
 def _builtin_table() -> dict[int, _BuiltinType]:
     specs = {
         "ffi.Object": _BuiltinType("::tvm::ffi::Object", None, 8, 8),
-        "ffi.String": _BuiltinType("::tvm::ffi::details::StringObj", "::tvm::ffi::String", 16, 8),
-        "ffi.Bytes": _BuiltinType("::tvm::ffi::details::BytesObj", "::tvm::ffi::Bytes", 16, 8),
+        "ffi.String": _BuiltinType("::tvm::ffi::detail::StringObj", "::tvm::ffi::String", 16, 8),
+        "ffi.Bytes": _BuiltinType("::tvm::ffi::detail::BytesObj", "::tvm::ffi::Bytes", 16, 8),
         "ffi.Error": _BuiltinType("::tvm::ffi::ErrorObj", "::tvm::ffi::Error", 16, 8),
         "ffi.Function": _BuiltinType("::tvm::ffi::FunctionObj", "::tvm::ffi::Function", 8, 8),
         "ffi.Shape": _BuiltinType("::tvm::ffi::ShapeObj", "::tvm::ffi::Shape", 8, 8),

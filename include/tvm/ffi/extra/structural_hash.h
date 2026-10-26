@@ -25,6 +25,8 @@
 
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/extra/base.h>
+#include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/accessor.h>
 
 namespace tvm {
 namespace ffi {
@@ -51,6 +53,23 @@ class StructuralHash {
    */
   TVM_FFI_INLINE uint64_t operator()(const Any& value) const { return Hash(value); }
 };
+
+namespace type_attr {
+/*!
+ * \brief Custom structural hash hook (used by ``StructuralHash``).
+ *
+ * Unlike ``kHash`` (which is for ``RecursiveHash`` / Python ``hash()``),
+ * this is for the ``StructuralHash`` system that supports def/use region
+ * semantics (``map_free_vars``).  The hook receives the current accumulated
+ * hash and a callback to recursively hash sub-values.
+ *
+ * ``hash_cb`` recursively hashes a sub-value; its integer ``TVMFFIDefRegionKind``
+ * argument controls free-variable mapping.
+ */
+inline constexpr reflection::AttrKey<TypedFunction<int64_t(
+    const Object*, int64_t, const TypedFunction<int64_t(AnyView, int64_t, int)>&)>>
+    kSHash{"__s_hash__"};
+}  // namespace type_attr
 
 }  // namespace ffi
 }  // namespace tvm

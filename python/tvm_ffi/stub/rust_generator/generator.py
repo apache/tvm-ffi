@@ -22,6 +22,7 @@ protocol, delegating the actual rendering to ``rust_generator.codegen``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING
 
 from .. import consts as C
@@ -32,14 +33,32 @@ from .codegen import (
     generate_rust_import_section,
     generate_rust_object,
 )
-from .utils import RustImports, RustUse, is_crate_type_key
+from .utils import RustImports, RustUse, check_tokens, is_crate_type_key, rust_module_path
 
 if TYPE_CHECKING:
-    from collections.abc import Container
     from pathlib import Path
 
     from ..file_utils import CodeBlock
     from ..utils import FuncInfo, InitConfig, ObjectInfo, Options
+
+
+class _DeclaredModules(Mapping[str, tuple[str, ...]]):
+    """The run's ``object/`` blocks by type key, to the module of the file each is in."""
+
+    def __init__(self, files: Mapping[str, Path]) -> None:
+        self._files = files
+
+    def __getitem__(self, type_key: str) -> tuple[str, ...]:
+        return rust_module_path(self._files[type_key])
+
+    def __contains__(self, type_key: object) -> bool:
+        return type_key in self._files
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._files)
+
+    def __len__(self) -> int:
+        return len(self._files)
 
 
 class RustGenerator:
@@ -79,6 +98,20 @@ class RustGenerator:
         """Every ``ffi.*`` key is bound by the crate (the rule ``codegen`` resolves types with)."""
         return is_crate_type_key(type_key)
 
+    def check_view(self, code_blocks: list[CodeBlock]) -> dict[tuple[str, object], tuple[str, ...]]:
+        """Return what the ``object/`` blocks and the import section define, not their spelling.
+
+        A run that only changes ``use`` lines, comments, layout or the module a path is
+        spelled from (see :func:`check_tokens`) leaves the file up to date.
+        """
+        view: dict[tuple[str, object], tuple[str, ...]] = {}
+        for code in code_blocks:
+            if code.kind in ("object", "import-section"):
+                tokens = check_tokens(code.lines[1:-1])
+                if tokens:  # an import section of `use` lines alone is no definition
+                    view[code.kind, code.param] = tokens
+        return view
+
     # --- per-block generation -------------------------------------------------
 
     def generate_global_funcs_block(
@@ -98,10 +131,10 @@ class RustGenerator:
         imports: RustImports,
         opt: Options,
         obj_info: ObjectInfo,
-        declared: Container[str] = frozenset(),
+        declared: Mapping[str, Path],
     ) -> None:
-        """Emit the opaque Rust binding for an ``object/<key>`` block."""
-        generate_rust_object(code, ty_map, imports, opt, obj_info, declared)
+        """Emit the Rust binding for an ``object/<key>`` block, named by module from ``declared``."""
+        generate_rust_object(code, ty_map, imports, opt, obj_info, _DeclaredModules(declared))
 
     def generate_import_section_block(
         self, code: CodeBlock, imports: RustImports, opt: Options, defined_types: set[str]

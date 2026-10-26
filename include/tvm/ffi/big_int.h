@@ -45,7 +45,7 @@
 
 namespace tvm {
 namespace ffi {
-namespace details {
+namespace detail {
 
 struct BigIntUnsafe;
 /*!
@@ -72,7 +72,7 @@ class BigIntObj : public Object {
   size_t size_;
   friend struct BigIntUnsafe;
 };
-}  // namespace details
+}  // namespace detail
 /*!
  * \brief An immutable integer, stored inline whenever it fits int64_t.
  *
@@ -128,7 +128,7 @@ class BigInt {
   /*! \brief Copy the value, sharing immutable heap storage when present. */
   TVM_FFI_INLINE BigInt(const BigInt& other) : data_(other.data_) {
     if (TVM_FFI_PREDICT_FALSE(data_.type_index != TypeIndex::kTVMFFIInt)) {
-      details::ObjectUnsafe::IncRefObjectHandle(data_.v_obj);
+      detail::ObjectUnsafe::IncRefObjectHandle(data_.v_obj);
     }
   }
 
@@ -137,7 +137,7 @@ class BigInt {
 
   TVM_FFI_INLINE ~BigInt() {
     if (TVM_FFI_PREDICT_FALSE(data_.type_index != TypeIndex::kTVMFFIInt)) {
-      details::ObjectUnsafe::DecRefObjectHandle(data_.v_obj);
+      detail::ObjectUnsafe::DecRefObjectHandle(data_.v_obj);
     }
   }
 
@@ -198,9 +198,9 @@ class BigInt {
    * \brief Take ownership of a canonical multiword integer without an extra reference.
    * \param ptr Owned normalized object with more than one word.
    */
-  TVM_FFI_INLINE explicit BigInt(ObjectPtr<details::BigIntObj> ptr) : BigInt() {
+  TVM_FFI_INLINE explicit BigInt(ObjectPtr<detail::BigIntObj> ptr) : BigInt() {
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(&data_);
-    data_.v_obj = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(ptr));
+    data_.v_obj = detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(ptr));
     data_.type_index = TypeIndex::kTVMFFIBigInt;
   }
   /*! \brief Reset a detached cell to inline zero without releasing ownership. */
@@ -210,11 +210,11 @@ class BigInt {
     data_.v_int64 = 0;
   }
   TVMFFIAny data_;
-  friend struct details::BigIntUnsafe;
+  friend struct detail::BigIntUnsafe;
   friend struct TypeTraits<BigInt>;
 };
 
-namespace details {
+namespace detail {
 struct BigIntUnsafe {
   /*!
    * \brief Test the inline integer representation.
@@ -1298,7 +1298,7 @@ inline std::string ToStringFallback(const BigInt& value) {
   return result;
 }
 }  // namespace int_ops
-}  // namespace details
+}  // namespace detail
 
 template <typename Int, std::enable_if_t<(std::is_integral_v<Int> && sizeof(Int) <= 8), int>>
 TVM_FFI_INLINE BigInt::BigInt(Int value) : BigInt() {
@@ -1306,9 +1306,9 @@ TVM_FFI_INLINE BigInt::BigInt(Int value) : BigInt() {
     uint64_t bits = static_cast<uint64_t>(value);
     constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
     if (TVM_FFI_PREDICT_FALSE(bits > static_cast<uint64_t>(kMax))) {
-      auto ptr = make_inplace_array_object<details::BigIntObj, int64_t>(2, 2);
-      details::BigIntUnsafe::GetMutableData(ptr)[0] = details::int_ops::BitcastToInt64(bits);
-      details::BigIntUnsafe::GetMutableData(ptr)[1] = 0;
+      auto ptr = make_inplace_array_object<detail::BigIntObj, int64_t>(2, 2);
+      detail::BigIntUnsafe::GetMutableData(ptr)[0] = detail::int_ops::BitcastToInt64(bits);
+      detail::BigIntUnsafe::GetMutableData(ptr)[1] = 0;
       *this = BigInt(std::move(ptr));
       return;
     }
@@ -1336,7 +1336,7 @@ TVM_FFI_INLINE std::optional<Int> BigInt::as() const {
     }
   }
   if constexpr (std::is_unsigned_v<Int> && sizeof(Int) == 8) {
-    auto repr = details::BigIntUnsafe::GetArrayView(*this);
+    auto repr = detail::BigIntUnsafe::GetArrayView(*this);
     if (repr.size() == 2 && repr[1] == 0) return static_cast<Int>(repr[0]);
   }
   return std::nullopt;
@@ -1349,20 +1349,20 @@ TVM_FFI_INLINE BigInt::BigInt(double value) : BigInt() {
     data_.v_int64 = static_cast<int64_t>(value);
     return;
   }
-  *this = details::int_ops::FromDoubleFallback(value);
+  *this = detail::int_ops::FromDoubleFallback(value);
 }
 
 TVM_FFI_INLINE BigInt::operator double() const {
   if (TVM_FFI_PREDICT_TRUE(data_.type_index == TypeIndex::kTVMFFIInt)) {
     return static_cast<double>(data_.v_int64);
   }
-  return details::int_ops::ToDoubleFallback(*this);
+  return detail::int_ops::ToDoubleFallback(*this);
 }
 
 TVM_FFI_INLINE uint64_t BigInt::hash() const {
   if (data_.type_index == TypeIndex::kTVMFFIInt) return static_cast<uint64_t>(data_.v_int64);
-  auto repr = details::BigIntUnsafe::GetArrayView(*this);
-  return details::StableHashBytes(&repr[0], repr.size() * sizeof(int64_t));
+  auto repr = detail::BigIntUnsafe::GetArrayView(*this);
+  return detail::StableHashBytes(&repr[0], repr.size() * sizeof(int64_t));
 }
 
 /// \cond Doxygen_Suppress
@@ -1386,7 +1386,7 @@ struct TypeTraits<BigInt> : public TypeTraitsBase {
     BigInt result;
     result.data_ = *src;
     if (TVM_FFI_PREDICT_FALSE(result.data_.type_index != TypeIndex::kTVMFFIInt)) {
-      details::ObjectUnsafe::IncRefObjectHandle(result.data_.v_obj);
+      detail::ObjectUnsafe::IncRefObjectHandle(result.data_.v_obj);
     }
     return result;
   }
@@ -1424,45 +1424,45 @@ struct TypeTraits<BigInt> : public TypeTraitsBase {
 
 // clang-format on
 
-#define TVM_FFI_DEFINE_BIGINT_OP_CHECKED(Name, Fallback, Overflow)                 \
-  TVM_FFI_DEFINE_BIGINT_OP_OVERLOAD(BigInt, Name, {                                \
-    if (TVM_FFI_PREDICT_TRUE(details::BigIntUnsafe::CheckInt64(a) &&               \
-                             details::BigIntUnsafe::CheckInt64(b))) {              \
-      int64_t x = details::BigIntUnsafe::GetInt64(a);                              \
-      int64_t y = details::BigIntUnsafe::GetInt64(b);                              \
-      int64_t result;                                                              \
-      if (TVM_FFI_PREDICT_FALSE(Overflow)) {                                       \
-        return details::int_ops::Fallback(details::BigIntUnsafe::GetArrayView(a),  \
-                                          details::BigIntUnsafe::GetArrayView(b)); \
-      }                                                                            \
-      return BigInt(result);                                                       \
-    }                                                                              \
-    return details::int_ops::Fallback(details::BigIntUnsafe::GetArrayView(a),      \
-                                      details::BigIntUnsafe::GetArrayView(b));     \
+#define TVM_FFI_DEFINE_BIGINT_OP_CHECKED(Name, Fallback, Overflow)               \
+  TVM_FFI_DEFINE_BIGINT_OP_OVERLOAD(BigInt, Name, {                              \
+    if (TVM_FFI_PREDICT_TRUE(detail::BigIntUnsafe::CheckInt64(a) &&              \
+                             detail::BigIntUnsafe::CheckInt64(b))) {             \
+      int64_t x = detail::BigIntUnsafe::GetInt64(a);                             \
+      int64_t y = detail::BigIntUnsafe::GetInt64(b);                             \
+      int64_t result;                                                            \
+      if (TVM_FFI_PREDICT_FALSE(Overflow)) {                                     \
+        return detail::int_ops::Fallback(detail::BigIntUnsafe::GetArrayView(a),  \
+                                         detail::BigIntUnsafe::GetArrayView(b)); \
+      }                                                                          \
+      return BigInt(result);                                                     \
+    }                                                                            \
+    return detail::int_ops::Fallback(detail::BigIntUnsafe::GetArrayView(a),      \
+                                     detail::BigIntUnsafe::GetArrayView(b));     \
   })
 
-#define TVM_FFI_DEFINE_BIGINT_OP_NO_OVERFLOW(Return, Name, Fallback, Fast)     \
-  TVM_FFI_DEFINE_BIGINT_OP_OVERLOAD(Return, Name, {                            \
-    if (TVM_FFI_PREDICT_TRUE(details::BigIntUnsafe::CheckInt64(a) &&           \
-                             details::BigIntUnsafe::CheckInt64(b))) {          \
-      int64_t x = details::BigIntUnsafe::GetInt64(a);                          \
-      int64_t y = details::BigIntUnsafe::GetInt64(b);                          \
-      return Fast;                                                             \
-    }                                                                          \
-    return details::int_ops::Fallback(details::BigIntUnsafe::GetArrayView(a),  \
-                                      details::BigIntUnsafe::GetArrayView(b)); \
+#define TVM_FFI_DEFINE_BIGINT_OP_NO_OVERFLOW(Return, Name, Fallback, Fast)   \
+  TVM_FFI_DEFINE_BIGINT_OP_OVERLOAD(Return, Name, {                          \
+    if (TVM_FFI_PREDICT_TRUE(detail::BigIntUnsafe::CheckInt64(a) &&          \
+                             detail::BigIntUnsafe::CheckInt64(b))) {         \
+      int64_t x = detail::BigIntUnsafe::GetInt64(a);                         \
+      int64_t y = detail::BigIntUnsafe::GetInt64(b);                         \
+      return Fast;                                                           \
+    }                                                                        \
+    return detail::int_ops::Fallback(detail::BigIntUnsafe::GetArrayView(a),  \
+                                     detail::BigIntUnsafe::GetArrayView(b)); \
   })
 
 // Op is an operator token in a function name and expression; parentheses are invalid here.
 // NOLINTBEGIN(bugprone-macro-parentheses)
-#define TVM_FFI_DEFINE_BIGINT_OP_COMPARE(Op)                                               \
-  TVM_FFI_DEFINE_BIGINT_OP_OVERLOAD(bool, operator Op, {                                   \
-    if (TVM_FFI_PREDICT_TRUE(details::BigIntUnsafe::CheckInt64(a) &&                       \
-                             details::BigIntUnsafe::CheckInt64(b))) {                      \
-      return details::BigIntUnsafe::GetInt64(a) Op details::BigIntUnsafe::GetInt64(b);     \
-    }                                                                                      \
-    return details::int_ops::CompareFallback(details::BigIntUnsafe::GetArrayView(a),       \
-                                             details::BigIntUnsafe::GetArrayView(b)) Op 0; \
+#define TVM_FFI_DEFINE_BIGINT_OP_COMPARE(Op)                                             \
+  TVM_FFI_DEFINE_BIGINT_OP_OVERLOAD(bool, operator Op, {                                 \
+    if (TVM_FFI_PREDICT_TRUE(detail::BigIntUnsafe::CheckInt64(a) &&                      \
+                             detail::BigIntUnsafe::CheckInt64(b))) {                     \
+      return detail::BigIntUnsafe::GetInt64(a) Op detail::BigIntUnsafe::GetInt64(b);     \
+    }                                                                                    \
+    return detail::int_ops::CompareFallback(detail::BigIntUnsafe::GetArrayView(a),       \
+                                            detail::BigIntUnsafe::GetArrayView(b)) Op 0; \
   })
 
 // NOLINTEND(bugprone-macro-parentheses)
@@ -1470,34 +1470,34 @@ struct TypeTraits<BigInt> : public TypeTraitsBase {
 // ---- BigInt operator overloading: BigInt/BigInt, BigInt/int64_t, int64_t/BigInt ----
 // Add signed integers, promoting when the sum exceeds int64_t.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(operator+, AddFallback,
-                                 details::int_ops::AddOverflow(x, y, &result))
+                                 detail::int_ops::AddOverflow(x, y, &result))
 // Subtract signed integers, promoting when the difference exceeds int64_t.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(operator-, SubFallback,
-                                 details::int_ops::SubOverflow(x, y, &result))
+                                 detail::int_ops::SubOverflow(x, y, &result))
 // Multiply signed integers, promoting when the product exceeds int64_t.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(operator*, MulFallback,
-                                 details::int_ops::MulOverflow(x, y, &result))
+                                 detail::int_ops::MulOverflow(x, y, &result))
 // Divide toward zero; zero divisors raise ZeroDivisionError and int64_t overflow promotes.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(truncdiv, TruncDivFallback,
-                                 details::int_ops::TruncDivOverflow(x, y, &result))
+                                 detail::int_ops::TruncDivOverflow(x, y, &result))
 // Truncating remainder is zero or has the dividend sign; zero divisors raise ZeroDivisionError.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(truncmod, TruncModFallback,
-                                 details::int_ops::TruncModOverflow(x, y, &result))
+                                 detail::int_ops::TruncModOverflow(x, y, &result))
 // Divide toward negative infinity; zero divisors raise ZeroDivisionError and overflow promotes.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(floordiv, FloorDivFallback,
-                                 details::int_ops::FloorDivOverflow(x, y, &result))
+                                 detail::int_ops::FloorDivOverflow(x, y, &result))
 // Floor remainder is zero or has the divisor sign; zero divisors raise ZeroDivisionError.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(floormod, FloorModFallback,
-                                 details::int_ops::FloorModOverflow(x, y, &result))
+                                 detail::int_ops::FloorModOverflow(x, y, &result))
 // Divide toward zero; zero divisors raise ZeroDivisionError and int64_t overflow promotes.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(operator/, TruncDivFallback,
-                                 details::int_ops::TruncDivOverflow(x, y, &result))
+                                 detail::int_ops::TruncDivOverflow(x, y, &result))
 // Truncating remainder is zero or has the dividend sign; zero divisors raise ZeroDivisionError.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(operator%, TruncModFallback,
-                                 details::int_ops::TruncModOverflow(x, y, &result))
+                                 detail::int_ops::TruncModOverflow(x, y, &result))
 // Left shift promotes as needed; negative counts raise ValueError, excessive growth OverflowError.
 TVM_FFI_DEFINE_BIGINT_OP_CHECKED(operator<<, LeftShiftFallback,
-                                 details::int_ops::LeftShiftOverflow(x, y, &result))
+                                 detail::int_ops::LeftShiftOverflow(x, y, &result))
 // Bitwise AND uses signed two's-complement sign extension.
 TVM_FFI_DEFINE_BIGINT_OP_NO_OVERFLOW(BigInt, operator&, AndFallback, BigInt(x& y))
 // Bitwise OR uses signed two's-complement sign extension.
@@ -1510,7 +1510,7 @@ TVM_FFI_DEFINE_BIGINT_OP_NO_OVERFLOW(BigInt, min, MinFallback, BigInt(x <= y ? x
 TVM_FFI_DEFINE_BIGINT_OP_NO_OVERFLOW(BigInt, max, MaxFallback, BigInt(x >= y ? x : y))
 // Sign-extending right shift; negative counts raise ValueError, large counts return 0/-1.
 TVM_FFI_DEFINE_BIGINT_OP_NO_OVERFLOW(BigInt, operator>>, RightShiftFallback,
-                                     BigInt(details::int_ops::RightShift(x, y)))
+                                     BigInt(detail::int_ops::RightShift(x, y)))
 // Test signed integer equality.
 TVM_FFI_DEFINE_BIGINT_OP_NO_OVERFLOW(bool, operator==, EqualFallback, x == y)
 // Test signed integer inequality.
@@ -1533,19 +1533,19 @@ TVM_FFI_DEFINE_BIGINT_OP_COMPARE(>=)
 TVM_FFI_INLINE BigInt operator+(const BigInt& value) { return value; }
 
 TVM_FFI_INLINE BigInt operator-(const BigInt& value) {
-  if (TVM_FFI_PREDICT_TRUE(details::BigIntUnsafe::CheckInt64(value))) {
-    int64_t x = details::BigIntUnsafe::GetInt64(value);
+  if (TVM_FFI_PREDICT_TRUE(detail::BigIntUnsafe::CheckInt64(value))) {
+    int64_t x = detail::BigIntUnsafe::GetInt64(value);
     constexpr int64_t kMin = std::numeric_limits<int64_t>::min();
     if (TVM_FFI_PREDICT_TRUE(x != kMin)) return BigInt(-x);
   }
-  return details::int_ops::NegateFallback(details::BigIntUnsafe::GetArrayView(value));
+  return detail::int_ops::NegateFallback(detail::BigIntUnsafe::GetArrayView(value));
 }
 
 TVM_FFI_INLINE BigInt operator~(const BigInt& value) {
-  if (TVM_FFI_PREDICT_TRUE(details::BigIntUnsafe::CheckInt64(value))) {
-    return BigInt(~details::BigIntUnsafe::GetInt64(value));
+  if (TVM_FFI_PREDICT_TRUE(detail::BigIntUnsafe::CheckInt64(value))) {
+    return BigInt(~detail::BigIntUnsafe::GetInt64(value));
   }
-  return details::int_ops::ComplementFallback(details::BigIntUnsafe::GetArrayView(value));
+  return detail::int_ops::ComplementFallback(detail::BigIntUnsafe::GetArrayView(value));
 }
 
 /// \cond Doxygen_Suppress
@@ -1610,7 +1610,7 @@ inline std::istream& operator>>(std::istream& is, BigInt& value) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const BigInt& value) {
-  return os << details::int_ops::ToStringFallback(value);
+  return os << detail::int_ops::ToStringFallback(value);
 }
 
 }  // namespace ffi

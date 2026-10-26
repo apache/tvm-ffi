@@ -67,9 +67,9 @@ def bigint_module() -> tvm_ffi.Module:
               TVMFFIByteArray input{bytes.data(), bytes.size()};
               TVMFFIAny result;
               if (TVMFFIBigIntFromByteArray(&input, &result) != 0) {
-                throw tvm::ffi::details::MoveFromSafeCallRaised();
+                throw tvm::ffi::detail::MoveFromSafeCallRaised();
               }
-              return tvm::ffi::details::AnyUnsafe::MoveTVMFFIAnyRawToAny(result);
+              return tvm::ffi::detail::AnyUnsafe::MoveTVMFFIAnyRawToAny(result);
             }
         """,
         functions=[

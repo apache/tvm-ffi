@@ -25,6 +25,8 @@
 
 #include <tvm/ffi/extra/base.h>
 #include <tvm/ffi/extra/json.h>
+#include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/accessor.h>
 
 namespace tvm {
 namespace ffi {
@@ -66,6 +68,27 @@ TVM_FFI_EXTRA_CXX_API json::Value ToJSONGraph(const Any& value, const Any& metad
  * \return The deserialized object graph.
  */
 TVM_FFI_EXTRA_CXX_API Any FromJSONGraph(const json::Value& value);
+
+namespace type_attr {
+/*!
+ * \brief Serialize object data to a JSON-compatible value.
+ *
+ * If registered, ``ToJSONGraph`` calls this instead of the default
+ * field-by-field serialization.  Allows types with non-trivial internal
+ * state (e.g. ``TInt`` storing a plain ``int64_t``) to define a compact
+ * custom JSON representation.
+ */
+inline constexpr reflection::AttrKey<TypedFunction<Any(AnyView)>> kDataToJson{"__data_to_json__"};
+/*!
+ * \brief Deserialize object data from a JSON-compatible value.
+ *
+ * Counterpart to ``kDataToJson``.  If registered, ``FromJSONGraph`` calls
+ * this to reconstruct the object from its serialized representation
+ * instead of using field-by-field deserialization.
+ */
+inline constexpr reflection::AttrKey<TypedFunction<Any(AnyView)>> kDataFromJson{
+    "__data_from_json__"};
+}  // namespace type_attr
 
 }  // namespace ffi
 }  // namespace tvm

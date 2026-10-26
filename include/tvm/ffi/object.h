@@ -23,7 +23,7 @@
 #ifndef TVM_FFI_OBJECT_H_
 #define TVM_FFI_OBJECT_H_
 
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/type_traits.h>
 
@@ -53,7 +53,7 @@ namespace ffi {
  */
 struct UnsafeInit {};
 
-namespace details {
+namespace detail {
 // Helper to perform
 // unsafe operations related to object
 struct ObjectUnsafe;
@@ -80,7 +80,7 @@ constexpr uint64_t kCombinedRefCountMaskUInt32 = (static_cast<uint64_t>(1) << 32
 template <typename TargetType>
 TVM_FFI_INLINE bool IsObjectInstance(int32_t object_type_index);
 
-}  // namespace details
+}  // namespace detail
 
 /*!
  * \brief Base class of all object containers.
@@ -146,7 +146,7 @@ class Object {
    */
   template <typename TargetType>
   bool IsInstance() const {
-    return details::IsObjectInstance<TargetType>(header_.type_index);
+    return detail::IsObjectInstance<TargetType>(header_.type_index);
   }
 
   /*! \return The internal runtime type index of the object. */
@@ -253,10 +253,10 @@ class Object {
 
  private:
   // exposing detailed constants to here
-  static constexpr uint64_t kCombinedRefCountMaskUInt32 = details::kCombinedRefCountMaskUInt32;
-  static constexpr uint64_t kCombinedRefCountStrongOne = details::kCombinedRefCountStrongOne;
-  static constexpr uint64_t kCombinedRefCountWeakOne = details::kCombinedRefCountWeakOne;
-  static constexpr uint64_t kCombinedRefCountBothOne = details::kCombinedRefCountBothOne;
+  static constexpr uint64_t kCombinedRefCountMaskUInt32 = detail::kCombinedRefCountMaskUInt32;
+  static constexpr uint64_t kCombinedRefCountStrongOne = detail::kCombinedRefCountStrongOne;
+  static constexpr uint64_t kCombinedRefCountWeakOne = detail::kCombinedRefCountWeakOne;
+  static constexpr uint64_t kCombinedRefCountBothOne = detail::kCombinedRefCountBothOne;
   /*! \brief increase strong reference count, the caller must already hold a strong reference */
   TVM_FFI_INLINE void IncRef() {
 #ifdef _MSC_VER
@@ -405,7 +405,7 @@ class Object {
   friend class ObjectPtr;
   template <typename>
   friend class WeakObjectPtr;
-  friend struct tvm::ffi::details::ObjectUnsafe;
+  friend struct tvm::ffi::detail::ObjectUnsafe;
 };
 
 /*!
@@ -545,7 +545,7 @@ class ObjectPtr {
   friend class ObjectPtr;
   template <typename>
   friend class WeakObjectPtr;
-  friend struct tvm::ffi::details::ObjectUnsafe;
+  friend struct tvm::ffi::detail::ObjectUnsafe;
 };
 
 /*!
@@ -612,7 +612,7 @@ class Arc : public ObjectPtr<T> {
   friend Arc<U> make_arc(Args&&... args);
   template <typename>
   friend class Arc;
-  friend struct tvm::ffi::details::ObjectUnsafe;
+  friend struct tvm::ffi::detail::ObjectUnsafe;
 };
 
 /*!
@@ -622,7 +622,7 @@ class Arc : public ObjectPtr<T> {
 template <typename T>
 inline constexpr bool is_object_subclass_v = std::is_base_of_v<Object, T>;
 
-namespace details {
+namespace detail {
 
 /*! \brief Whether T is an Object subclass with cv- or reference qualification. */
 template <typename T>
@@ -630,7 +630,7 @@ inline constexpr bool is_qualified_object_v =
     ::tvm::ffi::is_object_subclass_v<std::remove_cv_t<std::remove_reference_t<T>>> &&
     !std::is_same_v<T, std::remove_cv_t<std::remove_reference_t<T>>>;
 
-}  // namespace details
+}  // namespace detail
 
 /// \cond Doxygen_Suppress
 /*!
@@ -797,7 +797,7 @@ class WeakObjectPtr {
 
   template <typename>
   friend class WeakObjectPtr;
-  friend struct tvm::ffi::details::ObjectUnsafe;
+  friend struct tvm::ffi::detail::ObjectUnsafe;
 };
 
 /*!
@@ -1027,7 +1027,7 @@ class ObjectRef {
   Object* get_mutable() const { return data_.get(); }
   // friend classes.
   friend struct ObjectPtrHash;
-  friend struct tvm::ffi::details::ObjectUnsafe;
+  friend struct tvm::ffi::detail::ObjectUnsafe;
 };
 
 /*!
@@ -1214,7 +1214,7 @@ struct ObjectPtrEqual {
   [[maybe_unused]] static constexpr bool _type_is_nullable = false;                          \
   using ContainerType = ObjectName
 
-namespace details {
+namespace detail {
 
 template <typename TargetType>
 TVM_FFI_INLINE bool IsObjectInstance(int32_t object_type_index) {
@@ -1443,7 +1443,7 @@ struct ObjectUnsafe {
   }
 };
 
-}  // namespace details
+}  // namespace detail
 
 template <typename T>
 struct TypeToRuntimeTypeIndex<T, std::enable_if_t<std::is_base_of_v<ObjectRef, T>>> {
@@ -1480,7 +1480,7 @@ struct TypeTraits<ObjectPtr<TObject>,
       TypeTraits<std::nullptr_t>::CopyToAnyView(nullptr, result);
       return;
     }
-    TVMFFIObject* obj_ptr = details::ObjectUnsafe::TVMFFIObjectPtrFromObjectPtr(src);
+    TVMFFIObject* obj_ptr = detail::ObjectUnsafe::TVMFFIObjectPtrFromObjectPtr(src);
     result->type_index = obj_ptr->type_index;
     TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
@@ -1493,7 +1493,7 @@ struct TypeTraits<ObjectPtr<TObject>,
       TypeTraits<std::nullptr_t>::MoveToAny(nullptr, result);
       return;
     }
-    TVMFFIObject* obj_ptr = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(src));
+    TVMFFIObject* obj_ptr = detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(src));
     result->type_index = obj_ptr->type_index;
     TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
@@ -1504,17 +1504,17 @@ struct TypeTraits<ObjectPtr<TObject>,
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
     if (src->type_index == TypeIndex::kTVMFFINone) return true;
     return src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
-           details::IsObjectInstance<TObject>(src->type_index);
+           detail::IsObjectInstance<TObject>(src->type_index);
   }
 
   TVM_FFI_INLINE static ObjectPtr<TObject> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
     if (src->type_index == TypeIndex::kTVMFFINone) return nullptr;
-    return details::ObjectUnsafe::ObjectPtrFromUnowned<TObject>(src->v_obj);
+    return detail::ObjectUnsafe::ObjectPtrFromUnowned<TObject>(src->v_obj);
   }
 
   TVM_FFI_INLINE static ObjectPtr<TObject> MoveFromAnyAfterCheck(TVMFFIAny* src) {
     if (src->type_index == TypeIndex::kTVMFFINone) return nullptr;
-    ObjectPtr<TObject> result = details::ObjectUnsafe::ObjectPtrFromOwned<TObject>(src->v_obj);
+    ObjectPtr<TObject> result = detail::ObjectUnsafe::ObjectPtrFromOwned<TObject>(src->v_obj);
     TypeTraits<std::nullptr_t>::MoveToAny(nullptr, src);
     return result;
   }
@@ -1551,17 +1551,17 @@ struct TypeTraits<Arc<TObject>,
 
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
     return src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
-           details::IsObjectInstance<TObject>(src->type_index);
+           detail::IsObjectInstance<TObject>(src->type_index);
   }
 
   TVM_FFI_INLINE static Arc<TObject> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    return details::ObjectUnsafe::ArcFromObjectPtr(
-        details::ObjectUnsafe::ObjectPtrFromUnowned<TObject>(src->v_obj));
+    return detail::ObjectUnsafe::ArcFromObjectPtr(
+        detail::ObjectUnsafe::ObjectPtrFromUnowned<TObject>(src->v_obj));
   }
 
   TVM_FFI_INLINE static Arc<TObject> MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    Arc<TObject> result = details::ObjectUnsafe::ArcFromObjectPtr(
-        details::ObjectUnsafe::ObjectPtrFromOwned<TObject>(src->v_obj));
+    Arc<TObject> result = detail::ObjectUnsafe::ArcFromObjectPtr(
+        detail::ObjectUnsafe::ObjectPtrFromOwned<TObject>(src->v_obj));
     TypeTraits<std::nullptr_t>::MoveToAny(nullptr, src);
     return result;
   }
@@ -1577,6 +1577,21 @@ struct TypeTraits<Arc<TObject>,
   }
 };
 
+/*!
+ * \brief Default type traits for an ObjectRef subclass.
+ * \tparam TObjRef The ObjectRef subclass.
+ *
+ * A TypeTraits<TObjRef> specialization deriving from this base can customize only
+ * CheckAnyStrict while inheriting the default cast, copy, and move operations.
+ * TryCastFromAnyView statically dispatches to TypeTraits<TObjRef>::CheckAnyStrict,
+ * so the final specialization's checks apply without virtual dispatch. On success,
+ * it reuses CopyFromAnyViewAfterCheck.
+ *
+ * A custom CheckAnyStrict must validate the storage and nullability requirements
+ * of TObjRef before accepting a value. It can call this base's CheckAnyStrict to
+ * check those requirements before applying additional semantic constraints. It
+ * must not call the inherited TryCastFromAnyView, which would recurse.
+ */
 template <typename TObjRef>
 struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIObject;
@@ -1589,7 +1604,7 @@ struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
         return;
       }
     }
-    TVMFFIObject* obj_ptr = details::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(src);
+    TVMFFIObject* obj_ptr = detail::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(src);
     result->type_index = obj_ptr->type_index;
     TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
@@ -1604,7 +1619,7 @@ struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
         return;
       }
     }
-    TVMFFIObject* obj_ptr = details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(src));
+    TVMFFIObject* obj_ptr = detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(src));
     result->type_index = obj_ptr->type_index;
     TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
@@ -1617,43 +1632,34 @@ struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
       if (src->type_index == TypeIndex::kTVMFFINone) return true;
     }
     return src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
-           details::IsObjectInstance<ContainerType>(src->type_index);
+           detail::IsObjectInstance<ContainerType>(src->type_index);
   }
 
   TVM_FFI_INLINE static TObjRef CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
     if constexpr (TObjRef::_type_is_nullable) {
       if (src->type_index == TypeIndex::kTVMFFINone) {
-        return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(nullptr);
+        return detail::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(nullptr);
       }
     }
-    return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(
-        details::ObjectUnsafe::ObjectPtrFromUnowned<Object>(src->v_obj));
+    return detail::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(
+        detail::ObjectUnsafe::ObjectPtrFromUnowned<Object>(src->v_obj));
   }
 
   TVM_FFI_INLINE static TObjRef MoveFromAnyAfterCheck(TVMFFIAny* src) {
     if constexpr (TObjRef::_type_is_nullable) {
       if (src->type_index == TypeIndex::kTVMFFINone) {
-        return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(nullptr);
+        return detail::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(nullptr);
       }
     }
     ObjectPtr<ContainerType> obj_ptr =
-        details::ObjectUnsafe::ObjectPtrFromOwned<ContainerType>(src->v_obj);
+        detail::ObjectUnsafe::ObjectPtrFromOwned<ContainerType>(src->v_obj);
     TypeTraits<std::nullptr_t>::MoveToAny(nullptr, src);
-    return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(std::move(obj_ptr));
+    return detail::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(std::move(obj_ptr));
   }
 
   TVM_FFI_INLINE static std::optional<TObjRef> TryCastFromAnyView(const TVMFFIAny* src) {
-    if constexpr (TObjRef::_type_is_nullable) {
-      if (src->type_index == TypeIndex::kTVMFFINone) {
-        return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(nullptr);
-      }
-    }
-    if (src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
-        details::IsObjectInstance<ContainerType>(src->type_index)) {
-      return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(
-          details::ObjectUnsafe::ObjectPtrFromUnowned<ContainerType>(src->v_obj));
-    }
-    return std::nullopt;
+    if (!TypeTraits<TObjRef>::CheckAnyStrict(src)) return std::nullopt;
+    return CopyFromAnyViewAfterCheck(src);
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return ContainerType::_type_key; }
@@ -1708,7 +1714,7 @@ template <typename TObject>
 struct TypeTraits<TObject*, std::enable_if_t<std::is_base_of_v<Object, TObject>>>
     : public TypeTraitsBase {
   TVM_FFI_INLINE static void CopyToAnyView(TObject* src, TVMFFIAny* result) {
-    TVMFFIObject* obj_ptr = details::ObjectUnsafe::GetHeader(src);
+    TVMFFIObject* obj_ptr = detail::ObjectUnsafe::GetHeader(src);
     result->type_index = obj_ptr->type_index;
     TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
@@ -1717,25 +1723,25 @@ struct TypeTraits<TObject*, std::enable_if_t<std::is_base_of_v<Object, TObject>>
   }
 
   TVM_FFI_INLINE static void MoveToAny(TObject* src, TVMFFIAny* result) {
-    TVMFFIObject* obj_ptr = details::ObjectUnsafe::GetHeader(src);
+    TVMFFIObject* obj_ptr = detail::ObjectUnsafe::GetHeader(src);
     result->type_index = obj_ptr->type_index;
     TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
     result->v_obj = obj_ptr;
-    details::ObjectUnsafe::IncRefObjectHandle(result->v_obj);
+    detail::ObjectUnsafe::IncRefObjectHandle(result->v_obj);
   }
 
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
     return src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
-           details::IsObjectInstance<TObject>(src->type_index);
+           detail::IsObjectInstance<TObject>(src->type_index);
   }
 
   TVM_FFI_INLINE static TObject* CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
     if constexpr (!std::is_const_v<TObject>) {
       static_assert(TObject::_type_mutable, "TObject must be mutable to enable cast from Any");
     }
-    return details::ObjectUnsafe::RawObjectPtrFromUnowned<TObject>(src->v_obj);
+    return detail::ObjectUnsafe::RawObjectPtrFromUnowned<TObject>(src->v_obj);
   }
 
   TVM_FFI_INLINE static std::optional<TObject*> TryCastFromAnyView(const TVMFFIAny* src) {

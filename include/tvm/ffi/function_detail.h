@@ -17,14 +17,14 @@
  * under the License.
  */
 /*!
- * \file tvm/ffi/function_details.h
+ * \file tvm/ffi/function_detail.h
  * \brief Implements the funciton signature reflection
  */
-#ifndef TVM_FFI_FUNCTION_DETAILS_H_
-#define TVM_FFI_FUNCTION_DETAILS_H_
+#ifndef TVM_FFI_FUNCTION_DETAIL_H_
+#define TVM_FFI_FUNCTION_DETAIL_H_
 
 #include <tvm/ffi/any.h>
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
 
@@ -39,7 +39,7 @@ namespace ffi {
 template <typename T>
 class Expected;
 
-namespace details {
+namespace detail {
 
 template <typename ArgType>
 struct Arg2Str {
@@ -100,10 +100,10 @@ struct FuncFunctorImpl {
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":")" << StaticTypeKey::kTVMFFIFunction << R"(","named_args":{"return":[)";
-    oss << details::TypeSchema<R>::v();
+    oss << detail::TypeSchema<R>::v();
     oss << R"(],"params":[)";
     const char* sep = "";
-    ((oss << sep << details::TypeSchema<Args>::v(), sep = ","), ...);
+    ((oss << sep << detail::TypeSchema<Args>::v(), sep = ","), ...);
     (void)sep;
     oss << "]}}";
     return oss.str();
@@ -263,7 +263,7 @@ struct TypeSchemaImpl<AnyView> {
   }
 };
 
-}  // namespace details
+}  // namespace detail
 }  // namespace ffi
 }  // namespace tvm
-#endif  // TVM_FFI_FUNCTION_DETAILS_H_
+#endif  // TVM_FFI_FUNCTION_DETAIL_H_

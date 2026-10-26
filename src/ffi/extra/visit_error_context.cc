@@ -151,21 +151,20 @@ class VisitErrorAccessPathFinder {
     }
     switch (type_index) {
       case TypeIndex::kTVMFFIArray:
-        this->VisitSequence(
-            details::AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(value)));
+        this->VisitSequence(detail::AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(value)));
         break;
       case TypeIndex::kTVMFFIList:
-        this->VisitSequence(details::AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(value)));
+        this->VisitSequence(detail::AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(value)));
         break;
       case TypeIndex::kTVMFFIMap:
-        this->VisitMap(details::AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(value)));
+        this->VisitMap(detail::AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(value)));
         break;
       case TypeIndex::kTVMFFIDict:
-        this->VisitMap(details::AnyUnsafe::MoveFromAnyAfterCheck<Dict<Any, Any>>(std::move(value)));
+        this->VisitMap(detail::AnyUnsafe::MoveFromAnyAfterCheck<Dict<Any, Any>>(std::move(value)));
         break;
       default:
         if (type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
-          ObjectRef obj = details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value));
+          ObjectRef obj = detail::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value));
           this->VisitObject(obj);
         }
         break;

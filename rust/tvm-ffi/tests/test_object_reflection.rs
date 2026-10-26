@@ -16,414 +16,354 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! Object types defined in Rust register their fields and methods as C++
-//! `refl::ObjectDef` does: the reflection records match the ones C++ registers
-//! for `testing.SchemaAllTypes`, and the runtime reads and sets the fields and
-//! calls the methods through them.
-
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::reflection::ObjectDef;
+use tvm_ffi::reflection::FieldFlags;
 use tvm_ffi::*;
-use tvm_ffi_sys::TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskWritable;
 use tvm_ffi_sys::{
-    TVMFFIByteArray, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIGetTypeInfo, TVMFFIMethodInfo,
-    TVMFFITypeInfo, TVMFFITypeKeyToIndex,
+    TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIGetTypeInfo,
+    TVMFFISEqHashKind, TVMFFITypeInfo,
 };
 
-/// Fields of the types `testing.SchemaAllTypes` registers with `def_rw`, and
-/// methods of the signatures it and `testing.schema_*` register.
+// Rust-defined types whose `#[reflect]` fields reach the type table, so that
+// the C++ structural engines, `repr` and deep copy see them.
+
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.Reflected"]
+#[type_key = "testing.rust.ReflectedPoint"]
 #[type_register]
-#[type_mutable]
-#[type_reflection(ReflectedObj::register_reflection)]
-struct ReflectedObj {
-    object: Object,
-    #[def_rw(doc = "bool field")]
-    v_bool: bool,
-    #[def_rw]
-    v_int: i64,
-    #[def_rw]
-    v_float: f64,
-    #[def_rw]
-    v_device: DLDevice,
-    #[def_rw]
-    v_dtype: DLDataType,
-    #[def_rw]
-    v_string: String,
-    #[def_rw]
-    v_bytes: Bytes,
-    #[def_rw]
-    v_opt_int: Option<i64>,
-    #[def_rw]
-    v_opt_str: Option<String>,
-    #[def_rw]
-    v_arr_int: Array<i64>,
-    #[def_rw]
-    v_arr_str: Array<String>,
-    #[def_rw]
-    v_map_str_int: Map<String, i64>,
-    #[def_rw]
-    v_map_str_arr_int: Map<String, Array<i64>>,
-    // Not reflected.
-    hidden: i64,
+#[type_s_eq_hash_kind = "TreeNode"]
+struct PointObj {
+    base: Object,
+    #[reflect]
+    x: i64,
+    #[reflect(writable)]
+    y: f64,
+    #[reflect(seq_hash_ignore, repr_off)]
+    label: tvm_ffi::String,
+    // Not reflected: not in the type table, but still shallow-copied.
+    hits: i64,
 }
 
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
-struct Reflected {
-    data: ObjectArc<ReflectedObj>,
+struct Point {
+    data: ObjectArc<PointObj>,
 }
 
-impl ReflectedObj {
-    fn register_reflection(def: &mut ObjectDef<Self>) {
-        def.def(
-            "add_int",
-            |this: Reflected, x: i64| -> Result<i64> { Ok(this.data.v_int + x) },
-            "add int method",
-        )
-        .def_static(
-            "schema_arr_map_opt",
-            |_: Array<Option<i64>>,
-             mp: Map<String, Array<i64>>,
-             _: Option<String>|
-             -> Result<Map<String, Array<i64>>> { Ok(mp) },
-            "",
-        );
-        // A registering function may register other types: each registration
-        // takes the lock on its own.
-        RegisteredInHookObj::type_index();
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "testing.rust.ReflectedPoint3"]
+#[type_register]
+#[type_final]
+struct Point3Obj {
+    base: PointObj,
+    #[reflect]
+    z: i64,
+    #[reflect]
+    tags: Array<tvm_ffi::String>,
+    #[reflect]
+    r#type: Option<Point>,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+struct Point3 {
+    data: ObjectArc<Point3Obj>,
+}
+
+tvm_ffi::impl_object_upcast!(Point3 => Point);
+
+fn point_obj(x: i64, y: f64, label: &str) -> PointObj {
+    PointObj {
+        base: Object::new(),
+        x,
+        y,
+        label: label.into(),
+        hits: 7,
     }
 }
 
-fn reflected(v_int: i64, v_string: &str) -> Reflected {
-    Reflected {
-        data: ObjectArc::new(ReflectedObj {
-            object: Object::new(),
-            v_bool: true,
-            v_int,
-            v_float: 0.5,
-            v_device: DLDevice::new(DLDeviceType::kDLCPU, 0),
-            v_dtype: DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1),
-            v_string: String::from(v_string),
-            v_bytes: Bytes::from(&b"bytes"[..]),
-            v_opt_int: None,
-            v_opt_str: Some(String::from("opt")),
-            v_arr_int: Array::new(vec![1, 2]),
-            v_arr_str: Array::new(vec![String::from("a")]),
-            v_map_str_int: Map::new(),
-            v_map_str_arr_int: Map::new(),
-            hidden: 0,
+fn point(x: i64, y: f64, label: &str) -> Point {
+    Point {
+        data: ObjectArc::new(point_obj(x, y, label)),
+    }
+}
+
+fn point3(x: i64, z: i64) -> Point3 {
+    Point3 {
+        data: ObjectArc::new(Point3Obj {
+            base: point_obj(x, 0.5, "p3"),
+            z,
+            tags: Array::new(vec!["a".into(), "b".into()]),
+            r#type: Some(point(1, 2.0, "inner")),
         }),
     }
 }
 
-#[repr(C)]
-#[derive(Object)]
-#[type_key = "testing.rust.RegisteredInHook"]
-#[type_register]
-struct RegisteredInHookObj {
-    object: Object,
-}
-
-/// A parent and a child that each declare fields; the child's type info finds
-/// the parent's fields through its ancestor, as for C++.
-#[repr(C)]
-#[derive(Object)]
-#[type_key = "testing.rust.ReflectedParent"]
-#[type_register]
-#[type_child_slots = 1]
-struct ReflectedParentObj {
-    object: Object,
-    #[def_ro(name = "label", doc = "the label")]
-    r#label_: String,
-}
-
-#[repr(C)]
-#[derive(Object)]
-#[type_key = "testing.rust.ReflectedChild"]
-#[type_register]
-#[type_final]
-struct ReflectedChildObj {
-    parent: ReflectedParentObj,
-    #[def_ro]
-    count: i64,
-    #[def_ro]
-    any: Any,
-    #[def_ro]
-    object: tvm_ffi::object::ObjectRef,
-}
-
-#[repr(C)]
-#[derive(ObjectRef, Clone)]
-struct ReflectedChild {
-    data: ObjectArc<ReflectedChildObj>,
-}
-
-/// A second definition of `testing.rust.ReflectedParent`, as another library
-/// that links the crate defining it would have: it takes the registered index
-/// and does not register the reflection again.
-#[repr(C)]
-#[derive(Object)]
-#[type_key = "testing.rust.ReflectedParent"]
-#[type_register]
-#[type_child_slots = 1]
-struct ReflectedParentCopyObj {
-    object: Object,
-    #[def_ro(name = "label", doc = "the label")]
-    label: String,
-}
-
-/// The dummy call keeps `libtvm_ffi_testing`, which registers the C++ types
-/// and functions compared with, linked.
-fn type_info(type_key: &str) -> &'static TVMFFITypeInfo {
-    assert_eq!(unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() }, 0);
-    let key = unsafe { TVMFFIByteArray::from_str(type_key) };
-    let mut index = -1;
-    assert_eq!(unsafe { TVMFFITypeKeyToIndex(&key, &mut index) }, 0);
-    unsafe { &*TVMFFIGetTypeInfo(index) }
+fn type_info<N: ObjectCore>() -> &'static TVMFFITypeInfo {
+    unsafe { &*TVMFFIGetTypeInfo(N::type_index()) }
 }
 
 fn fields(info: &TVMFFITypeInfo) -> &[TVMFFIFieldInfo] {
     unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) }
 }
 
-fn methods(info: &TVMFFITypeInfo) -> &[TVMFFIMethodInfo] {
-    unsafe { std::slice::from_raw_parts(info.methods, info.num_methods as usize) }
-}
-
-fn find_field<'a>(info: &'a TVMFFITypeInfo, name: &str) -> &'a TVMFFIFieldInfo {
-    fields(info)
-        .iter()
-        .find(|field| field.name.as_str() == name)
-        .unwrap_or_else(|| panic!("no field {name}"))
-}
-
-fn find_method<'a>(info: &'a TVMFFITypeInfo, name: &str) -> &'a TVMFFIMethodInfo {
-    methods(info)
-        .iter()
-        .find(|method| method.name.as_str() == name)
-        .unwrap_or_else(|| panic!("no method {name}"))
-}
-
-/// The `type_schema` entry of a metadata JSON string, parsed by the runtime.
-fn type_schema(metadata: &TVMFFIByteArray) -> String {
-    let parsed: Map<String, Any> = Function::get_global("ffi.json.Parse")
+fn call(name: &str, args: &[AnyView]) -> Any {
+    Function::get_global(name)
         .unwrap()
-        .call_tuple_with_len::<1, _>((String::from(metadata.as_str()),))
-        .unwrap()
-        .try_into()
-        .unwrap();
-    parsed
-        .get(&String::from("type_schema"))
-        .unwrap()
-        .unwrap()
-        .try_into()
+        .call_packed(args)
         .unwrap()
 }
 
-fn global_metadata(name: &str) -> String {
-    Function::get_global("ffi.GetGlobalFuncMetadata")
-        .unwrap()
-        .call_tuple_with_len::<1, _>((String::from(name),))
-        .unwrap()
-        .try_into()
-        .unwrap()
+// A type registers on first use, and the runtime does not guard its type table
+// against readers on other threads, so each test registers every type here
+// before it reads the table.
+fn register_types() {
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        PointObj::type_index();
+        Point3Obj::type_index();
+        CounterObj::type_index();
+        no_imports::LeafObj::type_index();
+    });
 }
 
 #[test]
-fn test_fields_match_cpp() {
-    ReflectedObj::type_index();
-    let rust = type_info(ReflectedObj::TYPE_KEY);
-    let cpp = type_info("testing.SchemaAllTypes");
-    let names: Vec<&str> = fields(rust).iter().map(|f| f.name.as_str()).collect();
-    assert!(!names.contains(&"hidden"));
-    assert_eq!(names.len(), 13);
-    for field in fields(rust) {
-        let name = field.name.as_str();
-        let cpp_field = find_field(cpp, name);
-        assert_eq!(
-            type_schema(&field.metadata).as_str(),
-            type_schema(&cpp_field.metadata).as_str(),
-            "{name}"
-        );
-        // Both are writable, and carry no other flags since neither has a
-        // default value here.
-        let writable = kTVMFFIFieldFlagBitMaskWritable as i64;
-        assert_eq!(field.flags, writable, "{name}");
-        assert_eq!(cpp_field.flags & writable, writable, "{name}");
-        assert_eq!(
-            field.field_static_type_index, cpp_field.field_static_type_index,
-            "{name}"
-        );
-        assert!(field.getter.is_some() && !field.setter.is_null(), "{name}");
-    }
-    assert_eq!(find_field(rust, "v_bool").doc.as_str(), "bool field");
-    assert_eq!(find_field(rust, "v_int").doc.size, 0);
-}
+fn test_reflected_fields_are_registered_with_the_type() {
+    register_types();
+    let info = type_info::<PointObj>();
+    let names: Vec<&str> = fields(info).iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["x", "y", "label"]);
 
-#[test]
-fn test_type_metadata_and_finality() {
-    ReflectedChildObj::type_index();
-    let info = type_info(ReflectedChildObj::TYPE_KEY);
+    let [x, y, label] = fields(info) else {
+        unreachable!()
+    };
+    assert_eq!(x.flags, 0);
+    assert_eq!(x.offset, std::mem::offset_of!(PointObj, x) as i64);
+    assert_eq!(x.field_static_type_index, TypeIndex::kTVMFFIInt as i32);
+    assert_eq!(
+        x.metadata.as_str(),
+        r#"{"type_schema":"{\"type\":\"int\"}"}"#
+    );
+    assert_eq!(
+        y.flags,
+        TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskWritable as i64
+    );
+    assert_eq!(
+        label.flags,
+        (FieldFlags::SEQ_HASH_IGNORE | FieldFlags::REPR_OFF).bits()
+    );
+    assert_eq!(label.field_static_type_index, -1);
+
     let metadata = unsafe { &*info.metadata };
     assert_eq!(
         metadata.total_size as usize,
-        std::mem::size_of::<ReflectedChildObj>()
+        std::mem::size_of::<PointObj>()
     );
-    let is_final = |type_key: &str| -> bool {
-        reflection::get_type_attr(type_info(type_key).type_index, "__ffi_type_final__")
-            .unwrap()
-            .try_into()
-            .unwrap()
-    };
-    assert!(is_final(ReflectedChildObj::TYPE_KEY));
-    assert!(!is_final(ReflectedParentObj::TYPE_KEY));
+    assert_eq!(
+        metadata.structural_eq_hash_kind,
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32
+    );
+
+    // The subtype registers only its own fields, and inherits the kind.
+    let info = type_info::<Point3Obj>();
+    let names: Vec<&str> = fields(info).iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["z", "tags", "type"]);
+    assert_eq!(
+        fields(info)[1].metadata.as_str(),
+        r#"{"type_schema":"{\"type\":\"ffi.Array\",\"args\":[{\"type\":\"ffi.String\"}]}"}"#
+    );
+    assert_eq!(
+        unsafe { (*info.metadata).structural_eq_hash_kind },
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32
+    );
 }
 
 #[test]
-fn test_field_getters_and_setters() {
-    let object = reflected(7, "seven");
-    let type_index = ReflectedObj::type_index();
-    let v_int = FieldGetter::new(type_index, "v_int").unwrap();
-    assert_eq!(v_int.get::<_, i64>(&*object.data).unwrap(), 7);
-    let v_string = FieldGetter::new(type_index, "v_string").unwrap();
-    assert_eq!(
-        v_string.get::<_, String>(&*object.data).unwrap().as_str(),
-        "seven"
-    );
-    let v_opt_str = FieldGetter::new(type_index, "v_opt_str").unwrap();
-    assert_eq!(
-        v_opt_str
-            .get::<_, Option<String>>(&*object.data)
-            .unwrap()
-            .unwrap()
-            .as_str(),
-        "opt"
-    );
+fn test_reflected_fields_read_and_write_through_the_c_abi() {
+    register_types();
+    let p3 = point3(3, 4);
+    let x = FieldGetter::new(Point3Obj::type_index(), "x").unwrap();
+    let z = FieldGetter::new(Point3Obj::type_index(), "z").unwrap();
+    assert_eq!(x.get::<_, i64>(&*p3.data).unwrap(), 3);
+    assert_eq!(z.get::<_, i64>(&*p3.data).unwrap(), 4);
 
-    // Set fields as other languages do: the setter at the field's address.
-    let info = type_info(ReflectedObj::TYPE_KEY);
-    let set = |name: &str, value: Any| -> Result<()> {
-        let field = find_field(info, name);
-        let setter: TVMFFIFieldSetter = unsafe { std::mem::transmute(field.setter) };
-        let address = unsafe {
-            ObjectArc::as_raw(&object.data)
-                .cast::<u8>()
-                .add(field.offset as usize)
-                .cast_mut()
-                .cast()
-        };
-        let mut value = value;
-        let ret = unsafe { setter(address, Any::as_data_ptr(&mut value)) };
-        if ret == 0 {
-            Ok(())
-        } else {
-            Err(Error::from_raised())
-        }
+    let p = point(1, 2.0, "p");
+    let y = &fields(type_info::<PointObj>())[1];
+    let setter: TVMFFIFieldSetter = unsafe { std::mem::transmute(y.setter) };
+    let field = unsafe {
+        ObjectArc::as_raw(&p.data)
+            .cast::<u8>()
+            .add(y.offset as usize)
+            .cast_mut()
     };
-    set("v_int", Any::from(8i64)).unwrap();
-    set("v_string", Any::from(String::from("eight"))).unwrap();
-    set("v_opt_int", Any::from(3i64)).unwrap();
-    assert_eq!(object.data.v_int, 8);
-    assert_eq!(object.data.v_string.as_str(), "eight");
-    assert_eq!(object.data.v_opt_int, Some(3));
-    let error = set("v_int", Any::from(String::from("nine"))).unwrap_err();
+    let value = Any::from(8.5f64);
+    assert_eq!(
+        unsafe { setter(field.cast(), &Any::into_raw_ffi_any(value.clone())) },
+        0
+    );
+    assert_eq!(p.data.y, 8.5);
+    // A value of the wrong type is an error, not a write.
+    let value = Any::from(tvm_ffi::String::from("no"));
+    assert_ne!(
+        unsafe { setter(field.cast(), &Any::into_raw_ffi_any(value.clone())) },
+        0
+    );
+    let error = Error::from_raised();
     assert_eq!(error.kind(), TYPE_ERROR);
-    assert_eq!(object.data.v_int, 8);
+    assert_eq!(p.data.y, 8.5);
 }
 
 #[test]
-fn test_inherited_fields() {
-    let child = ReflectedChild {
-        data: ObjectArc::new(ReflectedChildObj {
-            parent: ReflectedParentObj {
-                object: Object::new(),
-                r#label_: String::from("parent"),
-            },
-            count: 2,
-            any: Any::from(1.5f64),
-            object: Any::from(Function::from_typed(|| -> Result<()> { Ok(()) }))
-                .try_into()
-                .unwrap(),
+fn test_cpp_structural_equality_and_hash_see_reflected_fields() {
+    register_types();
+    let equal = |a: &Point, b: &Point| -> bool {
+        let (a, b) = (Any::from(a.clone()), Any::from(b.clone()));
+        let args = [
+            AnyView::from(&a),
+            AnyView::from(&b),
+            AnyView::from(&false),
+            AnyView::from(&false),
+        ];
+        bool::try_from(call("ffi.StructuralEqual", &args)).unwrap()
+    };
+    let hash = |a: &Point| -> i64 {
+        let a = Any::from(a.clone());
+        let args = [
+            AnyView::from(&a),
+            AnyView::from(&false),
+            AnyView::from(&false),
+        ];
+        i64::try_from(call("ffi.StructuralHash", &args)).unwrap()
+    };
+    // `label` is ignored.
+    assert!(equal(&point(1, 2.0, "a"), &point(1, 2.0, "b")));
+    assert_eq!(hash(&point(1, 2.0, "a")), hash(&point(1, 2.0, "b")));
+    assert!(!equal(&point(1, 2.0, "a"), &point(2, 2.0, "a")));
+    assert!(!equal(&point(1, 2.0, "a"), &point(1, 3.0, "a")));
+    // Inherited and own fields of the subtype.
+    assert!(equal(&point3(1, 2).into(), &point3(1, 2).into()));
+    assert!(!equal(&point3(1, 2).into(), &point3(1, 3).into()));
+    assert!(!equal(&point3(1, 2).into(), &point3(0, 2).into()));
+}
+
+#[test]
+fn test_repr_and_deep_copy_see_reflected_fields() {
+    register_types();
+    let p = Any::from(point(5, 1.5, "hidden"));
+    let repr = tvm_ffi::String::try_from(call("ffi.ReprPrint", &[AnyView::from(&p)])).unwrap();
+    assert!(repr.as_str().contains("x=5"), "{}", repr.as_str());
+    assert!(!repr.as_str().contains("hidden"), "{}", repr.as_str());
+
+    let original = point3(1, 2);
+    let any = Any::from(original.clone());
+    let copy = Point3::try_from(call("ffi.DeepCopy", &[AnyView::from(&any)])).unwrap();
+    assert!(!copy.same_as(&original));
+    assert_eq!((copy.data.base.x, copy.data.z), (1, 2));
+    assert_eq!(copy.data.tags.len(), 2);
+    // The nested object is copied too.
+    let (inner, original_inner) = (
+        copy.data.r#type.clone().unwrap(),
+        original.data.r#type.clone().unwrap(),
+    );
+    assert!(!inner.same_as(&original_inner));
+    assert_eq!(inner.data.x, 1);
+}
+
+#[test]
+fn test_shallow_copy_and_finality_are_type_attributes() {
+    register_types();
+    let original = point(1, 2.0, "p");
+    let shallow_copy =
+        Function::try_from(get_type_attr(PointObj::type_index(), "__ffi_shallow_copy__").unwrap())
+            .unwrap();
+    let copy = Point::try_from(shallow_copy.call_tuple((original.clone(),)).unwrap()).unwrap();
+    assert!(!copy.same_as(&original));
+    assert_eq!(
+        (
+            copy.data.x,
+            copy.data.y,
+            copy.data.label.as_str(),
+            copy.data.hits
+        ),
+        (1, 2.0, "p", 7)
+    );
+    // Applied to another type, it is a type error.
+    let other = Counter {
+        data: ObjectArc::new(CounterObj {
+            base: Object::new(),
+            count: 0,
         }),
     };
-    let type_index = ReflectedChildObj::type_index();
-    let label = FieldGetter::new(type_index, "label").unwrap();
-    assert_eq!(
-        label.get::<_, String>(&*child.data).unwrap().as_str(),
-        "parent"
-    );
-    let any = FieldGetter::new(type_index, "any").unwrap();
-    assert_eq!(any.get::<_, f64>(&*child.data).unwrap(), 1.5);
-    let parent = type_info(ReflectedParentObj::TYPE_KEY);
-    let label = find_field(parent, "label");
-    assert_eq!(label.doc.as_str(), "the label");
-    assert_eq!(label.flags, 0);
-    // `Any` and object fields are recorded as C++ records them.
-    let rust = type_info(ReflectedChildObj::TYPE_KEY);
-    let cpp = type_info("testing.TestDeepCopyEdges");
-    for (name, cpp_name) in [("any", "v_any"), ("object", "v_obj")] {
-        let (field, cpp_field) = (find_field(rust, name), find_field(cpp, cpp_name));
-        assert_eq!(
-            type_schema(&field.metadata).as_str(),
-            type_schema(&cpp_field.metadata).as_str()
-        );
-        assert_eq!(
-            field.field_static_type_index,
-            cpp_field.field_static_type_index
-        );
+    let error = shallow_copy.call_tuple((other,)).err().unwrap();
+    assert_eq!(error.kind(), TYPE_ERROR);
+
+    let is_final = |type_index| {
+        bool::try_from(get_type_attr(type_index, "__ffi_type_final__").unwrap()).unwrap()
+    };
+    assert!(!is_final(PointObj::type_index()));
+    assert!(is_final(Point3Obj::type_index()));
+}
+
+// A registered type without `#[reflect]` has no reflection, as before.
+
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "testing.rust.Unreflected"]
+#[type_register]
+#[type_final]
+struct CounterObj {
+    base: Object,
+    count: i64,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+struct Counter {
+    data: ObjectArc<CounterObj>,
+}
+
+#[test]
+fn test_types_without_reflect_register_no_reflection() {
+    register_types();
+    let info = type_info::<CounterObj>();
+    assert_eq!(info.num_fields, 0);
+    assert!(info.metadata.is_null());
+    assert!(get_type_attr(CounterObj::type_index(), "__ffi_shallow_copy__").is_none());
+}
+
+// The derives name every item by path, so they need nothing in scope.
+mod no_imports {
+    #[repr(C)]
+    #[derive(tvm_ffi::derive::Object)]
+    #[type_key = "testing.rust.ReflectedNoImports"]
+    #[type_register]
+    pub struct LeafObj {
+        base: super::PointObj,
+        #[reflect]
+        pub w: i64,
+    }
+
+    #[repr(C)]
+    #[derive(tvm_ffi::derive::ObjectRef, Clone)]
+    pub struct Leaf {
+        pub data: tvm_ffi::ObjectArc<LeafObj>,
+    }
+
+    pub fn leaf(w: i64) -> Leaf {
+        Leaf {
+            data: tvm_ffi::ObjectArc::new(LeafObj {
+                base: super::point_obj(0, 0.0, ""),
+                w,
+            }),
+        }
     }
 }
 
 #[test]
-fn test_methods() {
-    let type_index = ReflectedObj::type_index();
-    let info = type_info(ReflectedObj::TYPE_KEY);
-
-    let add_int = find_method(info, "add_int");
-    assert_eq!(add_int.flags, 0);
-    assert_eq!(add_int.doc.as_str(), "add int method");
-    let add_int = Function::from_type_method(type_index, "add_int").unwrap();
-    let object = reflected(7, "seven");
-    let sum = add_int
-        .call_tuple_with_len::<2, _>((&object, 3i64))
-        .unwrap();
-    assert_eq!(i64::try_from(sum).unwrap(), 10);
-
-    // A static method's metadata is the metadata C++ records for a function of
-    // the same signature.
-    let schema_arr_map_opt = find_method(info, "schema_arr_map_opt");
-    assert_ne!(schema_arr_map_opt.flags, 0);
-    assert_eq!(schema_arr_map_opt.doc.size, 0);
-    assert_eq!(
-        schema_arr_map_opt.metadata.as_str(),
-        global_metadata("testing.schema_arr_map_opt").as_str()
-    );
-}
-
-#[test]
-fn test_runtime_compares_fields() {
-    // `ffi.RecursiveEq` compares objects field by field through the getters.
-    let eq = Function::get_global("ffi.RecursiveEq").unwrap();
-    let equal = |a: &Reflected, b: &Reflected| -> bool {
-        eq.call_tuple_with_len::<2, _>((a, b))
-            .unwrap()
-            .try_into()
-            .unwrap()
-    };
-    assert!(equal(&reflected(1, "one"), &reflected(1, "one")));
-    assert!(!equal(&reflected(1, "one"), &reflected(2, "one")));
-    assert!(!equal(&reflected(1, "one"), &reflected(1, "two")));
-}
-
-#[test]
-fn test_reflection_registers_once() {
-    ReflectedParentObj::type_index();
-    assert_eq!(
-        ReflectedParentCopyObj::type_index(),
-        ReflectedParentObj::type_index()
-    );
-    assert_eq!(fields(type_info(ReflectedParentObj::TYPE_KEY)).len(), 1);
+fn test_derives_need_nothing_in_scope() {
+    register_types();
+    let leaf = no_imports::leaf(9);
+    let w = FieldGetter::new(no_imports::LeafObj::type_index(), "w").unwrap();
+    assert_eq!(w.get::<_, i64>(&*leaf.data).unwrap(), 9);
 }

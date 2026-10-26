@@ -101,7 +101,7 @@ class JSONWriter {
         break;
       }
       case TypeIndex::kTVMFFIBool: {
-        bool bool_value = details::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(value);
+        bool bool_value = detail::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(value);
         if (bool_value) {
           WriteLiteral("true", 4);
         } else {
@@ -110,28 +110,28 @@ class JSONWriter {
         break;
       }
       case TypeIndex::kTVMFFIInt: {
-        WriteInt(details::AnyUnsafe::CopyFromAnyViewAfterCheck<int64_t>(value));
+        WriteInt(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<int64_t>(value));
         break;
       }
       case TypeIndex::kTVMFFIFloat: {
-        WriteFloat(details::AnyUnsafe::CopyFromAnyViewAfterCheck<double>(value));
+        WriteFloat(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<double>(value));
         break;
       }
       case TypeIndex::kTVMFFISmallStr:
       case TypeIndex::kTVMFFIStr: {
-        WriteString(details::AnyUnsafe::CopyFromAnyViewAfterCheck<String>(value));
+        WriteString(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<String>(value));
         break;
       }
       case TypeIndex::kTVMFFIArray: {
-        WriteArray(details::AnyUnsafe::CopyFromAnyViewAfterCheck<json::Array>(value));
+        WriteArray(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<json::Array>(value));
         break;
       }
       case TypeIndex::kTVMFFIList: {
-        WriteList(details::AnyUnsafe::CopyFromAnyViewAfterCheck<ffi::List<Any>>(value));
+        WriteList(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<ffi::List<Any>>(value));
         break;
       }
       case TypeIndex::kTVMFFIMap: {
-        WriteObject(details::AnyUnsafe::CopyFromAnyViewAfterCheck<json::Object>(value));
+        WriteObject(detail::AnyUnsafe::CopyFromAnyViewAfterCheck<json::Object>(value));
         break;
       }
       default: {

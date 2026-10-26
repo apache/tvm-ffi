@@ -30,6 +30,7 @@
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/enum.h>
 #include <tvm/ffi/extra/c_env_api.h>
+#include <tvm/ffi/extra/dataclass.h>
 #include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/optional.h>
@@ -69,7 +70,7 @@ class TestIntPair : public tvm::ffi::ObjectRef {
   int64_t Sum() const { return get()->a + get()->b; }
 
   // Required: define object reference methods
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestIntPair, tvm::ffi::ObjectRef, TestIntPairObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestIntPair, tvm::ffi::ObjectRef, TestIntPairObj);
 };
 
 class TestFrozenCxxObj : public tvm::ffi::Object {
@@ -103,7 +104,8 @@ class TestEnumVariantObj : public tvm::ffi::EnumObj {
 
 class TestEnumVariant : public tvm::ffi::Enum {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestEnumVariant, tvm::ffi::Enum, TestEnumVariantObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestEnumVariant, tvm::ffi::Enum,
+                                                TestEnumVariantObj);
 };
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -112,7 +114,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   // silence clang-tidy's bugprone-unused-raii since the RAII finalisation is the point.
   refl::ObjectDef<TestEnumVariantObj>(refl::init(false));  // NOLINT(bugprone-unused-raii)
   refl::TypeAttrDef<TestEnumVariantObj>().def_convert<TestEnumVariant>();
-  refl::EnumDef<TestEnumVariantObj>("Alpha").set_attr("code", int64_t{10});
+  constexpr refl::AttrKey<int64_t> code{"code"};
+  refl::EnumDef<TestEnumVariantObj>("Alpha").set_attr(code, int64_t{10});
   refl::EnumDef<TestEnumVariantObj>("Beta").set_attr("code", int64_t{20});
 }
 
@@ -125,7 +128,8 @@ class TestCxxIntEnumObj : public tvm::ffi::IntEnumObj {
 
 class TestCxxIntEnum : public tvm::ffi::IntEnum {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCxxIntEnum, tvm::ffi::IntEnum, TestCxxIntEnumObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestCxxIntEnum, tvm::ffi::IntEnum,
+                                                TestCxxIntEnumObj);
 };
 
 class TestCxxStrEnumObj : public tvm::ffi::StrEnumObj {
@@ -137,7 +141,8 @@ class TestCxxStrEnumObj : public tvm::ffi::StrEnumObj {
 
 class TestCxxStrEnum : public tvm::ffi::StrEnum {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCxxStrEnum, tvm::ffi::StrEnum, TestCxxStrEnumObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestCxxStrEnum, tvm::ffi::StrEnum,
+                                                TestCxxStrEnumObj);
 };
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -173,16 +178,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("pattern", &TestVisitRegionsObj::pattern, refl::AttachFieldFlag::SEqHashDefPattern())
       .def_ro("ordinary", &TestVisitRegionsObj::ordinary);
   refl::ObjectDef<TestVisitHookObj>().def_ro("child", &TestVisitHookObj::child);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralVisit);
-  refl::TypeAttrDef<TestVisitHookObj>().def(
-      refl::type_attr::kStructuralVisit,
-      [](StructuralVisitor visitor, const TestVisitHookObj* self) {
+  refl::EnsureTypeAttrColumn(type_attr::kStructuralVisit);
+  TypedFunction<Optional<VisitInterrupt>(StructuralVisitorObj*, AnyView)> hook =
+      [](StructuralVisitorObj* visitor, AnyView value) {
+        const auto* self = value.as_or_throw<const TestVisitHookObj*>();
         auto result = visitor->WithDefRegionKind(kTVMFFIDefRegionKindSimple,
                                                  [&] { return visitor->Visit(self->child); });
         if (result.has_value()) return result;
         // This sibling observes the region restored after the scoped child visit.
         return visitor->Visit(int64_t{4});
-      });
+      };
+  refl::TypeAttrDef<TestVisitHookObj>().attr(type_attr::kStructuralVisit, FStructuralVisit(hook));
   refl::GlobalDef().def("testing.make_visit_region_graph", [](bool with_hook) -> Any {
     ObjectRef fields(make_object<TestVisitRegionsObj>());
     if (with_hook) return ObjectRef(make_object<TestVisitHookObj>(fields));
@@ -277,6 +283,8 @@ class TestCxxEnumHolderObj : public Object {
  public:
   TestCxxIntEnum priority;
   TestCxxStrEnum opcode;
+
+  explicit TestCxxEnumHolderObj(UnsafeInit) : priority(UnsafeInit{}), opcode(UnsafeInit{}) {}
 
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxEnumHolder", TestCxxEnumHolderObj, Object);
@@ -436,7 +444,7 @@ class TestCompareObj : public Object {
 
 class TestCompare : public ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCompare, ObjectRef, TestCompareObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestCompare, ObjectRef, TestCompareObj);
 };
 
 class TestHashObj : public Object {
@@ -454,7 +462,7 @@ class TestHashObj : public Object {
 
 class TestHash : public ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestHash, ObjectRef, TestHashObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestHash, ObjectRef, TestHashObj);
 };
 
 class TestCustomHashObj : public Object {
@@ -470,7 +478,7 @@ class TestCustomHashObj : public Object {
 
 class TestCustomHash : public ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCustomHash, ObjectRef, TestCustomHashObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestCustomHash, ObjectRef, TestCustomHashObj);
 };
 
 class TestCustomCompareObj : public Object {
@@ -486,7 +494,7 @@ class TestCustomCompareObj : public Object {
 
 class TestCustomCompare : public ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCustomCompare, ObjectRef, TestCustomCompareObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestCustomCompare, ObjectRef, TestCustomCompareObj);
 };
 
 // Test object with __ffi_eq__ but deliberately no __ffi_hash__.
@@ -504,7 +512,7 @@ class TestEqWithoutHashObj : public Object {
 
 class TestEqWithoutHash : public ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestEqWithoutHash, ObjectRef, TestEqWithoutHashObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestEqWithoutHash, ObjectRef, TestEqWithoutHashObj);
 };
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
@@ -922,7 +930,10 @@ class SchemaAllTypesObj : public Object {
 
 class SchemaAllTypes : public ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SchemaAllTypes, ObjectRef, SchemaAllTypesObj);
+  SchemaAllTypes(int64_t vi, double vf, String s)
+      : ObjectRef(make_object<SchemaAllTypesObj>(vi, vf, std::move(s))) {}
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(SchemaAllTypes, ObjectRef, SchemaAllTypesObj);
 };
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -959,9 +970,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       // Register static creator (also a static method)
       .def_static(
           "make_with",
-          [](int64_t vi, double vf, String s) {
-            return SchemaAllTypes(make_object<SchemaAllTypesObj>(vi, vf, std::move(s)));
-          },
+          [](int64_t vi, double vf, String s) { return SchemaAllTypes(vi, vf, std::move(s)); },
           "Constructor with subset of fields");
 
   // Global typed functions to exercise RegisterFunc with various schemas
@@ -1015,27 +1024,26 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   // Register __ffi_hash__ for TestCustomHash: only hashes `key`, ignores `label`.
   refl::TypeAttrDef<TestCustomHashObj>().def(
-      refl::type_attr::kHash, [](const Object* self, const Function& fn_hash) -> int64_t {
+      type_attr::kHash.name, [](const Object* self, const Function& fn_hash) -> int64_t {
         auto* obj = static_cast<const TestCustomHashObj*>(self);
         return fn_hash(AnyView(obj->key)).cast<int64_t>();
       });
   // Register __ffi_hash__ for TestCustomCompare: only hashes `key`, consistent with eq/compare.
   refl::TypeAttrDef<TestCustomCompareObj>().def(
-      refl::type_attr::kHash, [](const Object* self, const Function& fn_hash) -> int64_t {
+      type_attr::kHash.name, [](const Object* self, const Function& fn_hash) -> int64_t {
         auto* obj = static_cast<const TestCustomCompareObj*>(self);
         return fn_hash(AnyView(obj->key)).cast<int64_t>();
       });
   // Register __ffi_eq__ for TestCustomCompare: compares only `key`.
   refl::TypeAttrDef<TestCustomCompareObj>().def(
-      refl::type_attr::kEq,
-      [](const Object* lhs, const Object* rhs, const Function& fn_eq) -> bool {
+      type_attr::kEq.name, [](const Object* lhs, const Object* rhs, const Function& fn_eq) -> bool {
         auto* a = static_cast<const TestCustomCompareObj*>(lhs);
         auto* b = static_cast<const TestCustomCompareObj*>(rhs);
         return fn_eq(AnyView(a->key), AnyView(b->key)).cast<bool>();
       });
   // Register __ffi_compare__ for TestCustomCompare: three-way ordering on `key`.
   refl::TypeAttrDef<TestCustomCompareObj>().def(
-      refl::type_attr::kCompare,
+      type_attr::kCompare.name,
       [](const Object* lhs, const Object* rhs, const Function& fn_cmp) -> int32_t {
         auto* a = static_cast<const TestCustomCompareObj*>(lhs);
         auto* b = static_cast<const TestCustomCompareObj*>(rhs);
@@ -1044,8 +1052,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   // Register __ffi_eq__ for TestEqWithoutHash: deliberately no __ffi_hash__.
   // This exercises the RecursiveHash guard that rejects eq-without-hash types.
   refl::TypeAttrDef<TestEqWithoutHashObj>().def(
-      refl::type_attr::kEq,
-      [](const Object* lhs, const Object* rhs, const Function& fn_eq) -> bool {
+      type_attr::kEq.name, [](const Object* lhs, const Object* rhs, const Function& fn_eq) -> bool {
         auto* a = static_cast<const TestEqWithoutHashObj*>(lhs);
         auto* b = static_cast<const TestEqWithoutHashObj*>(rhs);
         return fn_eq(AnyView(a->key), AnyView(b->key)).cast<bool>();

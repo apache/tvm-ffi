@@ -31,7 +31,7 @@ namespace {
 using namespace tvm::ffi;
 
 TEST(ExpectedChecks, Builder) {
-  using Builder = details::UnexpectedBuilder;
+  using Builder = detail::UnexpectedBuilder;
   static_assert(!std::is_convertible_v<Builder&, Unexpected<Error>>);
   static_assert(!std::is_convertible_v<Builder&, Expected<int>>);
 
@@ -106,15 +106,15 @@ Expected<int> UnsafeMutateAssign(Expected<Any> result, int* evaluations) noexcep
 TEST(ExpectedChecks, UnsafeAssignment) {
   int evaluations = 0;
   EXPECT_EQ(UnsafeMutateAssign(Any(41), &evaluations).value(), 42);
-  auto raw_ok = details::ExpectedUnsafe::MoveFromTVMFFIAny<int>(
-      details::ExpectedUnsafe::MoveToTVMFFIAny(UnsafeMutateAssign(Any(41), &evaluations)));
+  auto raw_ok = detail::ExpectedUnsafe::MoveFromTVMFFIAny<int>(
+      detail::ExpectedUnsafe::MoveToTVMFFIAny(UnsafeMutateAssign(Any(41), &evaluations)));
   EXPECT_EQ(raw_ok.value(), 42);
   Error error("ValueError", "unsafe assign", "");
   auto typed_error = UnsafeMutateAssign(error, &evaluations);
   ASSERT_TRUE(typed_error.is_err());
   EXPECT_EQ(typed_error.error().message(), "unsafe assign");
-  auto raw_error = details::ExpectedUnsafe::MoveFromTVMFFIAny<int>(
-      details::ExpectedUnsafe::MoveToTVMFFIAny(UnsafeMutateAssign(error, &evaluations)));
+  auto raw_error = detail::ExpectedUnsafe::MoveFromTVMFFIAny<int>(
+      detail::ExpectedUnsafe::MoveToTVMFFIAny(UnsafeMutateAssign(error, &evaluations)));
   ASSERT_TRUE(raw_error.is_err());
   EXPECT_EQ(raw_error.error().message(), "unsafe assign");
   EXPECT_EQ(evaluations, 4);

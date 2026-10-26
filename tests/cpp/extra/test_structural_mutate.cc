@@ -156,7 +156,7 @@ TEST(UnchangedOr, ErrorRoundTrip) {
   Expected<UnchangedOr<Any>> failure = Error("ValueError", "expected failure", "");
   const Any copied_storage(failure);
   Expected<UnchangedOr<Any>> copied =
-      details::AnyUnsafe::CopyFromAnyViewAfterCheck<Expected<UnchangedOr<Any>>>(copied_storage);
+      detail::AnyUnsafe::CopyFromAnyViewAfterCheck<Expected<UnchangedOr<Any>>>(copied_storage);
 
   ASSERT_TRUE(copied.is_err());
   EXPECT_EQ(copied.error().kind(), "ValueError");
@@ -164,7 +164,7 @@ TEST(UnchangedOr, ErrorRoundTrip) {
 
   Any moved_storage(failure);
   Expected<UnchangedOr<Any>> moved =
-      details::AnyUnsafe::MoveFromAnyAfterCheck<Expected<UnchangedOr<Any>>>(
+      detail::AnyUnsafe::MoveFromAnyAfterCheck<Expected<UnchangedOr<Any>>>(
           std::move(moved_storage));
 
   ASSERT_TRUE(moved.is_err());
@@ -192,7 +192,7 @@ TEST(UnchangedOr, ErrorRoundTrip) {
 TEST(StructuralMutate, UnchangedProtocolResolvesAtThrowingEntryPoints) {
   Expected<Any> raw_tag = []() -> Expected<Any> { return Unchanged(); }();
   ASSERT_TRUE(raw_tag.is_ok());
-  EXPECT_EQ(details::ExpectedUnsafe::GetData(raw_tag).type_index(), TypeIndex::kTVMFFIUnchanged);
+  EXPECT_EQ(detail::ExpectedUnsafe::GetData(raw_tag).type_index(), TypeIndex::kTVMFFIUnchanged);
   EXPECT_TRUE(ReturnTypedUnchangedExpected().value().IsUnchanged());
   auto never_matches = [](int64_t, StructuralMutatorObj*) -> Expected<Any> { return Any(); };
   using Mutator = StructuralMutateEngine<StructuralMapEngineBase, decltype(never_matches)>;
@@ -298,13 +298,12 @@ class TNestedMapHookObj : public Object {
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<TNestedMapHookObj>().def_rw("field", &TNestedMapHookObj::field);
-    refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMutate);
-    refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMaybeInplaceMutate);
+    refl::EnsureTypeAttrColumn(type_attr::kStructuralMutate);
+    refl::EnsureTypeAttrColumn(type_attr::kStructuralMaybeInplaceMutate);
     refl::TypeAttrDef<TNestedMapHookObj>()
-        .attr(refl::type_attr::kStructuralMutate,
-              FStructuralMutate::FromNative<&TNestedMapHookObj::StructuralMutate>())
-        .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
-              FStructuralMutate::FromNative<&TNestedMapHookObj::MaybeInplaceMutate>());
+        .native_fn_attr<&TNestedMapHookObj::StructuralMutate>(type_attr::kStructuralMutate)
+        .native_fn_attr<&TNestedMapHookObj::MaybeInplaceMutate>(
+            type_attr::kStructuralMaybeInplaceMutate);
   }
 
   static constexpr bool _type_mutable = true;
@@ -318,7 +317,7 @@ class TNestedMapHook : public ObjectRef {
     data_ = make_object<TNestedMapHookObj>(std::move(field));
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TNestedMapHook, ObjectRef, TNestedMapHookObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TNestedMapHook, ObjectRef, TNestedMapHookObj);
 };
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -734,7 +733,11 @@ TEST(StructuralMap, RootByValueProtectsSharedParentSubvalue) {
   AnyArray outer{Any(std::move(child))};
   const Object* child_address = outer[0].cast<AnyArray>().get();
 
-  AnyArray mapped = StructuralMap<WalkOrder::kPostOrder>(outer[0], Increment).cast<AnyArray>();
+  AnyArray mapped =
+      StructuralMap<WalkOrder::kPostOrder>(outer[0], Increment, [](const AnyArray& array) {
+        EXPECT_EQ(array[0].cast<int64_t>(), 2);
+        return Unchanged();
+      }).cast<AnyArray>();
 
   EXPECT_NE(mapped.get(), child_address);
   EXPECT_EQ(outer[0].cast<AnyArray>()[0].cast<int64_t>(), 1);
@@ -800,10 +803,12 @@ TEST(StructuralMap, RegisteredMutateHookUsesAssignOrReturn) {
 
   int nullable_var_callbacks = 0;
   nullable_mapped =
-      StructuralMap<WalkOrder::kPostOrder>(nullable, [&](const TVar& value) -> Expected<Any> {
-        ++nullable_var_callbacks;
-        return value.defined() ? Any(value) : Any(ObjectRef(nullptr));
-      }).cast<TMutatePair>();
+      StructuralMap<WalkOrder::kPostOrder>(nullable,
+                                           [&](const Optional<TVar>& value) -> Expected<Any> {
+                                             ++nullable_var_callbacks;
+                                             return Any(value);
+                                           })
+          .cast<TMutatePair>();
   EXPECT_EQ(nullable_var_callbacks, 2);
   EXPECT_FALSE(nullable_mapped->lhs.defined());
   EXPECT_TRUE(nullable_mapped->rhs.same_as(rhs));
@@ -1136,18 +1141,49 @@ Any CallDynStructuralMap(AnyView root, const Array<Tuple<int32_t, Function>>& ca
   return fn(root, callbacks, Array<Tuple<int32_t, Function>>(), static_cast<int32_t>(order));
 }
 
-TEST(StructuralMapDyn, PreOrderDescendsOriginalAfterUnchangedCallback) {
+TEST(StructuralMapDyn, UnchangedCallbackPreservesDescent) {
   AnyArray root{int64_t{1}};
   Function unchanged = Function::FromTyped([](const AnyArray&) -> Any { return Unchanged(); });
   Function increment = Function::FromTyped([](int64_t value) -> Any { return Any(value + 1); });
 
-  AnyArray mapped =
-      CallDynStructuralMap(root,
-                           {Tuple<int32_t, Function>(TypeIndex::kTVMFFIArray, unchanged),
-                            Tuple<int32_t, Function>(TypeIndex::kTVMFFIInt, increment)},
-                           WalkOrder::kPreOrder)
-          .cast<AnyArray>();
-  EXPECT_EQ(mapped[0].cast<int64_t>(), 2);
+  for (WalkOrder order : {WalkOrder::kPreOrder, WalkOrder::kPostOrder}) {
+    AnyArray mapped =
+        CallDynStructuralMap(root,
+                             {Tuple<int32_t, Function>(TypeIndex::kTVMFFIArray, unchanged),
+                              Tuple<int32_t, Function>(TypeIndex::kTVMFFIInt, increment)},
+                             order)
+            .cast<AnyArray>();
+    EXPECT_EQ(mapped[0].cast<int64_t>(), 2);
+    EXPECT_EQ(root[0].cast<int64_t>(), 1);
+  }
+}
+
+TEST(StructuralMap, PostOrderCallbackErrorKeepsDescendedNode) {
+  AnyArray root{int64_t{1}};
+  auto fail = [](const ArrayObj*) -> Any {
+    return Any(Error("ValueError", "post-order callback failed", ""));
+  };
+  auto check_error = [&](const Expected<Any>& result) {
+    ASSERT_TRUE(result.is_err());
+    EXPECT_EQ(result.error().message(), "post-order callback failed");
+    Optional<VisitErrorContext> context = VisitErrorContext::TryGetFromError(result.error());
+    ASSERT_TRUE(context.has_value());
+    ASSERT_EQ(context.value()->reverse_visit_pattern.size(), 1U);
+    AnyArray descended = context.value()->reverse_visit_pattern[0].as_or_throw<AnyArray>();
+    EXPECT_FALSE(descended.same_as(root));
+    EXPECT_EQ(descended[0].cast<int64_t>(), 2);
+  };
+
+  check_error(StructuralMapExpected<WalkOrder::kPostOrder>(root, Increment, fail));
+  Function map = Function::GetGlobalRequired("ffi.StructuralMap");
+  check_error(map.CallExpected<Any>(
+      root,
+      Array<Tuple<int32_t, Function>>{
+          Tuple<int32_t, Function>(TypeIndex::kTVMFFIArray, Function::FromTyped(fail)),
+          Tuple<int32_t, Function>(TypeIndex::kTVMFFIInt,
+                                   Function::FromTyped([](int64_t value) { return value + 1; }))},
+      Array<Tuple<int32_t, Function>>(), static_cast<int32_t>(WalkOrder::kPostOrder)));
+  EXPECT_EQ(root[0].cast<int64_t>(), 1);
 }
 
 TEST(StructuralMapDyn, InvokesCallbackForEveryFreeVarOccurrence) {

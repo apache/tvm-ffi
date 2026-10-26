@@ -298,7 +298,7 @@ impl<'a> From<&'a Any> for AnyView<'a> {
 }
 
 /// Whether a `TVMFFIAny` cell owns everything it holds, so its owning form is a
-/// bitwise copy. Mirrors C++ `details::InplaceConvertAnyViewToAny`.
+/// bitwise copy. Mirrors C++ `detail::InplaceConvertAnyViewToAny`.
 #[inline]
 pub(crate) fn is_plain_inline(type_index: i32) -> bool {
     type_index < TypeIndex::kTVMFFIRawStr as i32

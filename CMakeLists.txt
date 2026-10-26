@@ -129,7 +129,6 @@ endif ()
 
 tvm_ffi_add_msvc_flags(tvm_ffi_objs)
 tvm_ffi_add_target_from_obj(tvm_ffi tvm_ffi_objs)
-tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi_shared)
 
 if (TVM_FFI_USE_THREADS)
   find_package(Threads REQUIRED)
@@ -164,6 +163,7 @@ endif ()
 target_link_libraries(tvm_ffi_objs PUBLIC tvm_ffi_header)
 target_link_libraries(tvm_ffi_shared PUBLIC tvm_ffi_header)
 target_link_libraries(tvm_ffi_static PUBLIC tvm_ffi_header)
+tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi_shared)
 
 # ######### Target: `tvm_ffi_testing` ##########
 # Build testing utilities as a separate shared library that can be loaded on demand
@@ -193,40 +193,34 @@ elseif (UNIX AND NOT APPLE)
   set_target_properties(tvm_ffi_testing PROPERTIES INSTALL_RPATH "\$ORIGIN")
 endif ()
 
-# ----------------------------------------------------------------------------
-# The following code section only is triggered when the project is the root and will be skipped when
-# the project is a subproject.
-# ----------------------------------------------------------------------------
-if (NOT ${PROJECT_NAME} STREQUAL ${CMAKE_PROJECT_NAME})
-  return()
-endif ()
+# Keep developer settings and tests local to standalone builds. Installation and explicitly enabled
+# Python bindings are also available to embedding projects.
+if (PROJECT_NAME STREQUAL CMAKE_PROJECT_NAME)
+  option(TVM_FFI_ATTACH_DEBUG_SYMBOLS "Attach debug symbols even in release mode" OFF)
+  option(TVM_FFI_BUILD_TESTS "Adding test targets." OFF)
 
-option(TVM_FFI_ATTACH_DEBUG_SYMBOLS "Attach debug symbols even in release mode" OFF)
-option(TVM_FFI_BUILD_TESTS "Adding test targets." OFF)
-
-if (TVM_FFI_ATTACH_DEBUG_SYMBOLS)
-  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(tvm_ffi_objs PRIVATE -g1)
+  if (TVM_FFI_ATTACH_DEBUG_SYMBOLS)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(tvm_ffi_objs PRIVATE -g1)
+    endif ()
   endif ()
-endif ()
 
-include(cmake/Utils/CxxWarning.cmake)
-include(cmake/Utils/Sanitizer.cmake)
+  include(cmake/Utils/CxxWarning.cmake)
+  include(cmake/Utils/Sanitizer.cmake)
 
-# remap the file name to the source directory so we can see the exact file name in backtrace
-# relative to the project source root
-tvm_ffi_add_prefix_map(tvm_ffi_objs ${CMAKE_SOURCE_DIR})
+  # remap the file name to the source directory so we can see the exact file name in backtrace
+  # relative to the project source root
+  tvm_ffi_add_prefix_map(tvm_ffi_objs ${CMAKE_SOURCE_DIR})
 
-# ######### Adding cpp tests ##########
+  # ######### Adding cpp tests ##########
 
-# logics below are only executed when the project is the root project. but not when the project is a
-# subproject.
-if (TVM_FFI_BUILD_TESTS)
-  enable_testing()
-  message(STATUS "Enable Testing")
-  include(cmake/Utils/AddGoogleTest.cmake)
-  add_subdirectory(tests/cpp/)
-  tvm_ffi_add_cxx_warning(tvm_ffi_objs)
+  if (TVM_FFI_BUILD_TESTS)
+    enable_testing()
+    message(STATUS "Enable Testing")
+    include(cmake/Utils/AddGoogleTest.cmake)
+    add_subdirectory(tests/cpp/)
+    tvm_ffi_add_cxx_warning(tvm_ffi_objs)
+  endif ()
 endif ()
 
 # ######### Adding python module ##########
@@ -335,53 +329,91 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     # Linux uses $ORIGIN
     set_target_properties(tvm_ffi_cython PROPERTIES INSTALL_RPATH "\$ORIGIN/lib")
   endif ()
-  install(TARGETS tvm_ffi_cython DESTINATION .)
+  install(
+    TARGETS tvm_ffi_cython
+    DESTINATION .
+    COMPONENT tvm_ffi
+  )
 
   # ######### Installing the source ##########
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include/
-          DESTINATION 3rdparty/dlpack/include/
+  install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include/
+    DESTINATION 3rdparty/dlpack/include/
+    COMPONENT tvm_ffi
   )
   install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/libbacktrace/
     DESTINATION 3rdparty/libbacktrace/
+    COMPONENT tvm_ffi
     PATTERN ".git" EXCLUDE
     PATTERN ".git*" EXCLUDE
     PATTERN "*.tmp" EXCLUDE
   )
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/ DESTINATION src/ffi/)
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Utils/ DESTINATION share/cmake/tvm_ffi/Utils)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt DESTINATION .)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake/tvm_ffi-config.cmake
-          DESTINATION share/cmake/tvm_ffi
+  install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/
+    DESTINATION src/ffi/
+    COMPONENT tvm_ffi
   )
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_helpers.h
-          DESTINATION include/
+  install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Utils/
+    DESTINATION share/cmake/tvm_ffi/Utils
+    COMPONENT tvm_ffi
   )
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_object.h
-          DESTINATION include/
+  install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+    DESTINATION .
+    COMPONENT tvm_ffi
+  )
+  install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake/tvm_ffi-config.cmake
+    DESTINATION share/cmake/tvm_ffi
+    COMPONENT tvm_ffi
+  )
+  install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_helpers.h
+    DESTINATION include/
+    COMPONENT tvm_ffi
+  )
+  install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_object.h
+    DESTINATION include/
+    COMPONENT tvm_ffi
   )
 endif ()
 
 # ######### Install the related for normal cmake library ##########
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/tvm/ffi/ DESTINATION include/tvm/ffi/)
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include/ DESTINATION include/)
-install(TARGETS tvm_ffi_shared DESTINATION lib)
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/tvm/ffi/
+  DESTINATION include/tvm/ffi/
+  COMPONENT tvm_ffi
+)
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include/
+  DESTINATION include/
+  COMPONENT tvm_ffi
+)
+install(
+  TARGETS tvm_ffi_shared
+  DESTINATION lib
+  COMPONENT tvm_ffi
+)
 # if tvm_ffi_testing is built, we also install it
 if (TARGET tvm_ffi_testing)
   install(
     TARGETS tvm_ffi_testing
     DESTINATION lib
+    COMPONENT tvm_ffi
     OPTIONAL
   )
 endif ()
 # ship additional dSYM files for debugging symbols on if available
 if (APPLE)
   install(
-    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib/
+    DIRECTORY "$<TARGET_FILE:tvm_ffi_shared>.dSYM" "$<TARGET_FILE:tvm_ffi_testing>.dSYM"
     DESTINATION lib
-    FILES_MATCHING
-    PATTERN "*.dSYM"
+    COMPONENT tvm_ffi
+    OPTIONAL
   )
 endif ()
 
@@ -390,6 +422,7 @@ if (NOT TVM_FFI_BUILD_PYTHON_MODULE)
   install(
     TARGETS tvm_ffi_static
     DESTINATION lib
+    COMPONENT tvm_ffi
     OPTIONAL
   )
 endif ()

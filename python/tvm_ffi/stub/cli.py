@@ -26,6 +26,8 @@ import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tvm_ffi.core import _object_type_key_to_index
+
 from . import consts as C
 from .file_utils import CodeBlock, FileInfo, collect_files, syntax_for
 from .generator import generator_names, get_generator
@@ -39,7 +41,7 @@ from .lib_state import (
 from .utils import FuncInfo, InitConfig, Options
 
 if TYPE_CHECKING:
-    from collections.abc import Container
+    from collections.abc import Mapping
 
     from .generator import Generator
 
@@ -96,6 +98,9 @@ def __main__() -> int:
             generator=generator,
         )
 
+    # `--check` compares the generator's view of each file before the run edits any block.
+    before = {file.path: generator.check_view(file.code_blocks) for file in files if opt.check}
+
     # Stage 2b. Add the object blocks a `tvm-ffi-stubgen(prefix)` file asks for. This runs
     # after `--init`, which rewrites files on disk and reloads them.
     failed += _roll_out_prefixes(files, generator)
@@ -103,13 +108,8 @@ def __main__() -> int:
     # Stage 3: Process
     # - `tvm-ffi-stubgen(begin): global/...`
     # - `tvm-ffi-stubgen(begin): object/...`
-    # Every `object/` block of the run: what a generated binding may refer to.
-    declared = frozenset(
-        code.param
-        for file in files
-        for code in file.code_blocks
-        if code.kind == "object" and isinstance(code.param, str)
-    )
+    # Every `object/` block of the run, to its file: what a generated binding may refer to.
+    declared = _declared_objects(files)
     for file in files:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
@@ -128,7 +128,7 @@ def __main__() -> int:
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
             continue
-        if changed and opt.check:
+        if changed and opt.check and generator.check_view(file.code_blocks) != before[file.path]:
             stale += 1
             print(f"{C.TERM_YELLOW}[Stale] {file.path}{C.TERM_RESET}")
 
@@ -170,8 +170,9 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
     """Append an ``object/<key>`` block for each registered object under a file's ``prefix``.
 
     Keys with a block in any file of the run, named by ``skip``, or bound by the target's
-    runtime are left alone; an ``import-section`` is added when the file has none. Returns
-    the number of bad files.
+    runtime are left alone; an ``import-section`` is added when the file has none. A block
+    under the prefix whose type is no longer registered is removed. Returns the number of
+    bad files.
     """
     defined = {code.param for file in files for code in file.code_blocks if code.kind == "object"}
     registry = collect_type_keys()
@@ -193,6 +194,7 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
             failed += 1
             print(f'{C.TERM_RED}[Failed] File "{file.path}": {error}{C.TERM_RESET}')
             continue
+        _remove_unregistered_blocks(file, prefix, registry.get(prefix, []))
         if prefix not in registry:
             print(
                 f"{C.TERM_YELLOW}[Skipped] No registered object under prefix `{prefix}`{C.TERM_RESET}"
@@ -215,6 +217,27 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
             for block in _new_blocks(file.syntax, head.lineno_start, f"object/{info.type_key}")
         ]
     return failed
+
+
+def _remove_unregistered_blocks(file: FileInfo, prefix: str, registered: list[str]) -> None:
+    """Drop each ``object/`` block directly under ``prefix`` whose type is not ``registered``."""
+    kept: list[CodeBlock] = []
+    for code in file.code_blocks:
+        if (
+            code.kind == "object"
+            and isinstance(code.param, str)
+            and code.param.rpartition(".")[0] == prefix
+            and code.param not in registered
+        ):
+            print(
+                f'{C.TERM_YELLOW}[Removed] File "{file.path}": `object/{code.param}` '
+                f"(line {code.lineno_start}): the type is no longer registered{C.TERM_RESET}"
+            )
+            if kept and kept[-1].kind is None and kept[-1].lines == [""]:
+                kept.pop()  # the blank line the roll-out put before it
+            continue
+        kept.append(code)
+    file.code_blocks[:] = kept
 
 
 def _new_blocks(syntax: C.MarkerSyntax, lineno: int, stub: str) -> list[CodeBlock]:
@@ -315,16 +338,34 @@ def _stage_2(
     return generated_prefixes
 
 
+def _declared_objects(files: list[FileInfo]) -> dict[str, Path]:
+    """Map the type key of every ``object/`` block in ``files`` to the file it is in."""
+    declared: dict[str, Path] = {}
+    for file in files:
+        for code in file.code_blocks:
+            if code.kind == "object" and isinstance(code.param, str):
+                declared.setdefault(code.param, file.path)
+    return declared
+
+
 def _stage_3(  # noqa: PLR0912
     file: FileInfo,
     opt: Options,
     ty_map: dict[str, str],
     global_funcs: dict[str, list[FuncInfo]],
     generator: Generator,
-    declared: Container[str] = frozenset(),
+    declared: Mapping[str, Path] | None = None,
 ) -> bool:
-    """Process one file's blocks; return whether its content is (or would be) changed."""
+    """Process one file's blocks; return whether its content is (or would be) changed.
+
+    ``declared`` defaults to the ``object/`` blocks of ``file`` alone. An ``object/``
+    block whose type is no longer registered is left as is; once the rest of the file
+    is processed, they are reported together as an error.
+    """
+    if declared is None:
+        declared = _declared_objects([file])
     defined_funcs: set[str] = set()
+    unregistered: list[str] = []
     defined_types: set[str] = set()
     imports = generator.new_imports()
     # Stage 1. Hand the one-line directives the pipeline does not consume itself to the generator.
@@ -349,6 +390,9 @@ def _stage_3(  # noqa: PLR0912
         if code.kind == "object":
             type_key = code.param
             assert isinstance(type_key, str)
+            if _object_type_key_to_index(type_key) is None:
+                unregistered.append(f"`object/{type_key}` (line {code.lineno_start})")
+                continue
             obj_info = object_info_from_type_key(type_key)
             type_key = ty_map.get(type_key, type_key)
             defined_types.add(generator.canonical_type_name(type_key))
@@ -369,7 +413,12 @@ def _stage_3(  # noqa: PLR0912
         if code.kind == "export":
             generator.generate_export_block(code)
     # Finalize: write back to file
-    return file.update(verbose=opt.verbose, dry_run=opt.dry_run)
+    changed = file.update(verbose=opt.verbose, dry_run=opt.dry_run)
+    if unregistered:
+        raise ValueError(
+            f"{', '.join(unregistered)}: the type is no longer registered; delete the block"
+        )
+    return changed
 
 
 def _parse_args() -> Options:
@@ -491,7 +540,9 @@ def _parse_args() -> Options:
         action="store_true",
         help=(
             "Don't write changes; report every file whose stub blocks are out of date "
-            "and exit with status 1 if there is any. Cannot be combined with --init-*."
+            "and exit with status 1 if there is any. For --target rust, only the generated "
+            "definitions count, not `use` lines, comments, layout or module paths. "
+            "Cannot be combined with --init-*."
         ),
     )
     parser.add_argument(

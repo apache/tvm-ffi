@@ -30,7 +30,10 @@
 #include <stdint.h>
 #include <tvm/ffi/c_api.h>
 
-#ifdef __APPLE__
+#ifdef _MSC_VER
+#pragma section(".nv_fatbin", read)
+__declspec(allocate(".nv_fatbin"))
+#elif defined(__APPLE__)
 __attribute__((section("__DATA,.nv_fatbin"), used))
 #else
 __attribute__((section(".nv_fatbin"), used))

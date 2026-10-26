@@ -442,12 +442,11 @@ class TypeTable {
                               TypeIndex::kTVMFFIObject);
   }
 
-  static ObjectPtr<details::StringObj> MakeInplaceString(const char* data, size_t length) {
-    ObjectPtr<details::StringObj> p =
-        make_inplace_array_object<details::StringObj, char>(length + 1);
-    static_assert(alignof(details::StringObj) % alignof(char) == 0);
-    static_assert(sizeof(details::StringObj) % alignof(char) == 0);
-    char* dest_data = reinterpret_cast<char*>(p.get()) + sizeof(details::StringObj);
+  static ObjectPtr<detail::StringObj> MakeInplaceString(const char* data, size_t length) {
+    ObjectPtr<detail::StringObj> p = make_inplace_array_object<detail::StringObj, char>(length + 1);
+    static_assert(alignof(detail::StringObj) % alignof(char) == 0);
+    static_assert(sizeof(detail::StringObj) % alignof(char) == 0);
+    char* dest_data = reinterpret_cast<char*>(p.get()) + sizeof(detail::StringObj);
     p->data = dest_data;
     p->size = length;
     std::memcpy(dest_data, data, length);
@@ -491,7 +490,7 @@ class OpaqueObjectImpl : public Object, public TVMFFIOpaqueObjectCell {
   }
 
   void SetTypeIndex(int32_t type_index) {
-    details::ObjectUnsafe::GetHeader(this)->type_index = type_index;
+    detail::ObjectUnsafe::GetHeader(this)->type_index = type_index;
   }
 
   ~OpaqueObjectImpl() {
@@ -525,13 +524,13 @@ void TVMFFIGetVersion(TVMFFIVersion* out_version) {
 
 int TVMFFIObjectDecRef(TVMFFIObjectHandle handle) {
   TVM_FFI_SAFE_CALL_BEGIN();
-  tvm::ffi::details::ObjectUnsafe::DecRefObjectHandle(handle);
+  tvm::ffi::detail::ObjectUnsafe::DecRefObjectHandle(handle);
   TVM_FFI_SAFE_CALL_END();
 }
 
 int TVMFFIObjectIncRef(TVMFFIObjectHandle handle) {
   TVM_FFI_SAFE_CALL_BEGIN();
-  tvm::ffi::details::ObjectUnsafe::IncRefObjectHandle(handle);
+  tvm::ffi::detail::ObjectUnsafe::IncRefObjectHandle(handle);
   TVM_FFI_SAFE_CALL_END();
 }
 
@@ -547,7 +546,7 @@ int TVMFFIObjectCreateOpaque(void* handle, int32_t type_index, void (*deleter)(v
   // need to set the type index after creation, because the set to RuntimeTypeIndex()
   // happens after the constructor is called
   p->SetTypeIndex(type_index);
-  *out = tvm::ffi::details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(p));
+  *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(p));
   TVM_FFI_SAFE_CALL_END();
 }
 
@@ -636,16 +635,16 @@ int TVMFFIBigIntFromByteArray(const TVMFFIByteArray* input, TVMFFIAny* out) {
     if (size) std::memcpy(&value, input->data, sizeof(value));
     ffi::TypeTraits<ffi::BigInt>::MoveToAny(ffi::BigInt(value), out);
   } else {
-    auto ptr = ffi::make_inplace_array_object<ffi::details::BigIntObj, int64_t>(size, size);
-    std::memcpy(ffi::details::BigIntUnsafe::GetMutableData(ptr), input->data, input->size);
-    ffi::TypeTraits<ffi::BigInt>::MoveToAny(ffi::details::BigIntUnsafe::Normalize(std::move(ptr)),
+    auto ptr = ffi::make_inplace_array_object<ffi::detail::BigIntObj, int64_t>(size, size);
+    std::memcpy(ffi::detail::BigIntUnsafe::GetMutableData(ptr), input->data, input->size);
+    ffi::TypeTraits<ffi::BigInt>::MoveToAny(ffi::detail::BigIntUnsafe::Normalize(std::move(ptr)),
                                             out);
   }
   TVM_FFI_SAFE_CALL_END();
 }
 
 TVMFFIByteArray TVMFFIBigIntGetContentByteArray(const TVMFFIAny* value) {
-  auto view = tvm::ffi::details::BigIntUnsafe::GetArrayView(value);
+  auto view = tvm::ffi::detail::BigIntUnsafe::GetArrayView(value);
   return {reinterpret_cast<const char*>(&view[0]), view.size() * sizeof(int64_t)};
 }
 
@@ -654,8 +653,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace ffi = ::tvm::ffi;
   namespace refl = ::tvm::ffi::reflection;
   refl::TypeAttrDef<ffi::Object>().def_convert<ffi::ObjectRef>();
-  refl::TypeAttrDef<ffi::details::StringObj>().def_convert<ffi::String>();
-  refl::TypeAttrDef<ffi::details::BytesObj>().def_convert<ffi::Bytes>();
+  refl::TypeAttrDef<ffi::detail::StringObj>().def_convert<ffi::String>();
+  refl::TypeAttrDef<ffi::detail::BytesObj>().def_convert<ffi::Bytes>();
   refl::TypeAttrDef<ffi::ErrorObj>().def_convert<ffi::Error>();
   refl::TypeAttrDef<ffi::FunctionObj>().def_convert<ffi::Function>();
   refl::TypeAttrDef<ffi::ShapeObj>().def_convert<ffi::Shape>();
@@ -686,7 +685,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("value", &ffi::EnumObj::_str_index, "Canonical string index.", refl::init(false),
               refl::AttachFieldFlag::SEqHashIgnore())
       .def_convert<ffi::StrEnum>();
-  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumState);
+  refl::EnsureTypeAttrColumn(ffi::type_attr::kEnumState);
   refl::GlobalDef()
       .def_method("ffi.GetRegisteredTypeKeys",
                   []() -> ffi::Array<ffi::String> {

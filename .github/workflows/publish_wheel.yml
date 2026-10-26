@@ -34,6 +34,7 @@ jobs:
           - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28, build_sdist: "true"}
           - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28, build_sdist: "false"}
           - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
+          - {os: windows-11-arm, arch: ARM64, linux_image: "", build_sdist: "false"}
           - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
 
     steps:
@@ -84,7 +85,7 @@ jobs:
           subject-path: dist/*
 
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
         with:
           attestations: true
           verbose: true

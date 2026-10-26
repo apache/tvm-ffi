@@ -25,10 +25,14 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/device.h>
 #include <tvm/ffi/dtype.h>
+#include <tvm/ffi/extra/serialization.h>
+#include <tvm/ffi/extra/structural_equal.h>
+#include <tvm/ffi/extra/structural_hash.h>
 #include <tvm/ffi/extra/structural_mutate.h>
 #include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
+#include <tvm/ffi/reflection/native_function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
@@ -56,7 +60,7 @@ class TNumberObj : public BasePad, public Object {
 
 class TNumber : public ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TNumber, ObjectRef, TNumberObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TNumber, ObjectRef, TNumberObj);
 };
 
 class TIntObj : public TNumberObj {
@@ -75,7 +79,7 @@ class TIntObj : public TNumberObj {
 
 class TInt : public TNumber {
  public:
-  explicit TInt(int64_t value) { data_ = make_object<TIntObj>(value); }
+  explicit TInt(int64_t value) : TNumber(UnsafeInit{}) { data_ = make_object<TIntObj>(value); }
 
   static TInt StaticAdd(TInt lhs, TInt rhs) { return TInt(lhs->value + rhs->value); }
 
@@ -99,15 +103,17 @@ inline void TIntObj::RegisterReflection() {
   refl::TypeAttrDef<TIntObj>()
       .def("test.GetValue", &TIntObj::GetValue)
       .attr("test.size", sizeof(TIntObj))
-      .attr(refl::type_attr::kAnyHash, reinterpret_cast<void*>(&TInt::CustomAnyHash))
-      .attr(refl::type_attr::kAnyEqual, reinterpret_cast<void*>(&TInt::CustomAnyEqual));
+      .native_fn_attr<&TInt::CustomAnyHash>(type_attr::kAnyHash)
+      .native_fn_attr<&TInt::CustomAnyEqual>(type_attr::kAnyEqual);
   // custom json serialization
   refl::TypeAttrDef<TIntObj>()
-      .def(refl::type_attr::kDataToJson,
-           [](const TIntObj* self) -> Map<String, Any> {
+      .def(type_attr::kDataToJson.name,
+           [](AnyView value) -> Any {
+             const auto* self = value.as_or_throw<const TIntObj*>();
              return Map<String, Any>{{"value", self->value}};
            })
-      .def(refl::type_attr::kDataFromJson, [](Map<String, Any> json_obj) -> TInt {
+      .def(type_attr::kDataFromJson.name, [](AnyView value) -> Any {
+        auto json_obj = value.as_or_throw<Map<String, Any>>();
         return TInt(json_obj["value"].cast<int64_t>());
       });
 }
@@ -127,7 +133,7 @@ class TFloatObj : public TNumberObj {
 
 class TFloat : public TNumber {
  public:
-  explicit TFloat(double value) { data_ = make_object<TFloatObj>(value); }
+  explicit TFloat(double value) : TNumber(UnsafeInit{}) { data_ = make_object<TFloatObj>(value); }
 
   static uint64_t CustomAnyHash(const Any& src) {
     double value = src.cast<TFloat>()->value;
@@ -138,7 +144,7 @@ class TFloat : public TNumber {
     return lhs.cast<TFloat>()->value == rhs.cast<TFloat>()->value;
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TFloat, TNumber, TFloatObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TFloat, TNumber, TFloatObj);
 };
 
 inline void TFloatObj::RegisterReflection() {
@@ -148,8 +154,8 @@ inline void TFloatObj::RegisterReflection() {
       .def("sub", [](const TFloatObj* self, double other) -> double { return self->value - other; })
       .def("add", &TFloatObj::Add, "add method");
   refl::TypeAttrDef<TFloatObj>()
-      .def(refl::type_attr::kAnyHash, &TFloat::CustomAnyHash)
-      .def(refl::type_attr::kAnyEqual, &TFloat::CustomAnyEqual);
+      .def(type_attr::kAnyHash.name, &TFloat::CustomAnyHash)
+      .def(type_attr::kAnyEqual.name, &TFloat::CustomAnyEqual);
 }
 
 class TPrimExprObj : public Object {
@@ -181,7 +187,7 @@ class TPrimExpr : public ObjectRef {
     data_ = make_object<TPrimExprObj>(dtype, value);
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TPrimExpr, ObjectRef, TPrimExprObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TPrimExpr, ObjectRef, TPrimExprObj);
 };
 
 class TVarObj : public Object {
@@ -206,7 +212,7 @@ class TVar : public ObjectRef {
  public:
   explicit TVar(std::string name) { data_ = make_object<TVarObj>(name); }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TVar, ObjectRef, TVarObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TVar, ObjectRef, TVarObj);
 };
 
 class TPairObj : public Object {
@@ -232,7 +238,7 @@ class TPair : public ObjectRef {
     data_ = make_object<TPairObj>(std::move(lhs), std::move(rhs));
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TPair, ObjectRef, TPairObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TPair, ObjectRef, TPairObj);
 };
 
 class TMutatePairObj : public Object {
@@ -253,7 +259,7 @@ class TMutatePairObj : public Object {
       StructuralMutatorObj* mutator, AnyView value) noexcept {
     ++StructuralMutateCallCount();
     const TMutatePairObj* self =
-        details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const TMutatePairObj>(value);
+        detail::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const TMutatePairObj>(value);
     TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(UnchangedOr<ObjectRef>, lhs,
                                       mutator->MutateExpected(self->lhs, InplaceMode::kDisallow));
     TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(UnchangedOr<ObjectRef>, rhs,
@@ -272,10 +278,9 @@ class TMutatePairObj : public Object {
     refl::ObjectDef<TMutatePairObj>()
         .def_ro("lhs", &TMutatePairObj::lhs)
         .def_ro("rhs", &TMutatePairObj::rhs);
-    refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMutate);
-    refl::TypeAttrDef<TMutatePairObj>().attr(
-        refl::type_attr::kStructuralMutate,
-        FStructuralMutate::FromNative<&TMutatePairObj::StructuralMutateHook>());
+    refl::EnsureTypeAttrColumn(type_attr::kStructuralMutate);
+    refl::TypeAttrDef<TMutatePairObj>().native_fn_attr<&TMutatePairObj::StructuralMutateHook>(
+        type_attr::kStructuralMutate);
   }
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
@@ -288,7 +293,7 @@ class TMutatePair : public ObjectRef {
     data_ = make_object<TMutatePairObj>(std::move(lhs), std::move(rhs));
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TMutatePair, ObjectRef, TMutatePairObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TMutatePair, ObjectRef, TMutatePairObj);
 };
 
 class TObjectPtrHolderObj : public Object {
@@ -323,7 +328,7 @@ class TObjectPtrHolder : public ObjectRef {
     data_ = make_object<TObjectPtrHolderObj>(std::move(value), std::move(optional_alias));
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TObjectPtrHolder, ObjectRef, TObjectPtrHolderObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TObjectPtrHolder, ObjectRef, TObjectPtrHolderObj);
 };
 
 // FreeVar test object that has a sub-field referencing another FreeVar.
@@ -365,7 +370,7 @@ class TVarWithDep : public ObjectRef {
     data_ = make_object<TVarWithDepObj>(std::move(name), std::move(dep));
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TVarWithDep, ObjectRef, TVarWithDepObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TVarWithDep, ObjectRef, TVarWithDepObj);
 };
 
 // Holder with one recursive-def field and one non-recursive-def field.
@@ -377,7 +382,7 @@ class TDefHolderObj : public Object {
 
   TDefHolderObj(TVarWithDep def_recursive, TVarWithDep def_non_recursive)
       : def_recursive(std::move(def_recursive)), def_non_recursive(std::move(def_non_recursive)) {}
-  explicit TDefHolderObj(UnsafeInit) {}
+  explicit TDefHolderObj(UnsafeInit tag) : def_recursive(tag), def_non_recursive(tag) {}
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -398,7 +403,7 @@ class TDefHolder : public ObjectRef {
     data_ = make_object<TDefHolderObj>(std::move(def_recursive), std::move(def_non_recursive));
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TDefHolder, ObjectRef, TDefHolderObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TDefHolder, ObjectRef, TDefHolderObj);
 };
 
 class TFuncObj : public Object {
@@ -428,10 +433,9 @@ class TFuncObj : public Object {
         .def_ro("params", &TFuncObj::params, refl::AttachFieldFlag::SEqHashDefPattern())
         .def_ro("body", &TFuncObj::body)
         .def_ro("comment", &TFuncObj::comment, refl::AttachFieldFlag::SEqHashIgnore());
-    refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralVisit);
-    refl::TypeAttrDef<TFuncObj>().attr(
-        refl::type_attr::kStructuralVisit,
-        FStructuralVisit::FromNative<&TFuncObj::StructuralVisitHook>());
+    refl::EnsureTypeAttrColumn(type_attr::kStructuralVisit);
+    refl::TypeAttrDef<TFuncObj>().native_fn_attr<&TFuncObj::StructuralVisitHook>(
+        type_attr::kStructuralVisit);
   }
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
@@ -444,7 +448,7 @@ class TFunc : public ObjectRef {
     data_ = make_object<TFuncObj>(params, body, comment);
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TFunc, ObjectRef, TFuncObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TFunc, ObjectRef, TFuncObj);
 };
 
 class TCustomFuncObj : public Object {
@@ -457,7 +461,7 @@ class TCustomFuncObj : public Object {
       : params(params), body(body), comment(comment) {}
 
   bool SEqual(const TCustomFuncObj* other,
-              ffi::TypedFunction<bool(AnyView, AnyView, bool, AnyView)> cmp) const {
+              const ffi::TypedFunction<bool(AnyView, AnyView, int, AnyView)>& cmp) const {
     if (!cmp(params, other->params, true, "params")) {
       return false;
     }
@@ -467,7 +471,8 @@ class TCustomFuncObj : public Object {
     return true;
   }
 
-  int64_t SHash(int64_t init_hash, ffi::TypedFunction<int64_t(AnyView, int64_t, bool)> hash) const {
+  int64_t SHash(int64_t init_hash,
+                const ffi::TypedFunction<int64_t(AnyView, int64_t, int)>& hash) const {
     int64_t hash_value = init_hash;
     hash_value = hash(params, hash_value, true);
     hash_value = hash(body, hash_value, false);
@@ -481,8 +486,8 @@ class TCustomFuncObj : public Object {
         .def_ro("body", &TCustomFuncObj::body)
         .def_ro("comment", &TCustomFuncObj::comment);
     refl::TypeAttrDef<TCustomFuncObj>()
-        .def(refl::type_attr::kSEqual, &TCustomFuncObj::SEqual)
-        .def(refl::type_attr::kSHash, &TCustomFuncObj::SHash);
+        .def(type_attr::kSEqual.name, &TCustomFuncObj::SEqual)
+        .def(type_attr::kSHash.name, &TCustomFuncObj::SHash);
   }
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
@@ -495,7 +500,7 @@ class TCustomFunc : public ObjectRef {
     data_ = make_object<TCustomFuncObj>(params, body, comment);
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TCustomFunc, ObjectRef, TCustomFuncObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TCustomFunc, ObjectRef, TCustomFuncObj);
 };
 
 // Test object with all POD field types to exercise serialization of every field kind.
@@ -552,7 +557,7 @@ class TAllFields : public ObjectRef {
                                        v_array, v_map);
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TAllFields, ObjectRef, TAllFieldsObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TAllFields, ObjectRef, TAllFieldsObj);
 };
 
 // Test object with fields that have default values to test deserialization with missing fields
@@ -590,7 +595,7 @@ class TWithDefaults : public ObjectRef {
     data_ = make_object<TWithDefaultsObj>(required_val, default_int, default_str, default_bool);
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TWithDefaults, ObjectRef, TWithDefaultsObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TWithDefaults, ObjectRef, TWithDefaultsObj);
 };
 
 }  // namespace testing

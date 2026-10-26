@@ -120,7 +120,7 @@ class ShapeObj : public Object, public TVMFFIShapeCell {
   /// \endcond
 };
 
-namespace details {
+namespace detail {
 
 class ShapeObjStdImpl : public ShapeObj {
  public:
@@ -177,12 +177,12 @@ TVM_FFI_INLINE void FillStridesFromShape(ShapeView shape, int64_t* out_strides) 
  */
 TVM_FFI_INLINE ObjectPtr<ShapeObj> MakeStridesFromShape(ShapeView shape) {
   int64_t* strides_data;
-  ObjectPtr<ShapeObj> strides = details::MakeEmptyShape(shape.size(), &strides_data);
+  ObjectPtr<ShapeObj> strides = detail::MakeEmptyShape(shape.size(), &strides_data);
   FillStridesFromShape(shape, strides_data);
   return strides;
 }
 
-}  // namespace details
+}  // namespace detail
 
 /*!
  * \brief Managed reference to shape object.
@@ -198,7 +198,7 @@ class Shape : public ObjectRef {
   using index_type = ShapeObj::index_type;
 
   /*! \brief Default constructor */
-  Shape() : ObjectRef(details::MakeEmptyShape(0, nullptr)) {}
+  Shape() : ObjectRef(detail::MakeEmptyShape(0, nullptr)) {}
 
   /*!
    * \brief Constructor from iterator
@@ -207,7 +207,7 @@ class Shape : public ObjectRef {
    * \tparam IterType The type of iterator
    */
   template <typename IterType>
-  Shape(IterType begin, IterType end) : Shape(details::MakeInplaceShape(begin, end)) {}
+  Shape(IterType begin, IterType end) : Shape(detail::MakeInplaceShape(begin, end)) {}
 
   /**
    * \brief Constructor from Array<int64_t>
@@ -230,7 +230,7 @@ class Shape : public ObjectRef {
    * \param other a int64_t array.
    */
   Shape(std::vector<int64_t> other)  // NOLINT(*)
-      : ObjectRef(make_object<details::ShapeObjStdImpl>(std::move(other))) {}
+      : ObjectRef(make_object<detail::ShapeObjStdImpl>(std::move(other))) {}
 
   /*!
    * \brief constructor from shape view.
@@ -244,7 +244,7 @@ class Shape : public ObjectRef {
    * \return The strides.
    */
   static Shape StridesFromShape(ShapeView shape) {
-    return Shape(details::MakeStridesFromShape(shape));
+    return Shape(detail::MakeStridesFromShape(shape));
   }
 
   /*!

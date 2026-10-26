@@ -25,6 +25,8 @@ the module tears the dylib down.
 from __future__ import annotations
 
 import gc
+import platform
+import shutil
 import sys
 import tempfile
 import threading
@@ -42,6 +44,84 @@ from utils import build_test_objects
 # ---------------------------------------------------------------------------
 
 OBJ_DIR = build_test_objects()
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32" or platform.machine().lower() not in ("arm64", "aarch64"),
+    reason="requires native Windows ARM64",
+)
+def test_windows_arm64_native_compilers() -> None:
+    """Require real ARM64 objects from both MSVC and clang-cl in native CI."""
+    for variant in ("c", "c-msvc"):
+        path = OBJ_DIR / variant / "test_funcs.o"
+        assert path.exists(), f"{variant} compiler did not build the ARM64 test objects"
+        assert int.from_bytes(path.read_bytes()[:2], "little") == 0xAA64
+        mod = ExecutionSession().load_module(str(path))
+        assert mod.test_add(10, 20) == 30
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32" or platform.machine().lower() not in ("arm64", "aarch64"),
+    reason="requires native Windows ARM64 COFF lifecycle handling",
+)
+@pytest.mark.parametrize("compiler", ["clang-cl", "cl"])
+def test_failed_materialization_discards_crt_callbacks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compiler: str
+) -> None:
+    """Failed links release CRT slots without running them or poisoning later loads."""
+    assert shutil.which(compiler), f"{compiler} is required for native Windows ARM64 tests"
+    monkeypatch.setenv("CC", compiler)
+    source = Path(__file__).parent / "sources" / "c" / "test_ctor_dtor.c"
+    failing_source = tmp_path / "failed_ctor.c"
+    failing_source.write_text(
+        source.read_text().replace(
+            "static void puts_log(const char* msg) {",
+            "extern void tvm_ffi_test_unresolved_symbol(void);\n"
+            "static void puts_log(const char* msg) {\n"
+            "  tvm_ffi_test_unresolved_symbol();",
+        )
+    )
+    flags = ["/GS-"]
+    if compiler == "clang-cl":
+        flags.append("--target=aarch64-pc-windows-msvc")
+    failed_obj = tvm_ffi.cpp.build(
+        name="failed_ctor",
+        sources=[str(failing_source)],
+        output="failed_ctor.o",
+        extra_cflags=flags,
+        build_directory=str(tmp_path / "build"),
+    )
+    log: list[str] = []
+
+    @tvm_ffi.register_global_func("append_log", override=True)
+    def append_ctor_log(value: str) -> None:
+        log.append(value)
+
+    session = ExecutionSession()
+    for _ in range(3):
+        failed = None
+        with pytest.raises(Exception, match=r"Failed to materialize|Symbols not found"):
+            failed = session.load_module(failed_obj)
+            failed.get_function("main")
+        del failed
+        gc.collect()
+        assert log == []
+
+        mod = session.load_module(str(OBJ_DIR / "c" / "test_ctor_dtor.o"))
+        mod.get_function("main")()
+        del mod
+        gc.collect()
+        assert log == [
+            "<crt.XCA>",
+            "<crt.XCB>",
+            "<crt.XCC>",
+            "<crt.XCU>",
+            "<main>",
+            "<crt.XTA>",
+            "<crt.XTZ>",
+        ]
+        log.clear()
+
 
 _KNOWN_SUBDIRS = [
     "cc",

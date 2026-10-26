@@ -24,7 +24,7 @@
 #ifndef TVM_FFI_TRACEBACK_H_
 #define TVM_FFI_TRACEBACK_H_
 
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 
 #include <climits>
 #include <cstdlib>
@@ -66,7 +66,7 @@ inline bool ShouldExcludeFrame(const char* filename, const char* symbol) {
     if (strncmp(symbol, "tvm::ffi::Function", 18) == 0) {
       return true;
     }
-    if (strncmp(symbol, "tvm::ffi::details::", 19) == 0) {
+    if (strncmp(symbol, "tvm::ffi::detail::", 18) == 0) {
       return true;
     }
     if (strncmp(symbol, "TVMFFIBacktrace", 15) == 0) {
@@ -95,7 +95,7 @@ inline bool ShouldExcludeFrame(const char* filename, const char* symbol) {
     if (strstr(filename, "include/tvm/ffi/error.h") != nullptr) {
       return true;
     }
-    if (strstr(filename, "include/tvm/ffi/function_details.h") != nullptr) {
+    if (strstr(filename, "include/tvm/ffi/function_detail.h") != nullptr) {
       return true;
     }
     if (strstr(filename, "include/tvm/ffi/function.h") != nullptr) {

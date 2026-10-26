@@ -147,14 +147,14 @@ int TVMFFIFunctionCreate(void* self, TVMFFISafeCallType safe_call, void (*delete
                          TVMFFIObjectHandle* out) {
   TVM_FFI_SAFE_CALL_BEGIN();
   tvm::ffi::Function func = tvm::ffi::Function::FromExternC(self, safe_call, deleter);
-  *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(func));
+  *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(func));
   TVM_FFI_SAFE_CALL_END();
 }
 
 int TVMFFIAnyViewToOwnedAny(const TVMFFIAny* any_view, TVMFFIAny* out) {
   TVM_FFI_SAFE_CALL_BEGIN();
   tvm::ffi::Any result(*reinterpret_cast<const tvm::ffi::AnyView*>(any_view));
-  *out = tvm::ffi::details::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(result));
+  *out = tvm::ffi::detail::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(result));
   TVM_FFI_SAFE_CALL_END();
 }
 
@@ -181,7 +181,7 @@ int TVMFFIFunctionGetGlobal(const TVMFFIByteArray* name, TVMFFIObjectHandle* out
   const GlobalFunctionTable::Entry* fp = GlobalFunctionTable::Global()->Get(name_str);
   if (fp != nullptr) {
     tvm::ffi::Function func(fp->func_data);
-    *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(func));
+    *out = tvm::ffi::detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(func));
   } else {
     *out = nullptr;
   }

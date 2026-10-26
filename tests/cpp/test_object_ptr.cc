@@ -44,9 +44,9 @@ inline constexpr bool tvm::ffi::is_object_subclass_v<::tvm::ffi::testing::Mutual
 template <>
 inline constexpr bool tvm::ffi::is_object_subclass_v<::tvm::ffi::testing::MutualRightObj> = true;
 
-static_assert(::tvm::ffi::details::storage_enabled_v<
+static_assert(::tvm::ffi::detail::storage_enabled_v<
               ::tvm::ffi::ObjectPtr<::tvm::ffi::testing::MutualLeftObj>>);
-static_assert(::tvm::ffi::details::storage_enabled_v<
+static_assert(::tvm::ffi::detail::storage_enabled_v<
               ::tvm::ffi::ObjectPtr<::tvm::ffi::testing::MutualRightObj>>);
 
 namespace tvm {
@@ -162,7 +162,7 @@ static_assert(std::is_convertible_v<CxxDerivedObj*, CxxBaseObj*>);
 static_assert(std::is_constructible_v<ObjectPtr<CxxBaseObj>, ObjectPtr<CxxDerivedObj>>);
 static_assert(std::is_assignable_v<ObjectPtr<CxxBaseObj>&, ObjectPtr<CxxDerivedObj>>);
 static_assert(!TypeTraits<ObjectPtr<int>>::storage_enabled);
-static_assert(!tvm::ffi::details::storage_enabled_v<ObjectPtr<int>>);
+static_assert(!tvm::ffi::detail::storage_enabled_v<ObjectPtr<int>>);
 static_assert(
     tvm::ffi::type_subsumes_v<ObjectPtr<GeneratedBaseObj>, ObjectPtr<GeneratedDerivedObj>>);
 static_assert(

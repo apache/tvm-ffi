@@ -120,7 +120,9 @@ class VisitErrorContext : public ObjectRef {
       bool allow_prefix_match = false);
 
   /// \cond Doxygen_Suppress
-  explicit VisitErrorContext(ObjectPtr<VisitErrorContextObj> n) : ObjectRef(std::move(n)) {}
+  explicit VisitErrorContext(ObjectPtr<VisitErrorContextObj> n) : ObjectRef(std::move(n)) {
+    TVM_FFI_ICHECK_NOTNULL(data_.get());
+  }
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(VisitErrorContext, ObjectRef, VisitErrorContextObj);
   /// \endcond
 };
@@ -150,11 +152,11 @@ class VisitErrorContext : public ObjectRef {
  * \param node The ObjectRef at the current visit level (appended to the
  *             error context's reverse_visit_pattern on exception).
  */
-#define TVM_FFI_VISIT_END(node)                                                \
-  }                                                                            \
-  catch (::tvm::ffi::Error & _tvm_ffi_visit_err_) {                            \
-    ::tvm::ffi::details::UpdateVisitErrorContext(_tvm_ffi_visit_err_, (node)); \
-    throw;                                                                     \
+#define TVM_FFI_VISIT_END(node)                                               \
+  }                                                                           \
+  catch (::tvm::ffi::Error & _tvm_ffi_visit_err_) {                           \
+    ::tvm::ffi::detail::UpdateVisitErrorContext(_tvm_ffi_visit_err_, (node)); \
+    throw;                                                                    \
   }
 
 /*!
@@ -166,11 +168,11 @@ class VisitErrorContext : public ObjectRef {
  * \param node The current visit value. Object-backed values are appended to the
  *             error context's reverse_visit_pattern on exception.
  */
-#define TVM_FFI_VISIT_END_RETURN_EXPECTED(node)                                \
-  }                                                                            \
-  catch (::tvm::ffi::Error & _tvm_ffi_visit_err_) {                            \
-    ::tvm::ffi::details::UpdateVisitErrorContext(_tvm_ffi_visit_err_, (node)); \
-    return ::tvm::ffi::Unexpected(_tvm_ffi_visit_err_);                        \
+#define TVM_FFI_VISIT_END_RETURN_EXPECTED(node)                               \
+  }                                                                           \
+  catch (::tvm::ffi::Error & _tvm_ffi_visit_err_) {                           \
+    ::tvm::ffi::detail::UpdateVisitErrorContext(_tvm_ffi_visit_err_, (node)); \
+    return ::tvm::ffi::Unexpected(_tvm_ffi_visit_err_);                       \
   }
 
 /*!
@@ -210,14 +212,14 @@ class VisitErrorContext : public ObjectRef {
  * \param ErrorKind The kind of error to throw (e.g. TypeError, ValueError).
  * \param node The ObjectRef at the throw site (innermost frame).
  */
-#define TVM_FFI_VISIT_THROW(ErrorKind, node)                                                    \
-  ::tvm::ffi::details::ErrorBuilder(                                                            \
-      #ErrorKind, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0),                     \
-      TVM_FFI_ALWAYS_LOG_BEFORE_THROW, ::std::nullopt,                                          \
-      ::std::optional<::tvm::ffi::ObjectRef>(::tvm::ffi::details::MakeVisitErrorContext(node))) \
+#define TVM_FFI_VISIT_THROW(ErrorKind, node)                                                   \
+  ::tvm::ffi::detail::ErrorBuilder(                                                            \
+      #ErrorKind, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0),                    \
+      TVM_FFI_ALWAYS_LOG_BEFORE_THROW, ::std::nullopt,                                         \
+      ::std::optional<::tvm::ffi::ObjectRef>(::tvm::ffi::detail::MakeVisitErrorContext(node))) \
       .stream()
 
-namespace details {
+namespace detail {
 /*!
  * \brief Build a fresh VisitErrorContext seeded with `node` as the
  *        innermost (and currently only) frame of reverse_visit_pattern.
@@ -257,12 +259,12 @@ inline void UpdateVisitErrorContext(Error& err, const ObjectRef& node) {  // NOL
   if (extra_context) new_context->prev_error_context = *extra_context;
 
   ErrorObj* error_obj =
-      static_cast<ErrorObj*>(details::ObjectUnsafe::RawObjectPtrFromObjectRef(err));
+      static_cast<ErrorObj*>(detail::ObjectUnsafe::RawObjectPtrFromObjectRef(err));
   if (error_obj->extra_context != nullptr) {
-    details::ObjectUnsafe::DecRefObjectHandle(error_obj->extra_context);
+    detail::ObjectUnsafe::DecRefObjectHandle(error_obj->extra_context);
   }
   error_obj->extra_context =
-      details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(new_context));
+      detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(new_context));
 }
 
 /*!
@@ -302,7 +304,7 @@ TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(Error& err,
     UpdateVisitErrorContext(err, node.cast<ObjectRef>());
   }
 }
-}  // namespace details
+}  // namespace detail
 
 }  // namespace ffi
 }  // namespace tvm

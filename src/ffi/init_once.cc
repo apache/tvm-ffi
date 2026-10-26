@@ -22,7 +22,7 @@
  * \file src/ffi/init_once.cc
  * \brief Handle Init Once C API implementation.
  */
-#include <tvm/ffi/base_details.h>
+#include <tvm/ffi/base_detail.h>
 #include <tvm/ffi/c_api.h>
 
 #include <mutex>

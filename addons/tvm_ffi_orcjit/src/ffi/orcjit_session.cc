@@ -40,6 +40,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <sstream>
 
@@ -66,6 +67,9 @@
 
 #include "llvm_patches/win_coff_pdata_strip.h"
 #include "llvm_patches/win_dll_import_generator.h"
+#ifdef TVM_FFI_ORCJIT_WINDOWS_ARM64
+#include "llvm_patches/win_arm64_rtdyld.h"
+#endif
 #endif
 
 namespace tvm {
@@ -264,6 +268,14 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
             return std::make_unique<llvm::orc::ObjectLinkingLayer>(ES, memory_manager);
           });
     }  // if (memory_manager_)
+#elif defined(TVM_FFI_ORCJIT_WINDOWS_ARM64)
+    // LLVM 23's JITLink has no COFF/AArch64 backend. RTDyld supports this
+    // format and supplies its own long-branch stubs and DLL-import slots.
+    builder.setObjectLinkingLayerCreator(
+        [this](llvm::orc::ExecutionSession& ES, llvm::jitlink::JITLinkMemoryManager&)
+            -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
+          return CreateWindowsArm64ObjectLinkingLayer(ES, this);
+        });
 #elif defined(__APPLE__) || defined(_WIN32)
     // Force ObjectLinkingLayer (JITLink) so we can attach InitFiniPlugin.
     // macOS: LLJIT already defaults to JITLink for Darwin, but the explicit
@@ -337,12 +349,12 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
   has_orc_platform_ = SetUpOrcPlatform(builder, orc_rt);
   setup_builder(builder);
   jit_ = TVM_FFI_ORCJIT_LLVM_CALL(builder.create());
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(TVM_FFI_ORCJIT_WINDOWS_ARM64)
   // Strip .pdata/.xdata relocations from COFF objects before JITLink graph
   // building.  See llvm_patches/win_coff_pdata_strip.h for the rationale.
   jit_->getObjTransformLayer().setTransform(&StripCoffPdataXdata);
 #endif
-#if defined(__APPLE__) || defined(_WIN32)
+#if defined(__APPLE__) || (defined(_WIN32) && !defined(TVM_FFI_ORCJIT_WINDOWS_ARM64))
   // Mach-O and COFF still need the local lifecycle adapter. Linux uses LLVM
   // 23's ELFNixPlatform initialize/deinitialize path instead.
   auto& objlayer = jit_->getObjLinkingLayer();
@@ -355,9 +367,13 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
   // comprehensive generator that searches all loaded DLLs (vcruntime140,
   // ucrtbase, tvm_ffi, etc.) and creates __imp_* pointer stubs.
   if (auto PSG = jit_->getProcessSymbolsJITDylib()) {
+#ifdef TVM_FFI_ORCJIT_WINDOWS_ARM64
+    PSG->addGenerator(std::make_unique<DLLImportDefinitionGenerator>(jit_->getExecutionSession()));
+#else
     auto& ObjLayer = static_cast<llvm::orc::ObjectLinkingLayer&>(jit_->getObjLinkingLayer());
     PSG->addGenerator(
-        std::make_unique<DLLImportDefinitionGenerator>(jit_->getExecutionSession(), ObjLayer));
+        std::make_unique<DLLImportDefinitionGenerator>(jit_->getExecutionSession(), &ObjLayer));
+#endif
   }
 #endif
 }
@@ -528,7 +544,15 @@ ORCJITExecutionSessionObj::DrainPendingDeinitializers(llvm::orc::JITDylib& jit_d
 
 void ORCJITExecutionSessionObj::RunInitFiniEntries(const std::vector<InitFiniEntry>& entries) {
   for (const auto& entry : entries) {
-    entry.address.toPtr<CtorDtor>()();
+    auto address = entry.address;
+    if (entry.indirect) {
+      std::uintptr_t value;
+      std::memcpy(&value, address.toPtr<const void*>(), sizeof(value));
+      address = llvm::orc::ExecutorAddr(value);
+    }
+    if (address && address.getValue() != static_cast<std::uintptr_t>(-1)) {
+      address.toPtr<CtorDtor>()();
+    }
   }
 }
 

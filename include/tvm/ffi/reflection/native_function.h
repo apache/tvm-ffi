@@ -68,7 +68,7 @@ class NativeFunctionView<R(Args...)> {
                  ...),
                 "NativeFunctionView parameters require lvalue references or standard-layout, "
                 "trivially-copyable values");
-  static_assert((ffi::details::ArgSupported<Args> && ...) && ffi::details::RetSupported<R>,
+  static_assert((ffi::detail::ArgSupported<Args> && ...) && ffi::detail::RetSupported<R>,
                 "NativeFunctionView signature must be supported by TypedFunction");
   /*! \brief Raw C ABI-compatible function pointer stored for native hook dispatch. */
   using ABIType = TVMFFIAny (*)(Args...) noexcept;
@@ -123,7 +123,7 @@ class NativeFunctionView<R(Args...)> {
    * \return A value or an error.
    */
   TVM_FFI_INLINE Expected<R> CallExpected(Args... args) const noexcept {
-    return ffi::details::ExpectedUnsafe::MoveFromTVMFFIAny<R>(CallABI(std::forward<Args>(args)...));
+    return ffi::detail::ExpectedUnsafe::MoveFromTVMFFIAny<R>(CallABI(std::forward<Args>(args)...));
   }
 
   /*! \brief Invoke the hook and throw its error on failure. */
@@ -141,7 +141,7 @@ class NativeFunctionView<R(Args...)> {
 
   template <Expected<R> (*Fn)(Args...) noexcept>
   TVM_FFI_INLINE static TVMFFIAny NativeABIFuncPtr(Args... args) noexcept {
-    return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(Fn(std::forward<Args>(args)...));
+    return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(Fn(std::forward<Args>(args)...));
   }
 
   template <R (*Fn)(Args...)>
@@ -149,15 +149,15 @@ class NativeFunctionView<R(Args...)> {
     try {
       if constexpr (std::is_void_v<R>) {
         Fn(std::forward<Args>(args)...);
-        return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(Expected<void>());
+        return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(Expected<void>());
       } else {
-        return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(
+        return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(
             Expected<R>(Fn(std::forward<Args>(args)...)));
       }
     } catch (const ffi::Error& error) {
-      return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(Unexpected(error)));
+      return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(Unexpected(error)));
     } catch (const std::exception& error) {
-      return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(
+      return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(
           Expected<R>(Unexpected(ffi::Error("InternalError", error.what(), ""))));
     }
   }
@@ -179,23 +179,23 @@ class NativeFunctionView<R(Args...)> {
     int code = cell->safe_call(data_.v_obj, reinterpret_cast<const TVMFFIAny*>(packed_args),
                                sizeof...(Args), reinterpret_cast<TVMFFIAny*>(&result));
     if (TVM_FFI_PREDICT_FALSE(code != 0)) {
-      return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(
-          Expected<R>(Unexpected(ffi::details::MoveFromSafeCallRaised())));
+      return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(
+          Expected<R>(Unexpected(ffi::detail::MoveFromSafeCallRaised())));
     }
     if (result.type_index() == TypeIndex::kTVMFFIError) {
-      return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(
-          Unexpected(ffi::details::AnyUnsafe::MoveFromAnyAfterCheck<Error>(std::move(result)))));
+      return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(
+          Unexpected(ffi::detail::AnyUnsafe::MoveFromAnyAfterCheck<Error>(std::move(result)))));
     }
     if constexpr (std::is_same_v<R, Any>) {
-      return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(std::move(result)));
+      return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(std::move(result)));
     } else if constexpr (std::is_void_v<R>) {
       if (result.type_index() == TypeIndex::kTVMFFINone) {
-        return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(Expected<void>());
+        return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(Expected<void>());
       }
     } else if (auto value = result.template try_cast<R>()) {
-      return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(*std::move(value)));
+      return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(Expected<R>(*std::move(value)));
     }
-    return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(
+    return ffi::detail::ExpectedUnsafe::MoveToTVMFFIAny(
         Expected<R>(Unexpected(Error("TypeError", "Packed hook result type mismatch", ""))));
   }
 
@@ -310,7 +310,7 @@ struct TypeTraits<reflection::NativeFunctionView<Signature>> : public TypeTraits
 
   static void CopyToAnyView(const View& src, TVMFFIAny* result) { *result = src.data_; }
   static void MoveToAny(View src, TVMFFIAny* result) {
-    *result = details::AnyUnsafe::MoveAnyToTVMFFIAny(Any(AnyView::CopyFromTVMFFIAny(src.data_)));
+    *result = detail::AnyUnsafe::MoveAnyToTVMFFIAny(Any(AnyView::CopyFromTVMFFIAny(src.data_)));
   }
   static bool CheckAnyStrict(const TVMFFIAny* src) {
     return (src->type_index == TypeIndex::kTVMFFIOpaquePtr && src->v_ptr != nullptr) ||
@@ -342,14 +342,14 @@ struct TypeTraits<reflection::NativeFunction<Signature>> : public TypeTraitsBase
     *result = AnyView(src.data_).CopyToTVMFFIAny();
   }
   static void MoveToAny(Owner src, TVMFFIAny* result) {
-    *result = details::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(src.data_));
+    *result = detail::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(src.data_));
   }
   static bool CheckAnyStrict(const TVMFFIAny* src) { return TypeTraits<View>::CheckAnyStrict(src); }
   static Owner CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
     return Owner(TypeTraits<View>::CopyFromAnyViewAfterCheck(src));
   }
   static Owner MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return Owner(UnsafeInit{}, details::AnyUnsafe::MoveTVMFFIAnyToAny(src));
+    return Owner(UnsafeInit{}, detail::AnyUnsafe::MoveTVMFFIAnyToAny(src));
   }
   static std::optional<Owner> TryCastFromAnyView(const TVMFFIAny* src) {
     if (CheckAnyStrict(src)) return CopyFromAnyViewAfterCheck(src);

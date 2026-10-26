@@ -386,7 +386,7 @@ public:
   }
 
   // Required: define object reference methods
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestIntPair, tvm::ffi::ObjectRef, TestIntPairObj);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TestIntPair, tvm::ffi::ObjectRef, TestIntPairObj);
 };
 
 TVM_FFI_STATIC_INIT_BLOCK() {

@@ -94,7 +94,7 @@ TEST(OstreamObjectRef, DerivedSlicing) {
 }
 
 TEST(OstreamObjectRef, NullObjectRef) {
-  TNumber n;  // default-constructed, null
+  ObjectRef n;  // default-constructed, null
   std::ostringstream os;
   os << n;
   EXPECT_EQ(os.str(), "None");
