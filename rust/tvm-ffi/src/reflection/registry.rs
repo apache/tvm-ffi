@@ -42,7 +42,7 @@ use crate::tvm_ffi_sys::{
     TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeMetadata,
     TVMFFITypeRegisterAttr, TVMFFITypeRegisterField, TVMFFITypeRegisterMetadata,
 };
-use crate::type_traits::AnyCompatible;
+use crate::type_traits::{type_schema_metadata, AnyCompatible};
 use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR};
 
 /// A copy of an object's own fields under a fresh object header (the C++ copy
@@ -207,8 +207,7 @@ impl<N: ObjectCore> ObjectDef<N> {
         if !self.fresh {
             return Ok(self);
         }
-        let (static_type_index, schema) = field_type_info(&F::type_str());
-        let metadata = format!(r#"{{"type_schema":{}}}"#, json_string(&schema));
+        let metadata = type_schema_metadata(&F::type_schema());
         let info = TVMFFIFieldInfo {
             name: unsafe { TVMFFIByteArray::from_str(name) },
             doc: unsafe { TVMFFIByteArray::from_str("") },
@@ -220,7 +219,7 @@ impl<N: ObjectCore> ObjectDef<N> {
             getter: Some(field_getter::<F>),
             setter: field_setter::<F> as TVMFFIFieldSetter as *mut c_void,
             default_value_or_factory: TVMFFIAny::new(),
-            field_static_type_index: static_type_index,
+            field_static_type_index: field_static_type_index(&F::type_str()),
         };
         // The table copies the strings before returning.
         crate::check_safe_call!(unsafe { TVMFFITypeRegisterField(self.type_index, &info) })?;
@@ -364,135 +363,74 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
     -1
 }
 
-/// The static type index and the JSON type schema of a field, from the Rust type's `type_str()`
-/// (the names `AnyCompatible` reports, such as `int`, `ffi.String`, `Array<my.Node>`), as C++
-/// `TypeTraits<T>::field_static_type_index` and `TypeTraits<T>::TypeSchema()` state them.
-fn field_type_info(type_str: &str) -> (i32, String) {
+/// The static type index of a field, from the Rust type's `type_str()` (the names
+/// `AnyCompatible` reports, such as `int`, `ffi.String`, `Array<my.Node>`), as C++
+/// `TypeTraits<T>::field_static_type_index` states it.
+fn field_static_type_index(type_str: &str) -> i32 {
     use TVMFFITypeIndex::*;
     /// C++ `TypeIndex::kTVMFFIAny`, the static index of a field holding any value.
     const ANY: i32 = -1;
-    let (name, args) = split_generic(type_str);
-    let args: Vec<String> = args.iter().map(|arg| field_type_info(arg).1).collect();
-    let schema = |key: &str| match args.is_empty() {
-        true => format!(r#"{{"type":"{key}"}}"#),
-        false => format!(r#"{{"type":"{key}","args":[{}]}}"#, args.join(",")),
-    };
-    match name {
-        "None" => (kTVMFFINone as i32, schema("None")),
-        "int" => (kTVMFFIInt as i32, schema("int")),
-        "bool" => (kTVMFFIBool as i32, schema("bool")),
-        "float" => (kTVMFFIFloat as i32, schema("float")),
-        "void*" => (kTVMFFIOpaquePtr as i32, schema("void*")),
-        "DataType" => (kTVMFFIDataType as i32, schema("DataType")),
-        "Device" => (kTVMFFIDevice as i32, schema("Device")),
-        "DLTensor*" => (kTVMFFIDLTensorPtr as i32, schema("DLTensor*")),
-        "Any" => (ANY, schema("Any")),
+    let origin = type_str.split('<').next().unwrap_or(type_str).trim();
+    match origin {
+        "None" => kTVMFFINone as i32,
+        "int" => kTVMFFIInt as i32,
+        "bool" => kTVMFFIBool as i32,
+        "float" => kTVMFFIFloat as i32,
+        "void*" => kTVMFFIOpaquePtr as i32,
+        "DataType" => kTVMFFIDataType as i32,
+        "Device" => kTVMFFIDevice as i32,
+        "DLTensor*" => kTVMFFIDLTensorPtr as i32,
         // C++ `String`, `Bytes` and `BigInt` fields are typed `Any` statically (they have
         // inline forms), as is `Optional<T>`.
-        "ffi.String" | "ffi.Bytes" => (ANY, schema(name)),
-        "BigInt" => (ANY, schema("ffi.BigInt")),
-        "Optional" => (ANY, schema("Optional")),
-        "ffi.Function" => (kTVMFFIFunction as i32, schema(name)),
-        "ffi.Shape" => (kTVMFFIShape as i32, schema(name)),
-        "Array" => (kTVMFFIArray as i32, schema("ffi.Array")),
-        "List" => (kTVMFFIList as i32, schema("ffi.List")),
-        // Any other object reference, `Map` and `Dict` included, is typed `Object` statically.
-        "Map" => (kTVMFFIStaticObjectBegin as i32, schema("ffi.Map")),
-        "Dict" => (kTVMFFIStaticObjectBegin as i32, schema("ffi.Dict")),
-        _ => (kTVMFFIStaticObjectBegin as i32, schema(name)),
+        "ffi.String" | "ffi.Bytes" | "BigInt" | "Optional" => ANY,
+        "ffi.Function" => kTVMFFIFunction as i32,
+        "ffi.Shape" => kTVMFFIShape as i32,
+        "Array" => kTVMFFIArray as i32,
+        "List" => kTVMFFIList as i32,
+        // Any other object reference, `Map` included, is typed `Object` statically.
+        _ => kTVMFFIStaticObjectBegin as i32,
     }
-}
-
-/// `Name<A, B<C>>` as (`Name`, [`A`, `B<C>`]); a plain name has no arguments.
-fn split_generic(type_str: &str) -> (&str, Vec<&str>) {
-    let Some(open) = type_str.find('<') else {
-        return (type_str.trim(), Vec::new());
-    };
-    let Some(inner) = type_str[open + 1..].strip_suffix('>') else {
-        return (type_str.trim(), Vec::new());
-    };
-    let mut args = Vec::new();
-    let (mut depth, mut start) = (0usize, 0usize);
-    for (index, byte) in inner.bytes().enumerate() {
-        match byte {
-            b'<' => depth += 1,
-            b'>' => depth = depth.saturating_sub(1),
-            b',' if depth == 0 => {
-                args.push(inner[start..index].trim());
-                start = index + 1;
-            }
-            _ => {}
-        }
-    }
-    args.push(inner[start..].trim());
-    (type_str[..open].trim(), args)
-}
-
-/// `text` as a JSON string literal.
-fn json_string(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for ch in text.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{field_type_info, json_string, split_generic};
+    use super::field_static_type_index;
+    use crate::type_traits::{type_schema_metadata, AnyCompatible};
+    use crate::{Array, List, Map};
 
     #[test]
-    fn generic_names_split_at_top_level_commas() {
-        assert_eq!(split_generic("int"), ("int", vec![]));
-        assert_eq!(split_generic("Array<my.Node>"), ("Array", vec!["my.Node"]));
-        assert_eq!(
-            split_generic("Map<ffi.String, Array<my.Node>>"),
-            ("Map", vec!["ffi.String", "Array<my.Node>"])
-        );
+    fn field_static_type_indices_follow_the_cpp_type_traits() {
+        assert_eq!(field_static_type_index("int"), 1);
+        assert_eq!(field_static_type_index("ffi.String"), -1);
+        assert_eq!(field_static_type_index("Optional<my.Node>"), -1);
+        assert_eq!(field_static_type_index("my.Node"), 64);
+        assert_eq!(field_static_type_index("Array<my.Node>"), 71);
+        assert_eq!(field_static_type_index("List<int>"), 75);
+        assert_eq!(field_static_type_index("Map<ffi.String, int>"), 64);
     }
 
     #[test]
     fn field_schemas_follow_the_cpp_type_traits() {
-        assert_eq!(field_type_info("int"), (1, r#"{"type":"int"}"#.into()));
         assert_eq!(
-            field_type_info("ffi.String"),
-            (-1, r#"{"type":"ffi.String"}"#.into())
+            <Map<crate::String, i64>>::type_schema(),
+            r#"{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"int"}]}"#
         );
         assert_eq!(
-            field_type_info("my.Node"),
-            (64, r#"{"type":"my.Node"}"#.into())
+            <List<i64>>::type_schema(),
+            r#"{"type":"ffi.List","args":[{"type":"int"}]}"#
         );
         assert_eq!(
-            field_type_info("Array<my.Node>"),
-            (
-                71,
-                r#"{"type":"ffi.Array","args":[{"type":"my.Node"}]}"#.into()
-            )
+            <Option<Array<crate::String>>>::type_schema(),
+            r#"{"type":"Optional","args":[{"type":"ffi.Array","args":[{"type":"ffi.String"}]}]}"#
         );
         assert_eq!(
-            field_type_info("Map<ffi.String, int>"),
-            (
-                64,
-                r#"{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"int"}]}"#.into()
-            )
+            type_schema_metadata(r#"{"type":"int"}"#),
+            r#"{"type_schema":"{\"type\":\"int\"}"}"#
         );
+        // As C++ `EscapeStringJSON`, `/`, `\b` and DEL are escaped too.
         assert_eq!(
-            field_type_info("Optional<my.Node>"),
-            (
-                -1,
-                r#"{"type":"Optional","args":[{"type":"my.Node"}]}"#.into()
-            )
+            type_schema_metadata("a/b\u{8}\u{7f}"),
+            r#"{"type_schema":"a\/b\b\u007f"}"#
         );
-        assert_eq!(json_string(r#"{"type":"int"}"#), r#""{\"type\":\"int\"}""#);
     }
 }

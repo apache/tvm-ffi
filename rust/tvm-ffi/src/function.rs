@@ -342,7 +342,7 @@ impl Function {
         type_schema: &str,
         doc: &str,
     ) -> Result<()> {
-        let metadata = crate::function_internal::type_schema_metadata(type_schema)?;
+        let metadata = crate::type_traits::type_schema_metadata(type_schema);
         let mut method = TVMFFIAny::new();
         unsafe {
             <Function as AnyCompatible>::copy_to_any_view(func, &mut method);

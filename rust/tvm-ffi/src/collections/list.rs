@@ -565,6 +565,13 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
         format!("List<{}>", T::container_type_str())
     }
 
+    fn type_schema() -> String {
+        crate::type_traits::type_schema(
+            <ListObj as crate::ObjectCore>::TYPE_KEY,
+            &[T::container_type_schema()],
+        )
+    }
+
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
         data.type_index == TypeIndex::kTVMFFIList as i32
             && seq_cells(data)

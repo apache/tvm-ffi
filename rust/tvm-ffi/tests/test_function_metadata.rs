@@ -110,6 +110,7 @@ tvm_ffi_dll_export_typed_func!(rust_packed, Packed(rust_packed));
 #[cfg(feature = "export-metadata")]
 #[test]
 fn test_exported_packed_metadata_is_untyped() {
+    register_globals();
     let rust = call_getter(__tvm_ffi__metadata_rust_packed);
     assert_eq!(
         rust.as_str(),
@@ -142,95 +143,139 @@ fn test_exports_without_metadata() {
     without_export_metadata::__tvm_ffi__doc_rust_add();
 }
 
-/// Registers `func` as `testing.rust.<name>` and checks that its metadata is
-/// the one C++ records for `testing.<name>`.
-fn check_global<F, I, O>(name: &str, func: F)
+/// Registers `func` as `testing.rust.<name>` and records `name`.
+fn register_typed<F, I, O>(names: &mut Vec<&'static str>, name: &'static str, func: F)
 where
     F: AsPackedCallable<I, O> + 'static,
 {
-    let rust_name = format!("testing.rust.{name}");
-    Function::register_global_typed(&rust_name, func, "").unwrap();
-    assert_eq!(
-        global_metadata(&rust_name).as_str(),
-        global_metadata(&format!("testing.{name}")).as_str(),
-        "{name}"
-    );
+    Function::register_global_typed(&format!("testing.rust.{name}"), func, "").unwrap();
+    names.push(name);
+}
+
+// The runtime does not guard its global function table against readers on
+// other threads, so each test registers every global here before it reads
+// the table. Returns the names of the typed globals that mirror a C++
+// `testing.<name>` global.
+fn register_globals() -> &'static [&'static str] {
+    static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names = Vec::new();
+        let n = &mut names;
+        register_typed(n, "schema_id_float", |x: f64| -> Result<f64> { Ok(x) });
+        register_typed(n, "schema_id_bool", |x: bool| -> Result<bool> { Ok(x) });
+        register_typed(n, "schema_id_device", |x: DLDevice| -> Result<DLDevice> {
+            Ok(x)
+        });
+        register_typed(
+            n,
+            "schema_id_dtype",
+            |x: DLDataType| -> Result<DLDataType> { Ok(x) },
+        );
+        register_typed(n, "schema_id_string", |x: String| -> Result<String> {
+            Ok(x)
+        });
+        register_typed(n, "schema_id_bytes", |x: Bytes| -> Result<Bytes> { Ok(x) });
+        register_typed(n, "schema_id_func", |x: Function| -> Result<Function> {
+            Ok(x)
+        });
+        register_typed(
+            n,
+            "schema_id_object",
+            |x: object::ObjectRef| -> Result<object::ObjectRef> { Ok(x) },
+        );
+        register_typed(n, "schema_id_tensor", |x: Tensor| -> Result<Tensor> {
+            Ok(x)
+        });
+        register_typed(
+            n,
+            "schema_tensor_view_input",
+            |_: TensorView| -> Result<()> { Ok(()) },
+        );
+        register_typed(
+            n,
+            "schema_id_opt_int",
+            |x: Option<i64>| -> Result<Option<i64>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_opt_str",
+            |x: Option<String>| -> Result<Option<String>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_opt_obj",
+            |x: Option<object::ObjectRef>| -> Result<Option<object::ObjectRef>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_arr_int",
+            |x: Array<i64>| -> Result<Array<i64>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_arr_str",
+            |x: Array<String>| -> Result<Array<String>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_arr_obj",
+            |x: Array<object::ObjectRef>| -> Result<Array<object::ObjectRef>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_map_str_int",
+            |x: Map<String, i64>| -> Result<Map<String, i64>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_map_str_str",
+            |x: Map<String, String>| -> Result<Map<String, String>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_id_map_str_obj",
+            |x: Map<String, object::ObjectRef>| -> Result<Map<String, object::ObjectRef>> { Ok(x) },
+        );
+        register_typed(
+            n,
+            "schema_arr_map_opt",
+            |_: Array<Option<i64>>,
+             mp: Map<String, Array<i64>>,
+             _: Option<String>|
+             -> Result<Map<String, Array<i64>>> { Ok(mp) },
+        );
+        register_typed(n, "schema_no_args", || -> Result<i64> { Ok(1) });
+        register_typed(n, "schema_no_return", |_: i64| -> Result<()> { Ok(()) });
+        register_typed(n, "schema_no_args_no_return", || -> Result<()> { Ok(()) });
+
+        let packed = Function::from_packed(|_: &[AnyView]| -> Result<Any> { Ok(Any::new()) });
+        Function::register_global("testing.rust.schema_packed", packed).unwrap();
+        Function::register_global_typed(
+            "testing.rust.add",
+            |a: i64, b: i64| -> Result<i64> { Ok(a + b) },
+            "Add two integers.",
+        )
+        .unwrap();
+        names
+    })
 }
 
 #[test]
 fn test_global_metadata_matches_cpp() {
-    check_global("schema_id_float", |x: f64| -> Result<f64> { Ok(x) });
-    check_global("schema_id_bool", |x: bool| -> Result<bool> { Ok(x) });
-    check_global("schema_id_device", |x: DLDevice| -> Result<DLDevice> {
-        Ok(x)
-    });
-    check_global("schema_id_dtype", |x: DLDataType| -> Result<DLDataType> {
-        Ok(x)
-    });
-    check_global("schema_id_string", |x: String| -> Result<String> { Ok(x) });
-    check_global("schema_id_bytes", |x: Bytes| -> Result<Bytes> { Ok(x) });
-    check_global("schema_id_func", |x: Function| -> Result<Function> {
-        Ok(x)
-    });
-    check_global(
-        "schema_id_object",
-        |x: object::ObjectRef| -> Result<object::ObjectRef> { Ok(x) },
-    );
-    check_global("schema_id_tensor", |x: Tensor| -> Result<Tensor> { Ok(x) });
-    check_global("schema_tensor_view_input", |_: TensorView| -> Result<()> {
-        Ok(())
-    });
-    check_global(
-        "schema_id_opt_int",
-        |x: Option<i64>| -> Result<Option<i64>> { Ok(x) },
-    );
-    check_global(
-        "schema_id_opt_str",
-        |x: Option<String>| -> Result<Option<String>> { Ok(x) },
-    );
-    check_global(
-        "schema_id_opt_obj",
-        |x: Option<object::ObjectRef>| -> Result<Option<object::ObjectRef>> { Ok(x) },
-    );
-    check_global("schema_id_arr_int", |x: Array<i64>| -> Result<Array<i64>> {
-        Ok(x)
-    });
-    check_global(
-        "schema_id_arr_str",
-        |x: Array<String>| -> Result<Array<String>> { Ok(x) },
-    );
-    check_global(
-        "schema_id_arr_obj",
-        |x: Array<object::ObjectRef>| -> Result<Array<object::ObjectRef>> { Ok(x) },
-    );
-    check_global(
-        "schema_id_map_str_int",
-        |x: Map<String, i64>| -> Result<Map<String, i64>> { Ok(x) },
-    );
-    check_global(
-        "schema_id_map_str_str",
-        |x: Map<String, String>| -> Result<Map<String, String>> { Ok(x) },
-    );
-    check_global(
-        "schema_id_map_str_obj",
-        |x: Map<String, object::ObjectRef>| -> Result<Map<String, object::ObjectRef>> { Ok(x) },
-    );
-    check_global(
-        "schema_arr_map_opt",
-        |_: Array<Option<i64>>,
-         mp: Map<String, Array<i64>>,
-         _: Option<String>|
-         -> Result<Map<String, Array<i64>>> { Ok(mp) },
-    );
-    check_global("schema_no_args", || -> Result<i64> { Ok(1) });
-    check_global("schema_no_return", |_: i64| -> Result<()> { Ok(()) });
-    check_global("schema_no_args_no_return", || -> Result<()> { Ok(()) });
+    let names = register_globals();
+    assert_eq!(names.len(), 23);
+    for name in names {
+        assert_eq!(
+            global_metadata(&format!("testing.rust.{name}")).as_str(),
+            global_metadata(&format!("testing.{name}")).as_str(),
+            "{name}"
+        );
+    }
 }
 
 #[test]
 fn test_global_untyped_metadata_matches_cpp() {
-    let func = Function::from_packed(|_: &[AnyView]| -> Result<Any> { Ok(Any::new()) });
-    Function::register_global("testing.rust.schema_packed", func).unwrap();
+    register_globals();
     assert_eq!(
         global_metadata("testing.rust.schema_packed").as_str(),
         global_metadata("testing.schema_packed").as_str()
@@ -239,12 +284,7 @@ fn test_global_untyped_metadata_matches_cpp() {
 
 #[test]
 fn test_global_typed_registration_calls_the_function() {
-    Function::register_global_typed(
-        "testing.rust.add",
-        |a: i64, b: i64| -> Result<i64> { Ok(a + b) },
-        "Add two integers.",
-    )
-    .unwrap();
+    register_globals();
     let add = Function::get_global("testing.rust.add").unwrap();
     let sum = add.call_tuple_with_len::<2, _>((1i64, 2i64)).unwrap();
     assert_eq!(i64::try_from(sum).unwrap(), 3);

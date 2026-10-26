@@ -103,6 +103,37 @@ pub(crate) fn type_schema(origin: &str, args: &[String]) -> String {
     }
 }
 
+/// The metadata C++ records for a function or field of type schema
+/// `type_schema`: `{"type_schema":<type_schema as a JSON string>}`.
+pub(crate) fn type_schema_metadata(type_schema: &str) -> String {
+    format!(r#"{{"type_schema":{}}}"#, escape_string_json(type_schema))
+}
+
+/// `text` as a JSON string literal, escaped as C++ `EscapeStringJSON`
+/// (`string.h`) escapes it, so that metadata matches the C++ one byte for byte.
+fn escape_string_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '/' => out.push_str("\\/"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 || ch == '\u{7f}' => {
+                out.push_str(&format!("\\u{:04x}", ch as u32))
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// The type schema of a function parameter or return type.
 ///
 /// This is [`AnyCompatible::type_schema`] for a type that converts through
