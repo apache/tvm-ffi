@@ -30,6 +30,8 @@ name = "tvm_ffi"
 crate-type = ["lib"]
 
 [dependencies]
+# The static init blocks of a program or library are gathered at link time.
+linkme = "0.3"
 paste = "1.0"
 # Release CI also updates the internal dependency versions, including dev-dependencies.
 tvm-ffi-sys = { version = "0.1.0-alpha.0", path = "../tvm-ffi-sys" }
@@ -51,3 +53,8 @@ example = []
 name = "load_library"
 path = "examples/load_library.rs"
 required-features = ["example"]
+
+# A library with a static init block, which `tests/python/test_rust_static_init.py` loads.
+[[example]]
+name = "static_init"
+crate-type = ["cdylib"]

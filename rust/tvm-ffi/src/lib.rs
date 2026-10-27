@@ -33,6 +33,7 @@ pub mod object;
 pub mod optional;
 pub mod reflection;
 pub mod rvalue_ref;
+pub mod static_init;
 pub mod string;
 pub mod type_traits;
 pub use tvm_ffi_sys;
@@ -76,6 +77,7 @@ pub use crate::reflection::{
     get_type_attr, FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn,
 };
 pub use crate::rvalue_ref::RValueRef;
+pub use crate::static_init::run_static_init_blocks;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
 pub use tvm_ffi_macros::{def_object_ref, dispatch, match_any, rs_class};
