@@ -29,7 +29,6 @@ fn add_one(x: i64) -> Result<i64> {
 
 tvm_ffi::static_init_block! {
     Function::register_global_typed("static_init_example.add_one", add_one, "Add one to an integer.")?;
-    Ok(())
 }
 
 // The errors of the blocks that failed when the library loaded, which Python raises as

@@ -31,15 +31,37 @@ fn add_one(x: i64) -> Result<i64> {
 
 tvm_ffi::static_init_block! {
     Function::register_global_typed("test_static_init.add_one", add_one, "Add one.")?;
-    Ok(())
 }
 
+// A block may also end in the `Result<()>` it returns.
 mod elsewhere {
     use super::*;
 
     tvm_ffi::static_init_block! {
         Function::register_global_typed("test_static_init.elsewhere", || -> Result<i64> { Ok(7) }, "")?;
         Ok(())
+    }
+}
+
+// A block that returns early, and one that ends in `return`, which `!` types.
+mod returning {
+    use super::*;
+
+    fn body() -> Result<i64> {
+        Ok(8)
+    }
+
+    tvm_ffi::static_init_block! {
+        Function::register_global_typed("test_static_init.returning", body, "")?;
+        if Function::get_global("test_static_init.returning").is_ok() {
+            return Ok(());
+        }
+        Function::register_global_typed("test_static_init.not_reached", body, "")?;
+    }
+
+    tvm_ffi::static_init_block! {
+        Function::register_global_typed("test_static_init.returned", body, "")?;
+        return Ok(())
     }
 }
 
@@ -52,7 +74,6 @@ mod failing {
         Function::register_global_typed("test_static_init.twice", add_one, "")?;
         Function::register_global_typed("test_static_init.twice", add_one, "")?;
         Function::register_global_typed("test_static_init.after_broken", add_one, "")?;
-        Ok(())
     }
 
     tvm_ffi::static_init_block! {
@@ -76,6 +97,10 @@ fn blocks_run_when_the_program_loads() {
         2
     );
     assert_eq!(call_i64("test_static_init.elsewhere").unwrap(), 7);
+    // A block's own items are in scope, not shadowed by those of the macro.
+    assert_eq!(call_i64("test_static_init.returning").unwrap(), 8);
+    assert_eq!(call_i64("test_static_init.returned").unwrap(), 8);
+    assert!(Function::get_global("test_static_init.not_reached").is_err());
 
     // The block that failed registered what came before its error, and stopped there.
     assert!(Function::get_global("test_static_init.twice").is_ok());
@@ -86,7 +111,7 @@ fn blocks_run_when_the_program_loads() {
         .iter()
         .filter(|block| block.identity().starts_with("test_static_init"))
         .count();
-    assert_eq!(blocks, 5);
+    assert_eq!(blocks, 7);
 }
 
 #[test]

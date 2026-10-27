@@ -36,8 +36,10 @@ use crate::{Any, Error, Function, Result, INTERNAL_ERROR};
 pub use linkme;
 
 /// Run code when the program or library that holds it loads, as a C++
-/// `TVM_FFI_STATIC_INIT_BLOCK` does. The body is a block that returns [`Result<()>`](crate::Result):
-/// it registers what the library defines, such as global functions, and stops at its first error.
+/// `TVM_FFI_STATIC_INIT_BLOCK` does. The body is the body of a function that returns
+/// [`Result<()>`](crate::Result): it registers what the library defines, such as global functions,
+/// and stops at its first error, which `?` returns. A body whose statements all end in `;` returns
+/// `Ok(())`; one that ends in an expression returns it, a `Result<()>`.
 ///
 /// ```
 /// use tvm_ffi::{Function, Result};
@@ -48,7 +50,6 @@ pub use linkme;
 ///
 /// tvm_ffi::static_init_block! {
 ///     Function::register_global_typed("my_ext.add_one", add_one, "Add one to an integer.")?;
-///     Ok(())
 /// }
 ///
 /// // Registered when the program loaded.
@@ -88,8 +89,14 @@ macro_rules! static_init_block {
                         None => "",
                     },
                     stringify!($($body)*),
-                    || -> $crate::Result<()> { $($body)* },
+                    __tvm_ffi_static_init_block_body,
                 );
+            // A function item rather than a closure, to carry the attribute: a body that diverges,
+            // such as one that panics, makes the conversion of its value unreachable.
+            #[allow(unreachable_code)]
+            fn __tvm_ffi_static_init_block_body() -> $crate::Result<()> {
+                $crate::static_init::IntoStaticInitResult::into_static_init_result({ $($body)* })
+            }
             #[used]
             #[cfg_attr(target_os = "linux", link_section = ".init_array")]
             #[cfg_attr(target_os = "macos", link_section = "__DATA,__mod_init_func")]
@@ -97,6 +104,52 @@ macro_rules! static_init_block {
             static RUN_AT_LOAD: extern "C" fn() = $crate::static_init::__run_at_load;
         };
     };
+}
+
+/// The value of the body of a [`static_init_block!`](crate::static_init_block), converted to the
+/// outcome of the block: `()`, of a body whose statements all end in `;`, is `Ok(())`, a
+/// [`Result<()>`](crate::Result) is itself, and a body that diverges, as one that panics or ends
+/// in `return`, has no value to convert.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "a static init block returns `Result<()>`, not `{Self}`",
+    label = "the value of the block",
+    note = "end the last statement of the block with `;`, or return a `Result<()>`"
+)]
+pub trait IntoStaticInitResult {
+    fn into_static_init_result(self) -> Result<()>;
+}
+
+impl IntoStaticInitResult for () {
+    fn into_static_init_result(self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl IntoStaticInitResult for Result<()> {
+    fn into_static_init_result(self) -> Result<()> {
+        self
+    }
+}
+
+/// The never type `!`, which stable Rust names only as the return type of a function pointer.
+/// The value of a body that diverges is `!`, or `()` where an edition before 2024 falls back to it.
+#[doc(hidden)]
+pub trait FnOutput {
+    type Output;
+}
+
+impl<T> FnOutput for fn() -> T {
+    type Output = T;
+}
+
+#[doc(hidden)]
+pub type Never = <fn() -> ! as FnOutput>::Output;
+
+impl IntoStaticInitResult for Never {
+    fn into_static_init_result(self) -> Result<()> {
+        self
+    }
 }
 
 /// A [`static_init_block!`](crate::static_init_block), gathered at link time.
