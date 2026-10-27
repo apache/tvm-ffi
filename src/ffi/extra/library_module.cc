@@ -107,7 +107,8 @@ Module LoadModuleFromBytes(const std::string& kind, const Bytes& bytes) {
  *
  */
 Module ProcessLibraryBin(const char* library_bin, const ObjectPtr<Library>& opt_lib,
-                         void** library_ctx_addr = nullptr) {
+                         void** library_ctx_addr, const Optional<Module>& library_module,
+                         Optional<Module>* out_library_module) {
   // Layout of the library binary:
   // <nbytes : u64> <import_tree> <key0: str> [<val0: bytes>] <key1: str> [<val1: bytes>] ...
   // key can be: "_lib", or a module kind
@@ -139,11 +140,15 @@ Module ProcessLibraryBin(const char* library_bin, const ObjectPtr<Library>& opt_
     // to place the DSOModule
     if (kind == "_lib") {
       TVM_FFI_ICHECK(opt_lib != nullptr) << "_lib is not allowed during module serialization";
-      auto lib_mod_ptr = make_object<LibraryModuleObj>(opt_lib);
-      if (library_ctx_addr) {
-        *library_ctx_addr = lib_mod_ptr.get();
+      Module mod = library_module.has_value() ? library_module.value()
+                                              : Module(make_object<LibraryModuleObj>(opt_lib));
+      if (!library_module.has_value()) {
+        if (library_ctx_addr) {
+          *library_ctx_addr = mod.operator->();
+        }
       }
-      modules.emplace_back(lib_mod_ptr);
+      if (out_library_module) *out_library_module = mod;
+      modules.emplace_back(std::move(mod));
     } else {
       std::string module_bytes;
       TVM_FFI_ICHECK(stream.Read(&module_bytes));
@@ -152,6 +157,8 @@ Module ProcessLibraryBin(const char* library_bin, const ObjectPtr<Library>& opt_
     }
   }
   for (size_t i = 0; i < modules.size(); ++i) {
+    // A shared library's imports own the handles cached in its generated code.
+    if (library_module.has_value() && modules[i].same_as(library_module.value())) continue;
     for (size_t j = import_tree_indptr[i]; j < import_tree_indptr[i + 1]; ++j) {
       Array<Any>* module_imports = ModuleObj::InternalUnsafe::GetImports(modules[i].operator->());
       auto child_index = import_tree_child_indices[j];
@@ -196,7 +203,8 @@ void Module::VisitContextSymbols(const ffi::TypedFunction<void(String, void*)>& 
   ContextSymbolRegistry::Global()->VisitContextSymbols(callback);
 }
 
-Module CreateLibraryModule(ObjectPtr<Library> lib) {  // NOLINT(performance-unnecessary-value-param)
+Module CreateLibraryModule(const ObjectPtr<Library>& lib, const Optional<Module>& library_module,
+                           Optional<Module>* out_library_module) {
   const char* library_bin =
       reinterpret_cast<const char*>(lib->GetSymbol(ffi::symbol::tvm_ffi_library_bin));
   void** library_ctx_addr =
@@ -205,14 +213,20 @@ Module CreateLibraryModule(ObjectPtr<Library> lib) {  // NOLINT(performance-unne
   ContextSymbolRegistry::Global()->InitContextSymbols(lib);
   if (library_bin != nullptr) {
     // we have embedded binaries that needs to be deserialized
-    return ProcessLibraryBin(library_bin, lib, library_ctx_addr);
+    return ProcessLibraryBin(library_bin, lib, library_ctx_addr, library_module,
+                             out_library_module);
   } else {
+    if (library_module.has_value()) {
+      if (out_library_module) *out_library_module = library_module;
+      return library_module.value();
+    }
     // Only have one single DSO Module
     auto lib_mod_ptr = make_object<LibraryModuleObj>(lib);
     Module root_mod = Module(lib_mod_ptr);
     if (library_ctx_addr) {
       *library_ctx_addr = root_mod.operator->();
     }
+    if (out_library_module) *out_library_module = root_mod;
     return root_mod;
   }
 }

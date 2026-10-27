@@ -106,7 +106,9 @@ struct ModuleObj::InternalUnsafe {
  *
  * \return The corresponding loaded module.
  */
-Module CreateLibraryModule(ObjectPtr<Library> lib);
+Module CreateLibraryModule(const ObjectPtr<Library>& lib,
+                           const Optional<Module>& library_module = std::nullopt,
+                           Optional<Module>* out_library_module = nullptr);
 
 }  // namespace ffi
 }  // namespace tvm

@@ -25,6 +25,10 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
+#include <condition_variable>
+#include <mutex>
+#include <unordered_map>
+
 #include "module_internal.h"
 
 #if defined(_WIN32)
@@ -42,16 +46,68 @@ extern "C" {
 namespace tvm {
 namespace ffi {
 
+struct DSOModuleCache {
+  struct Entry {
+    WeakObjectPtr<ModuleObj> root;
+    WeakObjectPtr<ModuleObj> library;
+  };
+
+  std::recursive_mutex mutex;
+  std::condition_variable_any released;
+  std::unordered_map<void*, Entry> entries;
+
+  static DSOModuleCache* Global() {
+    static auto* cache = new DSOModuleCache();
+    return cache;
+  }
+};
+
 class DSOLibrary final : public Library {
  public:
-  explicit DSOLibrary(const String& name) { Load(name); }
+  DSOLibrary(const String& name, DSOModuleCache* cache) : cache_(cache) { Load(name); }
   ~DSOLibrary() final {
+    std::scoped_lock lock(cache_->mutex);
+    if (cached_) cache_->entries.erase(lib_handle_);
     if (lib_handle_) Unload();
+    if (cached_) cache_->released.notify_all();
   }
 
   void* GetSymbol(const String& name) final { return GetSymbol_(name.c_str()); }
 
+  static Module LoadModule(const String& name) {
+    auto* cache = DSOModuleCache::Global();
+    std::unique_lock<std::recursive_mutex> lock(cache->mutex);
+    while (true) {
+      auto lib = make_object<DSOLibrary>(name, cache);
+      auto it = cache->entries.find(lib->lib_handle_);
+      Optional<Module> library_module;
+      if (it != cache->entries.end()) {
+        if (auto root = it->second.root.lock()) return Module(root);
+        if (auto context = it->second.library.lock()) {
+          library_module = Module(context);
+        } else {
+          // The last owner is being destroyed. Let it close the old image before reloading.
+          lib.reset();
+          cache->released.wait(lock);
+          continue;
+        }
+      }
+      Optional<Module> context;
+      Module root = CreateLibraryModule(lib, library_module, &context);
+      if (context.has_value()) {
+        cache->entries[lib->lib_handle_] = {
+            detail::ObjectUnsafe::ObjectPtrFromObjectRef<ModuleObj>(root),
+            detail::ObjectUnsafe::ObjectPtrFromObjectRef<ModuleObj>(context.value())};
+        // A reused context owns the original handle and its cache entry.
+        lib->cached_ = !library_module.has_value();
+      }
+      return root;
+    }
+  }
+
  private:
+  DSOModuleCache* cache_;
+  bool cached_{false};
   // private system dependent implementation
   void* GetSymbol_(const char* name);
   void Load(const String& name);
@@ -112,7 +168,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("ffi.Module.load_from_file.so",
                         [](const String& library_path, const String&) {
-                          return CreateLibraryModule(make_object<DSOLibrary>(library_path));
+                          return DSOLibrary::LoadModule(library_path);
                         });
 }
 }  // namespace ffi
