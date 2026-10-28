@@ -131,6 +131,31 @@ pub struct RsCxxChildObj {
 
 def_object_ref!(pub RsCxxChild, TestCxxClassBase, RsCxxChildObj);
 
+/// A root type with `placeholder`, whose fields have the field types tvm-ffi
+/// gives placeholders.
+#[rs_class("testing.rust.RsPlaceholder", s_eq_hash_kind = "TreeNode", placeholder)]
+pub struct RsPlaceholderObj {
+    base: Object,
+    pub count: i64,
+    pub ratio: f64,
+    pub flag: bool,
+    pub label: tvm_ffi::String,
+    pub tags: Array<tvm_ffi::String>,
+    pub table: Map<tvm_ffi::String, i64>,
+    pub point: Option<RsPoint>,
+}
+
+def_object_ref!(pub RsPlaceholder, ObjectRef, RsPlaceholderObj);
+
+/// A subtype with `placeholder`, whose placeholder starts from its parent's.
+#[rs_class("testing.rust.RsPlaceholderChild", final, placeholder)]
+pub struct RsPlaceholderChildObj {
+    base: RsPlaceholderObj,
+    pub z: i32,
+}
+
+def_object_ref!(pub RsPlaceholderChild, RsPlaceholder, RsPlaceholderChildObj);
+
 /// A crate that reaches tvm-ffi only through a re-export names it with `crate`.
 mod reexported {
     // The bare `tvm_ffi` here is not the crate, as in a crate without the dependency.
@@ -218,6 +243,8 @@ fn register_types() {
         RsMarkerObj::type_index();
         RsScalarsObj::type_index();
         RsCxxChildObj::type_index();
+        RsPlaceholderObj::type_index();
+        RsPlaceholderChildObj::type_index();
         reexported::ReexportedObj::type_index();
     });
 }
@@ -394,4 +421,21 @@ fn test_crate_path_names_a_reexported_tvm_ffi() {
     assert_eq!(value.v, 5);
     assert!(ObjectRef::from(&value).same_as(&value));
     assert_eq!(field_names::<reexported::ReexportedObj>(), ["v"]);
+}
+
+#[test]
+fn test_placeholder_makes_the_object_from_its_parent_and_fields() {
+    register_types();
+    let child = RsPlaceholderChild::from(RsPlaceholderChildObj::placeholder());
+    assert_eq!(
+        (child.count, child.ratio, child.flag, child.z),
+        (0, 0.0, false, 0)
+    );
+    assert_eq!(child.label.as_str(), "");
+    assert!(child.tags.is_empty() && child.table.is_empty() && child.point.is_none());
+    // A valid object of its type, which the reflection sees as any other.
+    let other = RsPlaceholderChild::from(RsPlaceholderChildObj::placeholder());
+    assert!(!other.same_as(&child));
+    assert!(structural_equal(&child, &other));
+    assert!(structural_equal(&deep_copy(&child), &child));
 }

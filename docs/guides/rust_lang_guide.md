@@ -325,10 +325,14 @@ let point: Point = point3.into();
 and any other field from anything that converts into it, as the `new` of a type
 bound by `tvm-ffi-stubgen` does. The parent's object must implement
 `ShallowCopy`, as `rs_class` types and non-final C++ types bound by
-`tvm-ffi-stubgen` do. The reference dereferences to the object, and the object
-converts into it. The reference also converts into `ParentType`, the reference
-to its parent (`ObjectRef` for a type under `ffi.Object`);
-`impl_object_upcast!` converts it into the references to further ancestors.
+`tvm-ffi-stubgen` do. With `placeholder` after the type key, `#[rs_class]` also
+implements `Placeholder` for the object, from the placeholders of the parent's
+object and the fields: a valid object for a creator to make before reflection
+sets its fields, as the creator of a C++ type makes an empty one. The reference
+dereferences to the object, and the object converts into it. The reference also
+converts into `ParentType`, the reference to its parent (`ObjectRef` for a type
+under `ffi.Object`); `impl_object_upcast!` converts it into the references to
+further ancestors.
 
 ### Converting Borrowed Values into `Any`
 

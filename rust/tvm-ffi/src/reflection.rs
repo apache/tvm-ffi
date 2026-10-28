@@ -30,7 +30,9 @@ use crate::tvm_ffi_sys::{
 };
 use crate::{Any, AnyView, Error, ObjectCore, Result, TYPE_ERROR};
 
+mod placeholder;
 mod registry;
+pub use placeholder::Placeholder;
 pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy};
 
 /// A registry-owned type-attribute column indexed by runtime type.

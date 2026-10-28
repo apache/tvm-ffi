@@ -169,6 +169,9 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 ///   `derive(Object)`'s `#[type_final]`, `#[type_s_eq_hash_kind]`,
 ///   `#[type_child_slots]`, `#[type_child_slots_can_overflow]` and
 ///   `#[type_reflection]`.
+/// - `placeholder` also implements [`Placeholder`] for the object, from the
+///   placeholders of the parent's object and the fields, which must implement
+///   it too: the object a creator makes before reflection sets its fields.
 /// - `crate = path` is where the generated code finds tvm-ffi
 ///   (`crate = ::my_lib::tvm_ffi`), for a crate that depends on it only through
 ///   a re-export; by default `tvm_ffi`.
@@ -179,6 +182,7 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 /// `__ffi_init__`. A field's type must implement `AnyCompatible` and `Clone`.
 ///
 /// [`FieldFlags`]: ../tvm_ffi/reflection/struct.FieldFlags.html
+/// [`Placeholder`]: ../tvm_ffi/reflection/trait.Placeholder.html
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn rs_class(args: TokenStream, item: TokenStream) -> TokenStream {
