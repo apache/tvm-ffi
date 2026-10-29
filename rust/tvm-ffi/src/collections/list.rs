@@ -561,6 +561,11 @@ impl<'a, T: ContainerElement> IntoIterator for &'a List<T> {
 // --- Any Type System Conversions ---
 
 unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        ObjectArc::is_null(std::ptr::addr_of!((*field).data))
+    }
+
     fn type_str() -> String {
         format!("List<{}>", T::container_type_str())
     }

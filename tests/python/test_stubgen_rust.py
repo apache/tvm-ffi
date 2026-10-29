@@ -779,6 +779,16 @@ impl ShallowCopy for ExprObj {
             ty: Clone::clone(&self.ty),
         }
     }
+}
+
+unsafe impl UnsafeInit for ExprObj {
+    unsafe fn drop_defined_fields(this: *mut Self) {
+        unsafe {
+            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base));
+            drop_if_defined(addr_of_mut!((*this).span));
+            drop_if_defined(addr_of_mut!((*this).ty));
+        }
+    }
 }"""
 
 ADD_EXPECTED = """\
@@ -849,9 +859,12 @@ def test_render_complete_expr_golden() -> None:
     assert text == EXPR_EXPECTED
     assert _uses(imports) == {
         "std::ops::Deref",
+        "std::ptr::addr_of_mut",
         "tvm_ffi::Object",
         "tvm_ffi::ObjectArc",
         "tvm_ffi::ShallowCopy",
+        "tvm_ffi::UnsafeInit",
+        "tvm_ffi::reflection::drop_if_defined",
     }
 
 
@@ -979,6 +992,46 @@ def test_complete_optional_field_mirrors() -> None:
     assert "pub name: Optional<String>," in text
     assert "pub items: Option<Array<Any>>," in text
     assert "tvm_ffi::Optional" in _uses(imports)
+
+
+def test_unsafe_init_drops_each_field_by_its_all_zero_bytes() -> None:
+    """`UnsafeInit` skips an undefined field; a `TVMFFIAny` cell drops as is, an enum not at all."""
+    info = _info(
+        "demo.Mixed",
+        (
+            _field("count", TypeSchema("Optional", (TypeSchema("int"),)), 24, 16),
+            _field("value", "Any", 40, 16),
+            _field("items", TypeSchema("Optional", (TypeSchema("Array"),)), 56, 8),
+            _field("name", "str", 64, 16),
+            _field("kind", "int", 80, 8),
+        ),
+        total_size=88,
+    )
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "enum", "demo.Mixed.kind -> Kind(i64) { A=0 }", 1)
+    text, imports = _render(info, imports)
+    assert (
+        "unsafe impl UnsafeInit for MixedObj {\n"
+        "    unsafe fn drop_defined_fields(this: *mut Self) {\n"
+        "        unsafe {\n"
+        "            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base));\n"
+        "            drop_in_place(addr_of_mut!((*this).count));\n"
+        "            drop_in_place(addr_of_mut!((*this).value));\n"
+        "            drop_if_defined(addr_of_mut!((*this).items));\n"
+        "            drop_if_defined(addr_of_mut!((*this).name));\n"
+        "        }\n"
+        "    }\n"
+        "}"
+    ) in text, text
+    assert {"std::ptr::drop_in_place", "tvm_ffi::reflection::drop_if_defined"} <= _uses(imports)
+
+
+def test_final_type_has_no_unsafe_init() -> None:
+    """No Rust type derives from a final type, which needs no `UnsafeInit`."""
+    info = _info("demo.Leaf", (_field("a", "int", 24, 8),), total_size=32, is_final=True)
+    text, imports = _render(info)
+    assert "UnsafeInit" not in text
+    assert "tvm_ffi::UnsafeInit" not in _uses(imports)
 
 
 def test_complete_list_field_mirrors() -> None:

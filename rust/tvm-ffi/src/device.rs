@@ -94,6 +94,12 @@ impl Drop for RestoreStream {
 
 /// AnyCompatible for DLDevice
 unsafe impl AnyCompatible for DLDevice {
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        // No device type is zero; read as an integer, since zero is no `DLDeviceType`.
+        *std::ptr::addr_of!((*field).device_type).cast::<u32>() == 0
+    }
+
     fn type_str() -> String {
         // make it consistent with c++ representation
         "Device".to_string()

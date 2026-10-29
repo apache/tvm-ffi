@@ -825,6 +825,12 @@ unsafe impl AnyCompatible for BigInt {
         "BigInt".to_string()
     }
 
+    // A big integer is an inline integer or a big integer object, never None.
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32
+    }
+
     fn type_schema() -> std::string::String {
         crate::type_traits::type_schema(<BigIntObj as crate::ObjectCore>::TYPE_KEY, &[])
     }

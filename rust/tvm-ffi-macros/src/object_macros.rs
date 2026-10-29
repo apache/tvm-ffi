@@ -33,12 +33,13 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
 /// The `ObjectCore` impl of an object struct, and its `ShallowCopy` when it
 /// registers reflection, naming the tvm-ffi crate `tvm_ffi_crate`.
 ///
-/// `reflect_always` registers the reflection of a type without `#[reflect]`
-/// fields or `#[type_s_eq_hash_kind]` too, as `#[rs_class]` does.
+/// `rs_class` registers the reflection of a type without `#[reflect]` fields
+/// or `#[type_s_eq_hash_kind]` too, with the creator of its `UnsafeInit`, as
+/// `#[rs_class]` does.
 pub(crate) fn expand_object(
     derive_input: &DeriveInput,
     tvm_ffi_crate: &TokenStream2,
-    reflect_always: bool,
+    rs_class: bool,
 ) -> TokenStream2 {
     let struct_name = derive_input.ident.clone();
 
@@ -102,7 +103,7 @@ pub(crate) fn expand_object(
     }
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
-    let reflection = Reflection::parse(derive_input, reflect_always);
+    let reflection = Reflection::parse(derive_input, rs_class);
     assert!(
         reflection.is_none() || (type_register && get_attr(derive_input, "type_index").is_none()),
         "#[reflect], #[type_s_eq_hash_kind] and #[type_reflection] need #[type_register] and no \
@@ -264,6 +265,9 @@ struct Reflection {
     field_ids: Vec<syn::Ident>,
     /// The reflected fields.
     reflected: Vec<ReflectedField>,
+    /// Whether the type registers the creator of its `UnsafeInit`, as an
+    /// `#[rs_class]` type does.
+    unsafe_init: bool,
 }
 
 /// A `#[reflect]` field: its identifier, type, flag names, and the name and
@@ -349,9 +353,9 @@ fn doc_comment(attrs: &[syn::Attribute]) -> String {
 }
 
 impl Reflection {
-    /// The type's reflection, or `None` when it declares none and `always`
-    /// is false.
-    fn parse(derive_input: &DeriveInput, always: bool) -> Option<Self> {
+    /// The type's reflection, or `None` when it declares none and is not an
+    /// `rs_class`.
+    fn parse(derive_input: &DeriveInput, rs_class: bool) -> Option<Self> {
         let kind = get_attr(derive_input, "type_s_eq_hash_kind").map(|attr| {
             let kind = attr_to_str(attr);
             syn::Ident::new(&kind.value(), kind.span())
@@ -388,7 +392,7 @@ impl Reflection {
                 reflected.push(field);
             }
         }
-        if kind.is_none() && methods.is_none() && reflected.is_empty() && !always {
+        if kind.is_none() && methods.is_none() && reflected.is_empty() && !rs_class {
             return None;
         }
         Some(Self {
@@ -400,6 +404,7 @@ impl Reflection {
                 .expect("First field must be `<base_name>: <ObjectCoreType>`"),
             field_ids,
             reflected,
+            unsafe_init: rs_class,
         })
     }
 
@@ -453,9 +458,16 @@ impl Reflection {
                 #path(&mut def);
             }
         });
+        let creator = if self.unsafe_init {
+            quote!(Some(#reflection::unsafe_init_creator::<#struct_name>))
+        } else {
+            quote!(None)
+        };
         quote! {
             let registered = (|| -> #tvm_ffi_crate::Result<()> {
-                let def = #reflection::ObjectDef::<#struct_name>::registering(tindex, #kind)?
+                let def = #reflection::ObjectDef::<#struct_name>::registering(
+                    tindex, #kind, #creator,
+                )?
                     #(#fields)*
                     .shallow_copy()?;
                 #methods
@@ -556,6 +568,11 @@ pub(crate) fn expand_object_ref(
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index()
+            }
+
+            #[inline]
+            unsafe fn is_undefined(field: *const Self) -> bool {
+                #tvm_ffi_crate::object::ObjectArc::is_null(::core::ptr::addr_of!((*field).#data_id))
             }
 
             fn type_str() -> std::string::String {

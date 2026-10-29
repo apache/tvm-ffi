@@ -442,6 +442,12 @@ unsafe impl AnyCompatible for Bytes {
         "ffi.Bytes".to_string()
     }
 
+    // Bytes are small bytes or a bytes object, never None.
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32
+    }
+
     unsafe fn copy_to_any_view(this: &Self, data: &mut TVMFFIAny) {
         *data = this.data;
     }
@@ -488,6 +494,12 @@ unsafe impl AnyCompatible for Bytes {
 unsafe impl AnyCompatible for String {
     fn type_str() -> std::string::String {
         "ffi.String".to_string()
+    }
+
+    // A string is a small string or a string object, never None.
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32
     }
 
     unsafe fn copy_to_any_view(this: &Self, data: &mut TVMFFIAny) {

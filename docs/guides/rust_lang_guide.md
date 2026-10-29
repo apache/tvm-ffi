@@ -323,16 +323,25 @@ let point: Point = point3.into();
 `Point3Obj::new`, which takes the parent's object, then the fields: a scalar
 (`bool`, an integer or a float) as its own type, so that a literal infers as it,
 and any other field from anything that converts into it, as the `new` of a type
-bound by `tvm-ffi-stubgen` does. The parent's object must implement
-`ShallowCopy`, as `rs_class` types and non-final C++ types bound by
-`tvm-ffi-stubgen` do. With `placeholder` after the type key, `#[rs_class]` also
-implements `Placeholder` for the object, from the placeholders of the parent's
-object and the fields: a valid object for a creator to make before reflection
-sets its fields, as the creator of a C++ type makes an empty one. The reference
-dereferences to the object, and the object converts into it. The reference also
-converts into `ParentType`, the reference to its parent (`ObjectRef` for a type
-under `ffi.Object`); `impl_object_upcast!` converts it into the references to
-further ancestors.
+bound by `tvm-ffi-stubgen` does. The reference dereferences to the object, and
+the object converts into it. The reference also converts into `ParentType`, the
+reference to its parent (`ObjectRef` for a type under `ffi.Object`);
+`impl_object_upcast!` converts it into the references to further ancestors.
+
+The type also registers a creator, as C++ `refl::ObjectDef` registers one from
+the `UnsafeInit` constructor, and from it `__ffi_new__` and `__ffi_init__`
+(unless `reflection = path` defines `__ffi_init__`), so that a JSON graph reads
+the type back and Python constructs it from its fields. The creator makes the
+object with every field undefined, as C++ `UnsafeInit` leaves a reference null,
+and reflection then sets the fields. A Rust reference is never null, so an
+undefined field holds all-zero bytes, which are no value of its type
+(`AnyCompatible::is_undefined`): the field setter overwrites them without
+dropping, the field getter reads them as None and the object's deleter skips
+them. An `init_off` field stays all-zero after `__ffi_init__`, so its type must
+take all-zero bytes as a value, as a scalar or `Option<T>` does; a reference or
+a string does not, and fails the type's registration. The parent's object must
+implement `ShallowCopy` and `UnsafeInit`, as `rs_class` types and non-final C++
+types bound by `tvm-ffi-stubgen` do.
 
 ### Converting Borrowed Values into `Any`
 

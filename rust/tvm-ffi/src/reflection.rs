@@ -30,10 +30,12 @@ use crate::tvm_ffi_sys::{
 };
 use crate::{Any, AnyView, Error, ObjectCore, Result, TYPE_ERROR};
 
-mod placeholder;
 mod registry;
-pub use placeholder::Placeholder;
+mod unsafe_init;
 pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy};
+#[doc(hidden)]
+pub use unsafe_init::{drop_if_defined, unsafe_init_creator};
+pub use unsafe_init::{unsafe_init, UnsafeInit};
 
 /// A registry-owned type-attribute column indexed by runtime type.
 ///

@@ -145,9 +145,9 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 ///
 /// The first field, `base`, is the parent's object, as the base class of a C++
 /// object is: `base: Object` for a type under `ffi.Object`. The parent's object
-/// must implement `ShallowCopy`, as `rs_class` types and non-final C++ types
-/// bound by `tvm-ffi-stubgen` do. Every other field is reflected;
-/// `#[reflect(writable, seq_hash_ignore, ...)]` gives a field the
+/// must implement `ShallowCopy` and [`UnsafeInit`], as `rs_class` types and
+/// non-final C++ types bound by `tvm-ffi-stubgen` do. Every other field is
+/// reflected; `#[reflect(writable, seq_hash_ignore, ...)]` gives a field the
 /// [`FieldFlags`] of those names, and `name` and `doc` as for
 /// `derive(Object)`. The macro adds to the struct:
 ///
@@ -169,20 +169,22 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 ///   `derive(Object)`'s `#[type_final]`, `#[type_s_eq_hash_kind]`,
 ///   `#[type_child_slots]`, `#[type_child_slots_can_overflow]` and
 ///   `#[type_reflection]`.
-/// - `placeholder` also implements [`Placeholder`] for the object, from the
-///   placeholders of the parent's object and the fields, which must implement
-///   it too: the object a creator makes before reflection sets its fields.
 /// - `crate = path` is where the generated code finds tvm-ffi
 ///   (`crate = ::my_lib::tvm_ffi`), for a crate that depends on it only through
 ///   a re-export; by default `tvm_ffi`.
 ///
 /// The type is a `derive(Object)` type with `#[type_register]`: it registers on
 /// its first `type_index()`, with the fields, the methods,
-/// `__ffi_shallow_copy__` and `__ffi_type_final__`, and without
-/// `__ffi_init__`. A field's type must implement `AnyCompatible` and `Clone`.
+/// `__ffi_shallow_copy__` and `__ffi_type_final__`, and a creator that makes
+/// the object with every field undefined for reflection to set, as C++ makes one
+/// with `UnsafeInit`, from which it registers `__ffi_new__` and, unless the
+/// methods define it, `__ffi_init__`; the macro implements [`UnsafeInit`] for
+/// the object. A field's type must implement `AnyCompatible` and `Clone`; an
+/// `init_off` field's type must take all-zero bytes as a value, as
+/// `__ffi_init__` leaves the field so.
 ///
 /// [`FieldFlags`]: ../tvm_ffi/reflection/struct.FieldFlags.html
-/// [`Placeholder`]: ../tvm_ffi/reflection/trait.Placeholder.html
+/// [`UnsafeInit`]: ../tvm_ffi/reflection/trait.UnsafeInit.html
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn rs_class(args: TokenStream, item: TokenStream) -> TokenStream {

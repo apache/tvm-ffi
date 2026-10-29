@@ -239,6 +239,11 @@ unsafe impl<T> AnyCompatible for Array<T>
 where
     T: ContainerElement + Clone,
 {
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        ObjectArc::is_null(std::ptr::addr_of!((*field).data))
+    }
+
     fn type_str() -> String {
         format!("Array<{}>", T::container_type_str())
     }

@@ -459,6 +459,11 @@ where
     K: ContainerElement,
     V: ContainerElement,
 {
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        ObjectArc::is_null(std::ptr::addr_of!((*field).data))
+    }
+
     fn type_str() -> String {
         format!(
             "Map<{}, {}>",

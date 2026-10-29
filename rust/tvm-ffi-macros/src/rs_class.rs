@@ -38,7 +38,6 @@ pub(crate) fn rs_class(args: TokenStream, item: TokenStream) -> TokenStream {
 struct RsClassArgs {
     type_key: LitStr,
     type_final: bool,
-    placeholder: bool,
     s_eq_hash_kind: Option<LitStr>,
     child_slots: Option<LitInt>,
     child_slots_can_overflow: Option<LitBool>,
@@ -57,7 +56,6 @@ impl Parse for RsClassArgs {
         let mut args = RsClassArgs {
             type_key,
             type_final: false,
-            placeholder: false,
             s_eq_hash_kind: None,
             child_slots: None,
             child_slots_can_overflow: None,
@@ -76,12 +74,11 @@ impl Parse for RsClassArgs {
             if seen.contains(&key) {
                 return Err(syn::Error::new(name.span(), format!("duplicate `{key}`")));
             }
-            if key != "final" && key != "placeholder" {
+            if key != "final" {
                 input.parse::<Token![=]>()?;
             }
             match key.as_str() {
                 "final" => args.type_final = true,
-                "placeholder" => args.placeholder = true,
                 "s_eq_hash_kind" => args.s_eq_hash_kind = Some(input.parse()?),
                 "child_slots" => args.child_slots = Some(input.parse()?),
                 "child_slots_can_overflow" => args.child_slots_can_overflow = Some(input.parse()?),
@@ -90,9 +87,9 @@ impl Parse for RsClassArgs {
                 _ => {
                     return Err(syn::Error::new(
                         name.span(),
-                        "expected `final`, `placeholder`, `s_eq_hash_kind = \"<kind>\"`, \
-                         `child_slots = <n>`, `child_slots_can_overflow = <bool>`, \
-                         `reflection = <path>` or `crate = <path>`",
+                        "expected `final`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
+                         `child_slots_can_overflow = <bool>`, `reflection = <path>` or \
+                         `crate = <path>`",
                     ));
                 }
             }
@@ -212,21 +209,23 @@ fn expand(args: &RsClassArgs, item: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     })?;
     let object_impl = expand_object(&object_input, &tvm_ffi, true);
-    // The object from the placeholders of the parent's object and the fields, which
-    // `new` takes as it takes any value of their types.
-    let placeholder_impl = args.placeholder.then(|| {
-        let field_tys = fields.iter().map(|field| &field.ty);
-        quote! {
-            impl #tvm_ffi::Placeholder for #obj {
-                fn placeholder() -> Self {
-                    Self::new(
-                        <#base_ty as #tvm_ffi::Placeholder>::placeholder(),
-                        #(<#field_tys as #tvm_ffi::Placeholder>::placeholder(),)*
-                    )
+    // The parent's fields first, then the others in order, as the drop glue drops
+    // them; only through raw pointers, since some may be undefined.
+    let field_ids = fields.iter().map(|field| &field.ident);
+    let unsafe_init_impl = quote! {
+        unsafe impl #tvm_ffi::UnsafeInit for #obj {
+            unsafe fn drop_defined_fields(this: *mut Self) {
+                unsafe {
+                    <#base_ty as #tvm_ffi::UnsafeInit>::drop_defined_fields(
+                        ::core::ptr::addr_of_mut!((*this).#base_id),
+                    );
+                    #(#tvm_ffi::reflection::drop_if_defined(
+                        ::core::ptr::addr_of_mut!((*this).#field_ids),
+                    );)*
                 }
             }
         }
-    });
+    };
     let plain_fields = fields.iter().map(|field| {
         let mut field = (*field).clone();
         field.attrs.retain(|a| !a.path.is_ident("reflect"));
@@ -243,7 +242,7 @@ fn expand(args: &RsClassArgs, item: &DeriveInput) -> syn::Result<TokenStream2> {
 
         #object_impl
 
-        #placeholder_impl
+        #unsafe_init_impl
 
         impl ::core::ops::Deref for #obj {
             type Target = #base_ty;

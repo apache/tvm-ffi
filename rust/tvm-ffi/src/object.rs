@@ -557,6 +557,18 @@ impl<T: ObjectCore> ObjectArc<T> {
         }
     }
 
+    /// Whether `this` holds a null pointer, as all-zero bytes do: no
+    /// `ObjectArc`, but the field of an object that a creator left undefined.
+    ///
+    /// # Safety
+    ///
+    /// `this` points to an `ObjectArc<T>` or to all-zero bytes.
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn is_null(this: *const Self) -> bool {
+        (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
+    }
+
     /// Move a previously allocated object into the ObjectArc
     ///
     /// # Arguments

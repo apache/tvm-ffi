@@ -22,10 +22,11 @@
 //! [`ObjectDef`] fills the same type table entries as C++ `refl::ObjectDef<T>`
 //! and Python `_register_py_class`: the type metadata, one record per field
 //! with C ABI getter and setter, one record per method, and the
-//! `__ffi_shallow_copy__` and `__ffi_type_final__` type attributes. Through
-//! them the C++ structural equality, hashing and mutation, `repr`, deep copy
-//! and Python's generated classes reach the fields and methods of a Rust
-//! type.
+//! `__ffi_shallow_copy__` and `__ffi_type_final__` type attributes; for an
+//! `#[rs_class]` type also the creator, and from it the `__ffi_new__` and
+//! `__ffi_init__` type attributes. Through them the C++ structural equality,
+//! hashing and mutation, `repr`, deep copy, JSON graphs and Python's generated
+//! classes reach the fields and methods of a Rust type, and construct it.
 //!
 //! Only `#[derive(Object)]` creates an [`ObjectDef`], for a `#[type_register]`
 //! type with `#[reflect]` fields or a `#[type_reflection]` function; the
@@ -43,9 +44,9 @@ use crate::function_internal::AsPackedCallable;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter,
-    TVMFFIGetTypeInfo, TVMFFIMethodInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeIndex,
-    TVMFFITypeMetadata, TVMFFITypeRegisterAttr, TVMFFITypeRegisterField,
-    TVMFFITypeRegisterMetadata, TVMFFITypeRegisterMethod,
+    TVMFFIGetTypeInfo, TVMFFIMethodInfo, TVMFFIObject, TVMFFIObjectCreator, TVMFFIObjectHandle,
+    TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
+    TVMFFITypeRegisterField, TVMFFITypeRegisterMetadata, TVMFFITypeRegisterMethod,
 };
 use crate::type_traits::{type_schema_metadata, AnyCompatible};
 use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR, VALUE_ERROR};
@@ -171,6 +172,9 @@ impl BitOr for FieldFlags {
 pub struct ObjectDef<N: ObjectCore> {
     type_index: i32,
     fresh: bool,
+    /// The creator registered in the metadata, from which `finish` registers
+    /// `__ffi_new__` and `__ffi_init__`.
+    creator: Option<TVMFFIObjectCreator>,
     /// The first failed method registration, which `finish` reports.
     error: Option<Error>,
     method_names: Vec<String>,
@@ -182,14 +186,21 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// derive registers `N`'s type index, before `N::type_index()` returns.
     ///
     /// `kind` of `None` takes the nearest ancestor's kind, as a C++ subclass
-    /// inherits `_type_s_eq_hash_kind`.
+    /// inherits `_type_s_eq_hash_kind`. `creator`, as C++ `ObjectDef` takes
+    /// the default or `UnsafeInit` constructor, makes an object of `N` for
+    /// reflection to fill (`unsafe_init_creator::<N>` for an `#[rs_class]`).
     ///
     /// # Safety
     ///
     /// The caller holds `TYPE_REGISTRATION` for the builder's lifetime, and
-    /// `type_index` is `N`'s.
+    /// `type_index` is `N`'s. `creator` returns an owned handle of an object of
+    /// `N` that the field setters can fill.
     #[doc(hidden)]
-    pub unsafe fn registering(type_index: i32, kind: Option<SEqHashKind>) -> Result<Self> {
+    pub unsafe fn registering(
+        type_index: i32,
+        kind: Option<SEqHashKind>,
+        creator: Option<TVMFFIObjectCreator>,
+    ) -> Result<Self> {
         let info = TVMFFIGetTypeInfo(type_index);
         crate::ensure!(
             !info.is_null(),
@@ -205,7 +216,7 @@ impl<N: ObjectCore> ObjectDef<N> {
             };
             let metadata = TVMFFITypeMetadata {
                 doc: TVMFFIByteArray::from_str(""),
-                creator: None,
+                creator,
                 total_size: size_of::<N>() as i32,
                 structural_eq_hash_kind: kind,
             };
@@ -214,6 +225,7 @@ impl<N: ObjectCore> ObjectDef<N> {
         Ok(Self {
             type_index,
             fresh,
+            creator,
             error: None,
             method_names: Vec::new(),
             _object: PhantomData,
@@ -238,6 +250,18 @@ impl<N: ObjectCore> ObjectDef<N> {
     ) -> Result<Self> {
         if !self.fresh {
             return Ok(self);
+        }
+        // `__ffi_init__` leaves an `init_off` field as the creator made it, all-zero.
+        if self.creator.is_some() && flags.bits() & FieldFlags::INIT_OFF.bits() != 0 {
+            let zero = std::mem::MaybeUninit::<F>::zeroed();
+            crate::ensure!(
+                !unsafe { F::is_undefined(zero.as_ptr()) },
+                VALUE_ERROR,
+                "`init_off` field `{name}` of `{}` stays all-zero after `__ffi_init__`, which \
+                 is no value of `{}`",
+                N::TYPE_KEY,
+                F::type_str()
+            );
         }
         let metadata = type_schema_metadata(&F::type_schema());
         let info = TVMFFIFieldInfo {
@@ -346,8 +370,10 @@ impl<N: ObjectCore> ObjectDef<N> {
         self
     }
 
-    /// Registers `__ffi_type_final__`, which no other registered metadata
-    /// exposes, and reports the first failed method registration.
+    /// Registers, as C++ `ObjectDef` does, `__ffi_new__` from the creator and
+    /// `__ffi_init__` from the fields unless the type defines its own, then
+    /// `__ffi_type_final__`, which no other registered metadata exposes; and
+    /// reports the first failed method registration.
     #[doc(hidden)]
     pub fn finish(self) -> Result<()> {
         if let Some(error) = self.error {
@@ -355,6 +381,23 @@ impl<N: ObjectCore> ObjectDef<N> {
         }
         if !self.fresh {
             return Ok(());
+        }
+        if let Some(creator) = self.creator {
+            let new = Function::from_typed(move || -> Result<ObjectRef> {
+                let mut handle: TVMFFIObjectHandle = std::ptr::null_mut();
+                crate::check_safe_call!(unsafe { creator(&mut handle) })?;
+                // SAFETY: the creator returns an owned handle, which `ObjectRef` views.
+                Ok(unsafe { ObjectRef::from_data(ObjectArc::from_raw(handle.cast::<Object>())) })
+            });
+            register_type_attr(self.type_index, "__ffi_new__", Any::from(new))?;
+            // C++ `ObjectDef` looks `ffi._RegisterFFIInit` up the same way, in case
+            // it is not registered yet.
+            let explicit_init = self.method_names.iter().any(|name| name == "__ffi_init__");
+            if !explicit_init {
+                if let Ok(register_init) = Function::get_global("ffi._RegisterFFIInit") {
+                    register_init.call_tuple((self.type_index,))?;
+                }
+            }
         }
         register_type_attr(
             self.type_index,
@@ -419,7 +462,13 @@ unsafe extern "C" fn field_getter<F: AnyCompatible>(
     result: *mut TVMFFIAny,
 ) -> i32 {
     let read = catch_unwind(AssertUnwindSafe(|| {
-        let value: Any = (*field.cast::<F>()).to_any();
+        let field = field.cast::<F>();
+        // An undefined field reads as None, as a null `ObjectRef` does in C++.
+        let value = if F::is_undefined(field) {
+            Any::new()
+        } else {
+            (*field).to_any()
+        };
         std::ptr::write(result, Any::into_raw_ffi_any(value));
     }));
     match read {
@@ -441,7 +490,13 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
     let written = catch_unwind(AssertUnwindSafe(|| {
         match F::try_cast_from_any_view(&*value) {
             Ok(converted) => {
-                *field.cast::<F>() = converted;
+                let field = field.cast::<F>();
+                // An undefined field holds no value to drop.
+                if F::is_undefined(field) {
+                    field.write(converted);
+                } else {
+                    *field = converted;
+                }
                 None
             }
             Err(()) => Some(Error::new(

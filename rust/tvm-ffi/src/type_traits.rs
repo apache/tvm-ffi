@@ -43,6 +43,30 @@ pub unsafe trait AnyCompatible: Sized {
         unreachable!("MATCH_ANY_EXACT is false")
     }
 
+    /// Whether `field`, which holds a value of this type or all-zero bytes,
+    /// holds all-zero bytes that are no value of this type, as a null object
+    /// reference, a string of type index None or a zero device type: a field
+    /// that a creator left undefined for reflection to set, as C++ `UnsafeInit`
+    /// leaves a reference undefined (null). Unlike a C++ undefined reference,
+    /// it is no value; a nullable reference is `Option<T>`, whose `None` is a
+    /// defined value.
+    ///
+    /// The field setter writes an undefined field without dropping it, the
+    /// field getter reads it as None, and the object's deleter skips it. The default,
+    /// false, fits a type whose all-zero bytes are a value whose drop does
+    /// nothing, as a scalar's, `Any`'s or `Optional`'s.
+    ///
+    /// # Safety
+    ///
+    /// `field` points to a value of this type or to all-zero bytes. An
+    /// implementation reads only bytes that each value initializes and, when
+    /// `Option<Self>` is niche-optimized, that its `None` initializes too.
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        let _ = field;
+        false
+    }
+
     /// the value to copy to TVMFFIAny
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
     /// consume the value to move to Any
@@ -388,6 +412,18 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
 
     fn type_schema() -> String {
         type_schema("Optional", &[<T as AnyCompatible>::type_schema()])
+    }
+
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        // With a tag, all-zero bytes are `None`. A niche-optimized `Option<T>`
+        // keeps `T`'s bytes, where all-zero bytes are `None` if `None` looks
+        // undefined to `T` (a reference's null pointer, a device's zero type),
+        // and undefined if `None` sits elsewhere in the niche.
+        if std::mem::size_of::<Self>() != std::mem::size_of::<T>() {
+            return false;
+        }
+        let none = std::mem::MaybeUninit::new(None::<T>);
+        T::is_undefined(field.cast::<T>()) && !T::is_undefined(none.as_ptr().cast::<T>())
     }
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {

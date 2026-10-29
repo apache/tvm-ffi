@@ -27,9 +27,9 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   ``impl Into``. ``custom-new`` leaves the wrapper's ``new`` to hand-written
   code and names the generated one ``from_fields``. A type that is not final
   can be the parent of a type defined in Rust (``tvm_ffi::rs_class``): its
-  ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` when
-  every ancestor's is generated too (a ``ty-map``'d one is hand-written and
-  may not). ``<Leaf>Obj::new`` of a final type is crate-private.
+  ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` and
+  ``UnsafeInit`` when every ancestor's is generated too (a ``ty-map``'d one is
+  hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
@@ -601,6 +601,44 @@ class _ObjectRenderer:
             "}",
         ]
 
+    def _unsafe_init_lines(self) -> list[str]:
+        """``UnsafeInit``, which a subtype defined in Rust needs of its parent's object.
+
+        It drops the defined fields of an object made with every field undefined
+        (all-zero), the parent's first, as the creator of the subtype makes it: a
+        ``TVMFFIAny`` cell (``Any``, an ``Optional`` that is not a pointer) drops as
+        it is, since all-zero bytes are None; an enum newtype has nothing to drop;
+        anything else goes through ``drop_if_defined``, which skips an undefined field.
+        Emitted wherever ``ShallowCopy`` is.
+        """
+        unsafe_init = self.imports.record("tvm_ffi::UnsafeInit")
+        addr = self.imports.record("std::ptr::addr_of_mut")
+        directives = self.imports.directives
+        drops = [f"{unsafe_init}::drop_defined_fields({addr}!((*this).base));"]
+        for field in sorted(self.info.fields, key=lambda f: f.offset or 0):
+            target = f"{self.type_key}.{field.name}"
+            if target in directives.enums:
+                continue
+            mirror = self._field_mirror(self.type_key, field, self.imports)
+            assert mirror is not None  # the verdict already ran the renderability check
+            any_cell = target not in directives.field_types and (
+                field.origin == "Any"
+                or (field.origin == "Optional" and not mirror.startswith("Option<"))
+            )
+            drop = self.imports.record(
+                "std::ptr::drop_in_place" if any_cell else "tvm_ffi::reflection::drop_if_defined"
+            )
+            drops.append(f"{drop}({addr}!((*this).{rust_ident(field.name)}));")
+        return [
+            f"unsafe impl {unsafe_init} for {self.obj_struct} {{",
+            "    unsafe fn drop_defined_fields(this: *mut Self) {",
+            "        unsafe {",
+            *[f"            {line}" for line in drops],
+            "        }",
+            "    }",
+            "}",
+        ]
+
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
         self.imports.reserved.update((self.leaf, self.obj_struct))
@@ -654,6 +692,7 @@ class _ObjectRenderer:
             shallow_copy = self._shallow_copy_lines()
             if shallow_copy:
                 sections.append(shallow_copy)
+                sections.append(self._unsafe_init_lines())
         upcasts = self._upcast_lines()
         if upcasts:
             sections.append(upcasts)
