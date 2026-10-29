@@ -72,6 +72,12 @@ inline constexpr bool is_arc_type_v<Arc<TObject>> = true;
 template <typename T>
 inline constexpr bool use_object_ptr_optional_v =
     use_object_ref_optional_v<T> || is_object_ptr_type_v<T> || is_arc_type_v<T>;
+
+template <typename T>
+inline constexpr bool is_std_optional_v = false;
+
+template <typename T>
+inline constexpr bool is_std_optional_v<std::optional<T>> = true;
 /// \endcond
 
 // Fallback specialization for types that do NOT enable Any storage
@@ -88,7 +94,11 @@ class Optional<T,
   // NOLINTBEGIN(google-explicit-constructor)
   TVM_FFI_INLINE Optional(const Optional& other) = default;
   TVM_FFI_INLINE Optional(Optional&& other) noexcept = default;
-  TVM_FFI_INLINE Optional(std::optional<T> other) : data_(std::move(other)) {}
+  // See the ObjectRef specialization for why std::optional sources are constrained.
+  template <typename U, typename = std::enable_if_t<std::conjunction_v<
+                            std::bool_constant<is_std_optional_v<std::decay_t<U>>>,
+                            std::is_convertible<U, std::optional<T>>>>>
+  TVM_FFI_INLINE Optional(U&& other) : data_(std::forward<U>(other)) {}
   Optional(std::nullopt_t) {}
   TVM_FFI_INLINE Optional(T other) : data_(std::move(other)) {}
   // NOLINTEND(google-explicit-constructor)
@@ -196,9 +206,14 @@ class Optional<T,
   /*! \brief construct from a value of type T (move). */
   TVM_FFI_INLINE Optional(T&& value) : data_(std::move(value)) {}
   /*! \brief construct from a std::optional<T>. */
-  TVM_FFI_INLINE Optional(std::optional<T> other) {
-    if (other.has_value()) {
-      data_ = Any(*std::move(other));
+  // See the ObjectRef specialization for why std::optional sources are constrained.
+  template <typename U, typename = std::enable_if_t<std::conjunction_v<
+                            std::bool_constant<is_std_optional_v<std::decay_t<U>>>,
+                            std::is_convertible<U, std::optional<T>>>>>
+  TVM_FFI_INLINE Optional(U&& other) {
+    std::optional<T> value(std::forward<U>(other));
+    if (value.has_value()) {
+      data_ = Any(*std::move(value));
     }
   }
   // NOLINTEND(google-explicit-constructor)
@@ -413,9 +428,18 @@ class Optional<T, std::enable_if_t<use_object_ref_optional_v<T>>> {
   explicit Optional(UnsafeInit) {}
   Optional(std::nullopt_t) {}
   Optional(std::nullptr_t) {}
-  TVM_FFI_INLINE Optional(std::optional<T> other) {
-    if (other.has_value()) {
-      *this = *std::move(other);
+  // Accept only std::optional sources. A non-template std::optional<T> parameter makes copying an
+  // Optional consider std::optional<T>'s converting constructor from Optional. The standard
+  // constrains that constructor on whether T is constructible from Optional, which for types with
+  // an explicit Any constructor routes back through this very constructor: the constraint depends
+  // on itself, so a conforming implementation may reject it.
+  template <typename U, typename = std::enable_if_t<std::conjunction_v<
+                            std::bool_constant<is_std_optional_v<std::decay_t<U>>>,
+                            std::is_convertible<U, std::optional<T>>>>>
+  TVM_FFI_INLINE Optional(U&& other) {
+    std::optional<T> value(std::forward<U>(other));
+    if (value.has_value()) {
+      *this = *std::move(value);
     }
   }
   TVM_FFI_INLINE Optional(T other)

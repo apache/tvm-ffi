@@ -20,11 +20,14 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/expected.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/optional.h>
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
+#include <type_traits>
 
 #include "./testing_object.h"
 
@@ -56,6 +59,22 @@ static_assert(alignof(Optional<Function>) == alignof(Function));
 static_assert(sizeof(Optional<Optional<int>>) == sizeof(Any));
 static_assert(sizeof(Optional<Optional<TInt>>) == sizeof(Any));
 static_assert(detail::storage_enabled_v<Optional<int>>);
+
+// Regression guard: copying an Optional must not consider std::optional<T>'s converting
+// constructor from Optional. The standard constrains that constructor on T being constructible
+// from Optional, which for types with an explicit Any constructor recurses back into the copy
+// and makes the constraint self-dependent.
+class TAnyConstructible : public ObjectRef {
+ public:
+  explicit TAnyConstructible(Any value);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TAnyConstructible, ObjectRef, Object);
+};
+static_assert(
+    std::is_convertible_v<Optional<TAnyConstructible>, Expected<Optional<TAnyConstructible>>>);
+static_assert(std::is_copy_constructible_v<std::optional<Optional<TAnyConstructible>>>);
+static_assert(std::is_convertible_v<Optional<Optional<int>>, Expected<Optional<Optional<int>>>>);
+static_assert(std::is_copy_constructible_v<std::optional<Optional<Optional<int>>>>);
+static_assert(!std::is_constructible_v<Optional<TInt>, Optional<TNumber>>);
 
 TEST(Optional, StorageEnabledPassThrough) {
   // Optional<int> is storage-enabled, so a nested Optional round-trips through
@@ -108,6 +127,25 @@ TEST(Optional, ObjectRefPointerABI) {
   Optional<ObjectRef> absent = std::nullopt;
   EXPECT_EQ(absent.get(), nullptr);
   EXPECT_FALSE(Any(absent).cast<Optional<ObjectRef>>().has_value());
+}
+
+TEST(Optional, FromStdOptional) {
+  std::optional<TInt> engaged = TInt(1);
+  Optional<TInt> from_lvalue = engaged;
+  EXPECT_EQ(from_lvalue.value()->value, 1);
+  Optional<TNumber> from_derived = std::optional<TInt>(TInt(2));
+  EXPECT_EQ(from_derived.value().as<TIntObj>()->value, 2);
+  Optional<TInt> from_empty = std::optional<TInt>();
+  EXPECT_FALSE(from_empty.has_value());
+
+  Optional<int> from_int = std::optional<int>(3);
+  EXPECT_EQ(from_int.value(), 3);
+  Optional<Optional<int>> nested = std::optional<Optional<int>>(Optional<int>(4));
+  EXPECT_EQ(nested.value().value(), 4);
+
+  std::optional<TensorView> view;
+  Optional<TensorView> from_view = view;
+  EXPECT_FALSE(from_view.has_value());
 }
 
 TEST(Optional, double) {
