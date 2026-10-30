@@ -68,6 +68,18 @@ class StreamContext:
         )
 
 
+def _uses_torch_xpu(context: Any) -> bool:
+    """Return whether the Torch context (or the current Torch backend when None) is XPU."""
+    import torch  # noqa: PLC0415
+
+    xpu = getattr(torch, "xpu", None)
+    if xpu is None:
+        return False
+    if context is None:
+        return not torch.cuda.is_available() and xpu.is_available()
+    return isinstance(context, xpu.StreamContext)
+
+
 try:
     import torch
 
@@ -82,10 +94,18 @@ try:
             """Enter both Torch and FFI stream contexts."""
             if self.torch_context:
                 self.torch_context.__enter__()
-            current_stream = torch.cuda.current_stream()
-            self.ffi_context = StreamContext(
-                device(str(current_stream.device)), current_stream.cuda_stream
-            )
+            if _uses_torch_xpu(self.torch_context):
+                from .utils.xpu import xpu_device_from_torch  # noqa: PLC0415
+
+                current_stream = torch.xpu.current_stream()
+                self.ffi_context = StreamContext(
+                    xpu_device_from_torch(current_stream.device), current_stream.sycl_queue
+                )
+            else:
+                current_stream = torch.cuda.current_stream()
+                self.ffi_context = StreamContext(
+                    device(str(current_stream.device)), current_stream.cuda_stream
+                )
             self.ffi_context.__enter__()
             return self
 
@@ -100,10 +120,15 @@ try:
 
         cuda graph or current stream if `None` provided.
 
+        Both CUDA/ROCm and XPU are supported. A ``torch.xpu.stream(...)`` context
+        selects XPU; with `None`, XPU is used only when CUDA is unavailable. For XPU
+        the FFI stream is the ``sycl::queue*`` of the Torch stream.
+
         Parameters
         ----------
         context
-            The wrapped torch stream or cuda graph.
+            The wrapped torch stream (``torch.cuda.stream`` / ``torch.xpu.stream``)
+            or cuda graph.
 
         Returns
         -------
@@ -120,6 +145,10 @@ try:
 
             g = torch.cuda.CUDAGraph()
             with tvm_ffi.use_torch_stream(torch.cuda.graph(g)):
+                ...
+
+            s = torch.xpu.Stream()
+            with tvm_ffi.use_torch_stream(torch.xpu.stream(s)):
                 ...
 
         Note

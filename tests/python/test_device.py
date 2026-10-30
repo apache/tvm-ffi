@@ -50,6 +50,10 @@ def test_device_from_str() -> None:
         ("cuda:0", DLDeviceType.kDLCUDA, 0),
         ("cuda:3", DLDeviceType.kDLCUDA, 3),
         ("metal:2", DLDeviceType.kDLMetal, 2),
+        ("oneapi", DLDeviceType.kDLOneAPI, 0),
+        ("oneapi:1", DLDeviceType.kDLOneAPI, 1),
+        ("xpu", DLDeviceType.kDLOneAPI, 0),
+        ("xpu:2", DLDeviceType.kDLOneAPI, 2),
     ],
 )
 def test_device_dlpack_device_type(
@@ -85,6 +89,24 @@ def test_device_with_dev_id(
     dev = tvm_ffi.device(dev_type, dev_id)
     assert dev.dlpack_device_type() == expected_device_type
     assert dev.index == expect_device_id
+
+
+@pytest.mark.parametrize("dev_str", ["oneapi:0", "oneapi:3", "xpu:0", "xpu:3"])
+def test_oneapi_device_round_trip(dev_str: str) -> None:
+    dev = tvm_ffi.device(dev_str)
+    # the canonical name follows the DLPack device type, "xpu" is an input alias
+    assert dev.type == "oneapi"
+    assert str(dev) == "oneapi:" + dev_str.split(":")[1]
+    assert repr(dev) == f"device(type='oneapi', index={dev.index})"
+    assert tvm_ffi.device(str(dev)) == dev
+    assert tvm_ffi.device("xpu", dev.index) == tvm_ffi.device(DLDeviceType.kDLOneAPI, dev.index)
+
+
+@pytest.mark.parametrize("dev_str", ["oneapi:1", "xpu:1"])
+def test_oneapi_device_cpp_string_conversion(dev_str: str) -> None:
+    # a str passed to a typed DLDevice parameter is parsed by C++ TryParseDLDeviceType
+    schema_id_device = tvm_ffi.get_global_func("testing.schema_id_device")
+    assert schema_id_device(dev_str) == tvm_ffi.device(DLDeviceType.kDLOneAPI, 1)
 
 
 @pytest.mark.parametrize(

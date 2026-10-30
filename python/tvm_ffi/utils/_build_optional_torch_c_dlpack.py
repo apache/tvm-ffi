@@ -50,6 +50,12 @@ cpp_source = """
 #include <c10/hip/HIPStream.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #endif
+#ifdef BUILD_WITH_XPU
+// Only device-agnostic headers are used, so no SYCL compiler is needed.
+#include <ATen/detail/XPUHooksInterface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <vector>
+#endif
 
 using namespace std;
 namespace at {
@@ -504,7 +510,28 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
-  // Get current CUDA/ROCm work stream
+#ifdef BUILD_WITH_XPU
+  // Map a DLPack kDLOneAPI device_id (global SYCL device index) to the torch XPU index.
+  // Torch only enumerates Level Zero GPUs (since 2.7, discrete GPUs of one platform first), so the
+  // mapping comes from torch.
+  static c10::DeviceIndex XPUTorchIndexFromGlobal(int32_t global_idx) {
+    // getGlobalIdxFromDevice enumerates all SYCL devices, so build the table once.
+    static const std::vector<int32_t> global_indices = [] {
+      std::vector<int32_t> result;
+      const auto& hooks = at::detail::getXPUHooks();
+      for (c10::DeviceIndex i = 0; i < hooks.getNumGPUs(); ++i) {
+        result.push_back(hooks.getGlobalIdxFromDevice(c10::Device(c10::DeviceType::XPU, i)));
+      }
+      return result;
+    }();
+    for (size_t i = 0; i < global_indices.size(); ++i) {
+      if (global_indices[i] == global_idx) return static_cast<c10::DeviceIndex>(i);
+    }
+    TORCH_CHECK(false, "No torch XPU device has global SYCL device index ", global_idx);
+  }
+#endif
+
+  // Get current CUDA/ROCm/XPU work stream
   static int CurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** out_stream) {
     try {
 #ifdef BUILD_WITH_ROCM
@@ -516,6 +543,15 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
 #ifdef BUILD_WITH_CUDA
       if (device_type == kDLCUDA) {
         *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+        return 0;
+      }
+#endif
+#ifdef BUILD_WITH_XPU
+      if (device_type == kDLOneAPI) {
+        // The native handle of an XPU stream is its sycl::queue*.
+        c10::Device device(c10::DeviceType::XPU, XPUTorchIndexFromGlobal(device_id));
+        const auto* impl = c10::impl::getDeviceGuardImpl(c10::DeviceType::XPU);
+        *out_stream = impl->getStreamNativeHandle(impl->getStream(device));
         return 0;
       }
 #endif
@@ -777,15 +813,20 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         help="Build with ROCm support.",
     )
     parser.add_argument(
+        "--build-with-xpu",
+        action="store_true",
+        help="Build with Intel XPU (oneAPI) support.",
+    )
+    parser.add_argument(
         "--libname",
         type=str,
         default="auto",
-        help="The name of the generated library. It can be a name 'auto' to auto-generate a name following 'libtorch_c_dlpack_addon_torch{version.major}{version.minor}-cpu/cuda.{extension}'.",
+        help="The name of the generated library. It can be a name 'auto' to auto-generate a name following 'libtorch_c_dlpack_addon_torch{version.major}{version.minor}-cpu/cuda/rocm/xpu.{extension}'.",
     )
 
     args = parser.parse_args()
-    if args.build_with_cuda and args.build_with_rocm:
-        raise ValueError("Cannot enable both CUDA and ROCm at the same time.")
+    if sum([args.build_with_cuda, args.build_with_rocm, args.build_with_xpu]) > 1:
+        raise ValueError("Only one of CUDA, ROCm, and XPU can be enabled at the same time.")
 
     # resolve build directory
     if args.build_dir is None:
@@ -803,6 +844,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             device = "cuda"
         elif args.build_with_rocm:
             device = "rocm"
+        elif args.build_with_xpu:
+            device = "xpu"
         else:
             device = "cpu"
         suffix = ".dll" if IS_WINDOWS else ".so"
@@ -837,6 +880,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         elif args.build_with_rocm:
             cflags.extend(torch.utils.cpp_extension.COMMON_HIP_FLAGS)
             cflags.append("-DBUILD_WITH_ROCM")
+        elif args.build_with_xpu:
+            cflags.append("-DBUILD_WITH_XPU")
         include_paths.extend(get_torch_include_paths(args.build_with_cuda or args.build_with_rocm))
 
         # use CXX11 ABI

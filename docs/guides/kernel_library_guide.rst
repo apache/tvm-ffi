@@ -20,7 +20,8 @@ Kernel Library Guide
 
 This guide covers shipping C++/CUDA kernel libraries with TVM-FFI. The resulting
 libraries are agnostic to Python version and ML framework — a single ``.so`` works
-with PyTorch, JAX, PaddlePaddle, NumPy, and more.
+with PyTorch, JAX, PaddlePaddle, NumPy, and more. Kernels for Intel GPUs follow the
+same structure in SYCL; see `Intel XPU (SYCL) Kernels`_.
 
 .. seealso::
 
@@ -206,6 +207,33 @@ PyTorch tensors (and other framework tensors) are automatically converted to
 
 See :doc:`../get_started/quickstart` for examples with JAX, PaddlePaddle,
 NumPy, CuPy, Rust, and pure C++.
+
+
+Intel XPU (SYCL) Kernels
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Kernels for Intel GPUs are written in SYCL and receive tensors on the ``kDLOneAPI``
+device (``"oneapi"`` or ``"xpu"`` in Python). The header ``tvm/ffi/extra/sycl/base.h``
+(C++20, SYCL 2020) provides the current queue of the host framework:
+
+.. code-block:: cpp
+
+   #include <tvm/ffi/extra/sycl/base.h>
+
+   void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+     sycl::queue& q = tvm::ffi::GetCurrentSYCLQueue(x.device());
+     const float* in = static_cast<const float*>(x.data_ptr());
+     float* out = static_cast<float*>(y.data_ptr());
+     TVM_FFI_CHECK_SYCL_ERROR(q.parallel_for(
+         sycl::range<1>(x.size(0)), [=](sycl::id<1> i) { out[i] = in[i] + 1.0f; }));
+   }
+
+Build with ``icpx -fsycl -std=c++20``, or JIT compile with
+``tvm_ffi.cpp.load_inline(..., cuda_sources=source, backend="sycl")``. Set
+``TVM_FFI_SYCL_TARGETS`` (e.g. ``"intel_gpu_pvc intel_gpu_bmg_g21"``) to compile ahead of time
+instead of JIT compiling SPIR-V at load time. When called with ``torch.xpu`` tensors, the queue of
+the current PyTorch XPU stream is passed automatically; use
+``tvm_ffi.use_torch_stream(torch.xpu.stream(s))`` to select another stream.
 
 
 Tensor Handling

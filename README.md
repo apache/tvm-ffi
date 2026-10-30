@@ -32,6 +32,7 @@ yet flexible open convention with the following systems in mind:
 
 - **Stable, minimal C ABI** designed for kernels, DSLs, and runtime extensibility.
 - **Zero-copy interop** across PyTorch, JAX, and CuPy using [DLPack protocol](https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html).
+- **Multi-vendor GPU support** for NVIDIA (CUDA), AMD (ROCm), and Intel (XPU via oneAPI/SYCL): tensors and the framework's current stream are passed to kernels through the same calls.
 - **Compact value and call convention** covering common data types for ultra low-overhead ML applications.
 - **Multi-language support** out of the box: Python, C++, and Rust (with a path towards more languages).
 

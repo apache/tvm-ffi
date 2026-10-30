@@ -53,7 +53,20 @@ def _torch_extension_device(torch_module: Any) -> str:
         if getattr(torch_module.version, "hip", None) is not None:
             return "rocm"
         return "cuda"
+    xpu = getattr(torch_module, "xpu", None)
+    if xpu is not None and xpu.is_available():
+        return "xpu"
     return "cpu"
+
+
+def _addon_build_flags(device: str) -> list[str]:
+    """Return the addon build script flags for a device from :func:`_torch_extension_device`."""
+    flags = {
+        "cuda": ["--build-with-cuda"],
+        "rocm": ["--build-with-rocm"],
+        "xpu": ["--build-with-xpu"],
+    }
+    return flags.get(device, [])
 
 
 def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
@@ -101,7 +114,7 @@ def _check_and_update_dlpack_c_exchange_api(tensor_cls: object) -> bool:
     return False
 
 
-def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
+def load_torch_c_dlpack_extension() -> Any:
     try:
         import torch  # noqa: PLC0415
         import torch.version  # noqa: PLC0415
@@ -160,10 +173,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
                 "--libname",
                 libname,
             ]
-            if device == "cuda":
-                args.append("--build-with-cuda")
-            elif device == "rocm":
-                args.append("--build-with-rocm")
+            args.extend(_addon_build_flags(device))
 
             # use capture_output to reduce noise when building the torch c dlpack addon
             result = subprocess.run(args, check=False, capture_output=True)

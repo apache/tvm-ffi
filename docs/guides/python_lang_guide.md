@@ -323,6 +323,11 @@ from the module as usual.
 We can also use {py:func}`tvm_ffi.cpp.build_inline` to build the inline module without loading it. The built shared library is returned
 and can be loaded via {py:func}`tvm_ffi.load_module`.
 
+GPU code goes into `cuda_sources` and is compiled for the backend selected by `backend` (`"cuda"`, `"hip"`, or `"sycl"`).
+For Intel XPU, write the kernel in SYCL and pass `backend="sycl"`; the module is built with `icpx -fsycl -std=c++20`, and
+`torch.xpu` tensors and the current XPU stream are passed to the kernel automatically. See the
+{doc}`Kernel Library Guide <kernel_library_guide>` for a SYCL example.
+
 ## Error Handling
 
 An FFI function may raise an error. In such cases, the Python package will automatically

@@ -124,6 +124,8 @@ cdef class Device:
         "vpi": DLDeviceType.kDLVPI,
         "rocm": DLDeviceType.kDLROCM,
         "ext_dev": DLDeviceType.kDLExtDev,
+        "oneapi": DLDeviceType.kDLOneAPI,
+        "xpu": DLDeviceType.kDLOneAPI,
         "hexagon": DLDeviceType.kDLHexagon,
         "wgpu": DLDeviceType.kDLWebGPU,
         "webgpu": DLDeviceType.kDLWebGPU,
