@@ -592,6 +592,14 @@ def structural_walk(
     Deduplication can be composed with a pre-order callback whose own visited
     set returns :attr:`WalkResult.SKIP` on repeats.
 
+    At the outer error boundary, after recursive traversal collects visit
+    context, errors are offered once to the original input root type's
+    ``__ffi_enrich_visit_error__(error, root)`` hook. Only the exact root dynamic
+    type's attribute is used; parent types are not searched.
+    The hook receives the original input root and returns the original or
+    enriched FFI error. An absent or failing hook leaves the original error
+    unchanged. Recursive visitor/mutator methods only collect context.
+
     Parameters
     ----------
     root
@@ -687,6 +695,14 @@ def structural_visit(
     :meth:`StructuralVisitor.default_visit` for the value's registered/default
     descent. Returning without either call prunes that value's subtree.
 
+    At the outer error boundary, after recursive traversal collects visit
+    context, errors are offered once to the original input root type's
+    ``__ffi_enrich_visit_error__(error, root)`` hook. Only the exact root dynamic
+    type's attribute is used; parent types are not searched.
+    The hook receives the original input root and returns the original or
+    enriched FFI error. An absent or failing hook leaves the original error
+    unchanged. Recursive visitor/mutator methods only collect context.
+
     Parameters
     ----------
     root
@@ -726,6 +742,14 @@ def structural_mutate(
     mutation. Its returned value is final and is not traversed again. Entries
     use ``structural_map`` matching rules, and an unmatched value follows
     registered/default mutation.
+
+    At the outer error boundary, after recursive traversal collects visit
+    context, errors are offered once to the original input root type's
+    ``__ffi_enrich_visit_error__(error, root)`` hook. Only the exact root dynamic
+    type's attribute is used; parent types are not searched.
+    The hook receives the original input root and returns the original or
+    enriched FFI error. An absent or failing hook leaves the original error
+    unchanged. Recursive visitor/mutator methods only collect context.
 
     Parameters
     ----------
@@ -767,6 +791,14 @@ def structural_map(
     ``mutate(x) = post(D(pre(x)))``: callbacks run at every occurrence, while
     only default descent ``D`` reads or writes the variable-remap cache. A
     graph rewrite that must preserve sharing keeps its own callback memo.
+
+    At the outer error boundary, after recursive traversal collects visit
+    context, errors are offered once to the original input root type's
+    ``__ffi_enrich_visit_error__(error, root)`` hook. Only the exact root dynamic
+    type's attribute is used; parent types are not searched.
+    The hook receives the original input root and returns the original or
+    enriched FFI error. An absent or failing hook leaves the original error
+    unchanged. Recursive visitor/mutator methods only collect context.
 
     Parameters
     ----------

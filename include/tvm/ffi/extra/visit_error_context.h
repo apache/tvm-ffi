@@ -28,13 +28,35 @@
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/base.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/reflection/access_path.h>
+#include <tvm/ffi/reflection/accessor.h>
 
 namespace tvm {
 namespace ffi {
+namespace type_attr {
+
+/*!
+ * \brief Enrich an escaping structural visit or mutation error at its root.
+ *
+ * Called once at the outer public structural-operation error boundary, after
+ * recursive traversal has collected VisitErrorContext breadcrumbs. Arguments
+ * are (error, root), where root is the original operation input. Hook lookup
+ * uses only the exact root dynamic type, without parent lookup. Recursive
+ * visitor and mutator methods only collect context; they do not invoke this hook.
+ *
+ * The hook returns the original or an enriched error. An absent or failing
+ * hook leaves the original error unchanged, as does an error without visit
+ * context. Successful enrichment should remove the visit context to avoid
+ * rendering it again at an enclosing boundary.
+ */
+inline constexpr reflection::AttrKey<TypedFunction<Error(Error, ObjectRef)>> kEnrichVisitError{
+    "__ffi_enrich_visit_error__"};
+
+}  // namespace type_attr
 
 /*!
  * \brief Object class for VisitErrorContext.
@@ -99,6 +121,36 @@ class VisitErrorContext : public ObjectRef {
       return extra_context->as<VisitErrorContext>();
     }
     return std::nullopt;
+  }
+
+  /*!
+   * \brief Invoke the exact root type's visit-error enrichment hook.
+   *
+   * Public structural operations call this once at their outer error boundary,
+   * after recursive traversal has accumulated VisitErrorContext breadcrumbs,
+   * with the original operation input as root. Recursive visitor and mutator
+   * methods collect context without calling this helper.
+   *
+   * Only errors carrying VisitErrorContext and defined object roots participate.
+   * Lookup uses only the exact root dynamic type's attribute entry. An absent
+   * or failing hook leaves the original error unchanged. The borrowed
+   * root avoids changing successful mutation ownership semantics.
+   */
+  TVM_FFI_COLD_CODE
+  static Error EnrichVisitError(Error error, const ObjectRef& root) noexcept {
+    if (!root.defined() || !VisitErrorContext::TryGetFromError(error)) {
+      return error;
+    }
+    // Diagnostics must not replace the original failure if the hook itself fails.
+    try {
+      static reflection::TypeAttrColumn column(type_attr::kEnrichVisitError);
+      if (auto hook = type_attr::kEnrichVisitError.ValueFrom(column[root->type_index()])) {
+        return (*hook)(error, root);
+      }
+    } catch (...) {
+      return error;
+    }
+    return error;
   }
 
   /*! \brief Find all access paths that match the pattern specified in the

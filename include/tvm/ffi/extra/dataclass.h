@@ -149,6 +149,7 @@ namespace type_attr {
 inline constexpr reflection::AttrKey<
     TypedFunction<String(const Object*, const TypedFunction<String(AnyView)>&)>>
     kRepr{"__ffi_repr__"};
+
 /*!
  * \brief Custom recursive hash hook.
  *

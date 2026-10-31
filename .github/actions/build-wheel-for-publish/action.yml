@@ -22,7 +22,7 @@ description: >
 
 inputs:
   os:
-    description: "Runner operating system (e.g., ubuntu-latest, macos-14, windows-latest)"
+    description: "Runner operating system (e.g., ubuntu-latest, macos-latest, windows-latest)"
     required: true
   arch:
     description: "Target architecture for cibuildwheel (e.g., x86_64, aarch64, arm64, AMD64)"

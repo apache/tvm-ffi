@@ -1864,7 +1864,13 @@ Expected<Any> StructuralMapExpected(
   using Mutator = StructuralMapEngine<StructuralMapEngineBase, order, std::decay_t<Callbacks>...>;
   StructuralMutator mutator(make_object<Mutator>(std::forward<Callbacks>(callbacks)...));
   auto result = mutator->MutateExpected(root, InplaceMode::kAllow);
-  if (TVM_FFI_PREDICT_FALSE(result.is_err())) return Unexpected(std::move(result).error());
+  if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+    if (auto object_root = root.as<ObjectRef>()) {
+      return Unexpected(
+          VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+    }
+    return Unexpected(std::move(result).error());
+  }
   UnchangedOr<Any> mapped = detail::AnyUnsafe::MoveFromAnyAfterCheck<UnchangedOr<Any>>(
       std::move(detail::ExpectedUnsafe::GetData(result)));
   return std::move(mapped).ValueOrUnchanged(std::move(root));
@@ -1931,7 +1937,13 @@ Expected<Any> StructuralMutateExpected(
   using Mutator = StructuralMutateEngine<StructuralMapEngineBase, std::decay_t<Callbacks>...>;
   StructuralMutator mutator(make_object<Mutator>(std::forward<Callbacks>(callbacks)...));
   auto result = mutator->MutateExpected(root, InplaceMode::kAllow);
-  if (TVM_FFI_PREDICT_FALSE(result.is_err())) return Unexpected(std::move(result).error());
+  if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+    if (auto object_root = root.as<ObjectRef>()) {
+      return Unexpected(
+          VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+    }
+    return Unexpected(std::move(result).error());
+  }
   UnchangedOr<Any> mapped = detail::AnyUnsafe::MoveFromAnyAfterCheck<UnchangedOr<Any>>(
       std::move(detail::ExpectedUnsafe::GetData(result)));
   return std::move(mapped).ValueOrUnchanged(std::move(root));

@@ -99,7 +99,7 @@ jobs:
       matrix:
         arch: ["arm64"]
         python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
         with:

@@ -53,7 +53,7 @@ jobs:
           - {os: ubuntu-latest, arch: x86_64}
           - {os: ubuntu-24.04-arm, arch: aarch64}
           - {os: windows-latest, arch: AMD64}
-          - {os: macos-14, arch: arm64}
+          - {os: macos-latest, arch: arm64}
 
     steps:
       - name: Check out release source

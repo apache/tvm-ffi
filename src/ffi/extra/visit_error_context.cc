@@ -142,82 +142,60 @@ class VisitErrorAccessPathFinder {
   };
 
   void VisitAny(Any value) {
-    // Skip null Any silently — error-path defensive.
-    if (value == nullptr) return;
-    const int32_t type_index = value.type_index();
-    if (type_index < TypeIndex::kTVMFFIStaticObjectBegin) {
-      // Primitive — cannot hold an ObjectRef chain entry.
-      return;
-    }
-    switch (type_index) {
-      case TypeIndex::kTVMFFIArray:
-        this->VisitSequence(detail::AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(value)));
-        break;
-      case TypeIndex::kTVMFFIList:
-        this->VisitSequence(detail::AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(value)));
-        break;
-      case TypeIndex::kTVMFFIMap:
-        this->VisitMap(detail::AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(value)));
-        break;
-      case TypeIndex::kTVMFFIDict:
-        this->VisitMap(detail::AnyUnsafe::MoveFromAnyAfterCheck<Dict<Any, Any>>(std::move(value)));
-        break;
-      default:
-        if (type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
-          ObjectRef obj = detail::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value));
-          this->VisitObject(obj);
-        }
-        break;
+    if (value.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
+      this->VisitObject(detail::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value)));
     }
   }
 
   void VisitObject(const ObjectRef& node) {
-    // Defensive: error path; never throw.
     if (!node.defined()) return;
-    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(node->type_index());
-    if (type_info == nullptr || type_info->metadata == nullptr) return;
-
     bool matched_step = num_pattern_step_matched_ < records_.size() &&
                         node.same_as(records_[records_.size() - 1 - num_pattern_step_matched_]);
     if (matched_step) {
       ++num_pattern_step_matched_;
       if (num_pattern_step_matched_ == records_.size()) {
-        // Full match — materialize the AccessPath and record.
         results_.push_back(this->MaterializeAccessPath());
         --num_pattern_step_matched_;
         return;
       }
     }
 
-    this->VisitChildrenFields(node, type_info);
-
-    if (matched_step) --num_pattern_step_matched_;
-  }
-
-  void VisitChildrenFields(ObjectRef node, const TVMFFITypeInfo* type_info) {
-    // Snapshot results_.size() before descent to detect any inner full or
-    // prefix match recorded by a deeper call. If results_ grew, some inner
-    // node was recorded — we do not record again here.
+    // Containers are breadcrumb anchors too, even though their children use
+    // item steps rather than reflected fields. Sparse patterns may omit them.
     size_t results_before = results_.size();
-    reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* field_info) {
-      reflection::FieldGetter getter(field_info);
-      Any child_val = getter(node);
-      this->PushStep(TempAccessStep::Attr(field_info));
-      this->VisitAny(std::move(child_val));
-      this->PopStep();
-    });
+    switch (node->type_index()) {
+      case TypeIndex::kTVMFFIArray:
+        this->VisitSequence(node.as_or_throw<Array<Any>>());
+        break;
+      case TypeIndex::kTVMFFIList:
+        this->VisitSequence(node.as_or_throw<List<Any>>());
+        break;
+      case TypeIndex::kTVMFFIMap:
+        this->VisitMap(node.as_or_throw<Map<Any, Any>>());
+        break;
+      case TypeIndex::kTVMFFIDict:
+        this->VisitMap(node.as_or_throw<Dict<Any, Any>>());
+        break;
+      default: {
+        const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(node->type_index());
+        if (type_info != nullptr && type_info->metadata != nullptr) {
+          reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* field_info) {
+            reflection::FieldGetter getter(field_info);
+            this->PushStep(TempAccessStep::Attr(field_info));
+            this->VisitAny(getter(node));
+            this->PopStep();
+          });
+        }
+      }
+    }
 
-    // Leaf-with-prefix-match: this node contributed a match step, but no
-    // inner result was recorded from its subtree. Record the current node's
-    // path as the best-effort prefix. path_steps_ reflects the path TO this
-    // node (the step leading here was pushed by our caller), so
-    // MaterializeAccessPath() yields the correct prefix path.
-    // Skip when path_steps_ is empty — AccessPath::Root() gives no useful info.
-    if (allow_prefix_match_ && num_pattern_step_matched_ > 0 &&
-        num_pattern_step_matched_ < records_.size() && !path_steps_.empty() &&
+    // Only an actual matched anchor can be a partial result. Unrelated leaves
+    // under an earlier matched ancestor do not identify the failing subtree.
+    if (allow_prefix_match_ && matched_step && !path_steps_.empty() &&
         results_.size() == results_before) {
       results_.push_back(this->MaterializeAccessPath());
     }
+    if (matched_step) --num_pattern_step_matched_;
   }
 
   template <typename SeqType>
@@ -319,6 +297,7 @@ Array<reflection::AccessPath> VisitErrorContext::FindAccessPaths(
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
+  refl::EnsureTypeAttrColumn(type_attr::kEnrichVisitError);
   refl::ObjectDef<VisitErrorContextObj>()
       .def_ro("reverse_visit_pattern", &VisitErrorContextObj::reverse_visit_pattern)
       .def_ro("prev_error_context", &VisitErrorContextObj::prev_error_context);

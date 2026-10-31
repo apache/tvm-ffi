@@ -649,4 +649,14 @@ TEST(VisitErrorContext, TryGetFromError) {
   EXPECT_TRUE(StructuralEqual::Equal(expected, paths[0]));
 }
 
+TEST(VisitErrorContext, EnrichmentLeavesContextFreeErrorsUnchanged) {
+  Error original("ValueError", "plain failure", "trace");
+  Array<ObjectRef> root;
+  EXPECT_TRUE(VisitErrorContext::EnrichVisitError(original, root).same_as(original));
+  auto contextual = Error("ValueError", "contextual failure", "trace");
+  detail::UpdateVisitErrorContext(contextual, root);
+  EXPECT_TRUE(VisitErrorContext::EnrichVisitError(contextual, root).same_as(contextual));
+  EXPECT_TRUE(VisitErrorContext::EnrichVisitError(contextual, ObjectRef()).same_as(contextual));
+}
+
 }  // namespace

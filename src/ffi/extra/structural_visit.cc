@@ -77,12 +77,28 @@ Expected<Optional<VisitInterrupt>> StructuralWalkExpected(
     using Visitor =
         StructuralWalkEngine<StructuralVisitorObj, WalkOrder::kPreOrder, decltype(dispatch)>;
     StructuralVisitor visitor(make_object<Visitor>(std::move(dispatch)));
-    return visitor->VisitExpected(root);
+    auto result = visitor->VisitExpected(root);
+    if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+      if (auto object_root = root.as<ObjectRef>()) {
+        return Unexpected(
+            VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+      }
+      return Unexpected(std::move(result).error());
+    }
+    return result;
   } else {
     using Visitor =
         StructuralWalkEngine<StructuralVisitorObj, WalkOrder::kPostOrder, decltype(dispatch)>;
     StructuralVisitor visitor(make_object<Visitor>(std::move(dispatch)));
-    return visitor->VisitExpected(root);
+    auto result = visitor->VisitExpected(root);
+    if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+      if (auto object_root = root.as<ObjectRef>()) {
+        return Unexpected(
+            VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+      }
+      return Unexpected(std::move(result).error());
+    }
+    return result;
   }
 }
 
@@ -107,7 +123,15 @@ Expected<Optional<VisitInterrupt>> StructuralVisitExpected(
 
   using Visitor = StructuralVisitEngine<StructuralVisitorObj, decltype(dispatch)>;
   StructuralVisitor visitor(make_object<Visitor>(std::move(dispatch)));
-  return visitor->VisitExpected(root);
+  auto result = visitor->VisitExpected(root);
+  if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+    if (auto object_root = root.as<ObjectRef>()) {
+      return Unexpected(
+          VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+    }
+    return Unexpected(std::move(result).error());
+  }
+  return result;
 }
 
 /*! \brief Visit entries in a sequence container. */

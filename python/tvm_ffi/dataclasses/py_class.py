@@ -56,6 +56,7 @@ _STRUCTURE_KIND_MAP: dict[str | None, int] = {
 _FFI_TYPE_ATTR_NAMES: frozenset[str] = frozenset(
     {
         "__ffi_repr__",
+        "__ffi_enrich_visit_error__",
         "__ffi_hash__",
         "__ffi_eq__",
         "__ffi_compare__",

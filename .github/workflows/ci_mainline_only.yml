@@ -72,7 +72,7 @@ jobs:
           - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28, build_sdist: "true"}
           - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28, build_sdist: "false"}
           - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
-          - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
+          - {os: macos-latest, arch: arm64, linux_image: "", build_sdist: "false"}
 
     steps:
       - name: Checkout repository (for local composite action)
@@ -98,7 +98,7 @@ jobs:
       matrix:
         include:
           - {os: ubuntu-latest, python_version: "3.14"}
-          - {os: macos-14, python_version: "3.13"}
+          - {os: macos-latest, python_version: "3.13"}
           - {os: windows-latest, python_version: "3.12"}
     steps:
       - uses: actions/checkout@v5

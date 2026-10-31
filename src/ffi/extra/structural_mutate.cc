@@ -63,7 +63,13 @@ Expected<Any> StructuralMapExpected(
     StructuralMutator mutator(make_object<Mutator>(callbacks, callbacks_with_def_region_kind));
     return mutator->MutateExpected(root, InplaceMode::kAllow);
   }();
-  if (TVM_FFI_PREDICT_FALSE(result.is_err())) return Unexpected(std::move(result).error());
+  if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+    if (auto object_root = root.as<ObjectRef>()) {
+      return Unexpected(
+          VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+    }
+    return Unexpected(std::move(result).error());
+  }
   UnchangedOr<Any> mapped = AnyUnsafe::MoveFromAnyAfterCheck<UnchangedOr<Any>>(
       std::move(ExpectedUnsafe::GetData(result)));
   return std::move(mapped).ValueOrUnchanged(std::move(root));
@@ -150,7 +156,13 @@ Expected<Any> StructuralMutateExpected(
   using Mutator = StructuralMutateDynEngine<StructuralMapEngineBase>;
   StructuralMutator mutator(make_object<Mutator>(callbacks));
   auto result = mutator->MutateExpected(root, InplaceMode::kAllow);
-  if (TVM_FFI_PREDICT_FALSE(result.is_err())) return Unexpected(std::move(result).error());
+  if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+    if (auto object_root = root.as<ObjectRef>()) {
+      return Unexpected(
+          VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+    }
+    return Unexpected(std::move(result).error());
+  }
   UnchangedOr<Any> mapped = AnyUnsafe::MoveFromAnyAfterCheck<UnchangedOr<Any>>(
       std::move(ExpectedUnsafe::GetData(result)));
   return std::move(mapped).ValueOrUnchanged(std::move(root));

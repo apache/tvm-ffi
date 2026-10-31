@@ -767,7 +767,15 @@ Expected<Optional<VisitInterrupt>> StructuralWalkExpected(AnyView root,
   static_assert(sizeof...(Callbacks) != 0, "StructuralWalk requires at least one callback");
   using Visitor = StructuralWalkEngine<StructuralVisitorObj, order, std::decay_t<Callbacks>...>;
   StructuralVisitor visitor(make_object<Visitor>(std::forward<Callbacks>(callbacks)...));
-  return visitor->VisitExpected(root);
+  auto result = visitor->VisitExpected(root);
+  if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+    if (auto object_root = root.as<ObjectRef>()) {
+      return Unexpected(
+          VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+    }
+    return Unexpected(std::move(result).error());
+  }
+  return result;
 }
 
 /*!
@@ -935,7 +943,15 @@ Expected<Optional<VisitInterrupt>> StructuralVisitExpected(AnyView root,
   static_assert(sizeof...(Callbacks) != 0, "StructuralVisit requires at least one callback");
   using Engine = StructuralVisitEngine<StructuralVisitorObj, std::decay_t<Callbacks>...>;
   StructuralVisitor visitor(make_object<Engine>(std::forward<Callbacks>(callbacks)...));
-  return visitor->VisitExpected(root);
+  auto result = visitor->VisitExpected(root);
+  if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+    if (auto object_root = root.as<ObjectRef>()) {
+      return Unexpected(
+          VisitErrorContext::EnrichVisitError(std::move(result).error(), *object_root));
+    }
+    return Unexpected(std::move(result).error());
+  }
+  return result;
 }
 
 /*!

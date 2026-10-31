@@ -787,3 +787,92 @@ def test_structural_map_handles_inline_and_heap_strings_and_bytes() -> None:
         root = tvm_ffi.Array(values)
         replaced = tvm_ffi.structural_map(root, [(str, len), (bytes, len)], order=order)
         assert list(replaced) == [1, 7, 8, 7, 8]
+
+
+def test_structural_walk_error_array_paths() -> None:
+    @py_class(structural_eq="tree")
+    class ErrorLeaf(Object):
+        value: int
+
+    @py_class(structural_eq="tree")
+    class ErrorRoot(Object):
+        child: Any
+        unrelated: Any
+
+    leaf = ErrorLeaf(1)
+    children = tvm_ffi.Array([leaf])
+    root = ErrorRoot(children, ErrorLeaf(2))
+
+    def fail(*args: Any) -> None:
+        raise ValueError("container callback failure")
+
+    with pytest.raises(ValueError, match="container callback failure") as caught:
+        tvm_ffi.structural_walk(root, (ErrorLeaf, fail))
+    context = getattr(caught.value, "__tvm_ffi_error__").extra_context
+    find = tvm_ffi.get_global_func("ffi.VisitErrorContext.FindAccessPaths")
+    assert [str(path) for path in find(root, context, False)] == ["<root>.child[0]"]
+    assert [str(path) for path in find(root, context, True)] == ["<root>.child[0]"]
+
+
+@pytest.mark.parametrize("operation", ["walk", "visit", "map", "mutate"])
+def test_structural_error_exact_type_enrichment(operation: str) -> None:
+    calls: list[tuple[Any, Any]] = []
+
+    @py_class(f"test.EnrichBase.{operation}", structural_eq="tree")
+    class EnrichBase(Object):
+        child: Any
+
+        @staticmethod
+        def __ffi_enrich_visit_error__(error: Any, root: Any) -> Any:
+            calls.append((error, root))
+            return tvm_ffi.core.Error(
+                error.kind, error.message + " [root location]", error.backtrace
+            )
+
+    @py_class(f"test.EnrichDerived.{operation}", structural_eq="tree")
+    class EnrichDerived(EnrichBase):
+        tag: int
+
+    @py_class(f"test.EnrichRegistered.{operation}", structural_eq="tree")
+    class EnrichRegistered(EnrichDerived):
+        __ffi_enrich_visit_error__ = staticmethod(EnrichBase.__ffi_enrich_visit_error__)
+
+    root = EnrichRegistered(EnrichBase(tvm_ffi.Array([1])), 0)
+
+    def fail(*args: Any) -> None:
+        raise ValueError("callback failure")
+
+    with pytest.raises(ValueError, match=r"callback failure \[root location\]") as caught:
+        getattr(tvm_ffi, "structural_" + operation)(root, (int, fail))
+    assert len(calls) == 1
+    original, hook_root = calls[0]
+    assert hook_root.same_as(root)
+    assert original.kind == "ValueError"
+    assert original.message == "callback failure"
+    assert original.extra_context is not None
+    enriched = getattr(caught.value, "__tvm_ffi_error__")
+    assert enriched.extra_context is None
+    assert enriched.backtrace == original.backtrace
+
+    calls.clear()
+    for no_hook_root in (EnrichDerived(root.child, 0), 1):
+        with pytest.raises(ValueError, match=r"^callback failure$"):
+            getattr(tvm_ffi, "structural_" + operation)(no_hook_root, (int, fail))
+        assert not calls
+
+
+def test_structural_error_enrichment_failure_preserves_error() -> None:
+    @py_class(structural_eq="tree")
+    class BrokenEnricher(Object):
+        value: int
+
+        @staticmethod
+        def __ffi_enrich_visit_error__(error: Any, root: Any) -> Any:
+            raise RuntimeError("broken diagnostic")
+
+    def fail(value: int) -> None:
+        raise ValueError("original failure")
+
+    with pytest.raises(ValueError, match=r"^original failure$") as caught:
+        tvm_ffi.structural_walk(BrokenEnricher(1), (int, fail))
+    assert getattr(caught.value, "__tvm_ffi_error__").extra_context is not None
