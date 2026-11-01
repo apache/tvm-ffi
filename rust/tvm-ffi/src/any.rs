@@ -180,6 +180,41 @@ impl Any {
     pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
+    /// Borrow the stored object as `T` when its runtime type is `T` or a subtype.
+    ///
+    /// `T` is an object representation type such as `FooObj`, rather than its
+    /// managed reference `Foo`. Non-object values and unrelated object types
+    /// return `None`. This neither consumes `self` nor changes the object's
+    /// reference count, and the returned reference cannot outlive `self`.
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, Array, Object};
+    ///
+    /// let value = Any::from(Array::new(vec![1_i64]));
+    /// assert!(value.downcast_ref::<Object>().is_some());
+    /// assert!(Any::from(1_i64).downcast_ref::<Object>().is_none());
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// use tvm_ffi::{Any, Array, Object};
+    ///
+    /// let value = Any::from(Array::new(vec![1_i64]));
+    /// let object = value.downcast_ref::<Object>().unwrap();
+    /// drop(value);
+    /// let _ = std::ptr::from_ref(object);
+    /// ```
+    #[inline]
+    pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
+        if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
+            || !object::is_instance_of::<T>(self.data.type_index)
+        {
+            return None;
+        }
+        // SAFETY: the object tag and runtime type check guarantee a live T
+        // layout, and this borrow is bounded by the owning Any's lifetime.
+        Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
+    }
+
     /// Try to query if stored typed in Any exactly matches the type T
     ///
     /// This function is fast in the case of failure and can be used to check

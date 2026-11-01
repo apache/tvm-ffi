@@ -144,23 +144,87 @@ fn test_upcast_downcast_roundtrip() {
 }
 
 #[test]
-fn test_borrowed_node_cast_preserves_reference_count() {
+fn test_downcast_ref_preserves_reference_count() {
     let delete_counter = Arc::new(AtomicU32::new(0));
-    let base: TestBase = new_derived(7, 8, delete_counter.clone())
-        .try_cast()
-        .unwrap();
+    let typed = new_derived(7, 8, delete_counter.clone());
+    assert!(std::ptr::eq(
+        typed.downcast_ref::<TestDerivedObj>().unwrap(),
+        &*typed.data,
+    ));
+    assert_eq!(ObjectArc::strong_count(&typed.data), 1);
+    let base: TestBase = typed.try_cast().unwrap();
     let strong_count = ObjectArc::strong_count(TestBase::data(&base));
 
-    let derived = base.as_node::<TestDerivedObj>().unwrap();
+    let derived = base.downcast_ref::<TestDerivedObj>().unwrap();
     assert_eq!(derived.base.value, 7);
     assert_eq!(derived.extra, 8);
-    let base_node = base.as_node::<TestBaseObj>().unwrap();
-    assert_eq!(base_node.value, 7);
+    let base_obj = base.downcast_ref::<TestBaseObj>().unwrap();
+    assert!(std::ptr::eq(base_obj, &derived.base));
+    let root = base.downcast_ref::<Object>().unwrap();
+    assert!(std::ptr::eq(root, &derived.base.base));
+    assert!(base
+        .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
+        .is_none());
     assert_eq!(ObjectArc::strong_count(TestBase::data(&base)), strong_count);
+    assert_eq!(derived.extra, 8); // Keep the borrow live across the count check.
+
+    let erased: ObjectRef = base.try_cast().unwrap();
+    assert_eq!(erased.downcast_ref::<TestDerivedObj>().unwrap().extra, 8);
+    assert_eq!(ObjectArc::strong_count(ObjectRef::data(&erased)), 1);
 
     let base_only = new_base(1, delete_counter.clone());
-    assert!(base_only.as_node::<TestDerivedObj>().is_none());
+    assert!(base_only.downcast_ref::<TestDerivedObj>().is_none());
     assert_eq!(ObjectArc::strong_count(TestBase::data(&base_only)), 1);
+    assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
+    drop(erased);
+    drop(base_only);
+    assert_eq!(delete_counter.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn test_any_downcast_ref_preserves_reference_count() {
+    let delete_counter = Arc::new(AtomicU32::new(0));
+    let typed = new_derived(7, 8, delete_counter.clone());
+    let original = std::ptr::from_ref(&*typed.data);
+    let value = Any::from(typed);
+    let derived = value.downcast_ref::<TestDerivedObj>().unwrap();
+    assert!(std::ptr::eq(derived, original));
+    assert_eq!(derived.base.value, 7);
+    assert_eq!(derived.extra, 8);
+    assert!(std::ptr::eq(
+        value.downcast_ref::<TestBaseObj>().unwrap(),
+        &derived.base,
+    ));
+    assert!(std::ptr::eq(
+        value.downcast_ref::<Object>().unwrap(),
+        &derived.base.base,
+    ));
+    assert!(value
+        .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
+        .is_none());
+    assert_eq!(value.debug_strong_count(), Some(1));
+    assert_eq!(derived.extra, 8); // Keep the borrow live across the count check.
+
+    let base_only = Any::from(new_base(1, delete_counter.clone()));
+    assert!(base_only.downcast_ref::<TestDerivedObj>().is_none());
+    assert_eq!(base_only.debug_strong_count(), Some(1));
+    assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
+    drop(value);
+    drop(base_only);
+    assert_eq!(delete_counter.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn test_any_downcast_ref_rejects_non_objects() {
+    for value in [
+        Any::new(),
+        Any::from(42_i64),
+        Any::from(tvm_ffi::String::from("abc")),
+    ] {
+        assert!(value.downcast_ref::<Object>().is_none());
+        assert!(value.downcast_ref::<TestDerivedObj>().is_none());
+        assert_eq!(value.debug_strong_count(), None);
+    }
 }
 
 #[test]

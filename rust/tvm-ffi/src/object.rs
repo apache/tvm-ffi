@@ -151,19 +151,39 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
         }
     }
 
-    /// Borrow the underlying object as node type `N` when its runtime type matches.
+    /// Borrow the underlying object as `T` when its runtime type is `T` or a subtype.
     ///
+    /// `T` is an object representation type such as `FooObj`, rather than its
+    /// managed reference `Foo`. Unrelated object types return `None`.
     /// Unlike [`ObjectRefCast::try_cast`], this method neither consumes the
-    /// reference nor changes the object's reference count. The returned node
+    /// reference nor changes the object's reference count. The returned borrow
     /// cannot outlive `self`.
+    ///
+    /// ```
+    /// use tvm_ffi::{Array, Object, ObjectRefCore};
+    ///
+    /// let array = Array::new(vec![1_i64]);
+    /// assert!(array.downcast_ref::<Object>().is_some());
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// use tvm_ffi::{Array, Object, ObjectRefCore};
+    ///
+    /// let array = Array::new(vec![1_i64]);
+    /// let object = array.downcast_ref::<Object>().unwrap();
+    /// drop(array);
+    /// let _ = std::ptr::from_ref(object);
+    /// ```
     #[inline(always)]
-    fn as_node<N: ObjectCore>(&self) -> Option<&N> {
+    fn downcast_ref<T: ObjectCore>(&self) -> Option<&T> {
         let object = unsafe { ObjectArc::as_raw(Self::data(self)) };
         let type_index = unsafe { (*object.cast::<TVMFFIObject>()).type_index };
-        if !is_instance_of::<N>(type_index) {
+        if !is_instance_of::<T>(type_index) {
             return None;
         }
-        Some(unsafe { &*object.cast::<N>() })
+        // SAFETY: ObjectRefCore guarantees a live object allocation, the type
+        // check establishes T's layout, and the borrow cannot outlive self.
+        Some(unsafe { &*object.cast::<T>() })
     }
 }
 

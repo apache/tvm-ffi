@@ -72,6 +72,29 @@ shared interfaces. The named type can also impose additional constraints on the 
 For example, `Array<T>` holds an `ObjectArc<ArrayObj>` while constraining the array’s
 element type to `T`. Named reference types implement `ObjectRefCore` for shared reference operations.
 
+Use `downcast_ref::<T>()` on `Any` or a named reference to borrow an object representation
+such as `FooObj`. It returns `Option<&T>` and accepts an object whose runtime type is `T`
+or a subtype of `T`. The borrow cannot outlive its owner, and inspecting it does not consume
+the owner or increment the reference count. Unrelated object types and non-object `Any`
+values return `None`.
+
+```rust
+use tvm_ffi::{Any, Array, Object, ObjectRefCore};
+use tvm_ffi::collections::array::ArrayObj;
+
+let array = Array::new(vec![1_i64, 2]);
+assert!(array.downcast_ref::<ArrayObj>().is_some());
+assert!(array.downcast_ref::<Object>().is_some()); // A compatible base type.
+
+let value = Any::from(array);
+assert!(value.downcast_ref::<ArrayObj>().is_some());
+assert!(Any::from(1_i64).downcast_ref::<ArrayObj>().is_none());
+```
+
+The target is the object representation (`ArrayObj`), not the managed handle (`Array<i64>`);
+this operation checks the object hierarchy, not typed-container element constraints.
+`downcast_ref` replaces the managed reference API's earlier `as_node` spelling.
+
 ### Loading a Module
 
 Load a compiled TVM FFI module and call its functions:
