@@ -19,6 +19,11 @@ cmake_minimum_required(VERSION 3.26)
 
 project(tvm_ffi LANGUAGES CXX C)
 
+option(TVM_FFI_BUILD_SHARED_LIBS "Build TVM FFI as a shared library" ON)
+if (NOT TVM_FFI_BUILD_SHARED_LIBS AND (TVM_FFI_BUILD_PYTHON_MODULE OR TVM_FFI_BUILD_TESTS))
+  message(FATAL_ERROR "Python bindings and the C++ test suite require TVM_FFI_BUILD_SHARED_LIBS=ON")
+endif ()
+
 option(TVM_FFI_USE_LIBBACKTRACE "Enable libbacktrace" ON)
 option(TVM_FFI_USE_EXTRA_CXX_API "Enable extra CXX API in shared lib" ON)
 option(TVM_FFI_USE_THREADS "Link against threads in shared lib" ON)
@@ -58,9 +63,9 @@ target_include_directories(
                            $<INSTALL_INTERFACE:include>
 )
 
-# ######### Target: `tvm_ffi_objs` ##########
+# ######### Target: `tvm_ffi` ##########
 
-set(_tvm_ffi_objs_sources
+set(_tvm_ffi_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/backtrace.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/backtrace_win.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/object.cc"
@@ -73,7 +78,7 @@ set(_tvm_ffi_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/custom_allocator.cc"
 )
 
-set(_tvm_ffi_extra_objs_sources
+set(_tvm_ffi_extra_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_equal.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_hash.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_visit.cc"
@@ -92,105 +97,137 @@ set(_tvm_ffi_extra_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/env_c_api.cc"
 )
 if (TVM_FFI_USE_EXTRA_CXX_API)
-  list(APPEND _tvm_ffi_objs_sources ${_tvm_ffi_extra_objs_sources})
+  list(APPEND _tvm_ffi_sources ${_tvm_ffi_extra_sources})
 endif ()
 
-add_library(tvm_ffi_objs OBJECT ${_tvm_ffi_objs_sources})
-target_compile_features(tvm_ffi_objs PRIVATE cxx_std_17)
+if (TVM_FFI_BUILD_SHARED_LIBS)
+  add_library(tvm_ffi SHARED ${_tvm_ffi_sources})
+  add_library(tvm_ffi::shared ALIAS tvm_ffi)
+  target_compile_definitions(tvm_ffi PRIVATE TVM_FFI_EXPORTS)
+else ()
+  add_library(tvm_ffi STATIC ${_tvm_ffi_sources})
+  add_library(tvm_ffi::static ALIAS tvm_ffi)
+  target_compile_definitions(tvm_ffi PUBLIC TVM_FFI_STATIC)
+endif ()
+set_target_properties(
+  tvm_ffi
+  PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+)
+if (WIN32)
+  foreach (config_type Release RELEASE)
+    set_target_properties(
+      tvm_ffi
+      PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                 LIBRARY_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                 ARCHIVE_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+    )
+  endforeach ()
+endif ()
+target_compile_features(tvm_ffi PRIVATE cxx_std_17)
 
 set_target_properties(
-  tvm_ffi_objs
+  tvm_ffi
   PROPERTIES POSITION_INDEPENDENT_CODE ON
              CXX_EXTENSIONS OFF
              CXX_STANDARD_REQUIRED ON
              CXX_VISIBILITY_PRESET hidden
              VISIBILITY_INLINES_HIDDEN ON
-             PREFIX "lib"
 )
 
 # add the include path as public so they are visible to downstreams
-target_link_libraries(tvm_ffi_objs PUBLIC tvm_ffi_header)
+target_link_libraries(tvm_ffi PUBLIC tvm_ffi_header)
 
 if (TVM_FFI_USE_LIBBACKTRACE)
   message(STATUS "Setting C++ macro TVM_FFI_USE_LIBBACKTRACE - 1")
-  target_compile_definitions(tvm_ffi_objs PRIVATE TVM_FFI_USE_LIBBACKTRACE=1)
+  target_compile_definitions(tvm_ffi PRIVATE TVM_FFI_USE_LIBBACKTRACE=1)
 else ()
   message(STATUS "Setting C++ macro TVM_FFI_USE_LIBBACKTRACE - 0")
-  target_compile_definitions(tvm_ffi_objs PRIVATE TVM_FFI_USE_LIBBACKTRACE=0)
+  target_compile_definitions(tvm_ffi PRIVATE TVM_FFI_USE_LIBBACKTRACE=0)
 endif ()
 
 if (TVM_FFI_BACKTRACE_ON_SEGFAULT)
   message(STATUS "Setting C++ macro TVM_FFI_BACKTRACE_ON_SEGFAULT - 1")
-  target_compile_definitions(tvm_ffi_objs PRIVATE TVM_FFI_BACKTRACE_ON_SEGFAULT=1)
+  target_compile_definitions(tvm_ffi PRIVATE TVM_FFI_BACKTRACE_ON_SEGFAULT=1)
 else ()
   message(STATUS "Setting C++ macro TVM_FFI_BACKTRACE_ON_SEGFAULT - 0")
-  target_compile_definitions(tvm_ffi_objs PRIVATE TVM_FFI_BACKTRACE_ON_SEGFAULT=0)
+  target_compile_definitions(tvm_ffi PRIVATE TVM_FFI_BACKTRACE_ON_SEGFAULT=0)
 endif ()
 
-tvm_ffi_add_msvc_flags(tvm_ffi_objs)
-tvm_ffi_add_target_from_obj(tvm_ffi tvm_ffi_objs)
+tvm_ffi_add_msvc_flags(tvm_ffi)
 
 if (TVM_FFI_USE_THREADS)
   find_package(Threads REQUIRED)
-  target_link_libraries(tvm_ffi_shared PRIVATE Threads::Threads)
-  target_link_libraries(tvm_ffi_static INTERFACE Threads::Threads)
+  target_link_libraries(tvm_ffi PRIVATE Threads::Threads)
 endif ()
 
 if (TVM_FFI_USE_EXTRA_CXX_API
     AND CMAKE_DL_LIBS
     AND TVM_FFI_USE_DL_LIBS
 )
-  target_link_libraries(tvm_ffi_shared PRIVATE ${CMAKE_DL_LIBS})
-  target_link_libraries(tvm_ffi_static INTERFACE ${CMAKE_DL_LIBS})
+  target_link_libraries(tvm_ffi PRIVATE ${CMAKE_DL_LIBS})
 endif ()
 
 if (TARGET libbacktrace)
-  target_link_libraries(tvm_ffi_objs PRIVATE libbacktrace)
-  target_link_libraries(tvm_ffi_shared PRIVATE libbacktrace)
-  target_link_libraries(tvm_ffi_static PRIVATE libbacktrace)
+  target_link_libraries(tvm_ffi PRIVATE libbacktrace)
 endif ()
 
 if (MSVC)
-  target_link_libraries(tvm_ffi_objs PRIVATE DbgHelp.lib)
-  target_link_libraries(tvm_ffi_shared PRIVATE DbgHelp.lib)
-  target_link_libraries(tvm_ffi_static PRIVATE DbgHelp.lib)
+  target_link_libraries(tvm_ffi PRIVATE DbgHelp.lib)
 
   # produce pdb file
-  target_link_options(tvm_ffi_shared PRIVATE /DEBUG)
+  if (TVM_FFI_BUILD_SHARED_LIBS)
+    target_link_options(tvm_ffi PRIVATE /DEBUG)
+  endif ()
 endif ()
 
-# expose the headers as public dependencies
-target_link_libraries(tvm_ffi_objs PUBLIC tvm_ffi_header)
-target_link_libraries(tvm_ffi_shared PUBLIC tvm_ffi_header)
-target_link_libraries(tvm_ffi_static PUBLIC tvm_ffi_header)
-tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi_shared)
+if (TVM_FFI_BUILD_SHARED_LIBS)
+  tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi)
+  tvm_ffi_add_apple_dsymutil(tvm_ffi)
+endif ()
 
 # ######### Target: `tvm_ffi_testing` ##########
 # Build testing utilities as a separate shared library that can be loaded on demand
 # `tvm_ffi_testing` won't be inlcuded in `libtvm_ffi` and contains functions that are registered
 # only for testing purposes
-target_sources(tvm_ffi_testing PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/testing/testing.cc")
-target_compile_definitions(tvm_ffi_testing PRIVATE TVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1)
-target_compile_features(tvm_ffi_testing PRIVATE cxx_std_17)
-set_target_properties(
-  tvm_ffi_testing
-  PROPERTIES CXX_EXTENSIONS OFF
-             CXX_STANDARD_REQUIRED ON
-             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-)
-target_link_libraries(tvm_ffi_testing PRIVATE tvm_ffi_shared)
-target_link_libraries(tvm_ffi_testing PUBLIC tvm_ffi_header)
-tvm_ffi_add_msvc_flags(tvm_ffi_testing)
-tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi_testing)
-tvm_ffi_add_apple_dsymutil(tvm_ffi_testing)
+if (TVM_FFI_BUILD_SHARED_LIBS)
+  add_library(tvm_ffi_testing SHARED "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/testing/testing.cc")
+  target_compile_definitions(tvm_ffi_testing PRIVATE TVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1)
+  target_compile_features(tvm_ffi_testing PRIVATE cxx_std_17)
+  set_target_properties(
+    tvm_ffi_testing
+    PROPERTIES CXX_EXTENSIONS OFF
+               CXX_STANDARD_REQUIRED ON
+               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  target_link_libraries(tvm_ffi_testing PRIVATE tvm_ffi)
+  target_link_libraries(tvm_ffi_testing PUBLIC tvm_ffi_header)
+  tvm_ffi_add_msvc_flags(tvm_ffi_testing)
+  tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi_testing)
+  tvm_ffi_add_apple_dsymutil(tvm_ffi_testing)
 
-# Set the install RPATH for tvm_ffi_testing so it can find tvm_ffi.so relatively
-if (APPLE)
-  # macOS uses @loader_path
-  set_target_properties(tvm_ffi_testing PROPERTIES INSTALL_RPATH "@loader_path")
-elseif (UNIX AND NOT APPLE)
-  # Linux uses $ORIGIN
-  set_target_properties(tvm_ffi_testing PROPERTIES INSTALL_RPATH "\$ORIGIN")
+  # Set the install RPATH for tvm_ffi_testing so it can find tvm_ffi.so relatively
+  if (APPLE)
+    # macOS uses @loader_path
+    set_target_properties(tvm_ffi_testing PROPERTIES INSTALL_RPATH "@loader_path")
+  elseif (UNIX AND NOT APPLE)
+    # Linux uses $ORIGIN
+    set_target_properties(tvm_ffi_testing PROPERTIES INSTALL_RPATH "\$ORIGIN")
+  endif ()
+
+  if (WIN32)
+    foreach (config_type Release RELEASE)
+      set_target_properties(
+        tvm_ffi_testing
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   LIBRARY_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   ARCHIVE_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+      )
+    endforeach ()
+  endif ()
 endif ()
 
 # Keep developer settings and tests local to standalone builds. Installation and explicitly enabled
@@ -201,7 +238,7 @@ if (PROJECT_NAME STREQUAL CMAKE_PROJECT_NAME)
 
   if (TVM_FFI_ATTACH_DEBUG_SYMBOLS)
     if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-      target_compile_options(tvm_ffi_objs PRIVATE -g1)
+      target_compile_options(tvm_ffi PRIVATE -g1)
     endif ()
   endif ()
 
@@ -210,7 +247,7 @@ if (PROJECT_NAME STREQUAL CMAKE_PROJECT_NAME)
 
   # remap the file name to the source directory so we can see the exact file name in backtrace
   # relative to the project source root
-  tvm_ffi_add_prefix_map(tvm_ffi_objs ${CMAKE_SOURCE_DIR})
+  tvm_ffi_add_prefix_map(tvm_ffi ${CMAKE_SOURCE_DIR})
 
   # ######### Adding cpp tests ##########
 
@@ -219,7 +256,7 @@ if (PROJECT_NAME STREQUAL CMAKE_PROJECT_NAME)
     message(STATUS "Enable Testing")
     include(cmake/Utils/AddGoogleTest.cmake)
     add_subdirectory(tests/cpp/)
-    tvm_ffi_add_cxx_warning(tvm_ffi_objs)
+    tvm_ffi_add_cxx_warning(tvm_ffi)
   endif ()
 endif ()
 
@@ -317,11 +354,11 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
   )
   target_compile_features(tvm_ffi_cython PRIVATE cxx_std_17)
   target_link_libraries(tvm_ffi_cython PRIVATE tvm_ffi_header)
-  target_link_libraries(tvm_ffi_cython PRIVATE tvm_ffi_shared)
+  target_link_libraries(tvm_ffi_cython PRIVATE tvm_ffi)
   # link against testing to ensure right unloading order (cython first then testing)
   target_link_libraries(tvm_ffi_cython PRIVATE tvm_ffi_testing)
   tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi_cython)
-  # Set RPATH for tvm_ffi_cython to find tvm_ffi_shared.so relatively
+  # Set RPATH for tvm_ffi_cython to find the shared runtime relatively
   if (APPLE)
     # macOS uses @loader_path
     set_target_properties(tvm_ffi_cython PROPERTIES INSTALL_RPATH "@loader_path/lib")
@@ -394,7 +431,7 @@ install(
   COMPONENT tvm_ffi
 )
 install(
-  TARGETS tvm_ffi_shared
+  TARGETS tvm_ffi
   DESTINATION lib
   COMPONENT tvm_ffi
 )
@@ -408,19 +445,9 @@ if (TARGET tvm_ffi_testing)
   )
 endif ()
 # ship additional dSYM files for debugging symbols on if available
-if (APPLE)
+if (APPLE AND TVM_FFI_BUILD_SHARED_LIBS)
   install(
-    DIRECTORY "$<TARGET_FILE:tvm_ffi_shared>.dSYM" "$<TARGET_FILE:tvm_ffi_testing>.dSYM"
-    DESTINATION lib
-    COMPONENT tvm_ffi
-    OPTIONAL
-  )
-endif ()
-
-if (NOT TVM_FFI_BUILD_PYTHON_MODULE)
-  # when building wheel, we do not ship static as we already ships source and dll
-  install(
-    TARGETS tvm_ffi_static
+    DIRECTORY "$<TARGET_FILE:tvm_ffi>.dSYM" "$<TARGET_FILE:tvm_ffi_testing>.dSYM"
     DESTINATION lib
     COMPONENT tvm_ffi
     OPTIONAL

@@ -479,7 +479,7 @@ def _parse_args() -> Options:
         default="",
         help=(
             "CMake target that produces the shared library to load for stub generation "
-            "(e.g. tvm_ffi_shared). Required together with --init-pypkg and "
+            "(e.g. tvm_ffi). Required together with --init-pypkg and "
             "--init-prefix."
         ),
     )
