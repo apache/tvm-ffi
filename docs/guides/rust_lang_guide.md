@@ -65,17 +65,15 @@ export LD_LIBRARY_PATH=$(tvm-ffi-config --libdir):$LD_LIBRARY_PATH
 
 ## Basic Usage
 
-### Object and ObjectRef
+### Any and AnyView
 
-The object representation and its owning handle are separate, as with C++ `Object`
-and `ObjectRef`. A Rust object representation such as `MyPairObj` implements `ObjectCore`;
-`Object` is the root representation. A named managed reference such as `MyPair` wraps
-`ObjectArc<MyPairObj>`, which manages shared ownership through reference counting.
-`ObjectRef` is the erased managed reference. Named references implement `ObjectRefCore`
-for shared operations and can define their own methods:
+As in C++, `Any` owns a dynamically typed value, while `AnyView<'a>` borrows a value.
+An object stored in `Any` carries a strong reference; creating an `AnyView` does not
+increment its reference count. Rust tracks the view's lifetime so it cannot outlive
+the value it borrows. A custom pair illustrates owning and borrowed access:
 
 ```rust
-use tvm_ffi::{def_object_ref, rs_class, Object, ObjectRefCore};
+use tvm_ffi::{def_object_ref, rs_class, Any, AnyView, Object};
 use tvm_ffi::object::ObjectRef;
 
 #[rs_class("my.MyPair")]
@@ -87,24 +85,6 @@ pub struct MyPairObj {
 def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
 
 let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
-assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);
-```
-
-`downcast_ref::<T>()` borrows the representation as `Option<&T>`, with `T: ObjectCore`.
-It accepts the runtime type or a compatible base type and returns `None` for unrelated
-types. The returned reference borrows its source without consuming it or incrementing
-the reference count.
-
-### Any and AnyView
-
-As in C++, `Any` owns a dynamically typed value, while `AnyView<'a>` borrows a value.
-An object stored in `Any` carries a strong reference; creating an `AnyView` does not
-increment its reference count. Rust tracks the view's lifetime so it cannot outlive
-the value it borrows. Continuing with `MyPair` above:
-
-```rust
-use tvm_ffi::{Any, AnyView};
-
 let value = Any::from(pair); // Transfer the handle's ownership into Any.
 assert_eq!(value.downcast_ref::<MyPairObj>().unwrap().second, 4);
 let view = AnyView::from(&value);
@@ -114,10 +94,31 @@ let owned_pair = value.try_as::<MyPair>().unwrap(); // Acquire another strong re
 assert_eq!(owned_pair.second, 4);
 ```
 
-Both `Any` and `AnyView` provide object-only `downcast_ref::<T>()` with the same
-inheritance and borrowing rules as managed references. Non-object values return `None`.
-In contrast, `try_as::<MyPair>()` returns an owned managed reference, which retains the
-object independently of the source `Any` or `AnyView`.
+Both `Any` and `AnyView` provide object-only `downcast_ref::<T>() -> Option<&T>`,
+with `T: ObjectCore`. It accepts the runtime type or a compatible base type and
+returns `None` for unrelated types and non-object values. The returned reference
+borrows its source without consuming it or incrementing the reference count.
+In contrast, `try_as::<MyPair>()` returns an owned managed reference, which retains
+the object independently of the source `Any` or `AnyView`.
+
+### Object and ObjectRef
+
+The object representation and its owning handle are separate, as with C++ `Object`
+and `ObjectRef`. The `MyPairObj` representation above implements `ObjectCore`;
+`Object` is the root representation. Its named managed reference `MyPair` wraps
+`ObjectArc<MyPairObj>`, which manages shared ownership through reference counting.
+`ObjectRef` is the erased managed reference. Named references implement `ObjectRefCore`
+for shared operations and can define their own methods:
+
+```rust
+use tvm_ffi::ObjectRefCore;
+
+let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
+assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);
+```
+
+Managed references provide `downcast_ref::<T>()` with the same inheritance and
+borrowing rules as `Any` and `AnyView`.
 
 ### Loading a Module
 
