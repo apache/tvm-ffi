@@ -420,7 +420,7 @@ unsafe fn inherited_kind(info: *const crate::tvm_ffi_sys::TVMFFITypeInfo) -> i32
 
 /// `__ffi_shallow_copy__` of `N`: a copy of `object`, which must be an `N`, as a new object.
 fn shallow_copy_any<N: ObjectCore + ShallowCopy>(object: &ObjectRef) -> Result<Any> {
-    let Some(node) = object.as_node::<N>() else {
+    let Some(node) = object.downcast_ref::<N>() else {
         return Err(Error::new(
             TYPE_ERROR,
             &format!(

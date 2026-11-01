@@ -171,6 +171,8 @@ fn test_any_option_i32() {
 
     // Test Any with Some value
     assert_eq!(any_some.type_index(), TypeIndex::kTVMFFIInt as i32);
+    assert!(any_some.downcast_ref::<Object>().is_none());
+    assert!(any_view_some.downcast_ref::<Object>().is_none());
     assert_eq!(Option::<i32>::try_from(any_some).unwrap(), Some(42i32));
 
     // Test AnyView with Some value
@@ -184,6 +186,8 @@ fn test_any_option_i32() {
 
     // Test Any with None value
     assert_eq!(any_none.type_index(), TypeIndex::kTVMFFINone as i32);
+    assert!(any_none.downcast_ref::<Object>().is_none());
+    assert!(any_view_none.downcast_ref::<Object>().is_none());
     assert_eq!(Option::<i32>::try_from(any_none).unwrap(), None::<i32>);
 
     // Test AnyView with None value
