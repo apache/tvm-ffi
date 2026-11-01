@@ -70,7 +70,7 @@ registry (field types, method signatures, global function schemas).
 
 ```bash
 cmake . -B build_cpp -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build_cpp --parallel --config RelWithDebInfo --target tvm_ffi_shared
+cmake --build build_cpp --parallel --config RelWithDebInfo --target tvm_ffi
 ```
 
 ### Prerequisites

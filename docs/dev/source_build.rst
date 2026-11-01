@@ -118,7 +118,7 @@ instruction below should work for Linux, macOS and Windows.
 .. code-block:: bash
 
    cmake . -B build_cpp -DCMAKE_BUILD_TYPE=RelWithDebInfo
-   cmake --build build_cpp --parallel --config RelWithDebInfo --target tvm_ffi_shared
+   cmake --build build_cpp --parallel --config RelWithDebInfo --target tvm_ffi
    cmake --install build_cpp --config RelWithDebInfo --prefix ./dist
 
 After installation, you should see:

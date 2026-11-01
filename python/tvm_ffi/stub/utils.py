@@ -60,7 +60,7 @@ class InitConfig:
     """Name of the Python package to generate stubs for, e.g. apache-tvm-ffi (instead of tvm_ffi)"""
 
     shared_target: str
-    """Name of CMake target that generates the shared library, e.g. tvm_ffi_shared
+    """Name of CMake target that generates the shared library, e.g. tvm_ffi
 
     This is used to determine the name of the shared library file.
     - macOS: lib{shared_target}.dylib or lib{shared_target}.so

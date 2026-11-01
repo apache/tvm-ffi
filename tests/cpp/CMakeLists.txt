@@ -21,7 +21,7 @@ tvm_ffi_add_cxx_warning(tvm_ffi_tests)
 add_sanitizer_address(tvm_ffi_tests)
 tvm_ffi_add_apple_dsymutil(tvm_ffi_tests)
 tvm_ffi_add_msvc_flags(tvm_ffi_tests)
-target_link_libraries(tvm_ffi_tests PRIVATE tvm_ffi_shared)
+target_link_libraries(tvm_ffi_tests PRIVATE tvm_ffi::shared)
 target_link_libraries(tvm_ffi_tests PRIVATE tvm_ffi_testing)
 tvm_ffi_add_gtest(tvm_ffi_tests)
 
