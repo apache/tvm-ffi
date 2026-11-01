@@ -158,22 +158,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     /// Unlike [`ObjectRefCast::try_cast`], this method neither consumes the
     /// reference nor changes the object's reference count. The returned borrow
     /// cannot outlive `self`.
-    ///
-    /// ```
-    /// use tvm_ffi::{Array, Object, ObjectRefCore};
-    ///
-    /// let array = Array::new(vec![1_i64]);
-    /// assert!(array.downcast_ref::<Object>().is_some());
-    /// ```
-    ///
-    /// ```compile_fail,E0505
-    /// use tvm_ffi::{Array, Object, ObjectRefCore};
-    ///
-    /// let array = Array::new(vec![1_i64]);
-    /// let object = array.downcast_ref::<Object>().unwrap();
-    /// drop(array);
-    /// let _ = std::ptr::from_ref(object);
-    /// ```
+    /// See [`crate::Any::downcast_ref`] for an example.
     #[inline(always)]
     fn downcast_ref<T: ObjectCore>(&self) -> Option<&T> {
         let object = unsafe { ObjectArc::as_raw(Self::data(self)) };

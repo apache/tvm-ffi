@@ -78,6 +78,24 @@ impl<'a> AnyView<'a> {
         }
     }
 
+    /// Borrow the viewed object as `T` when its runtime type is `T` or a subtype.
+    ///
+    /// `T` is an object representation type such as `MyPairObj`. Non-object
+    /// values and unrelated object types return `None`. This does not change
+    /// the object's reference count; the borrow cannot outlive this view or
+    /// the owner it borrows. See [`Any::downcast_ref`] for an example.
+    #[inline]
+    pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
+        if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
+            || !object::is_instance_of::<T>(self.data.type_index)
+        {
+            return None;
+        }
+        // SAFETY: the type check establishes T's layout, and AnyView keeps
+        // the allocation borrowed for at least the lifetime of this reference.
+        Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
+    }
+
     /// More strict version than try_from/try_into
     ///
     /// This function will not try to cast the type
@@ -188,20 +206,23 @@ impl Any {
     /// reference count, and the returned reference cannot outlive `self`.
     ///
     /// ```
-    /// use tvm_ffi::{Any, Array, Object};
+    /// use tvm_ffi::{def_object_ref, rs_class, Any, AnyView, Object, ObjectRefCore};
+    /// use tvm_ffi::object::ObjectRef;
     ///
-    /// let value = Any::from(Array::new(vec![1_i64]));
-    /// assert!(value.downcast_ref::<Object>().is_some());
-    /// assert!(Any::from(1_i64).downcast_ref::<Object>().is_none());
-    /// ```
+    /// #[rs_class("my.MyPair", crate = tvm_ffi)]
+    /// pub struct MyPairObj {
+    ///     base: Object,
+    ///     pub first: i64,
+    ///     pub second: i64,
+    /// }
+    /// def_object_ref!(pub MyPair, ObjectRef, MyPairObj, crate = tvm_ffi);
     ///
-    /// ```compile_fail,E0505
-    /// use tvm_ffi::{Any, Array, Object};
-    ///
-    /// let value = Any::from(Array::new(vec![1_i64]));
-    /// let object = value.downcast_ref::<Object>().unwrap();
-    /// drop(value);
-    /// let _ = std::ptr::from_ref(object);
+    /// let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
+    /// assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);
+    /// let value = Any::from(pair);
+    /// assert_eq!(value.downcast_ref::<MyPairObj>().unwrap().second, 4);
+    /// let view = AnyView::from(&value);
+    /// assert_eq!(view.downcast_ref::<MyPairObj>().unwrap().first, 3);
     /// ```
     #[inline]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {

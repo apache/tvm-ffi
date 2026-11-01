@@ -65,35 +65,59 @@ export LD_LIBRARY_PATH=$(tvm-ffi-config --libdir):$LD_LIBRARY_PATH
 
 ## Basic Usage
 
-**Named managed reference**. A named managed reference follows the newtype pattern around
-`ObjectArc<T>`, which manages the underlying object’s lifetime through reference counting.
-Define methods and associated functions on the named type, and implement traits to provide
-shared interfaces. The named type can also impose additional constraints on the underlying object.
-For example, `Array<T>` holds an `ObjectArc<ArrayObj>` while constraining the array’s
-element type to `T`. Named reference types implement `ObjectRefCore` for shared reference operations.
+### Object and ObjectRef
 
-Use `downcast_ref::<T>()` on `Any` or a named reference to borrow an object representation
-such as `FooObj`. It returns `Option<&T>` and accepts an object whose runtime type is `T`
-or a subtype of `T`. The borrow cannot outlive its owner, and inspecting it does not consume
-the owner or increment the reference count. Unrelated object types and non-object `Any`
-values return `None`.
+The object representation and its owning handle are separate, as with C++ `Object`
+and `ObjectRef`. A Rust object representation such as `MyPairObj` implements `ObjectCore`;
+`Object` is the root representation. A named managed reference such as `MyPair` wraps
+`ObjectArc<MyPairObj>`, which manages shared ownership through reference counting.
+`ObjectRef` is the erased managed reference. Named references implement `ObjectRefCore`
+for shared operations and can define their own methods:
 
 ```rust
-use tvm_ffi::{Any, Array, Object, ObjectRefCore};
-use tvm_ffi::collections::array::ArrayObj;
+use tvm_ffi::{def_object_ref, rs_class, Object, ObjectRefCore};
+use tvm_ffi::object::ObjectRef;
 
-let array = Array::new(vec![1_i64, 2]);
-assert!(array.downcast_ref::<ArrayObj>().is_some());
-assert!(array.downcast_ref::<Object>().is_some()); // A compatible base type.
+#[rs_class("my.MyPair")]
+pub struct MyPairObj {
+    base: Object,
+    pub first: i64,
+    pub second: i64,
+}
+def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
 
-let value = Any::from(array);
-assert!(value.downcast_ref::<ArrayObj>().is_some());
-assert!(Any::from(1_i64).downcast_ref::<ArrayObj>().is_none());
+let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
+assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);
 ```
 
-The target is the object representation (`ArrayObj`), not the managed handle (`Array<i64>`);
-this operation checks the object hierarchy, not typed-container element constraints.
-`downcast_ref` replaces the managed reference API's earlier `as_node` spelling.
+`downcast_ref::<T>()` borrows the representation as `Option<&T>`, with `T: ObjectCore`.
+It accepts the runtime type or a compatible base type and returns `None` for unrelated
+types. The returned reference borrows its source without consuming it or incrementing
+the reference count.
+
+### Any and AnyView
+
+As in C++, `Any` owns a dynamically typed value, while `AnyView<'a>` borrows a value.
+An object stored in `Any` carries a strong reference; creating an `AnyView` does not
+increment its reference count. Rust tracks the view's lifetime so it cannot outlive
+the value it borrows. Continuing with `MyPair` above:
+
+```rust
+use tvm_ffi::{Any, AnyView};
+
+let value = Any::from(pair); // Transfer the handle's ownership into Any.
+assert_eq!(value.downcast_ref::<MyPairObj>().unwrap().second, 4);
+let view = AnyView::from(&value);
+assert_eq!(view.downcast_ref::<MyPairObj>().unwrap().first, 3);
+
+let owned_pair = value.try_as::<MyPair>().unwrap(); // Acquire another strong reference.
+assert_eq!(owned_pair.second, 4);
+```
+
+Both `Any` and `AnyView` provide object-only `downcast_ref::<T>()` with the same
+inheritance and borrowing rules as managed references. Non-object values return `None`.
+In contrast, `try_as::<MyPair>()` returns an owned managed reference, which retains the
+object independently of the source `Any` or `AnyView`.
 
 ### Loading a Module
 
