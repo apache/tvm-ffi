@@ -119,6 +119,8 @@ Stream Context
   use_torch_stream
   use_raw_stream
   get_raw_stream
+  utils.xpu.xpu_device_from_torch
+  utils.xpu.xpu_global_device_index
 
 
 C++ Extension

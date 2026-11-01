@@ -87,6 +87,8 @@ def build_wheel(
                     extra_args.append("--build-with-rocm")
                 else:
                     raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
+            elif hasattr(torch, "xpu") and torch.xpu.is_available():
+                extra_args.append("--build-with-xpu")
             subprocess.run(
                 [
                     sys.executable,

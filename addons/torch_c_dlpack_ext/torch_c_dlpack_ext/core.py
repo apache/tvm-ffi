@@ -47,6 +47,9 @@ def _torch_extension_device(torch_module: Any) -> str:
         if getattr(torch_module.version, "hip", None) is not None:
             return "rocm"
         return "cuda"
+    xpu = getattr(torch_module, "xpu", None)
+    if xpu is not None and xpu.is_available():
+        return "xpu"
     return "cpu"
 
 

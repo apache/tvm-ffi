@@ -277,6 +277,18 @@ cdef inline const DLPackExchangeAPI* GetTorchFallbackExchangeAPI() noexcept:
 cdef DLPackExchangeAPI _torch_fallback_exchange_api
 
 
+_torch_xpu_get_current_raw_stream = (
+    getattr(torch._C, "_xpu_getCurrentRawStream", None) if torch is not None else None
+)
+
+
+def _torch_xpu_current_raw_stream(torch_index: int) -> int:
+    """Return the ``sycl::queue*`` of torch's current stream on ``xpu:<torch_index>``."""
+    if _torch_xpu_get_current_raw_stream is not None:
+        return _torch_xpu_get_current_raw_stream(torch_index)
+    return torch.xpu.current_stream(torch_index).sycl_queue
+
+
 cdef int TVMFFIPyArgSetterTorchFallback_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
     PyObject* py_arg, TVMFFIAny* out
@@ -286,17 +298,23 @@ cdef int TVMFFIPyArgSetterTorchFallback_(
     cdef object arg = <object>py_arg
     cdef long long temp_ptr
     is_cuda = arg.is_cuda
+    is_xpu = not is_cuda and arg.is_xpu
+    torch_xpu_index = arg.device.index if is_xpu else -1
     arg = from_dlpack(torch.utils.dlpack.to_dlpack(arg))
     out.type_index = kTVMFFITensor
     out.v_ptr = (<Tensor>arg).chandle
     temp_dltensor = TVMFFITensorGetDLTensorPtr((<Tensor>arg).chandle)
     ctx.dlpack_c_exchange_api = GetTorchFallbackExchangeAPI()
     # record the stream and device for torch context
-    if is_cuda and ctx.device_type == -1:
+    if (is_cuda or is_xpu) and ctx.device_type == -1:
         ctx.device_type = temp_dltensor.device.device_type
         ctx.device_id = temp_dltensor.device.device_id
-        # This is an API that dynamo and other uses to get the raw stream from torch
-        temp_ptr = torch._C._cuda_getCurrentRawStream(temp_dltensor.device.device_id)
+        if is_cuda:
+            # This is an API that dynamo and other uses to get the raw stream from torch
+            temp_ptr = torch._C._cuda_getCurrentRawStream(temp_dltensor.device.device_id)
+        else:
+            # for kDLOneAPI the DLPack device_id is the global SYCL index, not the torch index
+            temp_ptr = _torch_xpu_current_raw_stream(torch_xpu_index)
         ctx.stream = <TVMFFIStreamHandle>temp_ptr
     # push to temp and clear the handle
     TVMFFIPyPushTempPyObject(ctx, <PyObject*>arg)

@@ -235,10 +235,34 @@ This is equivalent to the following PyTorch C++ code:
 **Auto-Update Stream Context.** When converting framework tensors via :py:func:`tvm_ffi.from_dlpack`,
 TVM-FFI automatically updates the stream context to match the device of the converted tensor.
 For example, when converting a PyTorch tensor on ``torch.device('cuda:3')``, TVM-FFI automatically
-captures the stream from :py:func:`torch.cuda.current_stream(device='cuda:3')`.
+captures the stream from :py:func:`torch.cuda.current_stream(device='cuda:3')`. For ``torch.xpu`` tensors,
+the ``sycl::queue*`` of :py:func:`torch.xpu.current_stream` is captured the same way.
 
 **Set Stream Context.** Use :py:func:`tvm_ffi.use_torch_stream` or :py:func:`tvm_ffi.use_raw_stream`
 to manually set the stream context when automatic detection is insufficient.
+
+**Stream Handle per Device.** The stream handle is opaque to TVM-FFI; its meaning depends on the device type:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Device type
+     - Stream handle
+   * - ``kDLCUDA``
+     - ``cudaStream_t``
+   * - ``kDLROCM``
+     - ``hipStream_t``
+   * - ``kDLOneAPI`` (Intel XPU)
+     - non-owning ``sycl::queue*``, valid for the duration of the call
+
+For ``kDLOneAPI``, ``device_id`` follows DLPack and is the index of the device in
+``sycl::device::get_devices()``. It can differ from the PyTorch index ``xpu:<n>``: PyTorch only
+enumerates Level Zero GPUs and, since PyTorch 2.7, hides integrated GPUs when a discrete GPU is
+present, while the global list also contains other devices, such as the OpenCL view of the same GPU.
+``ONEAPI_DEVICE_SELECTOR`` filters both lists alike, so it does not cause a difference by itself.
+A GPU-only list (``get_devices(sycl::info::device_type::gpu)``) gives different indices and must not
+be used. Tensors exported by PyTorch already carry this global index;
+use :py:func:`tvm_ffi.utils.xpu.xpu_device_from_torch` to convert a ``torch.device``.
 
 Tensor Classes
 --------------
