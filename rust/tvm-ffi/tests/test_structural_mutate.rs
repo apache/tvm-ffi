@@ -27,8 +27,8 @@ use tvm_ffi::{
     Function, InplaceMode, InplaceValue, IntoMapper, Map, MapDispatch, MapWithContextPolicy,
     MutContextPolicy, MutateCallbacks, MutateContext, MutateValue, Mutator, Object, ObjectArc,
     ObjectRefCore, Result, String as FfiString, StructuralMutator, StructuralVarRemap,
-    StructuralView, StructuralVisitor, TypeIndex, Unchanged, UnchangedOr, VisitCallbacks,
-    VisitContext, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
+    StructuralVisitor, TypeIndex, Unchanged, UnchangedOr, VisitCallbacks, VisitContext,
+    VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
@@ -36,11 +36,11 @@ struct IncrementIntegers;
 impl MapDispatch for IncrementIntegers {
     fn dispatch_map(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         _def_region_kind: DefRegionKind,
     ) -> Option<Result<Any>> {
         value
-            .cast::<i64>()
+            .try_as::<i64>()
             .map(|integer| Ok(Any::from(integer + 1)))
     }
 }
@@ -53,13 +53,13 @@ struct ManualIncrement {
 impl StructuralMutator for ManualIncrement {
     fn dispatch_mutate(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
-        if let Some(integer) = value.cast::<i64>() {
+        if let Some(integer) = value.try_as::<i64>() {
             Ok(Any::from(integer + 1))
         } else {
-            self.default_mutate(value, def_region_kind)
+            self.default_mutate(&value, def_region_kind)
         }
     }
 
@@ -71,11 +71,11 @@ impl StructuralMutator for ManualIncrement {
         self.default_maybe_inplace_mutate(value, def_region_kind)
     }
 
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
         self.remap.get(var)
     }
 
-    fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()> {
+    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
         self.remap.set(var, mutated_value)
     }
 }
@@ -89,14 +89,14 @@ struct ReplaceNone {
 impl StructuralMutator for ReplaceNone {
     fn dispatch_mutate(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         if value.type_index() == TypeIndex::kTVMFFINone as i32 {
             self.calls += 1;
             Ok(Any::from(8i64))
         } else {
-            self.default_mutate(value, def_region_kind)
+            self.default_mutate(&value, def_region_kind)
         }
     }
 
@@ -108,11 +108,11 @@ impl StructuralMutator for ReplaceNone {
         self.default_maybe_inplace_mutate(value, def_region_kind)
     }
 
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
         self.remap.get(var)
     }
 
-    fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()> {
+    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
         self.remap.set(var, mutated_value)
     }
 }
@@ -126,7 +126,7 @@ struct RecursiveEntryMutator {
 impl StructuralMutator for RecursiveEntryMutator {
     fn dispatch_mutate(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         if value.type_index() == TypeIndex::kTVMFFINone as i32 {
@@ -137,10 +137,10 @@ impl StructuralMutator for RecursiveEntryMutator {
             } else {
                 self.mutate(&1i64, def_region_kind)
             }
-        } else if let Some(integer) = value.cast::<i64>() {
+        } else if let Some(integer) = value.try_as::<i64>() {
             Ok(Any::from(integer + 1))
         } else {
-            self.default_mutate(value, def_region_kind)
+            self.default_mutate(&value, def_region_kind)
         }
     }
 
@@ -152,11 +152,11 @@ impl StructuralMutator for RecursiveEntryMutator {
         self.default_maybe_inplace_mutate(value, def_region_kind)
     }
 
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
         self.remap.get(var)
     }
 
-    fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()> {
+    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
         self.remap.set(var, mutated_value)
     }
 }
@@ -296,7 +296,7 @@ fn none_values_are_dispatched_to_map_callbacks_and_user_mutators() {
     let mut map_calls = 0;
     let mapped = structural_map(
         Any::new(),
-        |value: &StructuralView| {
+        |value: AnyView<'_>| {
             map_calls += 1;
             assert_eq!(value.type_index(), TypeIndex::kTVMFFINone as i32);
             Any::from(7i64)
@@ -350,8 +350,8 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         increment: bool,
     }
     impl StructuralMutator for Controlled {
-        fn dispatch_mutate(&mut self, value: &StructuralView, _: DefRegionKind) -> Result<Any> {
-            let integer = value.cast::<i64>().unwrap();
+        fn dispatch_mutate(&mut self, value: AnyView<'_>, _: DefRegionKind) -> Result<Any> {
+            let integer = value.try_as::<i64>().unwrap();
             Ok(if self.increment {
                 Any::from(integer + 1)
             } else {
@@ -455,12 +455,13 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     impl Forward {
         fn observe(&mut self, value: &MutateValue<'_, Array<Any>>) {
             self.modes.push(value.inplace_mode());
-            let node = value
-                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+            let view = value.as_value();
+            let node = view
+                .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .unwrap();
             assert_eq!(node.size, 1);
             // A temporary typed handle must not permanently revoke permission.
-            let temporary = value.cast::<Array<Any>>().unwrap();
+            let temporary = value.as_value().try_as::<Array<Any>>().unwrap();
             if self.retain && self.alias.is_none() {
                 self.alias = Some(temporary.clone().into());
             }
@@ -573,7 +574,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
         preserve: bool,
         retain: bool,
     ) -> Result<Any> {
-        let alias = retain.then(|| value.cast::<Array<i64>>().unwrap());
+        let alias = retain.then(|| value.as_value().try_as::<Array<i64>>().unwrap());
         assert_eq!(value.inplace_mode(), InplaceMode::Allow);
         // Carry the result back to the array callback: Unchanged belongs to
         // that input, not to the nested traversal's boolean root.
@@ -649,7 +650,7 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
         let result = structural_mutate(
             root,
             |value: MutateValue<'_>, ctx: &mut MutateContext<'_>| -> Result<UnchangedOr<Any>> {
-                if value.cast::<i64>().is_some() {
+                if value.as_value().try_as::<i64>().is_some() {
                     return if fail {
                         Err(Error::new(RUNTIME_ERROR, "child failed", ""))
                     } else {
@@ -749,10 +750,10 @@ fn callback_errors_preserve_message_and_add_object_context() {
     impl Delegate {
         fn visit_any(
             &mut self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             kind: DefRegionKind,
         ) -> Result<Option<VisitInterrupt>> {
-            if value.cast::<i64>().is_some() {
+            if value.try_as::<i64>().is_some() {
                 return Err(self.0.clone());
             }
             self.default_visit_children(value, kind)
@@ -761,7 +762,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
     #[dispatch(mutate, policy = (DefaultMutContextPolicy, DefaultMutContextPolicy))]
     impl Delegate {
         fn mutate_any(&mut self, value: MutateValue<'_>, ctx: &mut Mutator) -> Result<Any> {
-            if value.cast::<i64>().is_some() {
+            if value.as_value().try_as::<i64>().is_some() {
                 return Err(self.0.clone());
             }
             ctx.default_maybe_inplace_mutate(self, value)
@@ -850,20 +851,18 @@ fn callback_errors_preserve_message_and_add_object_context() {
         .err()
         .unwrap(),
     );
-    let mut visitor = VisitCallbacks::new(
-        (),
-        |value: &StructuralView, ctx: &mut VisitContext<'_, ()>| {
-            if value.cast::<i64>().is_some() {
+    let mut visitor =
+        VisitCallbacks::new((), |value: AnyView<'_>, ctx: &mut VisitContext<'_, ()>| {
+            if value.try_as::<i64>().is_some() {
                 return Err(source.clone());
             }
             ctx.visit_children()
-        },
-    )
-    .with_policy((DefaultContextPolicy, DefaultContextPolicy));
+        })
+        .with_policy((DefaultContextPolicy, DefaultContextPolicy));
     errors.push(structural_visit(&root, &mut visitor).err().unwrap());
     let mut mutator =
         MutateCallbacks::new((), |value: MutateValue<'_>, ctx: &mut MutateContext| {
-            if value.cast::<i64>().is_some() {
+            if value.as_value().try_as::<i64>().is_some() {
                 return Err(source.clone());
             }
             ctx.default_maybe_inplace_mutate(value)
@@ -1144,9 +1143,9 @@ impl GeneratedMapper {
         Any::from(value + 1)
     }
 
-    fn map_any(&mut self, value: &tvm_ffi::StructuralView) -> Result<Any> {
+    fn map_any(&mut self, value: tvm_ffi::AnyView<'_>) -> Result<Any> {
         self.catch_all += 1;
-        Ok(value.to_owned())
+        Ok(Any::from(value))
     }
 }
 
@@ -1305,7 +1304,7 @@ fn pre_order_mapping_preserves_inplace_permission() {
             value: MutateValue<'_>,
             ctx: &mut tvm_ffi::MutateContext<'_, State>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
+            if value.as_value().type_index() >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
                 self.0.set(Some(value.inplace_mode()));
             }
             ctx.default_maybe_inplace_mutate_result(value)
@@ -1323,13 +1322,13 @@ fn pre_order_mapping_preserves_inplace_permission() {
             let mut retained = None;
             let mut pointer = std::ptr::null();
             let mode = Cell::new(None);
-            let mut mapper = (|value: &StructuralView| {
-                if let Some(integer) = value.cast::<i64>() {
+            let mut mapper = (|value: AnyView<'_>| {
+                if let Some(integer) = value.try_as::<i64>() {
                     return Any::from(integer + 1);
                 }
                 let mapped = if case == "retained" {
-                    retained = Some(value.to_owned());
-                    value.to_owned()
+                    retained = Some(Any::from(value));
+                    Any::from(value)
                 } else {
                     Array::new(vec![1_i64]).into()
                 };
@@ -1445,10 +1444,10 @@ fn callbacks_return_values_convertible_into_any() {
 #[test]
 fn recursive_mutate_returns_unchanged_or_a_replacement() {
     fn clamp_negative_integers(
-        value: &StructuralView,
+        value: AnyView<'_>,
         mutator: &mut MutateContext<'_>,
     ) -> Result<UnchangedOr<Any>> {
-        if let Some(integer) = value.cast::<i64>() {
+        if let Some(integer) = value.try_as::<i64>() {
             if integer >= 0 {
                 // Keep this input without constructing an owning return value.
                 return Ok(UnchangedOr::unchanged());
@@ -1457,7 +1456,7 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
         }
 
         // Recurse into containers. Keep the unchanged marker if no child changed.
-        mutator.default_mutate_result(value)
+        mutator.default_mutate_result(&value)
     }
 
     // No rewrite: the public entry resolves unchanged to the original array.
@@ -1495,7 +1494,7 @@ fn pre_order_unchanged_reuses_unmodified_subtrees() {
                 }
             },
             // Keeping an array still lets pre-order map transform its children.
-            |_value: &StructuralView| Unchanged,
+            |_value: AnyView<'_>| Unchanged,
         ),
         WalkOrder::PreOrder,
     )
@@ -1526,8 +1525,8 @@ fn post_order_unchanged_preserves_descendant_rewrites() {
             let alias = shared.then(|| root.clone());
             let callbacks = (
                 |integer: i64| integer + 1,
-                |value: &StructuralView| {
-                    assert_eq!(value.cast::<Array<i64>>().unwrap().get(0).unwrap(), 2);
+                |value: AnyView<'_>| {
+                    assert_eq!(value.try_as::<Array<i64>>().unwrap().get(0).unwrap(), 2);
                     Unchanged
                 },
             );
@@ -1605,9 +1604,9 @@ fn nested_tuple_chain_exceeds_flat_arity() {
                 |value: i64| Any::from(value * 10),
                 (
                     |value: Array<FfiString>| Any::from(value),
-                    (|value: &StructuralView| {
+                    (|value: AnyView<'_>| {
                         catch_all += 1;
-                        value.to_owned()
+                        Any::from(value)
                     },),
                 ),
             ),
@@ -1626,9 +1625,9 @@ fn callbacks_run_in_the_configured_order() {
     let mut pre = Vec::new();
     structural_map(
         root.clone(),
-        |value: &StructuralView| {
-            pre.push(value.cast::<i64>());
-            value.to_owned()
+        |value: AnyView<'_>| {
+            pre.push(value.try_as::<i64>());
+            Any::from(value)
         },
         WalkOrder::PreOrder,
     )
@@ -1638,9 +1637,9 @@ fn callbacks_run_in_the_configured_order() {
     let mut post = Vec::new();
     structural_map(
         root,
-        |value: &StructuralView| {
-            post.push(value.cast::<i64>());
-            value.to_owned()
+        |value: AnyView<'_>| {
+            post.push(value.try_as::<i64>());
+            Any::from(value)
         },
         WalkOrder::PostOrder,
     )
@@ -1725,11 +1724,11 @@ fn stateful_mutate_integer(
 }
 
 fn stateful_mutate_default(
-    value: &tvm_ffi::StructuralView,
+    value: tvm_ffi::AnyView<'_>,
     mutator: &mut MutateContext<'_, CallbackMutateStats>,
 ) -> Result<Any> {
     mutator.state_mut().defaults += 1;
-    mutator.default_mutate(value)
+    mutator.default_mutate(&value)
 }
 
 #[test]
@@ -1764,7 +1763,7 @@ struct CallbackMutateDepth {
 }
 
 fn stateful_mutate_recursive(
-    value: &StructuralView,
+    value: AnyView<'_>,
     mutator: &mut MutateContext<'_, CallbackMutateDepth>,
 ) -> Result<Any> {
     {
@@ -1772,7 +1771,7 @@ fn stateful_mutate_recursive(
         state.current += 1;
         state.maximum = state.maximum.max(state.current);
     }
-    let mutated = mutator.default_mutate(value)?;
+    let mutated = mutator.default_mutate(&value)?;
     {
         let state = mutator.state_mut();
         state.current -= 1;
@@ -1808,10 +1807,10 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
         root,
         (
             |value: i64, _mutator: &mut MutateContext<'_>| Any::from(value + 1),
-            |value: &StructuralView, mutator: &mut MutateContext<'_>| -> Result<Any> {
+            |value: AnyView<'_>, mutator: &mut MutateContext<'_>| -> Result<Any> {
                 defaults.set(defaults.get() + 1);
-                let first = mutator.default_mutate(value)?;
-                let second = mutator.default_mutate(value)?;
+                let first = mutator.default_mutate(&value)?;
+                let second = mutator.default_mutate(&value)?;
                 assert_ne!(any_object_pointer(&first), any_object_pointer(&second));
                 Ok(first)
             },
@@ -1847,9 +1846,9 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let calls = Cell::new(0);
     let mutated = structural_mutate(
         Array::new(vec![1i64, 2]),
-        |value: &StructuralView, mutator: &mut MutateContext<'_>| {
+        |value: AnyView<'_>, mutator: &mut MutateContext<'_>| {
             calls.set(calls.get() + 1);
-            mutator.default_mutate(value)
+            mutator.default_mutate(&value)
         },
     )
     .and_then(Array::<i64>::try_from)
@@ -2001,7 +2000,8 @@ impl MutContextPolicy<PolicyState> for ArrayPolicy {
         ctx: &mut MutateContext<'_, PolicyState>,
     ) -> Result<UnchangedOr<Any>> {
         if value
-            .as_node::<tvm_ffi::collections::array::ArrayObj>()
+            .as_value()
+            .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
             .is_none()
         {
             return ctx.default_maybe_inplace_mutate_result(value);
@@ -2024,7 +2024,8 @@ impl MutContextPolicy<PolicyState> for RecordPolicy {
         ctx: &mut MutateContext<'_, PolicyState>,
     ) -> Result<UnchangedOr<Any>> {
         if value
-            .as_node::<tvm_ffi::collections::array::ArrayObj>()
+            .as_value()
+            .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
             .is_some()
         {
             let depth = ctx.state().depth;
@@ -2197,10 +2198,11 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
             ctx: &mut MutateContext<'_, Ownership>,
         ) -> Result<UnchangedOr<Any>> {
             let array = value
-                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                .as_value()
+                .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .is_some();
             if array && self.retain {
-                ctx.state_mut().retained = Some(value.to_owned());
+                ctx.state_mut().retained = Some(Any::from(value.as_value()));
             }
             let result = ctx.default_mutate_with_mode_result(value, self.mode)?;
             if array && !ctx.state().increment {
@@ -2320,14 +2322,14 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
             value: MutateValue<'_>,
             ctx: &mut MutateContext<'_, Regions>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.cast::<bool>() == Some(false) {
+            if value.as_value().try_as::<bool>() == Some(false) {
                 // Bypass this container's callback, but enter the next policy and redispatch its children.
                 return ctx.with_def_region_kind(Pattern, |ctx| {
                     ctx.default_mutate(&Array::new(vec![1_i64]))
                         .map(UnchangedOr::changed)
                 });
             }
-            if value.cast::<i64>() == Some(2) {
+            if value.as_value().try_as::<i64>() == Some(2) {
                 assert_eq!(ctx.def_region_kind(), Pattern);
                 ctx.mutate_with(&99_i64, self.0)?;
                 let error: Result<()> = ctx.with_def_region_kind(Use, |ctx| {
@@ -2348,7 +2350,8 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
             ctx: &mut MutateContext<'_, Regions>,
         ) -> Result<UnchangedOr<Any>> {
             if value
-                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                .as_value()
+                .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .is_some()
             {
                 assert_eq!(ctx.def_region_kind(), Pattern);
@@ -2365,11 +2368,12 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
             value: MutateValue<'_>,
             mutator: &mut Mutator,
         ) -> Result<UnchangedOr<Any>> {
-            if let Some(x) = value.cast::<i64>() {
+            if let Some(x) = value.as_value().try_as::<i64>() {
                 self.map_integer(x, mutator.def_region_kind());
             }
             if value
-                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                .as_value()
+                .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .is_some()
             {
                 self.0.push((200, mutator.def_region_kind()));
@@ -2408,12 +2412,13 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         let mut mutator = MutateCallbacks::new(
             Regions::default(),
             |value: MutateValue<'_>, ctx: &mut MutateContext<'_, Regions>| {
-                if let Some(x) = value.cast::<i64>() {
+                if let Some(x) = value.as_value().try_as::<i64>() {
                     let kind = ctx.def_region_kind();
                     ctx.state_mut().0.push((x, kind));
                 }
                 if value
-                    .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                    .as_value()
+                    .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                     .is_some()
                 {
                     let kind = ctx.def_region_kind();

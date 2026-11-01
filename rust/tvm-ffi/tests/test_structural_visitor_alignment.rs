@@ -27,7 +27,7 @@
 //! definition region, the rest inherit the surrounding state.
 
 use tvm_ffi::{
-    structural_visit, Array, DefRegionKind, Result, String as FfiString, StructuralView,
+    structural_visit, AnyView, Array, DefRegionKind, Result, String as FfiString,
     StructuralVisitor, VisitInterrupt,
 };
 
@@ -49,13 +49,13 @@ impl StructuralVisitor for RecordingVisitor {
     /// `TFuncObj::StructuralVisit`.
     fn visit(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        let integer = value.cast::<i64>();
+        let integer = value.try_as::<i64>();
         let label = match integer {
             Some(integer) => integer.to_string(),
-            None if value.cast::<Array<i64>>().is_some() => "array".to_string(),
+            None if value.try_as::<Array<i64>>().is_some() => "array".to_string(),
             None => "obj".to_string(),
         };
         // C++: visited.push_back(value_ref);
@@ -72,7 +72,7 @@ impl StructuralVisitor for RecordingVisitor {
         // C++ analog: `TFuncObj::StructuralVisit` — visit "params"
         // (element 0) under a pattern definition region, then the "body"
         // (element 1) under the inherited state.
-        if let Some(array) = value.cast::<Array<i64>>() {
+        if let Some(array) = value.try_as::<Array<i64>>() {
             // C++: visitor->WithDefRegionKind(kTVMFFIDefRegionKindPattern,
             //          [&] { return visitor->VisitExpected(self->params); })
             let params = array.get(0).unwrap();

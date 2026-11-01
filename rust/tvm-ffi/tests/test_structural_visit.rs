@@ -20,11 +20,10 @@
 use std::cell::{Cell, RefCell};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
-    dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, ContextPolicy,
+    dispatch, get_type_attr, structural_visit, structural_walk, Any, AnyView, Array, ContextPolicy,
     DLDataType, DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object,
-    ObjectRefCore, Result, String as FfiString, StructuralView, StructuralVisitor, TypeIndex,
-    VisitCallbacks, VisitContext, VisitInterrupt, WalkOrder, WalkResult, WalkWithContextPolicy,
-    RUNTIME_ERROR,
+    ObjectRefCore, Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks,
+    VisitContext, VisitInterrupt, WalkOrder, WalkResult, WalkWithContextPolicy, RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -53,10 +52,10 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     impl ContextPolicy<CollectIntegers> for ArrayScope {
         fn default_visit(
             &self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             visitor: &mut VisitContext<'_, CollectIntegers>,
         ) -> Result<Option<VisitInterrupt>> {
-            if value.cast::<Array<Any>>().is_none() {
+            if value.try_as::<Array<Any>>().is_none() {
                 return visitor.visit_children();
             }
             let outer_depth = visitor.state().depth;
@@ -78,7 +77,7 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     impl ContextPolicy<CollectIntegers> for RecordDescent {
         fn default_visit(
             &self,
-            _value: &StructuralView,
+            _value: AnyView<'_>,
             visitor: &mut VisitContext<'_, CollectIntegers>,
         ) -> Result<Option<VisitInterrupt>> {
             let state = visitor.state_mut();
@@ -190,10 +189,10 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
     impl ContextPolicy<Probe> for Scope {
         fn default_visit(
             &self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
-            let Some(array) = value.cast::<Array<i64>>() else {
+            let Some(array) = value.try_as::<Array<i64>>() else {
                 return ctx.visit_children();
             };
             let outer = ctx.def_region_kind();
@@ -210,10 +209,10 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
     impl Probe {
         fn visit_any(
             &mut self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             kind: DefRegionKind,
         ) -> Result<Option<VisitInterrupt>> {
-            if let Some(value) = value.cast::<i64>() {
+            if let Some(value) = value.try_as::<i64>() {
                 self.record(value, kind)
             } else {
                 self.default_visit_children(value, kind)
@@ -334,10 +333,10 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
     impl ContextPolicy<Probe> for Redirect {
         fn default_visit(
             &self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
-            let Some(array) = value.cast::<Array<Any>>() else {
+            let Some(array) = value.try_as::<Array<Any>>() else {
                 return ctx.visit_children();
             };
             assert_eq!(
@@ -349,7 +348,7 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
             ctx.state_mut().0.push(("before", 2, kind));
             let target = array.get(0).unwrap();
             let result = ctx.default_visit_children(&target, DefRegionKind::Pattern);
-            assert_eq!(ctx.current().cast::<Array<Any>>().unwrap().len(), 2);
+            assert_eq!(ctx.current().try_as::<Array<Any>>().unwrap().len(), 2);
             assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
             let kind = ctx.def_region_kind();
             ctx.state_mut().0.push(("after", 2, kind));
@@ -361,16 +360,16 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
     impl ContextPolicy<Probe> for Observe {
         fn default_visit(
             &self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
-            if let Some(array) = value.cast::<Array<Any>>() {
-                assert_eq!(ctx.current().cast::<Array<Any>>().unwrap().len(), 1);
+            if let Some(array) = value.try_as::<Array<Any>>() {
+                assert_eq!(ctx.current().try_as::<Array<Any>>().unwrap().len(), 1);
                 let kind = ctx.def_region_kind();
                 ctx.state_mut()
                     .0
                     .push(("next policy", array.len() as i64, kind));
-            } else if value.cast::<i64>().is_none() {
+            } else if value.try_as::<i64>().is_none() {
                 let kind = ctx.def_region_kind();
                 ctx.state_mut().0.push(("reflected policy", 0, kind));
             }
@@ -407,9 +406,9 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
     }
     let mut visitor = VisitCallbacks::new(
         Probe::default(),
-        |value: &StructuralView, ctx: &mut VisitContext<'_, Probe>| {
+        |value: AnyView<'_>, ctx: &mut VisitContext<'_, Probe>| {
             let kind = ctx.def_region_kind();
-            if let Some(array) = value.cast::<Array<Any>>() {
+            if let Some(array) = value.try_as::<Array<Any>>() {
                 ctx.state_mut()
                     .0
                     .push(("array callback", array.len() as i64, kind));
@@ -417,7 +416,7 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
             } else {
                 ctx.state_mut()
                     .0
-                    .push(("integer callback", value.cast::<i64>().unwrap(), kind));
+                    .push(("integer callback", value.try_as::<i64>().unwrap(), kind));
                 Ok(None)
             }
         },
@@ -433,18 +432,18 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
     let target = visit_region_graph(false);
     let mut visitor = VisitCallbacks::new(
         Probe::default(),
-        |value: &StructuralView, ctx: &mut VisitContext<'_, Probe>| {
-            if value.cast::<i64>() == Some(-1) {
+        |value: AnyView<'_>, ctx: &mut VisitContext<'_, Probe>| {
+            if value.try_as::<i64>() == Some(-1) {
                 assert!(ctx
                     .default_visit_children(&Any::new(), DefRegionKind::Pattern)?
                     .is_none());
                 let result = ctx.default_visit_children(&target, DefRegionKind::Pattern);
-                assert_eq!(ctx.current().cast::<i64>(), Some(-1));
+                assert_eq!(ctx.current().try_as::<i64>(), Some(-1));
                 assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
                 return result;
             }
             // A callback on the reflected target itself would fail this cast.
-            let integer = value.cast::<i64>().unwrap();
+            let integer = value.try_as::<i64>().unwrap();
             let kind = ctx.def_region_kind();
             ctx.state_mut().0.push(("integer callback", integer, kind));
             Ok(None)
@@ -472,9 +471,9 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
     }
     #[dispatch(walk)]
     impl Probe {
-        fn walk_any(&mut self, value: &StructuralView, kind: DefRegionKind) -> WalkResult {
+        fn walk_any(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> WalkResult {
             assert!(
-                value.cast::<Array<i64>>().is_some(),
+                value.try_as::<Array<i64>>().is_some(),
                 "children must not be visited"
             );
             assert_eq!(kind, DefRegionKind::None);
@@ -486,12 +485,12 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
     impl ContextPolicy<Probe> for Scope {
         fn default_visit(
             &self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
             ctx.state_mut().events.push("enter");
             ctx.state_mut().depth += 1;
-            let result = ctx.default_visit_children(&value.to_owned(), DefRegionKind::Pattern);
+            let result = ctx.default_visit_children(&Any::from(value), DefRegionKind::Pattern);
             assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
             ctx.state_mut().depth -= 1;
             ctx.state_mut().events.push("exit");
@@ -502,7 +501,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
     impl ContextPolicy<Probe> for Stop {
         fn default_visit(
             &self,
-            _: &StructuralView,
+            _: AnyView<'_>,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
             assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
@@ -519,7 +518,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
     impl ContextPolicy<Probe> for Unreachable {
         fn default_visit(
             &self,
-            _: &StructuralView,
+            _: AnyView<'_>,
             _: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
             panic!("the policy after Stop must not run")
@@ -536,7 +535,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
             } else {
                 let mut visitor = VisitCallbacks::new(
                     Probe::default(),
-                    |value: &StructuralView, ctx: &mut VisitContext<'_, Probe>| {
+                    |value: AnyView<'_>, ctx: &mut VisitContext<'_, Probe>| {
                         let kind = ctx.def_region_kind();
                         ctx.state_mut().walk_any(value, kind);
                         ctx.visit_children()
@@ -568,11 +567,11 @@ fn policy_regions_compose_with_field_flags_and_function_hooks() {
     impl ContextPolicy<PolicyRegionTrace> for SetRootRegion {
         fn default_visit(
             &self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             ctx: &mut VisitContext<'_, PolicyRegionTrace>,
         ) -> Result<Option<VisitInterrupt>> {
             if value.type_index() == self.0 {
-                ctx.default_visit_children(&value.to_owned(), self.1)
+                ctx.default_visit_children(&Any::from(value), self.1)
             } else {
                 ctx.visit_children()
             }
@@ -633,10 +632,10 @@ struct ReenterRegion(DefRegionKind);
 impl ContextPolicy<PolicyRegionTrace> for ReenterRegion {
     fn default_visit(
         &self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         ctx: &mut VisitContext<'_, PolicyRegionTrace>,
     ) -> Result<Option<VisitInterrupt>> {
-        match value.cast::<i64>() {
+        match value.try_as::<i64>() {
             Some(2) => {
                 assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
                 // Re-dispatch immediately: visit_children() must not be needed
@@ -657,10 +656,10 @@ impl ContextPolicy<PolicyRegionTrace> for ReenterRegion {
 impl PolicyRegionTrace {
     fn visit_any(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        if let Some(integer) = value.cast::<i64>() {
+        if let Some(integer) = value.try_as::<i64>() {
             self.walk_integer(integer, kind);
             if integer != 2 && integer != 3 {
                 return Ok(None);
@@ -678,7 +677,13 @@ fn policies_preserve_reflected_pattern_before_default_descent() {
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
     assert_eq!(
         visitor.0,
-        vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use), (100, Use)]
+        vec![
+            (1, Simple),
+            (2, Pattern),
+            (99, Pattern),
+            (3, Use),
+            (100, Use)
+        ]
     );
     for requested in [Use, Simple] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
@@ -754,8 +759,8 @@ fn plain_walk_uses_registered_array_hook() {
     let mut integers = 0;
     assert!(structural_walk(
         &root,
-        |value: &StructuralView| {
-            if value.cast::<i64>().is_some() {
+        |value: AnyView<'_>| {
+            if value.try_as::<i64>().is_some() {
                 integers += 1;
             }
             WalkResult::Advance
@@ -776,10 +781,10 @@ fn plain_walk_visits_map_values_without_visiting_keys() {
     let mut strings = 0;
     assert!(structural_walk(
         &root,
-        |value: &StructuralView| {
-            if value.cast::<i64>().is_some() {
+        |value: AnyView<'_>| {
+            if value.try_as::<i64>().is_some() {
                 integers += 1;
-            } else if value.cast::<FfiString>().is_some() {
+            } else if value.try_as::<FfiString>().is_some() {
                 strings += 1;
             }
             WalkResult::Advance
@@ -800,10 +805,10 @@ fn primitive_values_are_leaves_in_pre_and_post_order() {
     let mut pre = Vec::new();
     assert!(structural_walk(
         &dtype,
-        |value: &StructuralView| {
-            if value.cast::<DLDataType>().is_some() {
+        |value: AnyView<'_>| {
+            if value.try_as::<DLDataType>().is_some() {
                 pre.push("dtype");
-            } else if value.cast::<i64>().is_some() {
+            } else if value.try_as::<i64>().is_some() {
                 pre.push("child");
             }
             WalkResult::Advance
@@ -817,8 +822,8 @@ fn primitive_values_are_leaves_in_pre_and_post_order() {
     let mut skipped = Vec::new();
     assert!(structural_walk(
         &dtype,
-        |value: &StructuralView| {
-            if value.cast::<DLDataType>().is_some() {
+        |value: AnyView<'_>| {
+            if value.try_as::<DLDataType>().is_some() {
                 skipped.push("dtype");
                 WalkResult::Skip
             } else {
@@ -835,10 +840,10 @@ fn primitive_values_are_leaves_in_pre_and_post_order() {
     let mut post = Vec::new();
     assert!(structural_walk(
         &dtype,
-        |value: &StructuralView| {
-            if value.cast::<DLDataType>().is_some() {
+        |value: AnyView<'_>| {
+            if value.try_as::<DLDataType>().is_some() {
                 post.push("dtype");
-            } else if value.cast::<i64>().is_some() {
+            } else if value.try_as::<i64>().is_some() {
                 post.push("child");
             }
             WalkResult::Advance
@@ -855,7 +860,7 @@ fn primitive_fast_path_preserves_none_interrupt_and_error() {
     let mut none_calls = 0;
     assert!(structural_walk(
         &Any::new(),
-        |_value: &StructuralView| {
+        |_value: AnyView<'_>| {
             none_calls += 1;
             WalkResult::Advance
         },
@@ -895,10 +900,10 @@ fn registered_map_hook_visits_all_values_without_visiting_keys() {
     let mut strings = 0;
     assert!(structural_walk(
         &root,
-        |value: &StructuralView| {
-            if let Some(integer) = value.cast::<i64>() {
+        |value: AnyView<'_>| {
+            if let Some(integer) = value.try_as::<i64>() {
                 sum += integer;
-            } else if value.cast::<FfiString>().is_some() {
+            } else if value.try_as::<FfiString>().is_some() {
                 strings += 1;
             }
             WalkResult::Advance
@@ -918,8 +923,8 @@ fn interrupt_payload_crosses_map_traversal() {
         .collect();
     let outcome = structural_walk(
         &root,
-        |value: &StructuralView| {
-            if value.cast::<i64>().is_some() {
+        |value: AnyView<'_>| {
+            if value.try_as::<i64>().is_some() {
                 return WalkResult::interrupt_with(99i64);
             }
             WalkResult::Advance
@@ -938,8 +943,8 @@ fn handler_error_crosses_map_traversal() {
     let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64)].into_iter().collect();
     let error = match structural_walk(
         &root,
-        |value: &StructuralView| -> Result<WalkResult> {
-            if value.cast::<i64>().is_some() {
+        |value: AnyView<'_>| -> Result<WalkResult> {
+            if value.try_as::<i64>().is_some() {
                 Err(runtime_error("map handler failed"))
             } else {
                 Ok(WalkResult::Advance)
@@ -960,8 +965,8 @@ fn interrupt_stops_without_running_remaining_callbacks() {
     let mut integers = 0;
     let outcome = structural_walk(
         &root,
-        |value: &StructuralView| {
-            if value.cast::<i64>().is_some() {
+        |value: AnyView<'_>| {
+            if value.try_as::<i64>().is_some() {
                 integers += 1;
                 return WalkResult::Interrupt;
             }
@@ -985,10 +990,10 @@ struct ManualRegionVisitor {
 impl StructuralVisitor for ManualRegionVisitor {
     fn visit(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        if let Some(array) = value.cast::<Array<i64>>() {
+        if let Some(array) = value.try_as::<Array<i64>>() {
             // Override the state for exactly this child's subtree...
             let overridden = array.get(0).unwrap();
             if let Some(interrupt) = self.visit_child(&overridden, DefRegionKind::Simple)? {
@@ -998,7 +1003,7 @@ impl StructuralVisitor for ManualRegionVisitor {
             let inherited = array.get(1).unwrap();
             return self.visit_child(&inherited, def_region_kind);
         }
-        if value.cast::<i64>().is_some() {
+        if value.try_as::<i64>().is_some() {
             self.seen.push(def_region_kind);
         }
         Ok(None)
@@ -1096,7 +1101,7 @@ impl GenericDispatchProbe {
         WalkResult::Advance
     }
 
-    fn walk_any(&mut self, _value: &tvm_ffi::StructuralView) -> WalkResult {
+    fn walk_any(&mut self, _value: tvm_ffi::AnyView<'_>) -> WalkResult {
         self.catch_all += 1;
         WalkResult::Advance
     }
@@ -1131,10 +1136,10 @@ struct StraddleVisitor {
 impl StructuralVisitor for StraddleVisitor {
     fn visit(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        let label = match value.cast::<i64>() {
+        let label = match value.try_as::<i64>() {
             Some(integer) => format!("int:{integer}"),
             None => "node".to_string(),
         };
@@ -1203,16 +1208,16 @@ fn nested_walk_restores_the_outer_active_visitor() {
 
     assert!(structural_walk(
         &outer,
-        |value: &StructuralView| -> Result<WalkResult> {
-            if let Some(value) = value.cast::<i64>() {
+        |value: AnyView<'_>| -> Result<WalkResult> {
+            if let Some(value) = value.try_as::<i64>() {
                 outer_values.push(value);
             }
             if !entered_inner {
                 entered_inner = true;
                 structural_walk(
                     &inner,
-                    |value: &StructuralView| {
-                        if let Some(value) = value.cast::<i64>() {
+                    |value: AnyView<'_>| {
+                        if let Some(value) = value.try_as::<i64>() {
                             inner_values.push(value);
                         }
                         WalkResult::Advance
@@ -1235,8 +1240,8 @@ fn interrupt_payload_is_returned_to_the_caller() {
     let root = Array::new(vec![1i64, 2]);
     let outcome = structural_walk(
         &root,
-        |value: &StructuralView| {
-            if value.cast::<i64>() == Some(1) {
+        |value: AnyView<'_>| {
+            if value.try_as::<i64>() == Some(1) {
                 return WalkResult::interrupt_with(42i64);
             }
             WalkResult::Advance
@@ -1255,8 +1260,8 @@ fn handler_errors_include_native_visit_path() {
     let root = Array::new(vec![1i64]);
     let error = match structural_walk(
         &root,
-        |value: &StructuralView| -> Result<WalkResult> {
-            if value.cast::<i64>().is_some() {
+        |value: AnyView<'_>| -> Result<WalkResult> {
+            if value.try_as::<i64>().is_some() {
                 Err(runtime_error("handler failed"))
             } else {
                 Ok(WalkResult::Advance)
@@ -1278,10 +1283,10 @@ fn visitor_errors_include_native_visit_path() {
     impl StructuralVisitor for FailingVisitor {
         fn visit(
             &mut self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             def_region_kind: DefRegionKind,
         ) -> Result<Option<VisitInterrupt>> {
-            if value.cast::<i64>().is_some() {
+            if value.try_as::<i64>().is_some() {
                 return Err(runtime_error("visitor failed"));
             }
             self.default_visit_children(value, def_region_kind)
@@ -1336,10 +1341,10 @@ fn visitor_interrupt_propagates_through_default_children() {
     impl StructuralVisitor for InterruptingVisitor {
         fn visit(
             &mut self,
-            value: &StructuralView,
+            value: AnyView<'_>,
             def_region_kind: DefRegionKind,
         ) -> Result<Option<VisitInterrupt>> {
-            if value.cast::<i64>() == Some(2) {
+            if value.try_as::<i64>() == Some(2) {
                 return Ok(Some(VisitInterrupt::with(7i64)));
             }
             self.default_visit_children(value, def_region_kind)
@@ -1364,8 +1369,8 @@ fn closure_walk_receives_def_region_kind() {
     let mut kinds = Vec::new();
     assert!(structural_walk(
         &root,
-        |value: &StructuralView, kind: DefRegionKind| {
-            if value.cast::<i64>().is_some() {
+        |value: AnyView<'_>, kind: DefRegionKind| {
+            if value.try_as::<i64>().is_some() {
                 kinds.push(kind);
             }
             WalkResult::Advance
@@ -1383,8 +1388,8 @@ fn closure_walk_supports_post_order_and_skip() {
     let mut order_probe = Vec::new();
     assert!(structural_walk(
         &root,
-        |value: &StructuralView| {
-            order_probe.push(value.cast::<i64>());
+        |value: AnyView<'_>| {
+            order_probe.push(value.try_as::<i64>());
             WalkResult::Advance
         },
         WalkOrder::PostOrder,
@@ -1396,9 +1401,9 @@ fn closure_walk_supports_post_order_and_skip() {
     let mut visited = 0;
     assert!(structural_walk(
         &root,
-        |value: &StructuralView| {
+        |value: AnyView<'_>| {
             visited += 1;
-            if value.cast::<i64>().is_none() {
+            if value.try_as::<i64>().is_none() {
                 WalkResult::Skip
             } else {
                 WalkResult::Advance
@@ -1450,7 +1455,7 @@ fn chain_links_may_mix_def_region_arity() {
                 kinds.push(kind);
                 WalkResult::Advance
             },
-            |_value: &StructuralView, kind: DefRegionKind| {
+            |_value: AnyView<'_>, kind: DefRegionKind| {
                 assert_eq!(kind, DefRegionKind::None);
                 objects += 1;
                 WalkResult::Advance
@@ -1496,7 +1501,7 @@ fn chain_link_errors_include_native_visit_path() {
         &root,
         (
             |_value: i64| -> Result<WalkResult> { Err(runtime_error("link failed")) },
-            |_value: &StructuralView| WalkResult::Advance,
+            |_value: AnyView<'_>| WalkResult::Advance,
         ),
         WalkOrder::PreOrder,
     ) {
@@ -1588,7 +1593,7 @@ fn chain_supports_full_arity() {
                 objects += 1;
                 WalkResult::Advance
             },
-            |_value: &StructuralView, _kind: DefRegionKind| {
+            |_value: AnyView<'_>, _kind: DefRegionKind| {
                 others += 1;
                 WalkResult::Advance
             },
@@ -1659,12 +1664,12 @@ struct InheritedRegionProbe {
 impl StructuralVisitor for InheritedRegionProbe {
     fn visit(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         if self.at_root {
             self.at_root = false;
-            let outer = value.cast::<Array<Array<i64>>>().unwrap();
+            let outer = value.try_as::<Array<Array<i64>>>().unwrap();
             let inner = outer.get(0).unwrap();
             return self.visit_child(&inner, DefRegionKind::Pattern);
         }
@@ -1765,12 +1770,12 @@ fn nested_tuple_chain_exceeds_flat_arity() {
                         objects += 1;
                         WalkResult::Advance
                     },
-                    (|_value: &StructuralView, _kind: DefRegionKind| {
+                    (|_value: AnyView<'_>, _kind: DefRegionKind| {
                         others += 1;
                         WalkResult::Advance
                     },),
                 ),
-                |_value: &StructuralView| WalkResult::Advance,
+                |_value: AnyView<'_>| WalkResult::Advance,
             ),
         ),
         WalkOrder::PreOrder,
@@ -1790,7 +1795,7 @@ fn nested_tuple_first_match_order_is_flattened() {
     assert!(structural_walk(
         &root,
         (
-            (|_value: &StructuralView| {
+            (|_value: AnyView<'_>| {
                 first += 1;
                 WalkResult::Advance
             },),
@@ -1846,7 +1851,7 @@ fn stateful_visit_array(
     visitor: &mut VisitContext<'_, StatefulVisitStats>,
 ) -> Result<Option<VisitInterrupt>> {
     visitor.state_mut().arrays += 1;
-    assert!(visitor.current().cast::<Array<i64>>().is_some());
+    assert!(visitor.current().try_as::<Array<i64>>().is_some());
     visitor.visit_children()
 }
 
@@ -1883,7 +1888,7 @@ fn stateful_callback_visit_reborrows_visitor_during_recursion() {
     let root = Array::new(vec![Array::new(vec![1i64, 2])]);
     let mut visitor = VisitCallbacks::new(
         StatefulVisitDepth::default(),
-        |_value: &StructuralView, visitor: &mut VisitContext<'_, StatefulVisitDepth>| {
+        |_value: AnyView<'_>, visitor: &mut VisitContext<'_, StatefulVisitDepth>| {
             visitor.state_mut().current += 1;
             visitor.state_mut().calls += 1;
             let current = visitor.state().current;
@@ -1907,7 +1912,7 @@ fn callback_visit_can_reenter_the_same_fn_through_visitor() {
     let visits = Cell::new(0);
     assert!(structural_visit(
         &root,
-        |_value: &StructuralView, visitor: &mut VisitContext<'_, ()>| {
+        |_value: AnyView<'_>, visitor: &mut VisitContext<'_, ()>| {
             visits.set(visits.get() + 1);
             visitor.visit_children()
         },
@@ -1927,7 +1932,7 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
             |value: i64, _visitor: &mut VisitContext<'_, ()>| {
                 (value == 2).then(|| VisitInterrupt::with(value))
             },
-            |_value: &StructuralView, visitor: &mut VisitContext<'_, ()>| {
+            |_value: AnyView<'_>, visitor: &mut VisitContext<'_, ()>| {
                 fallback.set(fallback.get() + 1);
                 visitor.visit_children()
             },
@@ -2005,8 +2010,8 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
 
     assert!(structural_visit(
         &outer,
-        |value: &StructuralView, visitor: &mut VisitContext<'_, ()>| {
-            if let Some(value) = value.cast::<i64>() {
+        |value: AnyView<'_>, visitor: &mut VisitContext<'_, ()>| {
+            if let Some(value) = value.try_as::<i64>() {
                 outer_values.borrow_mut().push(value);
             }
             if !entered_inner.replace(true) {
@@ -2059,4 +2064,46 @@ fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
         .is_none()
     );
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
+    let root = Any::from(Array::new(vec![1_i64, 2]));
+    let view = AnyView::from(&root);
+    let copy = view;
+    assert_eq!(copy.debug_strong_count(), Some(1));
+    let mut retained = None;
+    structural_walk(
+        &copy,
+        |value: AnyView<'_>| {
+            let copy = value;
+            if copy
+                .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
+                .is_some()
+            {
+                assert!(copy.downcast_ref::<tvm_ffi::Object>().is_some());
+                assert_eq!(copy.debug_strong_count(), Some(1));
+                let typed = copy.try_as::<Array<i64>>().unwrap();
+                assert_eq!(copy.debug_strong_count(), Some(2));
+                drop(typed);
+                retained = Some(Any::from(copy));
+                assert_eq!(value.debug_strong_count(), Some(2));
+            } else {
+                assert!(copy.downcast_ref::<tvm_ffi::Object>().is_none());
+            }
+            WalkResult::Advance
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap();
+    structural_visit(
+        &view,
+        |value: AnyView<'_>, ctx: &mut VisitContext<'_, ()>| {
+            ctx.default_visit_children(&value, DefRegionKind::None)
+        },
+    )
+    .unwrap();
+    drop(root);
+    let retained = Array::<i64>::try_from(retained.unwrap()).unwrap();
+    assert_eq!(retained.iter().collect::<Vec<_>>(), vec![1, 2]);
 }

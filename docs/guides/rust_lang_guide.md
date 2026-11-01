@@ -500,7 +500,7 @@ order with the first matching argument type winning, like the variadic C++
 `StructuralWalk(root, callbacks...)` chain. A flat tuple holds up to 12
 lambdas; a tuple is itself a link, so nest `(a, b, (c, d, ...))` to chain
 more — order stays the flattened left-to-right order. Unmatched values
-simply advance; a `&StructuralView` lambda acts as a catch-all and must come
+simply advance; an `AnyView<'_>` lambda acts as a catch-all and must come
 last, since links after an always-matching one never run. Each lambda may
 take a trailing `DefRegionKind` argument:
 
@@ -569,7 +569,7 @@ Callbacks receive `VisitContext`, use first-match dispatch, and own traversal
 of matched values. `VisitCallbacks` adds state shared by the callback chain:
 
 ```rust
-use tvm_ffi::{structural_visit, Array, VisitCallbacks, VisitContext, StructuralView};
+use tvm_ffi::{structural_visit, Array, VisitCallbacks, VisitContext, AnyView};
 
 #[derive(Default)]
 struct Stats {
@@ -583,7 +583,7 @@ let mut visitor = VisitCallbacks::new(
         |value: i64, visitor: &mut VisitContext<'_, Stats>| {
             visitor.state_mut().total += value;
         },
-        |_value: &StructuralView, visitor: &mut VisitContext<'_, Stats>| {
+        |_value: AnyView<'_>, visitor: &mut VisitContext<'_, Stats>| {
             visitor.visit_children()
         },
     ),
@@ -608,7 +608,7 @@ unmatched values use default child traversal:
 ```rust
 use tvm_ffi::{
     dispatch, structural_visit, Array, DefRegionKind, Result, StructuralVisitor, VisitInterrupt,
-    StructuralView,
+    AnyView,
 };
 
 #[derive(Default)]
@@ -621,7 +621,7 @@ struct Depth {
 impl Depth {
     fn visit_any(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         self.current += 1;
@@ -651,9 +651,14 @@ than silently walked through reflection — visit such a type's children
 explicitly from a `StructuralVisitor`, or skip it with a pre-order
 `WalkResult::Skip`.
 
-`StructuralView` is the shared borrowed callback value for visit, walk, map,
-and mutate. Mapping callbacks return replacement values; their input view is
-borrowed and does not grant in-place mutation permission.
+`AnyView<'_>` is passed by value to catch-all visit, walk, map, and mutate
+callbacks. Copying it preserves a borrow without incrementing a reference
+count. Bind the view before calling `downcast_ref::<Node>()` when the node
+reference is used across statements; that reference borrows the view.
+Use `try_as::<Handle>()` for an owned typed handle or `Any::from(value)` to
+retain an erased value beyond the callback. Mapping callbacks return
+replacement values; their input view does not grant in-place mutation
+permission.
 
 ### Structural Mapping and Mutation
 
@@ -661,12 +666,12 @@ borrowed and does not grant in-place mutation permission.
 `#[dispatch(map)]` on an impl whose `map_*` methods return any value convertible
 into `Any`, directly or in `Result`. Methods are tested in source order, the
 first matching argument type wins, and an unmatched value is preserved. A
-method may take an optional trailing `DefRegionKind`; a `&StructuralView` method is a
+method may take an optional trailing `DefRegionKind`; an `AnyView<'_>` method is a
 catch-all and should therefore come last:
 
 ```rust
 use tvm_ffi::{
-    dispatch, structural_map, Any, Array, DefRegionKind, StructuralView, Result, WalkOrder,
+    dispatch, structural_map, Any, Array, DefRegionKind, AnyView, Result, WalkOrder,
 };
 
 #[derive(Default)]
@@ -681,8 +686,8 @@ impl Increment {
         Ok(value + 1)
     }
 
-    fn map_other(&mut self, value: &StructuralView) -> Any {
-        value.to_owned()
+    fn map_other(&mut self, value: AnyView<'_>) -> Any {
+        Any::from(value)
     }
 }
 
@@ -700,7 +705,7 @@ A single typed closure and an ordered tuple of up to twelve closures are also
 accepted; a tuple is itself a link, so `(a, b, (c, d, ...))` nests beyond that
 without changing the flattened order. Tuple dispatch is first-match, not broadcast: later closures do not
 run after an earlier argument type matches. As with generated dispatch, a
-`&StructuralView` catch-all belongs last. Numeric handlers claim the complete FFI
+`AnyView<'_>` catch-all belongs last. Numeric handlers claim the complete FFI
 `Int` or `Float` tag and then use Rust `as` conversion semantics; prefer `i64`
 or `f64` unless narrowing is deliberate.
 
@@ -714,7 +719,7 @@ there is final. `Array` and `List` elements are mapped in order. `Map` and
 The root is consumed. A uniquely owned built-in container may reuse its
 storage in place; passing `root.clone()` keeps the source shared and selects
 copy-on-write behavior. The engine rechecks uniqueness after a pre-order
-callback, so retaining an owning `StructuralView::to_owned()` alias before the
+callback, so retaining an owning `Any::from(value)` alias before the
 container's children are mapped forces the non-in-place path. Reflected
 objects must provide `__ffi_shallow_copy__`; the copy is validated before
 fields are mapped and discarded if no structural field changes.
@@ -789,9 +794,11 @@ assert_eq!(mutator.state().integers, 2);
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
 Use `MutateValue<'_, T>` with `default_maybe_inplace_mutate` to forward its
-permission, or `default_mutate_with_mode` to restrict it. Borrow through `value`; mutation
-contexts do not expose `current()`, and copy-only default descent takes an
-explicit borrow (`default_mutate(value)`). Generated handlers can read the mode
+permission, or `default_mutate_with_mode` to restrict it. Inspect it through
+`let view = value.as_value()` and `view.downcast_ref::<Node>()`; finish using
+that view before consuming the capability. Mutation contexts do not expose
+`current()`, and copy-only default descent takes an explicit borrow
+(`default_mutate(&view)`). Generated handlers can read the mode
 through `Mutator::inplace_mode()`; see `MutateValue` for ownership requirements.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
@@ -833,7 +840,7 @@ to default recursion.
 
 For low-level custom recursion, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
-capability: callers cannot construct it from a read-only `StructuralView`. Override
+capability: callers cannot construct it from a read-only `AnyView`. Override
 `dispatch_maybe_inplace_mutate` to opt into default container reuse;
 `default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
 values can be re-entered with `mutate`, while owned values can use
@@ -841,7 +848,7 @@ values can be re-entered with `mutate`, while owned values can use
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Any, Array, DefRegionKind, InplaceValue, StructuralView, Result,
+    structural_mutate, Any, Array, DefRegionKind, InplaceValue, AnyView, Result,
     StructuralMutator,
 };
 
@@ -849,10 +856,10 @@ use tvm_ffi::{
 struct Increment;
 
 impl StructuralMutator for Increment {
-    fn dispatch_mutate(&mut self, value: &StructuralView, kind: DefRegionKind) -> Result<Any> {
-        match value.cast::<i64>() {
+    fn dispatch_mutate(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
+        match value.try_as::<i64>() {
             Some(value) => Ok(Any::from(value + 1)),
-            None => self.default_mutate(value, kind),
+            None => self.default_mutate(&value, kind),
         }
     }
 

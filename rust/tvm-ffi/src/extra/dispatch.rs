@@ -19,9 +19,9 @@
 
 //! Typed callback dispatch for [`super::structural_visit::structural_walk`].
 
-use crate::error::Result;
+use crate::{error::Result, AnyView};
 
-use super::structural_visit::{DefRegionKind, IntoWalker, NativeVisit, StructuralView, WalkResult};
+use super::structural_visit::{DefRegionKind, IntoWalker, NativeVisit, WalkResult};
 
 /// Dispatch for typed `structural_walk` observer callbacks.
 ///
@@ -30,7 +30,7 @@ use super::structural_visit::{DefRegionKind, IntoWalker, NativeVisit, Structural
 pub trait WalkDispatch: Sized {
     fn dispatch_walk(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Option<Result<WalkResult>>;
 }
@@ -39,7 +39,7 @@ impl<V: WalkDispatch> WalkDispatch for &mut V {
     #[inline]
     fn dispatch_walk(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Option<Result<WalkResult>> {
         (**self).dispatch_walk(value, def_region_kind)
@@ -63,11 +63,7 @@ pub struct DispatchWalker<V> {
 }
 
 impl<V: WalkDispatch> NativeVisit for DispatchWalker<V> {
-    fn visit(
-        &mut self,
-        value: &StructuralView,
-        def_region_kind: DefRegionKind,
-    ) -> Result<WalkResult> {
+    fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         self.walker
             .dispatch_walk(value, def_region_kind)
             .unwrap_or_else(|| Ok(WalkResult::Advance))
