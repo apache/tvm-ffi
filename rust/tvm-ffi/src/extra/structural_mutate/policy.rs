@@ -27,36 +27,36 @@ use super::*;
 /// then hooks or reflected fields; children re-enter callback dispatch.
 /// Policies share callback state and compose as `(outer, inner)`.
 /// Restore user state before returning, including on errors; use
-/// [`MutateContext::with_def_region_kind`] for scoped definition regions.
-pub trait MutContextPolicy<State> {
+/// [`MutationContext::with_def_region_kind`] for scoped definition regions.
+pub trait MutationContextPolicy<State> {
     /// Customize default descent, preserving the input permission and result marker.
     fn default_mutate(
         &self,
-        value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, State>,
+        value: MutationValue<'_>,
+        ctx: &mut MutationContext<'_, State>,
     ) -> Result<UnchangedOr<Any>>;
 }
 
 /// Default descent through registered hooks or reflected structural fields.
-pub struct DefaultMutContextPolicy;
+pub struct DefaultMutationContextPolicy;
 
-impl<State> MutContextPolicy<State> for DefaultMutContextPolicy {
+impl<State> MutationContextPolicy<State> for DefaultMutationContextPolicy {
     fn default_mutate(
         &self,
-        value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, State>,
+        value: MutationValue<'_>,
+        ctx: &mut MutationContext<'_, State>,
     ) -> Result<UnchangedOr<Any>> {
         ctx.default_maybe_inplace_mutate_result(value)
     }
 }
 
-impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutContextPolicy<State>
-    for (Outer, Inner)
+impl<State, Outer: MutationContextPolicy<State>, Inner: MutationContextPolicy<State>>
+    MutationContextPolicy<State> for (Outer, Inner)
 {
     fn default_mutate(
         &self,
-        value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, State>,
+        value: MutationValue<'_>,
+        ctx: &mut MutationContext<'_, State>,
     ) -> Result<UnchangedOr<Any>> {
         let kind = ctx.def_region_kind();
         mutate_with_policy(
@@ -75,8 +75,8 @@ impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutC
 #[inline(always)]
 pub(super) fn mutate_with_policy<State>(
     driver: &mut dyn MutateContextDriver<State>,
-    policy: &impl MutContextPolicy<State>,
-    value: MutateValue<'_>,
+    policy: &impl MutationContextPolicy<State>,
+    value: MutationValue<'_>,
     kind: DefRegionKind,
 ) -> Result<Any> {
     let raw = value.value;
@@ -84,7 +84,7 @@ pub(super) fn mutate_with_policy<State>(
         kind,
         #[inline(always)]
         |kind| {
-            let mut ctx = MutateContext {
+            let mut ctx = MutationContext {
                 driver,
                 def_region_kind: kind,
                 inplace_mode: value.inplace_mode(),
@@ -101,7 +101,7 @@ struct NextPolicy<'a, State, Policy> {
     policy: &'a Policy,
 }
 
-impl<State, Policy: MutContextPolicy<State>> MutateContextDriver<State>
+impl<State, Policy: MutationContextPolicy<State>> MutateContextDriver<State>
     for NextPolicy<'_, State, Policy>
 {
     fn state(&self) -> &State {
@@ -118,11 +118,16 @@ impl<State, Policy: MutContextPolicy<State>> MutateContextDriver<State>
     }
     fn default_mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
         let view = value;
-        mutate_with_policy(self.driver, self.policy, MutateValue::borrowed(view), kind)
+        mutate_with_policy(
+            self.driver,
+            self.policy,
+            MutationValue::borrowed(view),
+            kind,
+        )
     }
     fn default_mutate_value(
         &mut self,
-        mut value: MutateValue<'_>,
+        mut value: MutationValue<'_>,
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any> {
@@ -165,7 +170,7 @@ impl<State, Driver: MutationDriver + MutateCallbackState<State>> MutateContextDr
     }
     fn default_mutate_value(
         &mut self,
-        value: MutateValue<'_>,
+        value: MutationValue<'_>,
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any> {
@@ -191,7 +196,7 @@ impl<D, Policy, const PRE_ORDER: bool> MutateCallbackState<D>
     }
 }
 
-/// A [`MapDispatch`] with a [`MutContextPolicy`], sharing the dispatcher's state.
+/// A [`MapDispatch`] with a [`MutationContextPolicy`], sharing the dispatcher's state.
 ///
 /// Pass this value or a mutable reference to [`structural_map`]. Each node's
 /// map callback runs outside its policy scope; its children run inside.
@@ -202,7 +207,9 @@ pub struct MapWithContextPolicy<Mapper, Policy> {
     policy: Rc<Policy>,
 }
 
-impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithContextPolicy<Mapper, Policy> {
+impl<Mapper: MapDispatch, Policy: MutationContextPolicy<Mapper>>
+    MapWithContextPolicy<Mapper, Policy>
+{
     /// Combine a dispatcher and a default-recursion policy.
     pub fn new(mapper: Mapper, policy: Policy) -> Self {
         Self {
@@ -227,7 +234,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithContextPolicy
     }
 }
 
-impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
+impl<Mapper: MapDispatch, Policy: MutationContextPolicy<Mapper>> NativeMap
     for MapWithContextPolicy<Mapper, Policy>
 {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
@@ -235,7 +242,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
     }
 }
 
-impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
+impl<Mapper: MapDispatch, Policy: MutationContextPolicy<Mapper>> NativeMap
     for &mut MapWithContextPolicy<Mapper, Policy>
 {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
@@ -246,7 +253,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
 #[doc(hidden)]
 pub enum ByPolicyMap {}
 
-impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
+impl<Mapper: MapDispatch, Policy: MutationContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
     for MapWithContextPolicy<Mapper, Policy>
 {
     type Mapper = Self;
@@ -255,7 +262,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyM
     }
 }
 
-impl<'a, Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
+impl<'a, Mapper: MapDispatch, Policy: MutationContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
     for &'a mut MapWithContextPolicy<Mapper, Policy>
 {
     type Mapper = Self;

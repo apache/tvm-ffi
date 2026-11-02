@@ -197,7 +197,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                 quote! {
                     fn on_default_mutate(
                         &mut self,
-                        value: #tvm_ffi::MutateValue<'_>,
+                        value: #tvm_ffi::MutationValue<'_>,
                         kind: #tvm_ffi::DefRegionKind,
                     ) -> #tvm_ffi::Result<#tvm_ffi::Any> {
                         let policy = #policy;
@@ -310,7 +310,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                     mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator,
                 ) -> Option<#tvm_ffi::Result<#tvm_ffi::Any>> {
                     <Self as #tvm_ffi::extra::structural_mutate::MutateDispatch>::dispatch_mutate_value(
-                        self, #tvm_ffi::MutateValue::borrowed(value), mutator,
+                        self, #tvm_ffi::MutationValue::borrowed(value), mutator,
                     )
                 }
 
@@ -318,7 +318,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                 #[allow(unreachable_code, unused_variables, unused_mut)]
                 fn dispatch_mutate_value(
                     &mut self,
-                    mut value: #tvm_ffi::MutateValue<'_>,
+                    mut value: #tvm_ffi::MutationValue<'_>,
                     mutator: &mut #tvm_ffi::Mutator,
                 ) -> Option<#tvm_ffi::Result<#tvm_ffi::Any>> {
                     #(#links)*
@@ -499,7 +499,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
                     .path
                     .segments
                     .last()
-                    .is_some_and(|s| s.ident == "MutateValue") =>
+                    .is_some_and(|s| s.ident == "MutationValue") =>
         {
             let segment = path.path.segments.last().unwrap();
             let value_type = if let PathArguments::AngleBracketed(args) = &segment.arguments {
