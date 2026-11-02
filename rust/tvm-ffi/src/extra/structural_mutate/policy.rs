@@ -79,7 +79,7 @@ pub(super) fn mutate_with_policy<State>(
     value: MutateValue<'_>,
     kind: DefRegionKind,
 ) -> Result<Any> {
-    let raw = value.value.raw();
+    let raw = value.value;
     with_mutation_region(
         kind,
         #[inline(always)]
@@ -117,8 +117,8 @@ impl<State, Policy: MutContextPolicy<State>> MutateContextDriver<State>
         self.driver.mutate_owned(value, kind, mode)
     }
     fn default_mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
-        let view = StructuralView::from_raw(*value.as_raw_ffi_any());
-        mutate_with_policy(self.driver, self.policy, MutateValue::borrowed(&view), kind)
+        let view = value;
+        mutate_with_policy(self.driver, self.policy, MutateValue::borrowed(view), kind)
     }
     fn default_mutate_value(
         &mut self,
@@ -126,13 +126,13 @@ impl<State, Policy: MutContextPolicy<State>> MutateContextDriver<State>
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any> {
-        value.mode = value.permit(mode).inplace_mode(value.value.raw());
+        value.mode = value.permit(mode).inplace_mode(value.value);
         mutate_with_policy(self.driver, self.policy, value, kind)
     }
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
         self.driver.var_remap_get(var)
     }
-    fn var_remap_set(&mut self, var: &StructuralView, replacement: &Any) -> Result<()> {
+    fn var_remap_set(&mut self, var: AnyView<'_>, replacement: &Any) -> Result<()> {
         self.driver.var_remap_set(var, replacement)
     }
 }
@@ -170,13 +170,13 @@ impl<State, Driver: MutationDriver + MutateCallbackState<State>> MutateContextDr
         mode: InplaceMode,
     ) -> Result<Any> {
         let permit = value.permit(mode);
-        default_mutate_driver(self.driver, value.value.raw(), kind, permit)
+        default_mutate_driver(self.driver, value.value, kind, permit)
     }
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
-        self.driver.var_remap_get_raw(var.raw())
+    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
+        self.driver.var_remap_get_raw(raw_of(var))
     }
-    fn var_remap_set(&mut self, var: &StructuralView, replacement: &Any) -> Result<()> {
-        self.driver.var_remap_set_raw(var.raw(), replacement)
+    fn var_remap_set(&mut self, var: AnyView<'_>, replacement: &Any) -> Result<()> {
+        self.driver.var_remap_set_raw(raw_of(var), replacement)
     }
 }
 

@@ -37,7 +37,7 @@ pub trait ContextPolicy<State> {
     /// or when a matched callback requests default descent.
     fn default_visit(
         &self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>>;
 }
@@ -48,7 +48,7 @@ pub struct DefaultContextPolicy;
 impl<State> ContextPolicy<State> for DefaultContextPolicy {
     fn default_visit(
         &self,
-        _value: &StructuralView,
+        _value: AnyView<'_>,
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>> {
         visitor.visit_children()
@@ -60,7 +60,7 @@ impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPol
 {
     fn default_visit(
         &self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>> {
         let kind = visitor.def_region_kind();
@@ -80,7 +80,7 @@ impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPol
 pub(super) fn visit_with_policy<State>(
     driver: &mut dyn VisitContextDriver<State>,
     policy: &impl ContextPolicy<State>,
-    value: &StructuralView,
+    value: AnyView<'_>,
     def_region_kind: DefRegionKind,
 ) -> Result<Option<VisitInterrupt>> {
     with_visit_region(
@@ -91,7 +91,7 @@ pub(super) fn visit_with_policy<State>(
                 value,
                 &mut VisitContext {
                     driver,
-                    current: StructuralView::from_raw(value.raw()),
+                    current: raw_of(value),
                     def_region_kind,
                     _not_send_sync: PhantomData,
                 },
@@ -125,7 +125,7 @@ impl<State, Policy: ContextPolicy<State>> VisitContextDriver<State>
         visit_with_policy(
             self.driver,
             self.policy,
-            &StructuralView::from_raw(raw),
+            unsafe { borrowed_view(&raw) },
             kind,
         )
     }
@@ -153,7 +153,7 @@ impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         // Bypass the current policy; children still re-enter the complete visitor.
-        default_user_visit_children(self.visitor, &StructuralView::from_raw(raw), kind)
+        default_user_visit_children(self.visitor, unsafe { borrowed_view(&raw) }, kind)
     }
 }
 
@@ -218,7 +218,7 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
 {
     const CUSTOM_DESCENT: bool = true;
 
-    fn visit(&mut self, value: &StructuralView, kind: DefRegionKind) -> Result<WalkResult> {
+    fn visit(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<WalkResult> {
         self.walker
             .dispatch_walk(value, kind)
             .unwrap_or_else(|| Ok(WalkResult::Advance))
@@ -226,7 +226,7 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
 
     fn default_visit_children<const PRE_ORDER: bool>(
         &mut self,
-        value: &StructuralView,
+        value: AnyView<'_>,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         let policy = Rc::clone(&self.policy);
@@ -267,6 +267,6 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool>
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        default_walk_children::<_, PRE_ORDER>(self.visitor, &StructuralView::from_raw(raw), kind)
+        default_walk_children::<_, PRE_ORDER>(self.visitor, unsafe { borrowed_view(&raw) }, kind)
     }
 }

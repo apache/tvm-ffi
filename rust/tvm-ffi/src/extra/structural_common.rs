@@ -20,11 +20,9 @@
 use crate::any::{Any, AnyView};
 use crate::error::Error;
 use crate::function::Function;
-use crate::object::{self, ObjectCore, ObjectRefCore};
+use crate::object::{self, ObjectRefCore};
 use crate::reflection::FieldGetter;
-use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
-};
+use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeKeyToIndex};
 
 /// Add one structural traversal frame to an error's backtrace.
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
@@ -45,7 +43,7 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
             ))
             .ok()?;
         }
-        let node = StructuralView::from_raw(raw).cast::<object::ObjectRef>()?;
+        let node = unsafe { borrowed_view(&raw) }.try_as::<object::ObjectRef>()?;
         let mut previous = error.extra_context();
         let mut nodes = Vec::new();
         if let Some(prior) = previous.as_ref() {
@@ -147,90 +145,6 @@ macro_rules! impl_callback_chain_tuple_arities {
 
 pub(crate) use impl_callback_chain_tuple_arities;
 
-/// A borrowed value shared by structural visit, walk, map, and mutate callbacks.
-///
-/// Use `&StructuralView` for an erased callback argument. [`Self::as_node`]
-/// borrows an object node, while [`Self::cast`] returns a typed value (acquiring
-/// ownership for object handles). This view does not grant in-place permission;
-/// consuming mutation callbacks use [`crate::MutateValue`] instead.
-#[repr(transparent)]
-pub struct StructuralView(TVMFFIAny);
-
-impl<'a> From<&'a StructuralView> for AnyView<'a> {
-    #[inline]
-    fn from(value: &'a StructuralView) -> Self {
-        // SAFETY: the view cannot outlive the borrowed structural value.
-        unsafe { AnyView::from_raw_ffi_any(value.raw()) }
-    }
-}
-
-impl StructuralView {
-    #[inline]
-    pub(crate) fn from_raw(raw: TVMFFIAny) -> Self {
-        Self(raw)
-    }
-
-    #[inline]
-    pub(crate) fn from_any(value: &Any) -> &Self {
-        // SAFETY: StructuralView is transparent over TVMFFIAny. The owning
-        // Any keeps its contents live for the lifetime of this shared borrow.
-        unsafe { &*std::ptr::from_ref(value.as_raw_ffi_any()).cast::<Self>() }
-    }
-
-    #[inline]
-    pub(crate) fn raw(&self) -> TVMFFIAny {
-        self.0
-    }
-
-    /// Copy this borrowed value into an owning [`Any`].
-    #[inline]
-    pub fn to_owned(&self) -> Any {
-        if let Some(owned) = try_to_owned_without_normalization(self.0) {
-            return owned;
-        }
-        Any::from(unsafe { AnyView::from_raw_ffi_any(self.0) })
-    }
-
-    /// Convert the value into an owned typed handle.
-    #[inline]
-    pub fn cast<R: crate::type_traits::AnyCompatible>(&self) -> Option<R> {
-        unsafe {
-            if R::check_any_strict(&self.0) {
-                Some(R::copy_from_any_view_after_check(&self.0))
-            } else {
-                None
-            }
-        }
-    }
-
-    /// Runtime type index stored in this value.
-    #[inline]
-    pub fn type_index(&self) -> i32 {
-        self.0.type_index
-    }
-
-    /// Borrow the value as node type `N` if it is an instance of that type.
-    #[inline]
-    pub fn as_node<N: ObjectCore>(&self) -> Option<&N> {
-        if self.0.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-            return None;
-        }
-        let base_type_index = N::type_index();
-        if self.0.type_index != base_type_index {
-            // A final type has no registered subtype, so a differing index can
-            // never match: reject with the integer compare alone, mirroring the
-            // `_type_final` fast path of C++ `IsObjectInstance`.
-            if N::TYPE_FINAL {
-                return None;
-            }
-            if !is_instance_at_depth(self.0.type_index, base_type_index, N::TYPE_DEPTH) {
-                return None;
-            }
-        }
-        Some(unsafe { &*(self.0.data_union.v_obj as *const N) })
-    }
-}
-
 /// Copy a borrowed FFI value when its owning representation is unchanged.
 ///
 /// Raw string/byte views and `ObjectRValueRef` return `None` because they need
@@ -261,31 +175,18 @@ pub(crate) fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
         && unsafe { lhs.data_union.v_uint64 == rhs.data_union.v_uint64 }
 }
 
-/// Subtype check with the base's inheritance depth supplied by the caller
-/// (`ObjectCore::TYPE_DEPTH`), so only the object's type info is fetched.
+/// Borrow a traversal ABI cell for no longer than the cell's scope.
+///
+/// # Safety
+/// The cell must satisfy `AnyView::from_raw_ffi_any`'s requirements, including
+/// its unique, at-most-once conversion rule for rvalue slots. The traversal
+/// driver must keep the owning root, field, or replacement alive for the borrow.
 #[inline]
-fn is_instance_at_depth(object_type_index: i32, base_type_index: i32, base_depth: i32) -> bool {
-    if object_type_index == base_type_index {
-        return true;
-    }
-    // Parent type indices are registered before their descendants. An object
-    // whose index precedes the target therefore cannot be its subtype.
-    if object_type_index < base_type_index {
-        return false;
-    }
-    unsafe {
-        let info = TVMFFIGetTypeInfo(object_type_index);
-        if info.is_null() {
-            return false;
-        }
-        if (*info).type_depth <= base_depth {
-            return false;
-        }
-        let ancestors = (*info).type_acenstors;
-        if ancestors.is_null() {
-            return false;
-        }
-        let ancestor = *ancestors.offset(base_depth as isize);
-        !ancestor.is_null() && (*ancestor).type_index == base_type_index
-    }
+pub(crate) unsafe fn borrowed_view(raw: &TVMFFIAny) -> AnyView<'_> {
+    AnyView::from_raw_ffi_any(*raw)
+}
+
+#[inline]
+pub(crate) fn raw_of(value: AnyView<'_>) -> TVMFFIAny {
+    *value.as_raw_ffi_any()
 }

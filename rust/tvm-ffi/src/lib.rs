@@ -66,7 +66,6 @@ pub use crate::extra::structural_visit::{
     WalkWithContextPolicy,
 };
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
-pub use crate::extra::StructuralView;
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
 pub use crate::object::{
