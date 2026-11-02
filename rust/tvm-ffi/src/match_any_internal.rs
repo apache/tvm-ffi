@@ -89,6 +89,64 @@ where
     }
 }
 
+/// Conversion for a shared `ref` binding, borrowing object nodes while retaining
+/// the ordinary owning conversion for object handles and custom matchers.
+#[doc(hidden)]
+pub trait RefPatternConversion<'view, 'value, T> {
+    #[doc(hidden)]
+    type LeafPattern;
+
+    #[doc(hidden)]
+    fn leaf_pattern(&self) -> PhantomData<Self::LeafPattern> {
+        PhantomData
+    }
+
+    #[doc(hidden)]
+    type Holder: std::borrow::Borrow<T>;
+
+    #[doc(hidden)]
+    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()>;
+}
+
+// The macro starts at three references. Autoderef selects the first applicable
+// implementation: borrowed ObjectCore, AnyCompatible, then custom TryInto.
+impl<'view, 'value, T: crate::object::ObjectCore> RefPatternConversion<'view, 'value, T>
+    for &&PatternConversionProbe<T>
+{
+    type LeafPattern = BorrowedLeaf<T>;
+    type Holder = &'view T;
+
+    #[inline(always)]
+    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()> {
+        view.downcast_ref::<T>().ok_or(())
+    }
+}
+
+impl<'view, 'value, T: AnyCompatible> RefPatternConversion<'view, 'value, T>
+    for &PatternConversionProbe<T>
+{
+    type LeafPattern = T;
+    type Holder = T;
+
+    #[inline(always)]
+    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()> {
+        (*self).try_convert(*view)
+    }
+}
+
+impl<'view, 'value, T> RefPatternConversion<'view, 'value, T> for PatternConversionProbe<T>
+where
+    AnyView<'value>: TryInto<T>,
+{
+    type LeafPattern = T;
+    type Holder = T;
+
+    #[inline(always)]
+    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()> {
+        (*view).try_into().map_err(|_| ())
+    }
+}
+
 /// Runtime type-index lookup for one `match_any!` call site.
 ///
 /// The smallest pattern `TypeIndex` is used as the base of a direct table.
@@ -192,11 +250,33 @@ where
     }
 }
 
+/// Lifetime-free metadata for a borrowed object node pattern.
+#[doc(hidden)]
+pub struct BorrowedLeaf<T>(PhantomData<fn() -> T>);
+
+impl<Head: crate::object::ObjectCore, Tail: LeafPatternList> LeafPatternList
+    for (BorrowedLeaf<Head>, Tail)
+{
+    const ALL_EXACT_LEAF: bool = Head::TYPE_FINAL && Tail::ALL_EXACT_LEAF;
+
+    #[inline(always)]
+    fn fill_leaf_type_indices(out: &mut [i32]) {
+        let (head, tail) = out.split_first_mut().expect("missing leaf pattern slot");
+        *head = Head::type_index();
+        Tail::fill_leaf_type_indices(tail);
+    }
+}
+
 /// Probe used by the macro to retain ordered matching for non-leaf patterns.
 #[doc(hidden)]
 pub struct LeafPatternProbe<T>(PhantomData<fn() -> T>);
 
 impl<T> LeafPatternProbe<T> {
+    #[doc(hidden)]
+    pub fn prepend<Head>(self, _: PhantomData<Head>) -> LeafPatternProbe<(Head, T)> {
+        LeafPatternProbe::new()
+    }
+
     #[doc(hidden)]
     pub const fn new() -> Self {
         Self(PhantomData)

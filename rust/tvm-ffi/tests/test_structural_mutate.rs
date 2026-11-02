@@ -25,7 +25,7 @@ use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
     Array, DefRegionKind, DefaultContextPolicy, DefaultMutationContextPolicy, Error, FieldGetter,
     Function, InplaceMode, IntoMapper, Map, MapDispatch, MapWithContextPolicy, MutateCallbacks,
-    MutationContext, MutationContextPolicy, MutationValue, Mutator, Object, ObjectArc,
+    MutationContext, MutationContextPolicy, MutationView, Mutator, Object, ObjectArc,
     ObjectRefCore, Result, String as FfiString, StructuralMutator, StructuralVarRemap,
     StructuralVisitor, TypeIndex, Unchanged, UnchangedOr, VisitCallbacks, VisitContext,
     VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
@@ -65,7 +65,7 @@ impl StructuralMutator for ManualIncrement {
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         self.default_maybe_inplace_mutate(value, def_region_kind)
@@ -102,7 +102,7 @@ impl StructuralMutator for ReplaceNone {
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         self.default_maybe_inplace_mutate(value, def_region_kind)
@@ -146,7 +146,7 @@ impl StructuralMutator for RecursiveEntryMutator {
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         self.default_maybe_inplace_mutate(value, def_region_kind)
@@ -360,7 +360,7 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         }
         fn dispatch_maybe_inplace_mutate(
             &mut self,
-            value: MutationValue<'_>,
+            value: MutationView<'_>,
             kind: DefRegionKind,
         ) -> Result<Any> {
             if self.increment {
@@ -400,7 +400,7 @@ fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
             assert_eq!(value.try_as::<bool>(), Some(true));
             let source = Array::new(vec![1_i64]);
             let pointer = array_pointer(&source);
-            let value = MutationValue::borrowed(AnyView::from(&source));
+            let value = MutationView::borrowed(AnyView::from(&source));
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
             // A count of one is insufficient: this handle only borrows source.
             assert_eq!(
@@ -442,7 +442,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
     impl Inspect {
         fn mutate_array(
             &mut self,
-            value: tvm_ffi::MutationValue<'_, Array<i64>>,
+            value: tvm_ffi::MutationView<'_, Array<i64>>,
             ctx: &mut Mutator,
         ) -> Unchanged {
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
@@ -453,7 +453,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
     let source = Array::new(vec![1_i64]);
     let result = StructuralMutator::dispatch_maybe_inplace_mutate(
         &mut Inspect,
-        MutationValue::borrowed(AnyView::from(&source)),
+        MutationView::borrowed(AnyView::from(&source)),
         DefRegionKind::None,
     )
     .unwrap();
@@ -461,7 +461,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
 
     let mut callbacks = MutateCallbacks::new(
         (),
-        |value: MutationValue<'_, Array<i64>>, ctx: &mut MutationContext<'_>| {
+        |value: MutationView<'_, Array<i64>>, ctx: &mut MutationContext<'_>| {
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
             assert_eq!(ctx.inplace_mode(), value.inplace_mode());
             Unchanged
@@ -469,7 +469,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
     );
     let result = callbacks
         .dispatch_maybe_inplace_mutate(
-            MutationValue::borrowed(AnyView::from(&source)),
+            MutationView::borrowed(AnyView::from(&source)),
             DefRegionKind::None,
         )
         .unwrap();
@@ -545,15 +545,15 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
         modes: Vec<InplaceMode>,
     }
     impl Forward {
-        fn observe(&mut self, value: &MutationValue<'_, Array<Any>>) {
+        fn observe(&mut self, value: &MutationView<'_, Array<Any>>) {
             self.modes.push(value.inplace_mode());
-            let view = value.as_value();
+            let view = value.as_any_view();
             let node = view
                 .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .unwrap();
             assert_eq!(node.size, 1);
             // A temporary typed handle must not permanently revoke permission.
-            let temporary = value.as_value().try_as::<Array<Any>>().unwrap();
+            let temporary = value.as_any_view().try_as::<Array<Any>>().unwrap();
             if self.retain && self.alias.is_none() {
                 self.alias = Some(temporary.clone().into());
             }
@@ -562,12 +562,12 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     }
     #[dispatch(mutate)]
     impl Forward {
-        fn mutate_string(&mut self, _: MutationValue<'_, FfiString>) -> Any {
+        fn mutate_string(&mut self, _: MutationView<'_, FfiString>) -> Any {
             panic!("typed miss must preserve the capability for the next handler")
         }
         fn mutate_array(
             &mut self,
-            value: MutationValue<'_, Array<Any>>,
+            value: MutationView<'_, Array<Any>>,
             ctx: &mut Mutator,
         ) -> Result<UnchangedOr<Any>> {
             assert_eq!(ctx.inplace_mode(), value.inplace_mode());
@@ -601,12 +601,12 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
             let result = if generated {
                 structural_mutate(root, &mut state).unwrap()
             } else {
-                let miss = |_: MutationValue<'_, FfiString>,
+                let miss = |_: MutationView<'_, FfiString>,
                             _: &mut MutationContext<'_, Forward>|
                  -> Any { panic!("typed miss must continue") };
                 let increment = |value: i64, _: &mut MutationContext<'_, Forward>| value + 1;
                 let descend =
-                    |value: MutationValue<'_, Array<Any>>,
+                    |value: MutationView<'_, Array<Any>>,
                      ctx: &mut MutationContext<'_, Forward>| {
                         assert_eq!(value.inplace_mode(), ctx.inplace_mode());
                         ctx.state_mut().observe(&value);
@@ -642,7 +642,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
 #[test]
 fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
     struct Inner<'a> {
-        value: Option<MutationValue<'a>>,
+        value: Option<MutationView<'a>>,
         preserve_unchanged: bool,
         result: Any,
     }
@@ -662,12 +662,12 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
         }
     }
     fn transfer(
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         generated: bool,
         preserve: bool,
         retain: bool,
     ) -> Result<Any> {
-        let alias = retain.then(|| value.as_value().try_as::<Array<i64>>().unwrap());
+        let alias = retain.then(|| value.as_any_view().try_as::<Array<i64>>().unwrap());
         assert_eq!(value.inplace_mode(), InplaceMode::Allow);
         // Carry the result back to the array callback: Unchanged belongs to
         // that input, not to the nested traversal's boolean root.
@@ -710,7 +710,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
     }
     #[dispatch(mutate)]
     impl Outer {
-        fn mutate_any(&mut self, value: MutationValue<'_>) -> Result<Any> {
+        fn mutate_any(&mut self, value: MutationView<'_>) -> Result<Any> {
             transfer(value, true, self.preserve, self.retain)
         }
     }
@@ -724,7 +724,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
                 } else {
                     structural_mutate(
                         root,
-                        |value: MutationValue<'_>, _: &mut MutationContext<'_>| {
+                        |value: MutationView<'_>, _: &mut MutationContext<'_>| {
                             transfer(value, false, preserve, retain)
                         },
                     )
@@ -745,8 +745,8 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
         let pointer = array_pointer(&root);
         let result = structural_mutate(
             root,
-            |value: MutationValue<'_>, ctx: &mut MutationContext<'_>| -> Result<UnchangedOr<Any>> {
-                if value.as_value().try_as::<i64>().is_some() {
+            |value: MutationView<'_>, ctx: &mut MutationContext<'_>| -> Result<UnchangedOr<Any>> {
+                if value.as_any_view().try_as::<i64>().is_some() {
                     return if fail {
                         Err(Error::new(RUNTIME_ERROR, "child failed", ""))
                     } else {
@@ -857,8 +857,8 @@ fn callback_errors_preserve_message_and_add_object_context() {
     }
     #[dispatch(mutate, policy = (DefaultMutationContextPolicy, DefaultMutationContextPolicy))]
     impl Delegate {
-        fn mutate_any(&mut self, value: MutationValue<'_>, ctx: &mut Mutator) -> Result<Any> {
-            if value.as_value().try_as::<i64>().is_some() {
+        fn mutate_any(&mut self, value: MutationView<'_>, ctx: &mut Mutator) -> Result<Any> {
+            if value.as_any_view().try_as::<i64>().is_some() {
                 return Err(self.0.clone());
             }
             ctx.default_maybe_inplace_mutate(self, value)
@@ -957,8 +957,8 @@ fn callback_errors_preserve_message_and_add_object_context() {
         .with_policy((DefaultContextPolicy, DefaultContextPolicy));
     errors.push(structural_visit(&root, &mut visitor).err().unwrap());
     let mut mutator =
-        MutateCallbacks::new((), |value: MutationValue<'_>, ctx: &mut MutationContext| {
-            if value.as_value().try_as::<i64>().is_some() {
+        MutateCallbacks::new((), |value: MutationView<'_>, ctx: &mut MutationContext| {
+            if value.as_any_view().try_as::<i64>().is_some() {
                 return Err(source.clone());
             }
             ctx.default_maybe_inplace_mutate(value)
@@ -1397,10 +1397,10 @@ fn pre_order_mapping_preserves_inplace_permission() {
     impl<State> MutationContextPolicy<State> for Observe<'_> {
         fn default_mutate(
             &self,
-            value: MutationValue<'_>,
+            value: MutationView<'_>,
             ctx: &mut tvm_ffi::MutationContext<'_, State>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.as_value().type_index() >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
+            if value.as_any_view().type_index() >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
                 self.0.set(Some(value.inplace_mode()));
             }
             ctx.default_maybe_inplace_mutate_result(value)
@@ -2096,11 +2096,11 @@ struct ArrayPolicy;
 impl MutationContextPolicy<PolicyState> for ArrayPolicy {
     fn default_mutate(
         &self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         ctx: &mut MutationContext<'_, PolicyState>,
     ) -> Result<UnchangedOr<Any>> {
         if value
-            .as_value()
+            .as_any_view()
             .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
             .is_none()
         {
@@ -2120,11 +2120,11 @@ struct RecordPolicy;
 impl MutationContextPolicy<PolicyState> for RecordPolicy {
     fn default_mutate(
         &self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         ctx: &mut MutationContext<'_, PolicyState>,
     ) -> Result<UnchangedOr<Any>> {
         if value
-            .as_value()
+            .as_any_view()
             .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
             .is_some()
         {
@@ -2198,7 +2198,7 @@ fn mutation_policies_share_state_and_preserve_callback_order() {
                 ctx.state_mut().events.push(("integer", depth));
                 x + 1
             },
-            |value: MutationValue<'_>, ctx: &mut MutationContext<'_, PolicyState>| {
+            |value: MutationView<'_>, ctx: &mut MutationContext<'_, PolicyState>| {
                 let depth = ctx.state().depth;
                 ctx.state_mut().events.push(("callback", depth));
                 ctx.default_maybe_inplace_mutate_result(value)
@@ -2233,7 +2233,7 @@ fn map_policy_entries_preserve_descent_and_callback_composition() {
     impl<State> MutationContextPolicy<State> for Stop {
         fn default_mutate(
             &self,
-            _: MutationValue<'_>,
+            _: MutationView<'_>,
             _: &mut MutationContext<'_, State>,
         ) -> Result<UnchangedOr<Any>> {
             Ok(UnchangedOr::unchanged())
@@ -2294,15 +2294,15 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
     impl MutationContextPolicy<Ownership> for Control {
         fn default_mutate(
             &self,
-            value: MutationValue<'_>,
+            value: MutationView<'_>,
             ctx: &mut MutationContext<'_, Ownership>,
         ) -> Result<UnchangedOr<Any>> {
             let array = value
-                .as_value()
+                .as_any_view()
                 .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .is_some();
             if array && self.retain {
-                ctx.state_mut().retained = Some(Any::from(value.as_value()));
+                ctx.state_mut().retained = Some(Any::from(value.as_any_view()));
             }
             let result = ctx.default_mutate_with_mode_result(value, self.mode)?;
             if array && !ctx.state().increment {
@@ -2321,7 +2321,7 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
         }
         fn mutate_array(
             &mut self,
-            value: MutationValue<'_, Array<i64>>,
+            value: MutationView<'_, Array<i64>>,
             mutator: &mut Mutator,
         ) -> Result<UnchangedOr<Any>> {
             mutator.default_maybe_inplace_mutate_result(self, value)
@@ -2376,7 +2376,7 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
                             |x: i64, ctx: &mut MutationContext<'_, Ownership>| {
                                 ctx.state_mut().map_integer(x)
                             },
-                            |value: MutationValue<'_>, ctx: &mut MutationContext<'_, Ownership>| {
+                            |value: MutationView<'_>, ctx: &mut MutationContext<'_, Ownership>| {
                                 ctx.default_maybe_inplace_mutate_result(value)
                             },
                         ),
@@ -2419,17 +2419,17 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
     impl MutationContextPolicy<Regions> for Redirect {
         fn default_mutate(
             &self,
-            value: MutationValue<'_>,
+            value: MutationView<'_>,
             ctx: &mut MutationContext<'_, Regions>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.as_value().try_as::<bool>() == Some(false) {
+            if value.as_any_view().try_as::<bool>() == Some(false) {
                 // Bypass this container's callback, but enter the next policy and redispatch its children.
                 return ctx.with_def_region_kind(Pattern, |ctx| {
                     ctx.default_mutate(&Array::new(vec![1_i64]))
                         .map(UnchangedOr::changed)
                 });
             }
-            if value.as_value().try_as::<i64>() == Some(2) {
+            if value.as_any_view().try_as::<i64>() == Some(2) {
                 assert_eq!(ctx.def_region_kind(), Pattern);
                 ctx.mutate_with(&99_i64, self.0)?;
                 let error: Result<()> = ctx.with_def_region_kind(Use, |ctx| {
@@ -2446,11 +2446,11 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
     impl MutationContextPolicy<Regions> for Observe {
         fn default_mutate(
             &self,
-            value: MutationValue<'_>,
+            value: MutationView<'_>,
             ctx: &mut MutationContext<'_, Regions>,
         ) -> Result<UnchangedOr<Any>> {
             if value
-                .as_value()
+                .as_any_view()
                 .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .is_some()
             {
@@ -2465,14 +2465,14 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
     impl Regions {
         fn mutate_any(
             &mut self,
-            value: MutationValue<'_>,
+            value: MutationView<'_>,
             mutator: &mut Mutator,
         ) -> Result<UnchangedOr<Any>> {
-            if let Some(x) = value.as_value().try_as::<i64>() {
+            if let Some(x) = value.as_any_view().try_as::<i64>() {
                 self.map_integer(x, mutator.def_region_kind());
             }
             if value
-                .as_value()
+                .as_any_view()
                 .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .is_some()
             {
@@ -2511,13 +2511,13 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         }
         let mut mutator = MutateCallbacks::new(
             Regions::default(),
-            |value: MutationValue<'_>, ctx: &mut MutationContext<'_, Regions>| {
-                if let Some(x) = value.as_value().try_as::<i64>() {
+            |value: MutationView<'_>, ctx: &mut MutationContext<'_, Regions>| {
+                if let Some(x) = value.as_any_view().try_as::<i64>() {
                     let kind = ctx.def_region_kind();
                     ctx.state_mut().0.push((x, kind));
                 }
                 if value
-                    .as_value()
+                    .as_any_view()
                     .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                     .is_some()
                 {
@@ -2564,7 +2564,7 @@ fn mutation_policy_halts_restore_state_and_skip_later_policies() {
     impl MutationContextPolicy<PolicyState> for Halt {
         fn default_mutate(
             &self,
-            _: MutationValue<'_>,
+            _: MutationView<'_>,
             _: &mut MutationContext<'_, PolicyState>,
         ) -> Result<UnchangedOr<Any>> {
             if self.0 {

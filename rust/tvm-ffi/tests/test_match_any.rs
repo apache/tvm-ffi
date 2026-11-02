@@ -71,6 +71,66 @@ fn matches_concrete_object_containers_in_source_order() {
         }
     };
     assert_eq!(matched_view, ("tensor", 2));
+
+    use tvm_ffi::collections::array::ArrayObj;
+    use tvm_ffi::{ObjectArc, ObjectRefCore};
+    let source = Array::new(vec![1_i64, 2, 3]);
+    let count = || ObjectArc::strong_count(<Array<i64> as ObjectRefCore>::data(&source));
+    let size = match_any! {
+        source {
+            Array::<i64>(ref handle) if {
+                assert_eq!(count(), 2);
+                assert_eq!(handle.len(), 3);
+                false
+            } => unreachable!(),
+            ArrayObj(ref node) if {
+                let _: &ArrayObj = node;
+                assert_eq!(count(), 1);
+                assert_eq!(node.size, 3);
+                false
+            } => unreachable!(),
+            ArrayObj(ref node) => {
+                let _: &ArrayObj = node;
+                assert_eq!(count(), 1);
+                node.size
+            },
+            _ => 0,
+        }
+    };
+    assert_eq!(size, 3);
+    assert_eq!(count(), 1);
+    let size = match_any! {
+        source {
+            Array::<i64>(ref handle) => {
+                let _: &Array<i64> = handle;
+                assert_eq!(count(), 2);
+                handle.len()
+            },
+            _ => 0,
+        }
+    };
+    assert_eq!(size, 3);
+    assert_eq!(count(), 1);
+    let mut saved = None;
+    assert_eq!(
+        match_any! {
+            source {
+                Array::<i64>(ref handle) if { saved = Some(handle); true } => saved.unwrap().len(),
+                _ => 0,
+            }
+        },
+        3
+    );
+    let node = 7;
+    assert_eq!(
+        match_any! {
+            source {
+                ArrayObj(ref node) if node.size == 0 => 0,
+                _ => node,
+            }
+        },
+        7
+    );
 }
 
 #[test]
@@ -92,6 +152,15 @@ fn custom_try_into_matcher_keeps_ordered_compatibility() {
         .unwrap();
     assert!(matches(AnyView::from(&module)));
     assert!(!matches(AnyView::from(&Shape::from([1_i64, 2]))));
+    assert!(match_any! {
+        module {
+            CustomModuleMatcher(ref matcher) => {
+                let _: &CustomModuleMatcher = matcher;
+                true
+            },
+            _ => false,
+        }
+    });
 }
 
 #[test]

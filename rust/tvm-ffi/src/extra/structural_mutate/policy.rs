@@ -32,7 +32,7 @@ pub trait MutationContextPolicy<State> {
     /// Customize default descent, preserving the input permission and result marker.
     fn default_mutate(
         &self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         ctx: &mut MutationContext<'_, State>,
     ) -> Result<UnchangedOr<Any>>;
 }
@@ -43,7 +43,7 @@ pub struct DefaultMutationContextPolicy;
 impl<State> MutationContextPolicy<State> for DefaultMutationContextPolicy {
     fn default_mutate(
         &self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         ctx: &mut MutationContext<'_, State>,
     ) -> Result<UnchangedOr<Any>> {
         ctx.default_maybe_inplace_mutate_result(value)
@@ -55,7 +55,7 @@ impl<State, Outer: MutationContextPolicy<State>, Inner: MutationContextPolicy<St
 {
     fn default_mutate(
         &self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         ctx: &mut MutationContext<'_, State>,
     ) -> Result<UnchangedOr<Any>> {
         let kind = ctx.def_region_kind();
@@ -76,7 +76,7 @@ impl<State, Outer: MutationContextPolicy<State>, Inner: MutationContextPolicy<St
 pub(super) fn mutate_with_policy<State>(
     driver: &mut dyn MutateContextDriver<State>,
     policy: &impl MutationContextPolicy<State>,
-    value: MutationValue<'_>,
+    value: MutationView<'_>,
     kind: DefRegionKind,
 ) -> Result<Any> {
     let raw = value.value;
@@ -118,16 +118,11 @@ impl<State, Policy: MutationContextPolicy<State>> MutateContextDriver<State>
     }
     fn default_mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
         let view = value;
-        mutate_with_policy(
-            self.driver,
-            self.policy,
-            MutationValue::borrowed(view),
-            kind,
-        )
+        mutate_with_policy(self.driver, self.policy, MutationView::borrowed(view), kind)
     }
     fn default_mutate_value(
         &mut self,
-        mut value: MutationValue<'_>,
+        mut value: MutationView<'_>,
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any> {
@@ -170,7 +165,7 @@ impl<State, Driver: MutationDriver + MutateCallbackState<State>> MutateContextDr
     }
     fn default_mutate_value(
         &mut self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any> {

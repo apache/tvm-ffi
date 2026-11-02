@@ -454,6 +454,15 @@ fn may_fail(value: i32) -> Result<()> {
 }
 ```
 
+`match_any!` provides typed checked-conversion arms for object-backed values.
+`MyPair(pair)` produces an owning handle; `MyPairObj(ref node)` binds a shared
+`&MyPairObj` without increasing its reference count. These are macro arm
+conventions, not native Rust destructuring. An owning or custom matcher such as
+`MyPair(ref pair)` still converts to its own value and borrows that local result.
+Guards retain source order, and a borrowed node cannot outlive its view or grant
+mutable access. Eligible final node and owning patterns share the exact-type
+lookup optimization; other patterns use ordered checked conversions.
+
 ### Structural Walk and Visit
 
 Rust provides equivalents of the C++ `StructuralWalk`/`StructuralVisitor`
@@ -729,7 +738,7 @@ results are not cached. Default recursion manages identity remapping with
 the same semantics as C++.
 
 `MutateCallbacks::with_policy` and `MapWithContextPolicy` use `MutationContextPolicy<State>`
-to manage context around default recursion. Policies consume `MutationValue`
+to manage context around default recursion. Policies consume `MutationView`
 and return `UnchangedOr<Any>`; see the API documentation for composition and
 scoped definition regions. Pass `MapWithContextPolicy` directly to `structural_map`,
 or pass `&mut mapper` to reuse it and inspect its state afterward;
@@ -763,7 +772,7 @@ original value.
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Array, MutateCallbacks, MutationContext, MutationValue,
+    structural_mutate, Array, MutateCallbacks, MutationContext, MutationView,
 };
 
 #[derive(Default)]
@@ -778,7 +787,7 @@ let mut mutator = MutateCallbacks::new(
             mutator.state_mut().integers += 1;
             value + 1
         },
-        |value: MutationValue<'_>, mutator: &mut MutationContext<'_, Stats>| {
+        |value: MutationView<'_>, mutator: &mut MutationContext<'_, Stats>| {
             mutator.default_maybe_inplace_mutate(value)
         },
     ),
@@ -793,13 +802,13 @@ assert_eq!(mutator.state().integers, 2);
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
-Use `MutationValue<'_, T>` with `default_maybe_inplace_mutate` to forward its
+Use `MutationView<'_, T>` with `default_maybe_inplace_mutate` to forward its
 permission, or `default_mutate_with_mode` to restrict it. Inspect it through
-`let view = value.as_value()` and `view.downcast_ref::<Node>()`; finish using
+`let view = value.as_any_view()` and `view.downcast_ref::<Node>()`; finish using
 that view before consuming the capability. Mutation contexts do not expose
 `current()`, and copy-only default descent takes an explicit borrow
 (`default_mutate(&view)`). Generated handlers can read the mode
-through `Mutator::inplace_mode()`; see `MutationValue` for ownership requirements.
+through `Mutator::inplace_mode()`; see `MutationView` for ownership requirements.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
 owns its mutable pass state, while `Mutator` supplies recursion and the current
@@ -839,8 +848,8 @@ Use `#[dispatch(mutate, policy = MyPolicy)]` to apply a `MutationContextPolicy<S
 to default recursion.
 
 For low-level custom recursion, implement `StructuralMutator` and pass
-`&mut` it to `structural_mutate`. `MutationValue` carries the engine's reuse
-permission. `MutationValue::borrowed` wraps an `AnyView` with `Disallow`;
+`&mut` it to `structural_mutate`. `MutationView` carries the engine's reuse
+permission. `MutationView::borrowed` wraps an `AnyView` with `Disallow`;
 only the engine can grant `Allow`, and explicit modes can only restrict it. Override
 `dispatch_maybe_inplace_mutate` to opt into default container reuse;
 `default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
@@ -849,7 +858,7 @@ values can be re-entered with `mutate`, while owned values can use
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Any, Array, DefRegionKind, MutationValue, AnyView, Result,
+    structural_mutate, Any, Array, DefRegionKind, MutationView, AnyView, Result,
     StructuralMutator,
 };
 
@@ -866,7 +875,7 @@ impl StructuralMutator for Increment {
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
-        value: MutationValue<'_>,
+        value: MutationView<'_>,
         kind: DefRegionKind,
     ) -> Result<Any> {
         self.default_maybe_inplace_mutate(value, kind)

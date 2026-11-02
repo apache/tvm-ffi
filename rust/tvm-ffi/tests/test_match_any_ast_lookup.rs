@@ -115,6 +115,20 @@ define_expr_leaves!(
 fn dispatches_representative_ast_leaf_nodes() {
     register_expr_types();
 
+    // The ref adapter must expose final-node metadata, including in mixed lists.
+    use tvm_ffi::match_any_internal::{
+        LeafPatternMetadata, LeafPatternProbe, PatternConversionProbe, RefPatternConversion,
+    };
+    let node_probe = PatternConversionProbe::<AddExprObj>::new();
+    let mixed = LeafPatternProbe::<(SubExpr, ())>::new().prepend((&&&node_probe).leaf_pattern());
+    assert!((&mixed).leaf_pattern_list_id().is_some());
+    let mut indices = [0; 2];
+    (&mixed).fill_leaf_type_indices(&mut indices);
+    assert_eq!(
+        indices,
+        [AddExprObj::type_index(), SubExprObj::type_index()]
+    );
+
     fn classify(value: Any) -> &'static str {
         match_any! {
             value {
@@ -143,6 +157,40 @@ fn dispatches_representative_ast_leaf_nodes() {
         }
     }
 
+    fn checked<T>(_: &T, value: &Any, count: usize, name: &'static str) -> &'static str {
+        assert_eq!(value.debug_strong_count(), Some(count));
+        name
+    }
+
+    fn classify_refs<T: ObjectCore>(value: &Any) -> &'static str {
+        match_any! {
+            *value {
+                T(ref node) => checked(node, value, 1, "add"),
+                SubExpr(ref handle) => checked(handle, value, 2, "sub"),
+                MulExprObj(ref node) => checked(node, value, 1, "mul"),
+                DivExpr(ref handle) => checked(handle, value, 2, "div"),
+                ModExprObj(ref node) => checked(node, value, 1, "mod"),
+                NegExpr(ref handle) => checked(handle, value, 2, "neg"),
+                CallExprObj(ref node) => checked(node, value, 1, "call"),
+                LetExpr(ref handle) => checked(handle, value, 2, "let"),
+                IfExprObj(ref node) => checked(node, value, 1, "if"),
+                TupleExpr(ref handle) => checked(handle, value, 2, "tuple"),
+                TupleGetItemExprObj(ref node) => checked(node, value, 1, "tuple_get_item"),
+                CastExpr(ref handle) => checked(handle, value, 2, "cast"),
+                LoadExprObj(ref node) => checked(node, value, 1, "load"),
+                StoreExpr(ref handle) => checked(handle, value, 2, "store"),
+                ForExprObj(ref node) => checked(node, value, 1, "for"),
+                WhileExpr(ref handle) => checked(handle, value, 2, "while"),
+                SeqExprObj(ref node) => checked(node, value, 1, "seq"),
+                ReturnExpr(ref handle) => checked(handle, value, 2, "return"),
+                ConstantExprObj(ref node) => checked(node, value, 1, "constant"),
+                VarExpr(ref handle) => checked(handle, value, 2, "var"),
+                AddExpr(_) => "duplicate_must_not_win",
+                _ => "unsupported",
+            }
+        }
+    }
+
     let cases = [
         (Any::from(AddExpr::default()), "add"),
         (Any::from(SubExpr::default()), "sub"),
@@ -166,11 +214,21 @@ fn dispatches_representative_ast_leaf_nodes() {
         (Any::from(VarExpr::default()), "var"),
     ];
     for (value, expected) in cases {
+        for _ in 0..2 {
+            assert_eq!(classify_refs::<AddExprObj>(&value), expected);
+            assert_eq!(value.debug_strong_count(), Some(1));
+        }
         assert_eq!(classify(value), expected);
     }
 
     assert_eq!(classify(Any::from(Shape::from([1_i64, 2]))), "unsupported");
     assert_eq!(classify(Any::from(1_i64)), "unsupported");
+    // The call-site cache was initialized for AddExprObj; another generic
+    // instantiation must take the ordered path and preserve its first arm.
+    assert_eq!(
+        classify_refs::<SubExprObj>(&Any::from(SubExpr::default())),
+        "add"
+    );
 
     // This call site has enough syntactically eligible arms to consider leaf
     // lookup, but Array<T> requires complete type conversion. The entire match
@@ -197,7 +255,10 @@ fn dispatches_representative_ast_leaf_nodes() {
                 SeqExpr(_) => "seq",
                 ReturnExpr(_) => "return",
                 Array::<i64>(_) => "integer_array",
-                Array::<f64>(_) => "float_array",
+                Array::<f64>(ref array) => {
+                    assert_eq!(array.len(), 2);
+                    "float_array"
+                },
                 _ => "unsupported",
             }
         }
