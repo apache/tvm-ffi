@@ -728,8 +728,8 @@ Within one `structural_map` call, callbacks run at every occurrence; their
 results are not cached. Default recursion manages identity remapping with
 the same semantics as C++.
 
-`MutateCallbacks::with_policy` and `MapWithContextPolicy` use `MutContextPolicy<State>`
-to manage context around default recursion. Policies consume `MutateValue`
+`MutateCallbacks::with_policy` and `MapWithContextPolicy` use `MutationContextPolicy<State>`
+to manage context around default recursion. Policies consume `MutationValue`
 and return `UnchangedOr<Any>`; see the API documentation for composition and
 scoped definition regions. Pass `MapWithContextPolicy` directly to `structural_map`,
 or pass `&mut mapper` to reuse it and inspect its state afterward;
@@ -758,12 +758,12 @@ owning-value helpers and top-level functions resolve the marker to the
 original value.
 
 `structural_mutate` accepts typed callback chains in addition to a
-`StructuralMutator`. Closure callbacks receive a `MutateContext`;
+`StructuralMutator`. Closure callbacks receive a `MutationContext`;
 `MutateCallbacks` adds state shared by that callback chain:
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Array, MutateCallbacks, MutateContext, MutateValue,
+    structural_mutate, Array, MutateCallbacks, MutationContext, MutationValue,
 };
 
 #[derive(Default)]
@@ -774,11 +774,11 @@ struct Stats {
 let mut mutator = MutateCallbacks::new(
     Stats::default(),
     (
-        |value: i64, mutator: &mut MutateContext<'_, Stats>| {
+        |value: i64, mutator: &mut MutationContext<'_, Stats>| {
             mutator.state_mut().integers += 1;
             value + 1
         },
-        |value: MutateValue<'_>, mutator: &mut MutateContext<'_, Stats>| {
+        |value: MutationValue<'_>, mutator: &mut MutationContext<'_, Stats>| {
             mutator.default_maybe_inplace_mutate(value)
         },
     ),
@@ -789,17 +789,17 @@ assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(mutator.state().integers, 2);
 ```
 
-`MutateContext::mutate` uses the copy path for a borrowed value, while
+`MutationContext::mutate` uses the copy path for a borrowed value, while
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
-Use `MutateValue<'_, T>` with `default_maybe_inplace_mutate` to forward its
+Use `MutationValue<'_, T>` with `default_maybe_inplace_mutate` to forward its
 permission, or `default_mutate_with_mode` to restrict it. Inspect it through
 `let view = value.as_value()` and `view.downcast_ref::<Node>()`; finish using
 that view before consuming the capability. Mutation contexts do not expose
 `current()`, and copy-only default descent takes an explicit borrow
 (`default_mutate(&view)`). Generated handlers can read the mode
-through `Mutator::inplace_mode()`; see `MutateValue` for ownership requirements.
+through `Mutator::inplace_mode()`; see `MutationValue` for ownership requirements.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
 owns its mutable pass state, while `Mutator` supplies recursion and the current
@@ -835,12 +835,13 @@ assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(increment.integers, 2);
 ```
 
-Use `#[dispatch(mutate, policy = MyPolicy)]` to apply a `MutContextPolicy<Self>`
+Use `#[dispatch(mutate, policy = MyPolicy)]` to apply a `MutationContextPolicy<Self>`
 to default recursion.
 
 For low-level custom recursion, implement `StructuralMutator` and pass
-`&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
-capability: callers cannot construct it from a read-only `AnyView`. Override
+`&mut` it to `structural_mutate`. `MutationValue` carries the engine's reuse
+permission. `MutationValue::borrowed` wraps an `AnyView` with `Disallow`;
+only the engine can grant `Allow`, and explicit modes can only restrict it. Override
 `dispatch_maybe_inplace_mutate` to opt into default container reuse;
 `default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
 values can be re-entered with `mutate`, while owned values can use
@@ -848,7 +849,7 @@ values can be re-entered with `mutate`, while owned values can use
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Any, Array, DefRegionKind, InplaceValue, AnyView, Result,
+    structural_mutate, Any, Array, DefRegionKind, MutationValue, AnyView, Result,
     StructuralMutator,
 };
 
@@ -865,7 +866,7 @@ impl StructuralMutator for Increment {
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
-        value: InplaceValue<'_>,
+        value: MutationValue<'_>,
         kind: DefRegionKind,
     ) -> Result<Any> {
         self.default_maybe_inplace_mutate(value, kind)
