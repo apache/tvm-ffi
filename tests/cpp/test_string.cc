@@ -20,6 +20,8 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/string.h>
 
+#include <cstdint>
+
 namespace {
 
 using namespace tvm::ffi;
@@ -39,8 +41,8 @@ TEST(String, MoveFromStdStorage) {
                                       std::string(8, 'x'), std::string(64, 'x')}) {
     std::string string_source = expected;
     std::string bytes_source = expected;
-    const char* string_data = string_source.data();
-    const char* bytes_data = bytes_source.data();
+    const auto string_address = reinterpret_cast<std::uintptr_t>(string_source.data());
+    const auto bytes_address = reinterpret_cast<std::uintptr_t>(bytes_source.data());
     String str(std::move(string_source));
     Bytes bytes(std::move(bytes_source));
     const bool small = expected.size() <= 7;
@@ -53,8 +55,8 @@ TEST(String, MoveFromStdStorage) {
     EXPECT_EQ(str.data()[str.size()], '\0');
     EXPECT_EQ(bytes.data()[bytes.size()], '\0');
     if (expected.size() == 64) {
-      EXPECT_EQ(str.data(), string_data);
-      EXPECT_EQ(bytes.data(), bytes_data);
+      EXPECT_EQ(reinterpret_cast<std::uintptr_t>(str.data()), string_address);
+      EXPECT_EQ(reinterpret_cast<std::uintptr_t>(bytes.data()), bytes_address);
     }
   }
 }
