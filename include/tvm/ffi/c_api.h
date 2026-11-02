@@ -37,6 +37,7 @@
 // Defines two macros
 // TVM_FFI_DLL: marks the function as a DLL export/import
 //              depending on whether TVM_FFI_EXPORTS is defined
+//              or undecorated when TVM_FFI_STATIC is defined
 // TVM_FFI_DLL_EXPORT: always marks the function as a DLL export
 #if !defined(TVM_FFI_DLL) && defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -44,7 +45,9 @@
 #define TVM_FFI_DLL_EXPORT EMSCRIPTEN_KEEPALIVE
 #endif
 #if !defined(TVM_FFI_DLL) && defined(_MSC_VER)
-#ifdef TVM_FFI_EXPORTS
+#if defined(TVM_FFI_STATIC)
+#define TVM_FFI_DLL
+#elif defined(TVM_FFI_EXPORTS)
 #define TVM_FFI_DLL __declspec(dllexport)
 #else
 #define TVM_FFI_DLL __declspec(dllimport)
