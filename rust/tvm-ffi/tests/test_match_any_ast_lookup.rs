@@ -117,7 +117,7 @@ fn dispatches_representative_ast_leaf_nodes() {
 
     // The ref adapter must expose final-node metadata, including in mixed lists.
     use tvm_ffi::match_any_internal::{
-        LeafPatternMetadata, LeafPatternProbe, PatternConversionProbe, RefPatternConversion,
+        LeafPatternMetadata, LeafPatternProbe, PatternConversionProbe, RefPatternMetadata,
     };
     let node_probe = PatternConversionProbe::<AddExprObj>::new();
     let mixed = LeafPatternProbe::<(SubExpr, ())>::new().prepend((&&&node_probe).leaf_pattern());
@@ -129,32 +129,39 @@ fn dispatches_representative_ast_leaf_nodes() {
         [AddExprObj::type_index(), SubExprObj::type_index()]
     );
 
-    fn classify(value: Any) -> &'static str {
-        match_any! {
-            value {
-                AddExpr(_) => "add",
-                SubExpr(_) => "sub",
-                MulExpr(_) => "mul",
-                DivExpr(_) => "div",
-                ModExpr(_) => "mod",
-                NegExpr(_) => "neg",
-                CallExpr(_) => "call",
-                LetExpr(_) => "let",
-                IfExpr(_) => "if",
-                TupleExpr(_) => "tuple",
-                TupleGetItemExpr(_) => "tuple_get_item",
-                CastExpr(_) => "cast",
-                LoadExpr(_) => "load",
-                StoreExpr(_) => "store",
-                ForExpr(_) => "for",
-                WhileExpr(_) => "while",
-                SeqExpr(_) => "seq",
-                ReturnExpr(_) => "return",
-                ConstantExpr(_) => "constant",
-                VarExpr(_) => "var",
-                _ => "unsupported",
+    type Owned<T> = T;
+    use tvm_ffi::MutationView;
+    macro_rules! classify_all {
+        ($value:expr; $wrapper:ident) => {
+            match_any! {
+                $value {
+                    $wrapper<AddExpr>(_) => "add",
+                    $wrapper<SubExpr>(_) => "sub",
+                    $wrapper<MulExpr>(_) => "mul",
+                    $wrapper<DivExpr>(_) => "div",
+                    $wrapper<ModExpr>(_) => "mod",
+                    $wrapper<NegExpr>(_) => "neg",
+                    $wrapper<CallExpr>(_) => "call",
+                    $wrapper<LetExpr>(_) => "let",
+                    $wrapper<IfExpr>(_) => "if",
+                    $wrapper<TupleExpr>(_) => "tuple",
+                    $wrapper<TupleGetItemExpr>(_) => "tuple_get_item",
+                    $wrapper<CastExpr>(_) => "cast",
+                    $wrapper<LoadExpr>(_) => "load",
+                    $wrapper<StoreExpr>(_) => "store",
+                    $wrapper<ForExpr>(_) => "for",
+                    $wrapper<WhileExpr>(_) => "while",
+                    $wrapper<SeqExpr>(_) => "seq",
+                    $wrapper<ReturnExpr>(_) => "return",
+                    $wrapper<ConstantExpr>(_) => "constant",
+                    $wrapper<VarExpr>(_) => "var",
+                    _ => "unsupported",
+                }
             }
-        }
+        };
+    }
+    fn classify(value: Any) -> &'static str {
+        classify_all!(value; Owned)
     }
 
     fn checked<T>(_: &T, value: &Any, count: usize, name: &'static str) -> &'static str {
@@ -164,7 +171,7 @@ fn dispatches_representative_ast_leaf_nodes() {
 
     fn classify_refs<T: ObjectCore>(value: &Any) -> &'static str {
         match_any! {
-            *value {
+            value {
                 T(ref node) => checked(node, value, 1, "add"),
                 SubExpr(ref handle) => checked(handle, value, 2, "sub"),
                 MulExprObj(ref node) => checked(node, value, 1, "mul"),
@@ -218,6 +225,12 @@ fn dispatches_representative_ast_leaf_nodes() {
             assert_eq!(classify_refs::<AddExprObj>(&value), expected);
             assert_eq!(value.debug_strong_count(), Some(1));
         }
+        assert_eq!(classify_all!(&value; Owned), expected);
+        assert_eq!(
+            classify_all!(MutationView::borrowed(tvm_ffi::AnyView::from(&value)); MutationView),
+            expected
+        );
+        assert_eq!(value.debug_strong_count(), Some(1));
         assert_eq!(classify(value), expected);
     }
 

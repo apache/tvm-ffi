@@ -317,31 +317,6 @@ impl Drop for Any {
     }
 }
 
-/// Convert an [`AnyView`] without constructing a diagnostic error on mismatch.
-#[inline]
-pub(crate) fn try_cast_from_any_view<T>(value: &AnyView<'_>) -> Result<T, ()>
-where
-    T: AnyCompatible,
-{
-    unsafe { T::try_cast_from_any_view(&value.data) }
-}
-
-/// Copy a value after exact-leaf lookup has established compatibility.
-///
-/// # Safety
-///
-/// `T::MATCH_ANY_EXACT` must be true and `value.type_index()` must equal
-/// `T::match_any_exact_type_index()`.
-#[inline(always)]
-pub(crate) unsafe fn copy_from_any_view_after_check<T>(value: &AnyView<'_>) -> T
-where
-    T: AnyCompatible,
-{
-    debug_assert!(T::MATCH_ANY_EXACT);
-    debug_assert!(T::check_any_strict(&value.data));
-    T::copy_from_any_view_after_check(&value.data)
-}
-
 // convert Any ref to AnyView
 impl<'a> From<&'a Any> for AnyView<'a> {
     #[inline]

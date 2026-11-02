@@ -563,6 +563,8 @@ pub(crate) fn expand_object_ref(
                 <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL
             };
 
+            const MATCH_ANY_STRICT_EXACT: bool = Self::MATCH_ANY_EXACT;
+
             #[inline]
             fn match_any_exact_type_index() -> i32 {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>

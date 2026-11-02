@@ -246,6 +246,10 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
         }
     }
 
+    unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+        Unchanged::check_any_strict(data) || T::container_match_constraints(data)
+    }
+
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
         if Unchanged::check_any_strict(data) {
             return Self::unchanged();

@@ -22,15 +22,7 @@ use std::any::TypeId;
 use tvm_ffi::match_any_internal::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
 use tvm_ffi::{match_any, Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex};
 
-struct CustomModuleMatcher;
-
-impl<'a> TryFrom<AnyView<'a>> for CustomModuleMatcher {
-    type Error = &'static str;
-
-    fn try_from(value: AnyView<'a>) -> Result<Self, Self::Error> {
-        value.try_as::<Module>().map(|_| Self).ok_or("not a Module")
-    }
-}
+type CustomModuleMatcher = Module;
 
 #[test]
 fn matches_concrete_object_containers_in_source_order() {
@@ -77,7 +69,7 @@ fn matches_concrete_object_containers_in_source_order() {
     let source = Array::new(vec![1_i64, 2, 3]);
     let count = || ObjectArc::strong_count(<Array<i64> as ObjectRefCore>::data(&source));
     let size = match_any! {
-        source {
+        &source {
             Array::<i64>(ref handle) if {
                 assert_eq!(count(), 2);
                 assert_eq!(handle.len(), 3);
@@ -100,7 +92,7 @@ fn matches_concrete_object_containers_in_source_order() {
     assert_eq!(size, 3);
     assert_eq!(count(), 1);
     let size = match_any! {
-        source {
+        &source {
             Array::<i64>(ref handle) => {
                 let _: &Array<i64> = handle;
                 assert_eq!(count(), 2);
@@ -114,7 +106,7 @@ fn matches_concrete_object_containers_in_source_order() {
     let mut saved = None;
     assert_eq!(
         match_any! {
-            source {
+            &source {
                 Array::<i64>(ref handle) if { saved = Some(handle); true } => saved.unwrap().len(),
                 _ => 0,
             }
@@ -124,17 +116,175 @@ fn matches_concrete_object_containers_in_source_order() {
     let node = 7;
     assert_eq!(
         match_any! {
-            source {
+            &source {
                 ArrayObj(ref node) if node.size == 0 => 0,
                 _ => node,
             }
         },
         7
     );
+
+    // Matching distinguishes runtime categories and rejects numeric truncation.
+    let mut evaluations = 0;
+    let mut guards = 0;
+    assert_eq!(
+        match_any!({ evaluations += 1; Any::from(true) } {
+            i64(_) if { guards += 1; true } => 0,
+            f64(_) => 0,
+            bool(n) if { guards += 1; !n } => 0,
+            bool(n) => i32::from(n),
+            _ => 0,
+        }),
+        1
+    );
+    assert_eq!((evaluations, guards), (1, 1));
+    assert_eq!(
+        match_any!(Any::from(1.25_f64) { f32(n) => n, _ => 0.0 }),
+        1.25
+    );
+    for (stored, unsigned, signed) in [
+        (-129_i64, None, None),
+        (-128, None, Some(-128)),
+        (127, Some(127), Some(127)),
+        (128, Some(128), None),
+        (255, Some(255), None),
+        (256, None, None),
+    ] {
+        assert_eq!(
+            match_any!(Any::from(stored) { u8(n) => Some(n), _ => None }),
+            unsigned
+        );
+        assert_eq!(
+            match_any!(Any::from(stored) { i8(n) => Some(n), _ => None }),
+            signed
+        );
+    }
+    assert_eq!(
+        match_any!(Any::from(i64::MAX) { u64(n) => Some(n), _ => None }),
+        Some(i64::MAX as u64)
+    );
+    assert_eq!(
+        match_any!(Any::from(u64::MAX) { u64(_) => unreachable!(), i64(n) => n, _ => 0 }),
+        -1
+    );
+    for (stored, expected) in [
+        (-0.0, Some(0x8000_0000)),
+        (f64::INFINITY, Some(f32::INFINITY.to_bits())),
+        (f32::from_bits(0xffc0_0001) as f64, Some(0xffc0_0001)),
+        (f64::from_bits(0x7ff8_0000_0000_0001), None),
+        (16_777_217.0, None),
+        (1e40, None),
+    ] {
+        assert_eq!(
+            match_any!(Any::from(stored) {
+                f32(n) => Some(n.to_bits()),
+                f64(n) => { assert_eq!(n.to_bits(), stored.to_bits()); None },
+                _ => unreachable!(),
+            }),
+            expected
+        );
+    }
+    assert_eq!(
+        match_any!(Any::from(257_i64) { Option<u8>(n) => n, _ => None }),
+        None
+    );
+    assert_eq!(
+        match_any!(Any::from(()) { Option<u8>(n) => Some(n), _ => None }),
+        Some(None)
+    );
+
+    assert!(match_any!(Any::from(true) { bool(ref n) => *n, _ => false }));
+    assert!(match_any!(Any::from(()) { ()(()) => true, _ => false }));
+    let pointer = core::ptr::null_mut::<core::ffi::c_void>();
+    assert!(
+        match_any!(Any::from(pointer) { *mut core::ffi::c_void(p) => p.is_null(), _ => false })
+    );
+    trait Payload {
+        type Item;
+    }
+    struct Integer;
+    impl Payload for Integer {
+        type Item = i64;
+    }
+    assert_eq!(
+        match_any!(Any::from(7_i64) { <Integer as Payload>::Item(n) => n, _ => 0 }),
+        7
+    );
+    fn identity<'a>(view: AnyView<'a>) -> AnyView<'a> {
+        match_any!(view { AnyView::<'_>(rest) => rest, _ => unreachable!() })
+    }
+    assert_eq!(
+        identity(AnyView::from(&source)).debug_strong_count(),
+        Some(1)
+    );
+
+    use tvm_ffi::{InplaceMode, MutationView};
+    let mut capability_evaluations = 0;
+    let capability = match_any!({
+        capability_evaluations += 1;
+        MutationView::borrowed(AnyView::from(&source))
+    } {
+        tvm_ffi::MutationView<Array<f64>>(_) => unreachable!(),
+        tvm_ffi::MutationView<Array<i64>>(matched) if {
+            assert_eq!(matched.inplace_mode(), InplaceMode::Disallow);
+            assert_eq!(count(), 1);
+            false
+        } => unreachable!(),
+        Array<i64>(owned) if {
+            assert_eq!(owned.len(), 3);
+            assert_eq!(count(), 2);
+            false
+        } => unreachable!(),
+        ArrayObj(ref node) if { assert_eq!(count(), 1); node.size == 0 } => unreachable!(),
+        AnyView::<'_>(view) if { assert_eq!(view.debug_strong_count(), Some(1)); false } => unreachable!(),
+        tvm_ffi::MutationView<Any>(rest) => rest,
+        _ => unreachable!(),
+    });
+    assert_eq!(capability_evaluations, 1);
+    assert_eq!(count(), 1);
+    assert_eq!(capability.inplace_mode(), InplaceMode::Disallow);
+    assert_eq!(
+        match_any!(&capability { ArrayObj(ref node) => node.size, _ => 0 }),
+        3
+    );
+
+    let typed = match_any!(capability {
+        tvm_ffi::MutationView<Array<i64>>(array) => array,
+        _ => unreachable!(),
+    });
+    assert_eq!(typed.as_any_view().debug_strong_count(), Some(1));
+    // Already narrowed inputs are normalized before attempts and guard recovery.
+    assert_eq!(
+        match_any!(typed {
+            tvm_ffi::MutationView<Array<f64>>(_) => 0,
+            ArrayObj(ref node) => node.size,
+            _ => 0,
+        }),
+        3
+    );
+    assert!(match_any!(MutationView::borrowed(AnyView::from(&())) {
+        tvm_ffi::MutationView<()>(_unit) => true, _ => false,
+    }));
+
+    fn native_control_flow(value: AnyView<'_>) -> Result<i64, ()> {
+        for _ in 0..1 {
+            match_any!(value {
+                i64(n) if { if n < 0 { return Err(()); } true } => return Ok(n),
+                bool(_) => continue,
+                _ => break,
+            });
+        }
+        let n = match_any!(value { f64(_) => Err(())?, _ => 0 });
+        Ok(n)
+    }
+    assert_eq!(native_control_flow(AnyView::from(&7_i64)), Ok(7));
+    assert_eq!(native_control_flow(AnyView::from(&-1_i64)), Err(()));
+    assert_eq!(native_control_flow(AnyView::from(&true)), Ok(0));
+    assert_eq!(native_control_flow(AnyView::from(&1.0_f64)), Err(()));
 }
 
 #[test]
-fn custom_try_into_matcher_keeps_ordered_compatibility() {
+fn type_alias_matcher_keeps_strict_compatibility() {
     fn matches(value: AnyView<'_>) -> bool {
         match_any! {
             value {
@@ -177,6 +327,52 @@ fn parameterized_containers_use_complete_conversion_semantics() {
     };
 
     assert_eq!(selected, "float array");
+    use tvm_ffi::{List, MutationView};
+    let values = Array::new(vec![257_i64]);
+    assert_eq!(
+        match_any!(&values { Array<u8>(_) => 0, Array<i64>(_) => 1, _ => 2 }),
+        1
+    );
+    assert!(!match_any!(Array::new(vec![true]) { Array<i64>(_) => true, _ => false }));
+    assert!(!match_any!(&values { List<i64>(_) => true, _ => false }));
+    let list = [257_i64].into_iter().collect::<List<i64>>();
+    assert!(!match_any!(&list { Array<i64>(_) => true, List<u8>(_) => true, _ => false }));
+    let nested = Array::new(vec![Array::new(vec![Some(257_i64)])]);
+    assert_eq!(
+        match_any!(&nested {
+            Array<Array<Option<u8>>>(_) => 0,
+            Array<Array<Option<i64>>>(_) => 1,
+            _ => 2,
+        }),
+        1
+    );
+    let map = [(1_i64, values)]
+        .into_iter()
+        .collect::<Map<i64, Array<i64>>>();
+    assert_eq!(
+        match_any!(&map { Map<u8, Array<u8>>(_) => 0, Map<u8, Array<i64>>(_) => 1, _ => 2 }),
+        1
+    );
+    // Transparent result carriers retain the same recursive numeric checks.
+    use tvm_ffi::{Unchanged, UnchangedOr};
+    assert!(!match_any!(Any::from(257_i64) { UnchangedOr<u8>(_) => true, _ => false }));
+    assert!(match_any!(Any::from(Unchanged) { UnchangedOr<u8>(_) => true, _ => false }));
+    assert!(!match_any!(MutationView::borrowed(AnyView::from(&nested)) {
+        MutationView<UnchangedOr<Array<Array<Option<u8>>>>>(_) => true,
+        _ => false,
+    }));
+    type Cap<'a, T> = MutationView<'a, T>;
+    let cap = MutationView::borrowed(AnyView::from(&nested));
+    let recovered = match_any!(cap {
+        Cap<Array<Array<Option<u8>>>>(_) => unreachable!(),
+        Cap<Array<Array<Option<i64>>>>(value) if {
+            assert_eq!(value.inplace_mode(), tvm_ffi::InplaceMode::Disallow);
+            false
+        } => unreachable!(),
+        Cap<Any>(value) => value,
+        _ => unreachable!(),
+    });
+    assert_eq!(recovered.as_any_view().debug_strong_count(), Some(1));
 }
 
 #[test]
@@ -228,4 +424,87 @@ fn metadata_only_accepts_exact_leaf_patterns() {
     type Custom = (NoAnyCompatibleMetadata, ());
     let custom = LeafPatternProbe::<Custom>::new();
     assert!((&custom).leaf_pattern_list_id().is_none());
+
+    // Large generic and lifetime-bearing matches must compile without a static
+    // bound; their metadata does not justify a final-object table.
+    fn generic<T: tvm_ffi::AnyCompatible>(view: AnyView<'_>) -> Option<T> {
+        match_any!(view {
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            T(value) => Some(value),
+            _ => None,
+        })
+    }
+    fn generic_cap<T: tvm_ffi::AnyCompatible>(value: tvm_ffi::MutationView<'_>) -> bool {
+        match_any!(value {
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            tvm_ffi::MutationView<T>(_) => true,
+            _ => false,
+        })
+    }
+    fn identity<'a>(view: AnyView<'a>) -> AnyView<'a> {
+        match_any!(view {
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            AnyView::<'_>(rest) => rest,
+            _ => unreachable!(),
+        })
+    }
+    assert_eq!(generic::<i64>(identity(AnyView::from(&7_i64))), Some(7));
+    assert_eq!(generic::<bool>(AnyView::from(&7_i64)), None);
+    assert!(generic_cap::<i64>(tvm_ffi::MutationView::borrowed(
+        AnyView::from(&7_i64)
+    )));
 }

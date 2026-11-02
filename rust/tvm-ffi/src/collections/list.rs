@@ -584,6 +584,12 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
                 .all(|cell| T::container_check_any_strict(cell))
     }
 
+    unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+        seq_cells(data)
+            .iter()
+            .all(|cell| T::container_match_constraints(cell))
+    }
+
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIList as i32;
         data.data_union.v_obj = ObjectArc::as_raw(Self::data(src)) as *mut TVMFFIObject;

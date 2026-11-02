@@ -39,20 +39,19 @@ pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     dispatch::dispatch(attr, item)
 }
 
-/// Match object-backed values carried by an Any-compatible scrutinee.
+/// Match payloads in `Any`, `AnyView`, object references or `MutationView`.
 ///
-/// The scrutinee may be an owned object handle, `Any`, or `AnyView`. Convert an
-/// already-borrowed object handle to `AnyView` before invoking the macro.
+/// Write `Type(value)` to bind an owned or scalar result, `NodeObj(ref node)`
+/// to borrow an object node, or `MutationView<Type>(capability)` to transfer a
+/// mutation capability. Rust type aliases and qualified types are accepted.
+/// Arms are tried in order; end with an unguarded `_ => ...` fallback.
 ///
-/// Typed arms are checked conversions, not native Rust destructuring.
-/// `Handle(value)` converts to an owning handle. `NodeType(ref node)` borrows
-/// an `ObjectCore` node without acquiring ownership; the binding is `&NodeType`.
-/// For owning or custom matcher types, `Matcher(ref value)` retains the existing
-/// conversion and borrows its local result. Shared node matching cannot grant
-/// mutable access, and bindings remain bounded by the scrutinee/view borrow.
-/// Guards are evaluated in source order before selecting an arm.
+/// The input is evaluated and taken by value once. Use `&value` to retain its
+/// owner. Matching is strict: it does not coerce between value categories or
+/// truncate stored numeric values. Guards may reject a match and try the next arm.
 ///
-/// Non-object values skip the typed patterns and use the `_` fallback.
+/// Typed mutation capabilities do not support Map payloads, including nested
+/// Maps; use `MutationView<Any>` for those. Ordinary `Map<K, V>` arms are supported.
 #[proc_macro_error]
 #[proc_macro]
 pub fn match_any(input: TokenStream) -> TokenStream {

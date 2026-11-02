@@ -570,6 +570,18 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
             value: MutationView<'_, Array<Any>>,
             ctx: &mut Mutator,
         ) -> Result<UnchangedOr<Any>> {
+            let mode = value.inplace_mode();
+            let count = value.as_any_view().debug_strong_count();
+            let value = tvm_ffi::match_any!(value {
+                MutationView<FfiString>(_) => unreachable!(),
+                MutationView<Array<Any>>(array) if {
+                    assert_eq!(array.inplace_mode(), mode);
+                    assert_eq!(array.as_any_view().debug_strong_count(), count);
+                    false
+                } => unreachable!(),
+                MutationView<Array<Any>>(array) => array,
+                _ => unreachable!(),
+            });
             assert_eq!(ctx.inplace_mode(), value.inplace_mode());
             self.observe(&value);
             ctx.default_mutate_with_mode_result(self, value, self.requested)
