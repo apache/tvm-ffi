@@ -197,7 +197,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                 quote! {
                     fn on_default_mutate(
                         &mut self,
-                        value: #tvm_ffi::MutationValue<'_>,
+                        value: #tvm_ffi::MutationView<'_>,
                         kind: #tvm_ffi::DefRegionKind,
                     ) -> #tvm_ffi::Result<#tvm_ffi::Any> {
                         let policy = #policy;
@@ -310,7 +310,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                     mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator,
                 ) -> Option<#tvm_ffi::Result<#tvm_ffi::Any>> {
                     <Self as #tvm_ffi::extra::structural_mutate::MutateDispatch>::dispatch_mutate_value(
-                        self, #tvm_ffi::MutationValue::borrowed(value), mutator,
+                        self, #tvm_ffi::MutationView::borrowed(value), mutator,
                     )
                 }
 
@@ -318,7 +318,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                 #[allow(unreachable_code, unused_variables, unused_mut)]
                 fn dispatch_mutate_value(
                     &mut self,
-                    mut value: #tvm_ffi::MutationValue<'_>,
+                    mut value: #tvm_ffi::MutationView<'_>,
                     mutator: &mut #tvm_ffi::Mutator,
                 ) -> Option<#tvm_ffi::Result<#tvm_ffi::Any>> {
                     #(#links)*
@@ -364,7 +364,7 @@ fn expand_links(
             let invoke = match &handler.argument {
                 HandlerArgument::Value => {
                     let value = if matches!(mode, DispatchMode::Mutate) {
-                        quote!(#value.as_value())
+                        quote!(#value.as_any_view())
                     } else {
                         value.clone()
                     };
@@ -380,7 +380,7 @@ fn expand_links(
                         #into_result(self.#method(node #trailing_arg))
                     });
                     let value = if matches!(mode, DispatchMode::Mutate) {
-                        quote!(#value.as_value())
+                        quote!(#value.as_any_view())
                     } else {
                         value.clone()
                     };
@@ -407,7 +407,7 @@ fn expand_links(
                         #into_result(self.#method(typed #trailing_arg))
                     });
                     let value = if matches!(mode, DispatchMode::Mutate) {
-                        quote!(#value.as_value())
+                        quote!(#value.as_any_view())
                     } else {
                         value.clone()
                     };
@@ -499,7 +499,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
                     .path
                     .segments
                     .last()
-                    .is_some_and(|s| s.ident == "MutationValue") =>
+                    .is_some_and(|s| s.ident == "MutationView") =>
         {
             let segment = path.path.segments.last().unwrap();
             let value_type = if let PathArguments::AngleBracketed(args) = &segment.arguments {
