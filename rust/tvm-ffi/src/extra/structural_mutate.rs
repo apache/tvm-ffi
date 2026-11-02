@@ -3439,7 +3439,7 @@ mod tests {
         let text = std::ffi::CString::new("borrowed traversal string").unwrap();
         let mut raw = TVMFFIAny::new();
         raw.type_index = TVMFFITypeIndex::kTVMFFIRawStr as i32;
-        raw.data_union.v_c_str = text.as_ptr();
+        raw.data_union.v_c_str = text.as_ptr().cast();
         let owned = owned_from_raw(raw).unwrap();
         drop(text);
         assert_eq!(
