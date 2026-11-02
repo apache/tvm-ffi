@@ -65,6 +65,11 @@ class StructuralHashHandler {
         return detail::StableHashCombine(TypeIndex::kTVMFFIStr,
                                          detail::StableHashSmallStrBytes(src_data));
       }
+      if (src_data->type_index == TypeIndex::kTVMFFISmallBytes) {
+        // Inline and heap bytes compare equal, so use the same type and content hash.
+        return detail::StableHashCombine(TypeIndex::kTVMFFIBytes,
+                                         detail::StableHashSmallStrBytes(src_data));
+      }
       // this is POD data, we can just hash the value
       return detail::StableHashCombine(src_data->type_index, src_data->v_uint64);
     }
@@ -269,6 +274,12 @@ class StructuralHashHandler {
         // so heap allocated string and on stack string will have the same hash
         return detail::StableHashCombine(
             TypeIndex::kTVMFFIStr,
+            detail::StableHashBytes(src_data->v_bytes, src_data->small_str_len));
+      }
+      if (src_data->type_index == TypeIndex::kTVMFFISmallBytes) {
+        // Map keys need the same canonical byte hash as other values.
+        return detail::StableHashCombine(
+            TypeIndex::kTVMFFIBytes,
             detail::StableHashBytes(src_data->v_bytes, src_data->small_str_len));
       }
       // this is POD data, we can just hash the value

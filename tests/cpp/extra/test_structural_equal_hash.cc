@@ -25,9 +25,12 @@
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ffi/extra/structural_hash.h>
+#include <tvm/ffi/extra/structural_key.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
+
+#include <unordered_map>
 
 #include "../testing_object.h"
 
@@ -53,6 +56,43 @@ Tensor MakeFilledTensor(const Shape& shape, float value) {
   // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound)
   for (int64_t i = 0; i < t.numel(); ++i) dst[i] = value;
   return t;
+}
+
+TEST(StructuralEqualHash, InlineAndHeapBytes) {
+  auto shapes = [](Any bytes) -> Array<Any> {
+    return {bytes,
+            Array<Any>{bytes},
+            Map<Any, Any>{{bytes, 5}},
+            Map<Any, Any>{{"value", bytes}},
+            Map<Any, Any>{{"outer", Map<Any, Any>{{bytes, Array<Any>{bytes}}}}},
+            Array<Any>{Map<Any, Any>{{bytes, bytes}}}};
+  };
+  for (const std::string& value :
+       {std::string(), std::string("abc"), std::string("a\0b", 3), std::string("\xff\x80", 2),
+        std::string("1234567"), std::string("12345678")}) {
+    Any inline_bytes = Bytes(value.data(), value.size());
+    Any heap_bytes = Bytes(std::string(value));
+    ASSERT_EQ(heap_bytes.type_index(), TypeIndex::kTVMFFIBytes);
+    Array<Any> inline_shapes = shapes(inline_bytes);
+    Array<Any> heap_shapes = shapes(heap_bytes);
+    for (size_t i = 0; i < inline_shapes.size(); ++i) {
+      Any lhs = inline_shapes[i], rhs = heap_shapes[i];
+      EXPECT_TRUE(StructuralEqual()(lhs, rhs));
+      EXPECT_EQ(StructuralHash()(lhs), StructuralHash()(rhs));
+      StructuralKey lhs_key(lhs), rhs_key(rhs);
+      EXPECT_EQ(lhs_key, rhs_key);
+      std::unordered_map<StructuralKey, int> cache;
+      cache[lhs_key] = 1;
+      cache[rhs_key] = 2;
+      EXPECT_EQ(cache.size(), 1U);
+      EXPECT_EQ(cache.at(lhs_key), 2);
+      Map<Any, Any> map;
+      map.Set(lhs_key, 1);
+      map.Set(rhs_key, 2);
+      EXPECT_EQ(map.size(), 1U);
+      EXPECT_EQ(map.at(lhs_key).cast<int>(), 2);
+    }
+  }
 }
 
 TEST(StructuralEqualHash, Array) {

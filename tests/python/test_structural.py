@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 import pytest
 import tvm_ffi
+import tvm_ffi.cpp
 import tvm_ffi.testing
 from tvm_ffi.dataclasses import Object, field, py_class
 
@@ -41,6 +42,52 @@ def test_structural_key_basic() -> None:
     assert hash(k1) == hash(k2)
     assert tvm_ffi.structural_equal(k1.key, k2.key)
     assert not tvm_ffi.structural_equal(k1.key, k3.key)
+
+
+def test_structural_key_inline_and_heap_bytes() -> None:
+    mod = tvm_ffi.cpp.load_inline(
+        name="test_structural_heap_bytes",
+        cpp_sources=r"""
+            #include <tvm/ffi/container/array.h>
+            #include <tvm/ffi/container/map.h>
+            #include <tvm/ffi/extra/structural_key.h>
+            #include <tvm/ffi/string.h>
+
+            tvm::ffi::Array<tvm::ffi::Any> byte_shapes(tvm::ffi::Bytes value, bool heap) {
+                using namespace tvm::ffi;
+                std::string data(value.data(), value.size());
+                Any bytes = heap ? Bytes(std::move(data)) : Bytes(data.data(), data.size());
+                return {Array<Any>{bytes}, Map<Any, Any>{{bytes, 5}},
+                        Map<Any, Any>{{"value", bytes}},
+                        Map<Any, Any>{{"outer", Map<Any, Any>{{bytes, Array<Any>{bytes}}}}},
+                        Array<Any>{Map<Any, Any>{{bytes, bytes}}}};
+            }
+
+            tvm::ffi::Map<tvm::ffi::Any, tvm::ffi::Any> native_insert(
+                tvm::ffi::Any lhs, tvm::ffi::Any rhs) {
+                using namespace tvm::ffi;
+                Map<Any, Any> map;
+                map.Set(StructuralKey(lhs), 1);
+                map.Set(StructuralKey(rhs), 2);
+                return map;
+            }
+        """,
+        functions=["byte_shapes", "native_insert"],
+    )
+    for value in (b"", b"abc", b"a\x00b", b"\xff\x80", b"1234567", b"12345678"):
+        inline_shapes = mod.byte_shapes(value, False)
+        heap_shapes = mod.byte_shapes(value, True)
+        pairs = [(inline_shapes, heap_shapes), *zip(inline_shapes, heap_shapes)]
+        for lhs, rhs in pairs:
+            assert tvm_ffi.structural_equal(lhs, rhs)
+            assert tvm_ffi.structural_hash(lhs) == tvm_ffi.structural_hash(rhs)
+            lhs_key = tvm_ffi.StructuralKey(lhs)
+            rhs_key = tvm_ffi.StructuralKey(rhs)
+            assert lhs_key == rhs_key
+            assert {lhs_key: "cached"}[rhs_key] == "cached"
+            native_map = mod.native_insert(lhs, rhs)
+            assert len(native_map) == 1
+            assert native_map[lhs_key] == 2
 
 
 def test_structural_helpers() -> None:
