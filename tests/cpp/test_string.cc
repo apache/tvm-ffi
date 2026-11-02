@@ -20,6 +20,8 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/string.h>
 
+#include <cstdint>
+
 namespace {
 
 using namespace tvm::ffi;
@@ -32,6 +34,31 @@ TEST(String, MoveFromStd) {
   string copy = string(s);
   EXPECT_EQ(copy, expect);
   EXPECT_EQ(source.size(), 0);  // NOLINT(bugprone-use-after-move)
+}
+
+TEST(String, MoveFromStdStorage) {
+  for (const std::string& expected : {std::string(), std::string("a\0b", 3), std::string(7, 'x'),
+                                      std::string(8, 'x'), std::string(64, 'x')}) {
+    std::string string_source = expected;
+    std::string bytes_source = expected;
+    const auto string_address = reinterpret_cast<std::uintptr_t>(string_source.data());
+    const auto bytes_address = reinterpret_cast<std::uintptr_t>(bytes_source.data());
+    String str(std::move(string_source));
+    Bytes bytes(std::move(bytes_source));
+    const bool small = expected.size() <= 7;
+    EXPECT_EQ(AnyView(str).type_index(),
+              small ? TypeIndex::kTVMFFISmallStr : TypeIndex::kTVMFFIStr);
+    EXPECT_EQ(AnyView(bytes).type_index(),
+              small ? TypeIndex::kTVMFFISmallBytes : TypeIndex::kTVMFFIBytes);
+    EXPECT_EQ(std::string(str), expected);
+    EXPECT_EQ(std::string(bytes), expected);
+    EXPECT_EQ(str.data()[str.size()], '\0');
+    EXPECT_EQ(bytes.data()[bytes.size()], '\0');
+    if (expected.size() == 64) {
+      EXPECT_EQ(reinterpret_cast<std::uintptr_t>(str.data()), string_address);
+      EXPECT_EQ(reinterpret_cast<std::uintptr_t>(bytes.data()), bytes_address);
+    }
+  }
 }
 
 TEST(String, CopyFromStd) {
