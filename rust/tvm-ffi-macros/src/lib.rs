@@ -44,6 +44,14 @@ pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The scrutinee may be an owned object handle, `Any`, or `AnyView`. Convert an
 /// already-borrowed object handle to `AnyView` before invoking the macro.
 ///
+/// Typed arms are checked conversions, not native Rust destructuring.
+/// `Handle(value)` converts to an owning handle. `NodeType(ref node)` borrows
+/// an `ObjectCore` node without acquiring ownership; the binding is `&NodeType`.
+/// For owning or custom matcher types, `Matcher(ref value)` retains the existing
+/// conversion and borrows its local result. Shared node matching cannot grant
+/// mutable access, and bindings remain bounded by the scrutinee/view borrow.
+/// Guards are evaluated in source order before selecting an arm.
+///
 /// Non-object values skip the typed patterns and use the `_` fallback.
 #[proc_macro_error]
 #[proc_macro]

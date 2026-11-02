@@ -454,6 +454,15 @@ fn may_fail(value: i32) -> Result<()> {
 }
 ```
 
+`match_any!` provides typed checked-conversion arms for object-backed values.
+`MyPair(pair)` produces an owning handle; `MyPairObj(ref node)` binds a shared
+`&MyPairObj` without increasing its reference count. These are macro arm
+conventions, not native Rust destructuring. An owning or custom matcher such as
+`MyPair(ref pair)` still converts to its own value and borrows that local result.
+Guards retain source order, and a borrowed node cannot outlive its view or grant
+mutable access. Eligible final node and owning patterns share the exact-type
+lookup optimization; other patterns use ordered checked conversions.
+
 ### Structural Walk and Visit
 
 Rust provides equivalents of the C++ `StructuralWalk`/`StructuralVisitor`

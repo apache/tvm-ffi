@@ -198,6 +198,9 @@ where
         .enumerate()
         .rev()
         .fold(fallback, |next, (arm_id, arm)| {
+            if let Some(binding) = shared_ref_binding(&arm.binding) {
+                return expand_ref_pattern_arm(tvm_ffi, arm, binding, view, next);
+            }
             let matcher = &arm.matcher;
             let matched = matched_arm(arm_id, arm);
             let conversion = expand_pattern_conversion(tvm_ffi, matcher, view);
@@ -212,6 +215,83 @@ where
                 }
             }
         })
+}
+
+fn shared_ref_binding(binding: &Pat) -> Option<&Ident> {
+    match binding {
+        Pat::Ident(binding)
+            if binding.by_ref.is_some()
+                && binding.mutability.is_none()
+                && binding.subpat.is_none() =>
+        {
+            Some(&binding.ident)
+        }
+        _ => None,
+    }
+}
+
+fn expand_ref_pattern_arm(
+    tvm_ffi: &TokenStream,
+    arm: &TypedArm,
+    binding: &Ident,
+    view: &Ident,
+    next: TokenStream,
+) -> TokenStream {
+    let holder = Ident::new("__tvm_ffi_match_any_ref_holder", Span::mixed_site());
+    let matcher = &arm.matcher;
+    let body = &arm.body;
+    let borrow = quote! {
+        #[allow(unused_variables)]
+        let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(&#holder);
+    };
+    let conversion = expand_ref_pattern_conversion(tvm_ffi, matcher, view);
+    if let Some(guard) = &arm.guard {
+        let converted = Ident::new("__tvm_ffi_match_any_ref_converted", Span::mixed_site());
+        let accepted = Ident::new("__tvm_ffi_match_any_ref_accepted", Span::mixed_site());
+        // Keep the guard binding out of the fallthrough scope. Preserve native
+        // guard control flow and emit the remaining arms only once.
+        quote! {{
+            let #converted = #conversion;
+            let #accepted = if let ::core::result::Result::Ok(#holder) = &#converted {
+                #[allow(unused_variables)]
+                let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(#holder);
+                #guard
+            } else {
+                false
+            };
+            if #accepted {
+                let #holder = #converted.as_ref().unwrap();
+                #[allow(unused_variables)]
+                let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(#holder);
+                #body
+            } else {
+                ::core::mem::drop(#converted);
+                #next
+            }
+        }}
+    } else {
+        quote! {
+            if let ::core::result::Result::Ok(#holder) = #conversion {
+                #borrow
+                #body
+            } else {
+                #next
+            }
+        }
+    }
+}
+
+fn expand_ref_pattern_conversion(
+    tvm_ffi: &TokenStream,
+    matcher: &Path,
+    view: &Ident,
+) -> TokenStream {
+    let probe = Ident::new("__tvm_ffi_match_any_ref_probe", Span::mixed_site());
+    quote! {{
+        use #tvm_ffi::match_any_internal::RefPatternConversion as _;
+        let #probe = #tvm_ffi::match_any_internal::PatternConversionProbe::<#matcher>::new();
+        (&&&#probe).try_convert_ref(&#view)
+    }}
 }
 
 fn expand_pattern_conversion(tvm_ffi: &TokenStream, matcher: &Path, view: &Ident) -> TokenStream {
@@ -263,18 +343,29 @@ fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ide
     let static_table = Ident::new("__TVM_FFI_MATCH_ANY_LEAF_TABLE", span);
     let table = Ident::new("__tvm_ffi_match_any_leaf_table", span);
     let arm_count = arms.len();
-    let pattern_list = arms
-        .iter()
-        .map(|arm| &arm.matcher)
-        .rev()
-        .fold(quote!(()), |tail, matcher| quote!((#matcher, #tail)));
+    let pattern_probe = arms.iter().rev().fold(
+        quote!(#tvm_ffi::match_any_internal::LeafPatternProbe::<()>::new()),
+        |tail, arm| {
+            let matcher = &arm.matcher;
+            let metadata = if shared_ref_binding(&arm.binding).is_some() {
+                quote!({
+                    use #tvm_ffi::match_any_internal::RefPatternConversion as _;
+                    let probe = #tvm_ffi::match_any_internal::PatternConversionProbe::<#matcher>::new();
+                    (&&&probe).leaf_pattern()
+                })
+            } else {
+                quote!(::core::marker::PhantomData::<#matcher>)
+            };
+            quote!(#tail.prepend(#metadata))
+        },
+    );
 
     quote! {
         {
             use #tvm_ffi::match_any_internal::LeafPatternMetadata as _;
 
             let #probe =
-                #tvm_ffi::match_any_internal::LeafPatternProbe::<#pattern_list>::new();
+                #pattern_probe;
             match (&#probe).leaf_pattern_list_id() {
                 ::core::option::Option::Some(#pattern_list_id) => {
                     static #static_table: ::std::sync::OnceLock<
@@ -316,7 +407,11 @@ fn expand_direct_leaf_selection(
         let matcher = &arm.matcher;
         let variant = &arm_variants[arm_id];
         let arm_constant = &arm_constants[arm_id];
-        let conversion = expand_exact_pattern_conversion(tvm_ffi, matcher, view);
+        let conversion = if shared_ref_binding(&arm.binding).is_some() {
+            expand_ref_pattern_conversion(tvm_ffi, matcher, view)
+        } else {
+            expand_exact_pattern_conversion(tvm_ffi, matcher, view)
+        };
 
         quote! {
             #arm_constant => {
@@ -355,6 +450,16 @@ fn expand_leaf_body_dispatch(
         let binding = &arm.binding;
         let body = &arm.body;
         let variant = &arm_variants[arm_id];
+        if let Some(binding) = shared_ref_binding(binding) {
+            let holder = Ident::new("__tvm_ffi_match_any_ref_holder", Span::mixed_site());
+            let matcher = &arm.matcher;
+            return quote! {
+                #selected_enum::#variant(#holder) => {
+                    let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(&#holder);
+                    #body
+                }
+            };
+        }
 
         quote! {
             #selected_enum::#variant(#binding) => {
@@ -410,19 +515,22 @@ fn expand_leaf_lookup_match(
                 }
             });
     let lookup_arm_id = expand_leaf_table_lookup(tvm_ffi, arms, &view);
-    let ordered_selection = expand_ordered_try_into_chain(
-        tvm_ffi,
-        arms,
+    let ordered_selection = arms.iter().enumerate().rev().fold(
         quote!(#selected_enum::#fallback_variant),
-        &view,
-        &rejected,
-        |arm_id, _| {
+        |next, (arm_id, arm)| {
             let variant = &arm_variants[arm_id];
-            quote!(
-                ::core::result::Result::Ok(#selected_value) => {
+            let conversion = if shared_ref_binding(&arm.binding).is_some() {
+                expand_ref_pattern_conversion(tvm_ffi, &arm.matcher, &view)
+            } else {
+                expand_pattern_conversion(tvm_ffi, &arm.matcher, &view)
+            };
+            quote! {
+                if let ::core::result::Result::Ok(#selected_value) = #conversion {
                     #selected_enum::#variant(#selected_value)
+                } else {
+                    #next
                 }
-            )
+            }
         },
     );
 
