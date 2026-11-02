@@ -34,6 +34,31 @@ TEST(String, MoveFromStd) {
   EXPECT_EQ(source.size(), 0);  // NOLINT(bugprone-use-after-move)
 }
 
+TEST(String, MoveFromStdStorage) {
+  for (const std::string& expected : {std::string(), std::string("a\0b", 3), std::string(7, 'x'),
+                                      std::string(8, 'x'), std::string(64, 'x')}) {
+    std::string string_source = expected;
+    std::string bytes_source = expected;
+    const char* string_data = string_source.data();
+    const char* bytes_data = bytes_source.data();
+    String str(std::move(string_source));
+    Bytes bytes(std::move(bytes_source));
+    const bool small = expected.size() <= 7;
+    EXPECT_EQ(AnyView(str).type_index(),
+              small ? TypeIndex::kTVMFFISmallStr : TypeIndex::kTVMFFIStr);
+    EXPECT_EQ(AnyView(bytes).type_index(),
+              small ? TypeIndex::kTVMFFISmallBytes : TypeIndex::kTVMFFIBytes);
+    EXPECT_EQ(std::string(str), expected);
+    EXPECT_EQ(std::string(bytes), expected);
+    EXPECT_EQ(str.data()[str.size()], '\0');
+    EXPECT_EQ(bytes.data()[bytes.size()], '\0');
+    if (expected.size() == 64) {
+      EXPECT_EQ(str.data(), string_data);
+      EXPECT_EQ(bytes.data(), bytes_data);
+    }
+  }
+}
+
 TEST(String, CopyFromStd) {
   using namespace std;
   string source = "this is a string";

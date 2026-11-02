@@ -185,7 +185,13 @@ class BytesBaseCell {
   }
 
   template <typename LargeObj>
-  void InitFromStd(std::string&& other, int32_t large_type_index) {
+  void InitFromStd(std::string&& other, int32_t small_type_index, int32_t large_type_index) {
+    if (other.size() <= kMaxSmallBytesLen) {
+      char* dest_data =
+          InitSpaceForSize<LargeObj>(other.size(), small_type_index, large_type_index);
+      std::memcpy(dest_data, other.c_str(), other.size() + 1);
+      return;
+    }
     // needs to be reset to none first for exception safety
     data_.type_index = TypeIndex::kTVMFFINone;
     data_.zero_padding = 0;
@@ -205,7 +211,6 @@ class BytesBaseCell {
    */
   template <typename LargeObj>
   char* InitSpaceForSize(size_t size, int32_t small_type_index, int32_t large_type_index) {
-    size_t kMaxSmallBytesLen = sizeof(int64_t) - 1;
     // first zero the content, this is important for exception safety
     data_.type_index = small_type_index;
     data_.zero_padding = 0;
@@ -255,6 +260,7 @@ class BytesBaseCell {
   }
 
  private:
+  static constexpr size_t kMaxSmallBytesLen = sizeof(int64_t) - 1;
   explicit BytesBaseCell(TVMFFIAny data) : data_(data) {}
   /*! \brief internal backing data */
   TVMFFIAny data_;
@@ -297,7 +303,8 @@ class Bytes {
    * \param other a char array.
    */
   Bytes(std::string&& other) {  // NOLINT(*)
-    data_.InitFromStd<detail::BytesObj>(std::move(other), TypeIndex::kTVMFFIBytes);
+    data_.InitFromStd<detail::BytesObj>(std::move(other), TypeIndex::kTVMFFISmallBytes,
+                                        TypeIndex::kTVMFFIBytes);
   }
   /*!
    * \brief Swap this String with another string
@@ -498,7 +505,8 @@ class String {
   String(std::string&& other) {  // NOLINT(*)
     // exception safety, first set to none so if exception is thrown
     // destructor works correctly
-    data_.InitFromStd<detail::StringObj>(std::move(other), TypeIndex::kTVMFFIStr);
+    data_.InitFromStd<detail::StringObj>(std::move(other), TypeIndex::kTVMFFISmallStr,
+                                         TypeIndex::kTVMFFIStr);
   }
 
   /*!
