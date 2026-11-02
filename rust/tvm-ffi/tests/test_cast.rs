@@ -151,16 +151,34 @@ fn test_borrowed_node_cast_preserves_reference_count() {
         .unwrap();
     let strong_count = ObjectArc::strong_count(TestBase::data(&base));
 
-    let derived = base.as_node::<TestDerivedObj>().unwrap();
+    let derived = base.downcast_ref::<TestDerivedObj>().unwrap();
     assert_eq!(derived.base.value, 7);
     assert_eq!(derived.extra, 8);
-    let base_node = base.as_node::<TestBaseObj>().unwrap();
+    let base_node = base.downcast_ref::<TestBaseObj>().unwrap();
     assert_eq!(base_node.value, 7);
     assert_eq!(ObjectArc::strong_count(TestBase::data(&base)), strong_count);
 
     let base_only = new_base(1, delete_counter.clone());
-    assert!(base_only.as_node::<TestDerivedObj>().is_none());
+    assert!(base_only.downcast_ref::<TestDerivedObj>().is_none());
     assert_eq!(ObjectArc::strong_count(TestBase::data(&base_only)), 1);
+
+    let any = Any::from(base);
+    let view = AnyView::from(&any);
+    let derived = any.downcast_ref::<TestDerivedObj>().unwrap();
+    assert!(std::ptr::eq(
+        view.downcast_ref::<TestDerivedObj>().unwrap(),
+        derived
+    ));
+    assert_eq!(view.downcast_ref::<TestBaseObj>().unwrap().value, 7);
+    assert!(any.downcast_ref::<Object>().is_some());
+    assert_eq!(any.debug_strong_count(), Some(1));
+    assert_eq!(derived.extra, 8);
+
+    let base_only = Any::from(base_only);
+    assert!(base_only.downcast_ref::<TestDerivedObj>().is_none());
+    assert!(AnyView::from(&base_only)
+        .downcast_ref::<TestDerivedObj>()
+        .is_none());
 }
 
 #[test]
