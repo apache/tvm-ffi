@@ -33,44 +33,6 @@ use crate::type_traits::{AnyCompatible, ContainerElement};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Unchanged;
 
-// SAFETY: the unchanged ABI tag has no payload or owned resources.
-unsafe impl AnyCompatible for Unchanged {
-    unsafe fn copy_to_any_view(_src: &Self, data: &mut TVMFFIAny) {
-        *data = TVMFFIAny::new();
-        data.type_index = TVMFFITypeIndex::kTVMFFIUnchanged as i32;
-    }
-
-    unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-        Self::copy_to_any_view(&src, data);
-    }
-
-    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        data.type_index == TVMFFITypeIndex::kTVMFFIUnchanged as i32
-    }
-
-    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {
-        Self
-    }
-
-    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {
-        Self
-    }
-
-    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
-        Self::check_any_strict(data).then_some(Self).ok_or(())
-    }
-
-    fn type_str() -> std::string::String {
-        "Unchanged".into()
-    }
-
-    fn type_schema() -> std::string::String {
-        crate::type_traits::type_schema("ffi.Unchanged", &[])
-    }
-}
-
-crate::impl_try_from_any!(Unchanged);
-
 /// A typed replacement or an [`Unchanged`] marker, stored in one FFI Any cell.
 ///
 /// `T` may be an FFI value type or [`Any`]. Use `Result<UnchangedOr<T>>` to
@@ -225,6 +187,69 @@ impl<T: ContainerElement> Clone for UnchangedOr<T> {
     }
 }
 
+impl<T: ContainerElement> TryFrom<Any> for UnchangedOr<T> {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: Any) -> Result<Self> {
+        TryFromTemp::<Self>::try_from(value).map(TryFromTemp::into_value)
+    }
+}
+
+impl<'a, T: ContainerElement> TryFrom<AnyView<'a>> for UnchangedOr<T> {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: AnyView<'a>) -> Result<Self> {
+        TryFromTemp::<Self>::try_from(value).map(TryFromTemp::into_value)
+    }
+}
+
+#[inline]
+pub(crate) fn is_unchanged(value: &Any) -> bool {
+    value.type_index() == TVMFFITypeIndex::kTVMFFIUnchanged as i32
+}
+
+// -----------------------------------------------------------------------------
+// AnyCompatible: low-level FFI carrier conversions.
+// -----------------------------------------------------------------------------
+
+// SAFETY: the unchanged ABI tag has no payload or owned resources.
+unsafe impl AnyCompatible for Unchanged {
+    unsafe fn copy_to_any_view(_src: &Self, data: &mut TVMFFIAny) {
+        *data = TVMFFIAny::new();
+        data.type_index = TVMFFITypeIndex::kTVMFFIUnchanged as i32;
+    }
+
+    unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
+        Self::copy_to_any_view(&src, data);
+    }
+
+    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
+        data.type_index == TVMFFITypeIndex::kTVMFFIUnchanged as i32
+    }
+
+    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {
+        Self
+    }
+
+    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {
+        Self
+    }
+
+    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
+        Self::check_any_strict(data).then_some(Self).ok_or(())
+    }
+
+    fn type_str() -> std::string::String {
+        "Unchanged".into()
+    }
+
+    fn type_schema() -> std::string::String {
+        crate::type_traits::type_schema("ffi.Unchanged", &[])
+    }
+}
+
+crate::impl_try_from_any!(Unchanged);
+
 // SAFETY: the carrier contains either the resource-free marker or exactly
 // T's owning representation. Borrowing never acquires ownership; moving
 // transfers the carrier once. Non-strict conversions materialize a valid T.
@@ -282,25 +307,4 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
     fn type_schema() -> std::string::String {
         crate::type_traits::type_schema("UnchangedOr", &[T::container_type_schema()])
     }
-}
-
-impl<T: ContainerElement> TryFrom<Any> for UnchangedOr<T> {
-    type Error = Error;
-    #[inline]
-    fn try_from(value: Any) -> Result<Self> {
-        TryFromTemp::<Self>::try_from(value).map(TryFromTemp::into_value)
-    }
-}
-
-impl<'a, T: ContainerElement> TryFrom<AnyView<'a>> for UnchangedOr<T> {
-    type Error = Error;
-    #[inline]
-    fn try_from(value: AnyView<'a>) -> Result<Self> {
-        TryFromTemp::<Self>::try_from(value).map(TryFromTemp::into_value)
-    }
-}
-
-#[inline]
-pub(crate) fn is_unchanged(value: &Any) -> bool {
-    value.type_index() == TVMFFITypeIndex::kTVMFFIUnchanged as i32
 }
