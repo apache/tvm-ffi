@@ -93,7 +93,7 @@ pub enum ByMapDispatch {}
 impl<'a, V: MapDispatch> IntoMapper<ByMapDispatch> for &'a mut V {
     type Mapper = DispatchMapper<'a, V>;
 
-    #[inline]
+    #[inline(always)]
     fn into_mapper(self) -> Self::Mapper {
         DispatchMapper(self)
     }
@@ -180,7 +180,7 @@ where
     T: crate::type_traits::AnyCompatible,
     O: IntoMutateResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
@@ -201,7 +201,7 @@ where
     T: crate::type_traits::AnyCompatible,
     O: IntoMutateResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
@@ -222,7 +222,7 @@ where
     N: ObjectCore,
     O: IntoMutateResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
@@ -243,7 +243,7 @@ where
     N: ObjectCore,
     O: IntoMutateResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
@@ -263,7 +263,7 @@ where
     F: for<'a> FnMut(AnyView<'a>) -> O,
     O: IntoMutateResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
@@ -281,7 +281,7 @@ where
     F: for<'a> FnMut(AnyView<'a>, DefRegionKind) -> O,
     O: IntoMutateResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
@@ -298,7 +298,7 @@ pub struct ByMapChainLink<Markers>(PhantomData<fn(Markers)>);
 pub enum ByMapDispatchLink {}
 
 impl<V: MapDispatch> MapChainLink<ByMapDispatchLink> for &mut V {
-    #[inline]
+    #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
@@ -316,7 +316,7 @@ pub struct MapChain<Link, Marker> {
 }
 
 impl<Link, Marker> MapChain<Link, Marker> {
-    #[inline]
+    #[inline(always)]
     fn new(link: Link) -> Self {
         MapChain {
             link,
@@ -352,7 +352,7 @@ macro_rules! impl_map_chain_link {
         where
             $($F: MapChainLink<$M>,)+
         {
-            #[inline]
+            #[inline(always)]
             fn try_map(
                 &mut self,
                 value: AnyView<'_>,
@@ -373,7 +373,7 @@ macro_rules! impl_map_chain_link {
         {
             type Mapper = MapChain<($($F,)+), ByMapChainLink<($($M,)+)>>;
 
-            #[inline]
+            #[inline(always)]
             fn into_mapper(self) -> Self::Mapper {
                 MapChain::new(self)
             }
@@ -394,7 +394,7 @@ macro_rules! impl_bare_map_link {
             {
                 type Mapper = MapChain<F, $marker<T>>;
 
-                #[inline]
+                #[inline(always)]
                 fn into_mapper(self) -> Self::Mapper {
                     MapChain::new(self)
                 }
@@ -417,7 +417,7 @@ where
 {
     type Mapper = MapChain<F, ByMapCatchAll>;
 
-    #[inline]
+    #[inline(always)]
     fn into_mapper(self) -> Self::Mapper {
         MapChain::new(self)
     }
@@ -430,7 +430,7 @@ where
 {
     type Mapper = MapChain<F, ByMapCatchAllKind>;
 
-    #[inline]
+    #[inline(always)]
     fn into_mapper(self) -> Self::Mapper {
         MapChain::new(self)
     }
@@ -479,6 +479,7 @@ impl<'v, 'c, 'r, 'a, D: MapDispatch, const PRE_ORDER: bool>
 }
 
 impl<D: MapDispatch, const PRE_ORDER: bool> NativeMapper<'_, D, PRE_ORDER> {
+    #[inline(always)]
     fn map_current(
         &mut self,
         value: MutationView<'_>,

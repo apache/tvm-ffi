@@ -25,6 +25,7 @@ use crate::reflection::FieldGetter;
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeKeyToIndex};
 
 /// Add one structural traversal frame to an error's backtrace.
+#[cold]
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
 }
@@ -150,7 +151,7 @@ pub(crate) use impl_callback_chain_tuple_arities;
 /// Raw string/byte views and `ObjectRValueRef` return `None` because they need
 /// the runtime's normalization or move logic. A null object pointer also
 /// returns `None` instead of constructing an invalid owning value.
-#[inline]
+#[inline(always)]
 pub(crate) fn try_to_owned_without_normalization(raw: TVMFFIAny) -> Option<Any> {
     if is_plain_inline(raw.type_index) {
         return Some(unsafe { Any::from_raw_ffi_any(raw) });
@@ -168,7 +169,7 @@ pub(crate) fn try_to_owned_without_normalization(raw: TVMFFIAny) -> Option<Any> 
 
 pub(crate) use crate::any::is_plain_inline;
 
-#[inline]
+#[inline(always)]
 pub(crate) fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
     lhs.type_index == rhs.type_index
         && lhs.small_str_len == rhs.small_str_len

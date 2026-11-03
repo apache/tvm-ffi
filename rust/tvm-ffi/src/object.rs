@@ -625,7 +625,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// `ptr` must own one strong reference to a live, stable managed allocation
     /// whose dynamic type is compatible with `T` and whose payload is valid.
     /// Ownership of that reference is transferred into the returned handle.
-    #[inline]
+    #[inline(always)]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self {
             ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
@@ -640,7 +640,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     ///
     /// # Returns
     /// * `*const T` - The raw pointer
-    #[inline]
+    #[inline(always)]
     pub unsafe fn into_raw(this: Self) -> *const T {
         let droped_this = std::mem::ManuallyDrop::new(this);
         droped_this.ptr.as_ptr() as *const T
@@ -719,6 +719,7 @@ impl<T: ObjectCore> Deref for ObjectArc<T> {
 
 // implement Drop for ObjectArc
 impl<T: ObjectCore> Drop for ObjectArc<T> {
+    #[inline(always)]
     fn drop(&mut self) {
         unsafe { unsafe_::dec_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }

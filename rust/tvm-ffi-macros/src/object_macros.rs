@@ -165,7 +165,18 @@ pub(crate) fn expand_object(
                             tindex
                         }
                     );
-                    *TYPE_INDEX
+                    // Keep Once's initialization descriptors in the cold helper,
+                    // rather than in every inlined runtime type-index caller.
+                    #[cold]
+                    #[inline(never)]
+                    fn initialize_type_index() -> i32 {
+                        *std::sync::LazyLock::force(&TYPE_INDEX)
+                    }
+                    if let Some(index) = std::sync::LazyLock::get(&TYPE_INDEX) {
+                        *index
+                    } else {
+                        initialize_type_index()
+                    }
                 }
             }
         }
@@ -191,7 +202,18 @@ pub(crate) fn expand_object(
                             tindex
                         }
                     );
-                    *TYPE_INDEX
+                    // Keep Once's initialization descriptors in the cold helper,
+                    // rather than in every inlined runtime type-index caller.
+                    #[cold]
+                    #[inline(never)]
+                    fn initialize_type_index() -> i32 {
+                        *std::sync::LazyLock::force(&TYPE_INDEX)
+                    }
+                    if let Some(index) = std::sync::LazyLock::get(&TYPE_INDEX) {
+                        *index
+                    } else {
+                        initialize_type_index()
+                    }
                 }
             }
         }
