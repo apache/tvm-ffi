@@ -60,8 +60,8 @@ pub use crate::extra::structural_mutate::{
     StructuralMutatorBase, StructuralMutatorObj, StructuralMutatorView, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, DefRegionKind, IntoVisitor, StructuralVisitor, StructuralVisitorBase,
-    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt,
+    structural_visit, DefRegionKind, IntoVisitor, StructuralVisitorObj, StructuralVisitorView,
+    VisitInterrupt, VisitInterruptObj,
 };
 pub use crate::extra::structural_walk::{
     structural_walk, IntoWalkResult, IntoWalker, WalkChainLink, WalkOrder, WalkResult,

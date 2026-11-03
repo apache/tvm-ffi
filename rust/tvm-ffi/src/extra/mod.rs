@@ -17,6 +17,7 @@
  * under the License.
  */
 pub mod dispatch;
+pub mod marker;
 pub mod module;
 mod structural_common;
 pub mod structural_map;

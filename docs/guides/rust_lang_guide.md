@@ -578,11 +578,28 @@ let found = structural_walk(
     },
     WalkOrder::PreOrder,
 )?;
-assert_eq!(found.map(|i| i64::try_from(i.value).unwrap()), Some(2));
+assert_eq!(found.map(|i| i.value.try_as::<i64>().unwrap()), Some(2));
 ```
 
-`structural_visit` accepts a dispatcher, owned or borrowed. Pass state belongs
-on `self`; matching handlers control recursion through `StructuralVisitorView<'_, Self>`.
+`VisitInterrupt` is the owning object reference for `VisitInterruptObj`, matching
+its native FFI representation. Construct it with `VisitInterrupt::with(payload)`;
+`interrupt.value` reads the shared payload. Unlike the former payload-only struct,
+it cannot be constructed with a struct literal or have its payload moved out or
+replaced through the reference. Borrow the payload for conversion, as above, or
+clone it when a separate owner is needed. Converting an interrupt to or from `Any`
+transfers the same interrupt object, including when its payload is `None` or `Error`.
+
+Visitor and walker callbacks must return failures through `Result` and must not
+panic. They do not catch or resume panics across native frames: a panic reaching
+the non-unwinding `extern "C"` callback boundary aborts the process.
+
+`structural_visit` accepts owned or mutably borrowed dispatchers. Pass `&mut D`
+to retain the dispatcher and inspect its state after traversal; an owned value is
+held in the outer call and uses the same borrowed engine. Custom bases accept
+both forms through `StructuralVisitor::new(base, dispatcher)`. Visitor and mutator
+entry points share the compile-time `tvm_ffi::extra::marker::{Owned, Borrowed}` selectors;
+these add no runtime storage. Pass state belongs on `self`; matching handlers
+control recursion through `StructuralVisitorView<'_, Self>`.
 Unmatched values use default child traversal. Walk continues to accept both
 dispatchers and closures.
 

@@ -18,9 +18,6 @@
  */
 
 use std::cell::{Cell, RefCell};
-use tvm_ffi::extra::structural_visit::{
-    StructuralVisitor, StructuralVisitorBase, StructuralVisitorObj,
-};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, AnyView, Array, DLDataType,
@@ -31,48 +28,6 @@ use tvm_ffi::{
 
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
-}
-
-#[repr(C, align(64))]
-struct ScopedVisitBase<'a> {
-    base: StructuralVisitorObj,
-    depth: &'a Cell<usize>,
-    calls: &'a Cell<usize>,
-}
-
-impl<'a> ScopedVisitBase<'a> {
-    fn new(depth: &'a Cell<usize>, calls: &'a Cell<usize>) -> Self {
-        Self {
-            base: StructuralVisitorObj::default(),
-            depth,
-            calls,
-        }
-    }
-}
-
-// SAFETY: the exact ABI prefix is first; only copied external Cell references
-// survive recursive calls, and the scope guard restores state on every exit.
-unsafe impl StructuralVisitorBase for ScopedVisitBase<'_> {
-    unsafe fn default_visit<D>(
-        this: *mut Self,
-        dispatch: &mut D,
-        value: AnyView<'_>,
-        visitor: &mut StructuralVisitorView<'_, D>,
-    ) -> Result<Option<VisitInterrupt>> {
-        assert_eq!(this.addr() % 64, 0);
-        let depth = (*this).depth;
-        let previous = depth.get();
-        depth.set(previous + 1);
-        (*this).calls.set((*this).calls.get() + 1);
-        struct Restore<'a>(&'a Cell<usize>, usize);
-        impl Drop for Restore<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.1);
-            }
-        }
-        let _restore = Restore(depth, previous);
-        StructuralVisitorObj::default_visit(dispatch, value, visitor)
-    }
 }
 
 // Nested recursion restores regions after normal, interrupt, error and panic exits.
@@ -156,18 +111,12 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
             seen: vec![],
             regions: vec![],
         };
-        let depth = Cell::new(0);
-        let defaults = Cell::new(0);
-        let result = structural_visit(
-            &Array::new(vec![1_i64, 5]),
-            StructuralVisitor::new(ScopedVisitBase::new(&depth, &defaults), &mut visitor),
-        );
-        assert_eq!(depth.get(), 0);
-        assert_eq!(defaults.get(), 1);
+        let result = structural_visit(&Array::new(vec![1_i64, 5]), &mut visitor);
+
         match outcome {
             Outcome::Finish => assert!(result.unwrap().is_none()),
             Outcome::Interrupt => {
-                assert_eq!(i64::try_from(result.unwrap().unwrap().value).unwrap(), 42)
+                assert_eq!(result.unwrap().unwrap().value.try_as::<i64>().unwrap(), 42)
             }
             Outcome::Error => assert!(result.err().unwrap().to_string().contains("descent failed")),
         }
@@ -577,7 +526,7 @@ fn primitive_fast_path_preserves_none_interrupt_and_error() {
     )
     .unwrap()
     .unwrap();
-    assert_eq!(i64::try_from(interrupt.value).unwrap(), 9);
+    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 9);
 
     let error = match structural_walk(
         &1i64,
@@ -635,7 +584,7 @@ fn interrupt_payload_crosses_map_traversal() {
     let Some(interrupt) = outcome else {
         panic!("map walk unexpectedly completed");
     };
-    assert_eq!(i64::try_from(interrupt.value).unwrap(), 99);
+    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 99);
 }
 
 #[test]
@@ -823,7 +772,7 @@ fn generated_visitor_can_drive_recursion_through_mut_self() {
     let root = Array::new(vec![1i64, 2, 3]);
     let mut visitor = GeneratedRecursiveVisitor::default();
     let interrupt = structural_visit(&root, &mut visitor).unwrap().unwrap();
-    assert_eq!(i64::try_from(interrupt.value).unwrap(), 2);
+    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 2);
     assert_eq!(visitor.events, vec!["enter:array", "int:1", "int:2"]);
 }
 
@@ -1070,7 +1019,7 @@ fn interrupt_payload_is_returned_to_the_caller() {
     let Some(interrupt) = outcome else {
         panic!("walk unexpectedly completed");
     };
-    assert_eq!(i64::try_from(interrupt.value).unwrap(), 42);
+    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 42);
 }
 
 #[test]
@@ -1151,26 +1100,6 @@ fn visitor_errors_include_native_visit_path() {
 }
 
 #[test]
-fn callback_panics_resume_after_the_registered_hook_returns() {
-    let root = Array::new(vec![1i64]);
-    let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        structural_walk(
-            &root,
-            |_value: i64| -> WalkResult { panic!("visitor panic") },
-            WalkOrder::PreOrder,
-        )
-    })) {
-        Err(panic) => panic,
-        Ok(_) => panic!("panicking visitor unexpectedly returned"),
-    };
-    let message = panic
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
-    assert_eq!(message, Some("visitor panic"));
-}
-
-#[test]
 fn visitor_interrupt_propagates_through_default_children() {
     struct InterruptingVisitor;
 
@@ -1200,7 +1129,7 @@ fn visitor_interrupt_propagates_through_default_children() {
     let Some(interrupt) = outcome else {
         panic!("visitor traversal unexpectedly completed");
     };
-    assert_eq!(i64::try_from(interrupt.value).unwrap(), 7);
+    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 7);
 }
 
 #[test]
@@ -1703,28 +1632,16 @@ fn callback_visit_defaults_only_when_no_link_matches() {
     }
     let root = Array::new(vec![1i64, 2]);
     let integers = Cell::new(0);
-    let depth = Cell::new(0);
-    let defaults = Cell::new(0);
-    assert!(structural_visit(
-        &root,
-        StructuralVisitor::new(ScopedVisitBase::new(&depth, &defaults), Integers(&integers)),
-    )
-    .unwrap()
-    .is_none());
-    assert_eq!(depth.get(), 0);
-    assert_eq!(defaults.get(), 1);
+    assert!(structural_visit(&root, Integers(&integers),)
+        .unwrap()
+        .is_none());
+
     assert_eq!(integers.get(), 3);
     let integers = Cell::new(0);
-    assert!(structural_visit(
-        &root,
-        StructuralVisitor::new(
-            ScopedVisitBase::new(&depth, &defaults),
-            SkipArray(&integers)
-        ),
-    )
-    .unwrap()
-    .is_none());
-    assert_eq!(defaults.get(), 1);
+    assert!(structural_visit(&root, SkipArray(&integers),)
+        .unwrap()
+        .is_none());
+
     assert_eq!(integers.get(), 0);
 }
 
@@ -1861,7 +1778,7 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
     let root = Array::new(vec![1i64, 2, 3]);
     let fallback = Cell::new(0);
     let interrupted = structural_visit(&root, Stop(&fallback)).unwrap().unwrap();
-    assert_eq!(i64::try_from(interrupted.value).unwrap(), 2);
+    assert_eq!(interrupted.value.try_as::<i64>().unwrap(), 2);
     assert_eq!(fallback.get(), 1);
 }
 
@@ -1999,44 +1916,32 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
         checked: false,
         calls: 0,
     };
-    let depth = Cell::new(0);
-    let defaults = Cell::new(0);
-    structural_visit(
-        &aligned_root,
-        StructuralVisitor::new(ScopedVisitBase::new(&depth, &defaults), &mut borrowed),
-    )
-    .unwrap();
+    structural_visit(&aligned_root, &mut borrowed).unwrap();
     assert_eq!(borrowed.calls, 3);
-    assert_eq!(defaults.get(), 3);
-    assert_eq!(depth.get(), 0);
+
     structural_visit(
         &aligned_root,
-        StructuralVisitor::new(
-            ScopedVisitBase::new(&depth, &defaults),
-            Aligned {
-                checked: false,
-                calls: 0,
-            },
-        ),
+        Aligned {
+            checked: false,
+            calls: 0,
+        },
     )
     .unwrap();
-    assert_eq!(defaults.get(), 6);
-    assert_eq!(depth.get(), 0);
+
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let observed = RefCell::new(Vec::new());
         structural_walk(
             &Array::new(vec![Any::from(Array::new(vec![1_i64]))]),
-            StructuralVisitor::new(ScopedVisitBase::new(&depth, &defaults), |value: i64| {
-                observed.borrow_mut().push((value, depth.get()));
+            |value: i64| {
+                observed.borrow_mut().push(value);
                 WalkResult::Advance
-            }),
+            },
             order,
         )
         .unwrap();
-        assert_eq!(*observed.borrow(), vec![(1, 2)]);
-        assert_eq!(depth.get(), 0);
+        assert_eq!(*observed.borrow(), vec![1]);
     }
-    assert_eq!(defaults.get(), 12);
+
     struct Inner<'a>(&'a RefCell<Vec<i64>>);
     #[dispatch(
         visit,
@@ -2058,7 +1963,6 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
         entered: &'a Cell<bool>,
         outer_values: &'a RefCell<Vec<i64>>,
         inner_values: &'a RefCell<Vec<i64>>,
-        depth: &'a Cell<usize>,
     }
     #[dispatch(
         visit,
@@ -2075,9 +1979,7 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
                 self.outer_values.borrow_mut().push(value);
             }
             if !self.entered.replace(true) {
-                let before = self.depth.get();
                 structural_visit(self.inner, Inner(self.inner_values))?;
-                assert_eq!(self.depth.get(), before);
             }
             visitor.default_visit(self, &value)
         }
@@ -2089,90 +1991,17 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
     let inner_values = RefCell::new(Vec::new());
     assert!(structural_visit(
         &outer,
-        StructuralVisitor::new(
-            ScopedVisitBase::new(&depth, &defaults),
-            Outer {
-                inner: &inner,
-                entered: &entered_inner,
-                outer_values: &outer_values,
-                inner_values: &inner_values,
-                depth: &depth,
-            }
-        )
+        Outer {
+            inner: &inner,
+            entered: &entered_inner,
+            outer_values: &outer_values,
+            inner_values: &inner_values,
+        }
     )
     .unwrap()
     .is_none());
     assert_eq!(*outer_values.borrow(), vec![10, 20]);
     assert_eq!(*inner_values.borrow(), vec![1, 2]);
-    assert_eq!(depth.get(), 0);
-    assert_eq!(defaults.get(), 15);
-}
-
-#[test]
-fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
-    struct Panic<'a>(&'a Cell<bool>);
-    #[dispatch(
-        visit,
-        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
-        Result<Option<VisitInterrupt>>
-    )]
-    impl<'a> Panic<'a> {
-        fn visit_integer(
-            &mut self,
-            _: i64,
-            _: &mut StructuralVisitorView<'_, Self>,
-        ) -> Result<Option<VisitInterrupt>> {
-            self.0.set(true);
-            panic!("callback visitor panic")
-        }
-    }
-    struct Count<'a>(&'a Cell<i32>);
-    #[dispatch(
-        visit,
-        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
-        Result<Option<VisitInterrupt>>
-    )]
-    impl<'a> Count<'a> {
-        fn visit_integer(
-            &mut self,
-            _: i64,
-            _: &mut StructuralVisitorView<'_, Self>,
-        ) -> Result<Option<VisitInterrupt>> {
-            self.0.set(self.0.get() + 1);
-            Ok(None)
-        }
-    }
-    let root = Array::new(vec![1i64]);
-    let entered_callback = Cell::new(false);
-    let depth = Cell::new(0);
-    let defaults = Cell::new(0);
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        structural_visit(
-            &root,
-            StructuralVisitor::new(
-                ScopedVisitBase::new(&depth, &defaults),
-                Panic(&entered_callback),
-            ),
-        )
-    }));
-    assert_eq!(depth.get(), 0);
-    assert_eq!(defaults.get(), 1);
-    assert!(
-        entered_callback.get(),
-        "panicking callback visitor was never called"
-    );
-    let panic = match outcome {
-        Err(panic) => panic,
-        Ok(Err(error)) => panic!("panicking callback visitor returned an error: {error}"),
-        Ok(Ok(_)) => panic!("panicking callback visitor unexpectedly returned"),
-    };
-    assert_eq!(
-        panic.downcast_ref::<&str>().copied(),
-        Some("callback visitor panic")
-    );
-    let calls = Cell::new(0);
-    assert!(structural_visit(&root, Count(&calls)).unwrap().is_none());
-    assert_eq!(calls.get(), 1);
 }
 
 #[test]
@@ -2271,77 +2100,56 @@ fn generic_dispatch_distinguishes_no_match_from_handler_outcomes() {
 }
 
 #[test]
-fn managed_walk_preserves_borrowed_base_address_and_drop_on_all_exits() {
-    #[repr(C, align(64))]
-    struct Base<'a, const N: usize> {
-        base: StructuralVisitorObj,
-        padding: [u8; N],
+fn managed_walk_preserves_observer_address_and_drop_on_all_exits() {
+    #[repr(align(64))]
+    struct Storage<'a, const N: usize> {
+        _padding: [u8; N],
         address: &'a Cell<usize>,
         drops: &'a Cell<usize>,
     }
-    impl<const N: usize> Drop for Base<'_, N> {
+    impl<const N: usize> Drop for Storage<'_, N> {
         fn drop(&mut self) {
             self.drops.set(self.drops.get() + 1);
-        }
-    }
-    // SAFETY: the ABI prefix is first and only copied external Cell references
-    // are used across recursion. The observed address never escapes the test.
-    unsafe impl<const N: usize> StructuralVisitorBase for Base<'_, N> {
-        unsafe fn default_visit<D>(
-            this: *mut Self,
-            dispatch: &mut D,
-            value: AnyView<'_>,
-            visitor: &mut StructuralVisitorView<'_, D>,
-        ) -> Result<Option<VisitInterrupt>> {
-            assert_eq!(this.addr() % 64, 0);
-            let address = (*this).address;
-            if address.get() == 0 {
-                address.set(this.addr());
-            }
-            assert_eq!(address.get(), this.addr());
-            StructuralVisitorObj::default_visit(dispatch, value, visitor)
         }
     }
     fn run<const N: usize>(mode: usize) {
         let address = Cell::new(0);
         let drops = Cell::new(0);
         let root = Array::new(vec![1_i64, 2]);
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            structural_walk(
-                &root,
-                StructuralVisitor::new(
-                    Base {
-                        base: StructuralVisitorObj::default(),
-                        padding: [0_u8; N],
-                        address: &address,
-                        drops: &drops,
-                    },
-                    |value: i64| -> Result<WalkResult> {
-                        if value != 2 {
-                            return Ok(WalkResult::Advance);
-                        }
-                        match mode {
-                            1 => panic!("storage panic"),
-                            2 => Err(runtime_error("storage error")),
-                            3 => Ok(WalkResult::InterruptWith(Any::new())),
-                            4 => Ok(WalkResult::InterruptWith(
-                                runtime_error("payload error").into(),
-                            )),
-                            _ => Ok(WalkResult::Advance),
-                        }
-                    },
-                ),
-                WalkOrder::PreOrder,
-            )
-        }));
-        assert_eq!(outcome.is_err(), mode == 1);
+        let storage = Storage {
+            _padding: [0_u8; N],
+            address: &address,
+            drops: &drops,
+        };
+        let outcome = structural_walk(
+            &root,
+            move |value: i64| -> Result<WalkResult> {
+                let current = std::ptr::from_ref(&storage).addr();
+                assert_eq!(current % 64, 0);
+                if storage.address.get() == 0 {
+                    storage.address.set(current);
+                }
+                assert_eq!(storage.address.get(), current);
+                if value != 2 {
+                    return Ok(WalkResult::Advance);
+                }
+                match mode {
+                    2 => Err(runtime_error("storage error")),
+                    3 => Ok(WalkResult::InterruptWith(Any::new())),
+                    4 => Ok(WalkResult::InterruptWith(
+                        runtime_error("payload error").into(),
+                    )),
+                    _ => Ok(WalkResult::Advance),
+                }
+            },
+            WalkOrder::PreOrder,
+        );
         match outcome {
-            Err(payload) => assert_eq!(payload.downcast_ref::<&str>(), Some(&"storage panic")),
-            Ok(Err(error)) => {
+            Err(error) => {
                 assert_eq!(mode, 2);
                 assert!(error.message().contains("storage error"));
             }
-            Ok(Ok(Some(interrupt))) => {
+            Ok(Some(interrupt)) => {
                 assert!(mode == 3 || mode == 4);
                 assert_eq!(
                     interrupt.value.type_index(),
@@ -2352,43 +2160,20 @@ fn managed_walk_preserves_borrowed_base_address_and_drop_on_all_exits() {
                     } as i32
                 );
             }
-            Ok(Ok(None)) => assert_eq!(mode, 0),
+            Ok(None) => assert_eq!(mode, 0),
         }
         assert_ne!(address.get(), 0);
         assert_eq!(drops.get(), 1);
     }
-    for mode in 0..5 {
+    for mode in [0, 2, 3, 4] {
         run::<0>(mode);
         run::<4096>(mode);
     }
 }
 
 #[test]
-fn default_base_wrapper_preserves_order_and_post_recursion_state() {
+fn visitor_preserves_post_recursion_state() {
     let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3, 4])]);
-    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-        let ordinary = RefCell::new(Vec::new());
-        let wrapped = RefCell::new(Vec::new());
-        structural_walk(
-            &root,
-            |value: AnyView<'_>| {
-                ordinary.borrow_mut().push(value.try_as::<i64>());
-                WalkResult::Advance
-            },
-            order,
-        )
-        .unwrap();
-        structural_walk(
-            &root,
-            StructuralVisitor::new(StructuralVisitorObj::default(), |value: AnyView<'_>| {
-                wrapped.borrow_mut().push(value.try_as::<i64>());
-                WalkResult::Advance
-            }),
-            order,
-        )
-        .unwrap();
-        assert_eq!(*ordinary.borrow(), *wrapped.borrow());
-    }
     #[derive(Default)]
     struct PostState {
         depth: usize,
@@ -2414,21 +2199,11 @@ fn default_base_wrapper_preserves_order_and_post_recursion_state() {
             Ok(result)
         }
     }
-    for wrapped in [false, true] {
-        let mut state = PostState::default();
-        if wrapped {
-            structural_visit(
-                &root,
-                StructuralVisitor::new(StructuralVisitorObj::default(), &mut state),
-            )
-            .unwrap();
-        } else {
-            structural_visit(&root, &mut state).unwrap();
-        }
-        assert_eq!(state.depth, 0);
-        assert_eq!(state.completed, 7);
-        assert_eq!(state.leaves, vec![1, 2, 3, 4]);
-    }
+    let mut state = PostState::default();
+    structural_visit(&root, &mut state).unwrap();
+    assert_eq!(state.depth, 0);
+    assert_eq!(state.completed, 7);
+    assert_eq!(state.leaves, vec![1, 2, 3, 4]);
 }
 
 #[test]

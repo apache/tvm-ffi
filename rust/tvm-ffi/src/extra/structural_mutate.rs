@@ -26,6 +26,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::marker::PhantomData;
+
+use super::marker::{Borrowed, Owned};
 use std::ops::ControlFlow;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::ptr::NonNull;
@@ -701,7 +703,7 @@ unsafe fn base_default_mutate<M: MutationDriver>(
 #[doc(hidden)]
 pub enum ByBaseMutator {}
 
-impl<B: StructuralMutatorBase, D: MutateDispatch> IntoMutator<(ByBaseMutator, ByOwnedMutator)>
+impl<B: StructuralMutatorBase, D: MutateDispatch> IntoMutator<(ByBaseMutator, Owned)>
     for StructuralMutator<B, D>
 {
     fn mutate_root(self, root: Any) -> Result<Any> {
@@ -712,7 +714,7 @@ impl<B: StructuralMutatorBase, D: MutateDispatch> IntoMutator<(ByBaseMutator, By
         )
     }
 }
-impl<B: StructuralMutatorBase, D: MutateDispatch> IntoMutator<(ByBaseMutator, ByBorrowedMutator)>
+impl<B: StructuralMutatorBase, D: MutateDispatch> IntoMutator<(ByBaseMutator, Borrowed)>
     for StructuralMutator<B, &mut D>
 {
     fn mutate_root(self, root: Any) -> Result<Any> {
@@ -729,16 +731,12 @@ pub trait IntoMutator<Marker> {
     #[doc(hidden)]
     fn mutate_root(self, root: Any) -> Result<Any>;
 }
-#[doc(hidden)]
-pub enum ByOwnedMutator {}
-#[doc(hidden)]
-pub enum ByBorrowedMutator {}
-impl<D: MutateDispatch> IntoMutator<ByOwnedMutator> for D {
+impl<D: MutateDispatch> IntoMutator<Owned> for D {
     fn mutate_root(self, root: Any) -> Result<Any> {
         run_user_mutator(root, OwnedDispatcher(self))
     }
 }
-impl<D: MutateDispatch> IntoMutator<ByBorrowedMutator> for &mut D {
+impl<D: MutateDispatch> IntoMutator<Borrowed> for &mut D {
     fn mutate_root(self, root: Any) -> Result<Any> {
         run_user_mutator(root, BorrowedDispatcher(self))
     }
