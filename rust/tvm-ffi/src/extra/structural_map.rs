@@ -23,18 +23,14 @@ use super::structural_common::{
     borrowed_view, impl_callback_chain_tuple_arities, raw_of, same_shallow,
 };
 use super::structural_mutate::{
-    default_mutate_driver, run_mutator_engine, runtime_state, with_value_context,
-    BorrowedDispatcher, ByBaseMutator, DispatcherStorage, IntoMutateResult, MutationDriver,
-    OwnedDispatcher, Permit, StructuralMutator, StructuralMutatorBase, StructuralMutatorHandle,
-    StructuralMutatorObj,
+    with_value_context, IntoMutateResult, MutationView, StructuralMutateEngine,
+    StructuralMutatorView,
 };
 use super::structural_visit::DefRegionKind;
 use super::structural_walk::WalkOrder;
 use super::unchanged::is_unchanged;
-use crate::tvm_ffi_sys::TVMFFIAny;
 use crate::{Any, AnyView, Dispatcher, ObjectCore, Result};
 use std::marker::PhantomData;
-use std::os::raw::c_void;
 
 // -----------------------------------------------------------------------------
 // Map adapter to Dispatcher.
@@ -60,8 +56,8 @@ pub trait NativeMap: Sized {
 }
 
 impl<D: MapDispatch> NativeMap for D {
-    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_native_mapper(root, OwnedDispatcher(self), order)
+    fn map_root(mut self, root: Any, order: WalkOrder) -> Result<Any> {
+        run_native_mapper(root, &mut self, order)
     }
 }
 
@@ -108,74 +104,7 @@ pub struct DispatchMapper<'a, V>(&'a mut V);
 
 impl<V: MapDispatch> NativeMap for DispatchMapper<'_, V> {
     fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_native_mapper(root, BorrowedDispatcher(self.0), order)
-    }
-}
-
-trait MapWithBase: Sized {
-    fn map_with_base<B: StructuralMutatorBase>(
-        self,
-        root: Any,
-        order: WalkOrder,
-        base: B,
-    ) -> Result<Any>;
-}
-impl<D: MapDispatch> MapWithBase for D {
-    fn map_with_base<B: StructuralMutatorBase>(
-        self,
-        root: Any,
-        order: WalkOrder,
-        base: B,
-    ) -> Result<Any> {
-        run_mapper_with_base(root, OwnedDispatcher(self), order, base)
-    }
-}
-impl<D: MapDispatch> MapWithBase for DispatchMapper<'_, D> {
-    fn map_with_base<B: StructuralMutatorBase>(
-        self,
-        root: Any,
-        order: WalkOrder,
-        base: B,
-    ) -> Result<Any> {
-        run_mapper_with_base(root, BorrowedDispatcher(self.0), order, base)
-    }
-}
-#[doc(hidden)]
-pub struct BaseMapper<B, M>(B, M);
-impl<B: StructuralMutatorBase, M: MapWithBase> NativeMap for BaseMapper<B, M> {
-    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-        self.1.map_with_base(root, order, self.0)
-    }
-}
-impl<B, H, M> IntoMapper<(ByBaseMutator, M)> for StructuralMutator<B, H>
-where
-    B: StructuralMutatorBase,
-    H: IntoMapper<M>,
-    H::Mapper: MapWithBase,
-{
-    type Mapper = BaseMapper<B, H::Mapper>;
-    fn into_mapper(self) -> Self::Mapper {
-        BaseMapper(self.base, self.dispatch.into_mapper())
-    }
-}
-fn run_mapper_with_base<S: DispatcherStorage, B: StructuralMutatorBase>(
-    root: Any,
-    dispatch: S,
-    order: WalkOrder,
-    base: B,
-) -> Result<Any>
-where
-    S::Dispatch: MapDispatch,
-{
-    match order {
-        WalkOrder::PreOrder => {
-            run_mutator_engine::<NativeMapper<'_, S::Dispatch, true, B>, _, _>(root, dispatch, base)
-        }
-        WalkOrder::PostOrder => {
-            run_mutator_engine::<NativeMapper<'_, S::Dispatch, false, B>, _, _>(
-                root, dispatch, base,
-            )
-        }
+        run_native_mapper(root, self.0, order)
     }
 }
 
@@ -511,174 +440,88 @@ where
 // Implementation of map.
 // -----------------------------------------------------------------------------
 
-struct NativeMapper<'a, D, const PRE_ORDER: bool, B> {
-    _base: PhantomData<B>,
+struct NativeMapper<'a, D, const PRE_ORDER: bool> {
     dispatch: &'a mut D,
-    runtime: StructuralMutatorHandle,
 }
 
-fn run_native_mapper<S: DispatcherStorage>(root: Any, dispatch: S, order: WalkOrder) -> Result<Any>
-where
-    S::Dispatch: MapDispatch,
-{
+fn run_native_mapper<D: MapDispatch>(root: Any, dispatch: &mut D, order: WalkOrder) -> Result<Any> {
     match order {
-        WalkOrder::PreOrder => run_map_engine::<S, true>(root, dispatch),
-        WalkOrder::PostOrder => run_map_engine::<S, false>(root, dispatch),
+        WalkOrder::PreOrder => StructuralMutateEngine::run_mutator::<_, false>(
+            root,
+            &mut NativeMapper::<D, true> { dispatch },
+        ),
+        WalkOrder::PostOrder => StructuralMutateEngine::run_mutator::<_, false>(
+            root,
+            &mut NativeMapper::<D, false> { dispatch },
+        ),
     }
 }
 
-fn run_map_engine<S: DispatcherStorage, const PRE: bool>(root: Any, dispatch: S) -> Result<Any>
-where
-    S::Dispatch: MapDispatch,
-{
-    run_mutator_engine::<NativeMapper<'_, S::Dispatch, PRE, StructuralMutatorObj>, S, _>(
-        root,
-        dispatch,
-        StructuralMutatorObj::default(),
-    )
-}
-
-impl<D: MapDispatch, const PRE_ORDER: bool, B: StructuralMutatorBase>
-    NativeMapper<'_, D, PRE_ORDER, B>
+impl<'v, 'c, 'r, 'a, D: MapDispatch, const PRE_ORDER: bool>
+    Dispatcher<
+        (
+            MutationView<'v>,
+            &'c mut StructuralMutatorView<'r, NativeMapper<'a, D, PRE_ORDER>>,
+        ),
+        Option<Result<Any>>,
+    > for &mut NativeMapper<'a, D, PRE_ORDER>
 {
     #[inline(always)]
-    fn map_raw(
-        &mut self,
-        raw: TVMFFIAny,
-        def_region_kind: DefRegionKind,
-        permit: Permit,
-    ) -> Result<Any> {
-        self.map_current_raw(raw, def_region_kind, permit)
+    fn dispatch_tuple(
+        self,
+        (value, mutator): (
+            MutationView<'v>,
+            &'c mut StructuralMutatorView<'r, NativeMapper<'a, D, PRE_ORDER>>,
+        ),
+    ) -> Option<Result<Any>> {
+        Some(self.map_current(value, mutator))
     }
+}
 
-    fn map_current_raw(
+impl<D: MapDispatch, const PRE_ORDER: bool> NativeMapper<'_, D, PRE_ORDER> {
+    fn map_current(
         &mut self,
-        raw: TVMFFIAny,
-        def_region_kind: DefRegionKind,
-        permit: Permit,
+        value: MutationView<'_>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
     ) -> Result<Any> {
-        match PRE_ORDER {
-            true => {
-                // A replacement inherits the input's permission, established
-                // before the callback can acquire or release ownership.
-                let permit = permit.inplace_mode(raw).permit();
-                let value = unsafe { borrowed_view(&raw) };
-                let Some(callback_result) = self.dispatch.dispatch_map(value, def_region_kind)
-                else {
-                    return self.default_map_current_raw(raw, def_region_kind, permit);
-                };
-                let mapped = callback_result.map_err(|error| with_value_context(error, raw))?;
-                let mapped_raw = *mapped.as_raw_ffi_any();
-                if is_unchanged(&mapped) || same_shallow(raw, mapped_raw) {
-                    // Release the callback's temporary ownership before the
-                    // runtime uniqueness check observes the original.
-                    drop(mapped);
-                    self.default_map_current_raw(raw, def_region_kind, permit)
+        let mode = value.inplace_mode();
+        let raw = raw_of(value.as_any_view());
+        let kind = mutator.def_region_kind();
+        if PRE_ORDER {
+            // Snapshot permission before a callback can retain or release ownership.
+            let Some(callback_result) = self
+                .dispatch
+                .dispatch_map(unsafe { borrowed_view(&raw) }, kind)
+            else {
+                return mutator.default_mutate(self, value).map(Into::into);
+            };
+            let mapped = callback_result.map_err(|error| with_value_context(error, raw))?;
+            if is_unchanged(&mapped) || same_shallow(raw, *mapped.as_raw_ffi_any()) {
+                // Drop temporary ownership before default descent checks uniqueness.
+                drop(mapped);
+                mutator.default_mutate(self, value).map(Into::into)
+            } else {
+                let replacement = MutationView::new(AnyView::from(&mapped), mode);
+                let descended: Any = mutator.default_mutate(self, replacement)?.into();
+                Ok(if is_unchanged(&descended) {
+                    mapped
                 } else {
-                    let descended = self.map_default_root(&mapped, def_region_kind, permit)?;
-                    Ok(if is_unchanged(&descended) {
-                        mapped
-                    } else {
-                        descended
-                    })
-                }
+                    descended
+                })
             }
-            false => {
-                let mapped = self.default_map_current_raw(raw, def_region_kind, permit)?;
-                let original = unsafe { borrowed_view(&raw) };
-                let value = if is_unchanged(&mapped) {
-                    original
-                } else {
-                    AnyView::from(&mapped)
-                };
-                // Keep child rewrites when the callback leaves its input unchanged.
-                match self.dispatch.dispatch_map(value, def_region_kind) {
-                    Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
-                    Some(result) => {
-                        result.map_err(|error| with_value_context(error, raw_of(value)))
-                    }
-                    None => Ok(mapped),
-                }
+        } else {
+            let mapped: Any = mutator.default_mutate(self, value)?.into();
+            let current = if is_unchanged(&mapped) {
+                unsafe { borrowed_view(&raw) }
+            } else {
+                AnyView::from(&mapped)
+            };
+            match self.dispatch.dispatch_map(current, kind) {
+                Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
+                Some(result) => result.map_err(|error| with_value_context(error, raw_of(current))),
+                None => Ok(mapped),
             }
         }
-    }
-
-    /// Descend into a pre-order replacement without dispatching its root again.
-    fn map_default_root(
-        &mut self,
-        mapped: &Any,
-        def_region_kind: DefRegionKind,
-        permit: Permit,
-    ) -> Result<Any> {
-        let raw = *mapped.as_raw_ffi_any();
-        self.default_map_current_raw(raw, def_region_kind, permit)
-    }
-}
-
-impl<D: MapDispatch, const PRE_ORDER: bool, B: StructuralMutatorBase> MutationDriver
-    for NativeMapper<'_, D, PRE_ORDER, B>
-{
-    type Dispatch = D;
-    type Base = B;
-    fn dispatcher(&mut self) -> &mut D {
-        self.dispatch
-    }
-    fn runtime(&self) -> StructuralMutatorHandle {
-        self.runtime
-    }
-    fn context(&mut self) -> *mut c_void {
-        std::ptr::from_mut(&mut *self.dispatch).cast()
-    }
-    #[inline(always)]
-    unsafe fn runtime_dispatch<const INPLACE: bool>(
-        runtime: StructuralMutatorHandle,
-        raw: TVMFFIAny,
-        kind: DefRegionKind,
-    ) -> TVMFFIAny {
-        NativeMapper::<D, PRE_ORDER, B> {
-            dispatch: &mut *(*runtime_state(runtime)).context.cast::<D>(),
-            runtime,
-            _base: PhantomData,
-        }
-        .dispatch_abi_raw::<INPLACE>(raw, kind)
-    }
-    #[inline(always)]
-    unsafe fn runtime_recurse(
-        runtime: StructuralMutatorHandle,
-        dispatch: &mut D,
-        raw: TVMFFIAny,
-        kind: DefRegionKind,
-        permit: Permit,
-    ) -> Result<Any> {
-        NativeMapper::<D, PRE_ORDER, B> {
-            dispatch,
-            runtime,
-            _base: PhantomData,
-        }
-        .dispatch_raw(raw, kind, permit)
-    }
-    #[inline(always)]
-    unsafe fn runtime_default(
-        runtime: StructuralMutatorHandle,
-        dispatch: &mut D,
-        raw: TVMFFIAny,
-        kind: DefRegionKind,
-        permit: Permit,
-    ) -> Result<Any> {
-        default_mutate_driver(
-            &mut NativeMapper::<D, PRE_ORDER, B> {
-                dispatch,
-                runtime,
-                _base: PhantomData,
-            },
-            raw,
-            kind,
-            permit,
-        )
-    }
-    #[inline(always)]
-    fn dispatch_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind, permit: Permit) -> Result<Any> {
-        self.map_raw(raw, kind, permit)
     }
 }
 
