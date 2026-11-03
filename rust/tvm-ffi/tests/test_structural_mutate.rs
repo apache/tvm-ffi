@@ -19,9 +19,7 @@
 
 use std::cell::{Cell, RefCell};
 use tvm_ffi::collections::map::MapObj;
-use tvm_ffi::extra::structural_mutate::{
-    IntoMutateResult, StructuralMutator, StructuralMutatorBase, StructuralMutatorObj,
-};
+use tvm_ffi::extra::structural_mutate::IntoMutateResult;
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
@@ -45,46 +43,6 @@ impl<'receiver, 'value> Dispatcher<(AnyView<'value>, DefRegionKind), Option<Resu
         value
             .try_as::<i64>()
             .map(|integer| Ok(Any::from(integer + 1)))
-    }
-}
-
-#[repr(C, align(64))]
-struct ScopedMutateBase<'a> {
-    base: StructuralMutatorObj,
-    depth: &'a Cell<usize>,
-    calls: &'a Cell<usize>,
-}
-impl<'a> ScopedMutateBase<'a> {
-    fn new(depth: &'a Cell<usize>, calls: &'a Cell<usize>) -> Self {
-        Self {
-            base: StructuralMutatorObj::default(),
-            depth,
-            calls,
-        }
-    }
-}
-// SAFETY: the ABI prefix is first; only copied external Cell references span
-// recursion, and the guard restores scoped state on every exit.
-unsafe impl StructuralMutatorBase for ScopedMutateBase<'_> {
-    unsafe fn default_mutate<D>(
-        this: *mut Self,
-        dispatch: &mut D,
-        value: MutationView<'_>,
-        mutator: &mut StructuralMutatorView<'_, D>,
-    ) -> Result<UnchangedOr<Any>> {
-        assert_eq!(this.addr() % 64, 0);
-        let depth = (*this).depth;
-        let previous = depth.get();
-        depth.set(previous + 1);
-        (*this).calls.set((*this).calls.get() + 1);
-        struct Restore<'a>(&'a Cell<usize>, usize);
-        impl Drop for Restore<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.1);
-            }
-        }
-        let _restore = Restore(depth, previous);
-        StructuralMutatorObj::default_mutate(dispatch, value, mutator)
     }
 }
 
@@ -655,7 +613,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
         fn mutate_array(
             &mut self,
             value: MutationView<'_, Array<i64>>,
-            mutator: &mut StructuralMutatorView<'_, Self>,
+            _mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<Any> {
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
             Unchanged.into_mutate_result()
@@ -819,7 +777,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
         fn mutate_integer(
             &mut self,
             value: i64,
-            mutator: &mut StructuralMutatorView<'_, Self>,
+            _mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<Any> {
             Ok(Any::from(value + 1))
         }
@@ -1298,35 +1256,6 @@ fn callback_errors_preserve_message_and_add_object_context() {
 }
 
 #[test]
-fn callback_panics_resume_after_the_registered_hook_returns() {
-    let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        structural_map(
-            Array::new(vec![1i64]),
-            |_integer: i64| -> Any { panic!("mapper panic") },
-            WalkOrder::PostOrder,
-        )
-    })) {
-        Err(panic) => panic,
-        Ok(_) => panic!("panicking mapper unexpectedly returned"),
-    };
-
-    let message = panic
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
-    assert_eq!(message, Some("mapper panic"));
-
-    let mapped = structural_map(
-        Array::new(vec![1i64]),
-        |integer: i64| Any::from(integer + 1),
-        WalkOrder::PostOrder,
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
-    assert_eq!(mapped.get(0).unwrap(), 2);
-}
-
-#[test]
 fn unique_map_reuses_nested_unique_value_storage() {
     let child = Array::new(vec![1i64, 2]);
     let child_pointer = array_pointer(&child);
@@ -1399,31 +1328,6 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
     assert_eq!(error.message(), "map mapper failed");
     assert!(error.backtrace().contains("origin"));
     assert!(error.backtrace().contains("object `ffi.Map`"));
-
-    #[repr(C)]
-    struct RejectBase(StructuralMutatorObj);
-    // SAFETY: the exact prefix is first; no Base borrow survives the callback.
-    unsafe impl StructuralMutatorBase for RejectBase {
-        unsafe fn default_mutate<D>(
-            _this: *mut Self,
-            _dispatch: &mut D,
-            _value: MutationView<'_>,
-            _mutator: &mut StructuralMutatorView<'_, D>,
-        ) -> Result<UnchangedOr<Any>> {
-            Err(Error::new(RUNTIME_ERROR, "base failed", "base origin"))
-        }
-    }
-    let error = structural_map(
-        source.clone(),
-        StructuralMutator::new(RejectBase(StructuralMutatorObj::default()), |x: i64| x),
-        WalkOrder::PreOrder,
-    )
-    .err()
-    .unwrap();
-    assert_eq!(error.message(), "base failed");
-    assert!(error.backtrace().contains("base origin"));
-    assert!(error.backtrace().contains("object `ffi.Map`"));
-    assert_eq!(source.get(&1).unwrap(), Some(10));
 }
 
 #[test]
@@ -1663,16 +1567,7 @@ fn pre_order_mapping_preserves_inplace_permission() {
             mapped
         })
         .into_mapper();
-        let depth = Cell::new(0);
-        let calls = Cell::new(0);
-        let output = structural_map(
-            root,
-            StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), &mut mapper),
-            WalkOrder::PreOrder,
-        )
-        .unwrap();
-        assert_eq!(depth.get(), 0);
-        assert_eq!(calls.get(), 2);
+        let output = structural_map(root, &mut mapper, WalkOrder::PreOrder).unwrap();
         let reuse = case == "unique";
         assert_eq!(any_object_pointer(&output) == pointer, reuse, "{case}");
         if case == "retained" {
@@ -2303,16 +2198,15 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
         }
     }
     #[repr(align(128))]
-    struct Outer<'a>(&'a Cell<usize>);
+    struct Outer;
     #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
-    impl<'a> Outer<'a> {
+    impl Outer {
         fn mutate_integer(
             &mut self,
             value: i64,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<Any> {
             assert_eq!(std::ptr::from_mut(self).addr() % 128, 0);
-            assert_eq!(self.0.get(), 1);
             if value != 1 {
                 return Ok(Any::from(value + 1));
             }
@@ -2323,54 +2217,10 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
                 .map(Into::into)
         }
     }
-    let depth = Cell::new(0);
-    let calls = Cell::new(0);
-    let mutated = structural_mutate(
-        Array::new(vec![1i64]),
-        StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), Outer(&depth)),
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
-    assert_eq!(mutated.get(0).unwrap(), 4);
-    assert_eq!(depth.get(), 0);
-    assert_eq!(calls.get(), 1);
-}
-
-#[test]
-fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
-    struct Panic;
-    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
-    impl Panic {
-        fn mutate_integer(
-            &mut self,
-            _: i64,
-            _: &mut StructuralMutatorView<'_, Self>,
-        ) -> Result<Any> {
-            panic!("callback mutator panic")
-        }
-    }
-    let depth = Cell::new(0);
-    let calls = Cell::new(0);
-    let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        structural_mutate(
-            Array::new(vec![1i64]),
-            StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), Panic),
-        )
-    })) {
-        Err(panic) => panic,
-        Ok(_) => panic!("panicking callback mutator unexpectedly returned"),
-    };
-    assert_eq!(
-        panic.downcast_ref::<&str>().copied(),
-        Some("callback mutator panic")
-    );
-
-    assert_eq!(depth.get(), 0);
-    assert_eq!(calls.get(), 1);
-    let mutated = structural_mutate(Array::new(vec![1i64]), GeneratedStatelessDispatch)
+    let mutated = structural_mutate(Array::new(vec![1i64]), Outer)
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(mutated.get(0).unwrap(), 2);
+    assert_eq!(mutated.get(0).unwrap(), 4);
 }
 
 #[test]
@@ -2378,36 +2228,12 @@ fn map_entries_preserve_descent_and_callback_composition() {
     let root = || Array::new(vec![1_i64]);
     let first = |value: Any| Array::<i64>::try_from(value).unwrap().get(0).unwrap();
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-        let depth = Cell::new(0);
-        let calls = Cell::new(0);
         let mut dispatch = IncrementIntegers;
         let callbacks = (|s: FfiString| s, (&mut dispatch,));
-        assert_eq!(
-            first(
-                structural_map(
-                    root(),
-                    StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), callbacks),
-                    order
-                )
-                .unwrap()
-            ),
-            2
-        );
+        assert_eq!(first(structural_map(root(), callbacks, order).unwrap()), 2);
 
         let callbacks = (|x: i64| x + 1, (|s: FfiString| s,));
-        assert_eq!(
-            first(
-                structural_map(
-                    root(),
-                    StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), callbacks),
-                    order
-                )
-                .unwrap()
-            ),
-            2
-        );
-        assert_eq!(depth.get(), 0);
-        assert_eq!(calls.get(), 4);
+        assert_eq!(first(structural_map(root(), callbacks, order).unwrap()), 2);
     }
 }
 
@@ -2475,13 +2301,11 @@ fn mutation_descent_preserves_ownership_and_markers() {
                         InplaceMode::Allow
                     },
                 };
-                let depth = Cell::new(0);
-                let calls = Cell::new(0);
                 let (output, state) = if entry < 2 {
                     let mut mapper = MapOwnership(state);
                     let output = structural_map(
                         root,
-                        StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), &mut mapper),
+                        &mut mapper,
                         if entry == 0 {
                             WalkOrder::PreOrder
                         } else {
@@ -2492,15 +2316,9 @@ fn mutation_descent_preserves_ownership_and_markers() {
                     (output, mapper.0)
                 } else {
                     let mut mutator = state;
-                    let output = structural_mutate(
-                        root,
-                        StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), &mut mutator),
-                    )
-                    .unwrap();
+                    let output = structural_mutate(root, &mut mutator).unwrap();
                     (output, mutator)
                 };
-                assert_eq!(depth.get(), 0);
-                assert_eq!(calls.get(), if entry < 2 { 2 } else { 1 });
                 let output = Array::<i64>::try_from(output).unwrap();
                 assert_eq!(output.get(0).unwrap(), if increment { 2 } else { 1 });
                 assert_eq!(array_pointer(&output) == pointer, !increment || case == 0);
@@ -2667,16 +2485,10 @@ fn mutation_regions_retargeting_and_error_restore() {
 }
 
 #[test]
-fn default_base_wrapper_preserves_mapping_and_post_recursion_state() {
+fn mapping_preserves_post_recursion_state() {
     let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3, 4])]);
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let ordinary = structural_map(root.clone(), |value: i64| value + 1, order).unwrap();
-        let wrapped = structural_map(
-            root.clone(),
-            StructuralMutator::new(StructuralMutatorObj::default(), |value: i64| value + 1),
-            order,
-        )
-        .unwrap();
         let leaves = |value: &Any| {
             let result = RefCell::new(Vec::new());
             structural_walk(
@@ -2691,7 +2503,6 @@ fn default_base_wrapper_preserves_mapping_and_post_recursion_state() {
             result.into_inner()
         };
         assert_eq!(leaves(&ordinary), vec![2, 3, 4, 5]);
-        assert_eq!(leaves(&wrapped), leaves(&ordinary));
     }
     #[derive(Default)]
     struct PostState {
@@ -2714,121 +2525,32 @@ fn default_base_wrapper_preserves_mapping_and_post_recursion_state() {
             Ok(result.into())
         }
     }
-    for wrapped in [false, true] {
-        let mut state = PostState::default();
-        if wrapped {
-            structural_mutate(
-                root.clone(),
-                StructuralMutator::new(StructuralMutatorObj::default(), &mut state),
-            )
-            .unwrap();
-        } else {
-            structural_mutate(root.clone(), &mut state).unwrap();
-        }
-        assert_eq!(state.depth, 0);
-        assert_eq!(state.completed, 7);
-    }
+    let mut state = PostState::default();
+    structural_mutate(root.clone(), &mut state).unwrap();
+    assert_eq!(state.depth, 0);
+    assert_eq!(state.completed, 7);
 }
 
 #[test]
-fn explicit_default_base_preserves_primitive_replacement_descent() {
+fn mapping_preserves_primitive_replacement_descent() {
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-        for wrapped in [false, true] {
-            let callback = |value: i64| -> Any {
-                if value == 0 {
-                    Array::new(vec![1_i64, 2]).into()
-                } else {
-                    (value + 10).into()
-                }
-            };
-            let result = if wrapped {
-                structural_map(
-                    0_i64,
-                    StructuralMutator::new(StructuralMutatorObj::default(), callback),
-                    order,
-                )
+        let callback = |value: i64| -> Any {
+            if value == 0 {
+                Array::new(vec![1_i64, 2]).into()
             } else {
-                structural_map(0_i64, callback, order)
+                (value + 10).into()
             }
-            .unwrap();
-            let result = Array::<i64>::try_from(result).unwrap();
-            let expected = if matches!(order, WalkOrder::PreOrder) {
-                [11, 12]
-            } else {
-                [1, 2]
-            };
-            assert_eq!(result.get(0).unwrap(), expected[0]);
-            assert_eq!(result.get(1).unwrap(), expected[1]);
-            let unchanged = if wrapped {
-                structural_map(
-                    7_i64,
-                    StructuralMutator::new(StructuralMutatorObj::default(), |_: bool| false),
-                    order,
-                )
-            } else {
-                structural_map(7_i64, |_: bool| false, order)
-            }
-            .unwrap();
-            assert_eq!(i64::try_from(unchanged).unwrap(), 7);
-        }
-    }
-}
-
-#[test]
-fn managed_mutator_drops_borrowed_aligned_base_on_success_error_and_panic() {
-    #[repr(C, align(64))]
-    struct Base<'a> {
-        base: StructuralMutatorObj,
-        drops: &'a Cell<usize>,
-    }
-    impl Drop for Base<'_> {
-        fn drop(&mut self) {
-            self.drops.set(self.drops.get() + 1);
-        }
-    }
-    unsafe impl StructuralMutatorBase for Base<'_> {
-        unsafe fn default_mutate<D>(
-            this: *mut Self,
-            dispatch: &mut D,
-            value: MutationView<'_>,
-            mutator: &mut StructuralMutatorView<'_, D>,
-        ) -> Result<UnchangedOr<Any>> {
-            assert_eq!(this.addr() % 64, 0);
-            StructuralMutatorObj::default_mutate(dispatch, value, mutator)
-        }
-    }
-    for mode in 0..3 {
-        let drops = Cell::new(0);
-        let root = Array::new(vec![1_i64, 2]);
-        let mut callback = |value: i64| -> Result<Any> {
-            if value == 2 {
-                if mode == 1 {
-                    return Err(Error::new(RUNTIME_ERROR, "managed error", ""));
-                }
-                if mode == 2 {
-                    panic!("managed panic");
-                }
-            }
-            Ok(value.into())
         };
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            structural_map(
-                root,
-                StructuralMutator::new(
-                    Base {
-                        base: StructuralMutatorObj::default(),
-                        drops: &drops,
-                    },
-                    &mut callback,
-                ),
-                WalkOrder::PreOrder,
-            )
-        }));
-        assert_eq!(drops.get(), 1);
-        match mode {
-            0 => assert!(outcome.unwrap().is_ok()),
-            1 => assert!(outcome.unwrap().is_err()),
-            _ => assert!(outcome.is_err()),
-        }
+        let result = structural_map(0_i64, callback, order).unwrap();
+        let result = Array::<i64>::try_from(result).unwrap();
+        let expected = if matches!(order, WalkOrder::PreOrder) {
+            [11, 12]
+        } else {
+            [1, 2]
+        };
+        assert_eq!(result.get(0).unwrap(), expected[0]);
+        assert_eq!(result.get(1).unwrap(), expected[1]);
+        let unchanged = structural_map(7_i64, |_: bool| false, order).unwrap();
+        assert_eq!(i64::try_from(unchanged).unwrap(), 7);
     }
 }

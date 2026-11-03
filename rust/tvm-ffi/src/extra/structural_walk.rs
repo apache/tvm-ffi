@@ -18,19 +18,16 @@
  */
 
 //! Observer callbacks and adapters for structural walking.
+//!
+//! Callbacks report failures with [`Result`] and must not panic. A panic reaching
+//! the non-unwinding native callback boundary aborts the process.
 
-use super::structural_common::{borrowed_view, impl_callback_chain_tuple_arities, raw_of};
+use super::structural_common::{impl_callback_chain_tuple_arities, raw_of};
 use super::structural_visit::{
-    base_default_visit, dispatcher_context, finish, interrupt_result, run_visitor_engine,
-    rust_vtable_visit_impl, visit_children_raw, with_value_context, with_visitor_def_region,
-    ChildVisit, DefRegionKind, OwnedVisitor, StructuralVisitEngine, StructuralVisitor,
-    StructuralVisitorBase, StructuralVisitorHandle, StructuralVisitorObj, StructuralVisitorVTable,
-    VisitDriver, VisitInterrupt, VisitorStorage,
+    finish, DefRegionKind, StructuralVisitEngine, StructuralVisitorView, VisitInterrupt,
 };
-use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFITypeIndex};
 use crate::{Any, AnyView, Dispatcher, ObjectCore, Result};
 use std::marker::PhantomData;
-use std::os::raw::c_void;
 
 // -----------------------------------------------------------------------------
 // Key data structures and callback results.
@@ -158,36 +155,6 @@ impl<V: WalkDispatch> NativeVisit for DispatchWalker<&mut V> {
     }
 }
 
-#[doc(hidden)]
-pub struct ByBaseWalker<M>(PhantomData<M>);
-
-impl<Base: StructuralVisitorBase, D: IntoWalker<M>, M> IntoWalker<ByBaseWalker<M>>
-    for StructuralVisitor<Base, D>
-{
-    type Walker = StructuralVisitor<Base, D::Walker>;
-
-    fn into_walker(self) -> Self::Walker {
-        StructuralVisitor::new(self.base, self.dispatcher.into_walker())
-    }
-}
-
-impl<Base, D> NativeContext for StructuralVisitor<Base, D> {}
-
-impl<Base: StructuralVisitorBase, D: NativeVisit> NativeVisit for StructuralVisitor<Base, D> {
-    fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
-        finish(run_walker(
-            raw_of(root),
-            self.base,
-            OwnedVisitor(self.dispatcher),
-            order,
-        ))
-    }
-
-    fn visit(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<WalkResult> {
-        self.dispatcher.visit(value, kind)
-    }
-}
-
 /// Conversion into the walker argument of [`structural_walk`].
 ///
 /// Accepts a mutable [`Dispatcher`], a typed callback or a nested callback
@@ -250,14 +217,8 @@ pub trait WalkChainLink<Marker>: sealed::SealedLink<Marker> {
 pub(crate) use sealed::NativeContext;
 
 mod sealed {
-    // Only engine adapters may project the pointer used for ABI reentry.
-    // Identity equality cannot establish that a pointer came from the current
-    // exclusive reborrow, so this projection must not be user-overridable.
-    pub trait NativeContext: Sized {
-        fn context(&mut self) -> *mut std::ffi::c_void {
-            super::dispatcher_context(self)
-        }
-    }
+    // Keep native observer implementations within the supported adapters.
+    pub trait NativeContext: Sized {}
 
     use super::{AnyView, DefRegionKind, IntoWalkResult, ObjectCore, WalkDispatch};
 
@@ -540,12 +501,7 @@ impl_bare_link_walker!(
 #[doc(hidden)]
 pub trait NativeVisit: Sized + sealed::NativeContext {
     fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
-        finish(run_walker(
-            raw_of(root),
-            StructuralVisitorObj::default(),
-            OwnedVisitor(self),
-            order,
-        ))
+        finish(run_walker(raw_of(root), self, order))
     }
 
     fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult>;
@@ -563,134 +519,67 @@ impl<V: NativeVisit> NativeVisit for &mut V {
 // Implementation of walk.
 // -----------------------------------------------------------------------------
 
-struct WalkChildren<'a, Base, V, const PRE_ORDER: bool> {
-    visitor: &'a mut V,
-    runtime: StructuralVisitorHandle,
-    _base: PhantomData<Base>,
+// A walk is an ordinary visitor handler: the visitor core owns all child
+// recursion, native hooks and region transitions. This adapter only chooses
+// when the observer runs and translates its control result.
+struct WalkVisitor<V, const PRE_ORDER: bool> {
+    observer: V,
 }
 
-impl<Base: StructuralVisitorBase, V: NativeVisit, const PRE_ORDER: bool> ChildVisit
-    for WalkChildren<'_, Base, V, PRE_ORDER>
+impl<'s, 'v, 'c, 'r, V: NativeVisit, const PRE_ORDER: bool>
+    Dispatcher<
+        (
+            AnyView<'v>,
+            &'c mut StructuralVisitorView<'r, WalkVisitor<V, PRE_ORDER>>,
+        ),
+        Option<Result<Option<VisitInterrupt>>>,
+    > for &'s mut WalkVisitor<V, PRE_ORDER>
 {
-    fn context(&mut self) -> *mut c_void {
-        self.visitor.context()
-    }
     #[inline(always)]
-    fn visit_child(&mut self, child: AnyView<'_>, kind: DefRegionKind) -> Any {
-        // A reflected field is a real region transition; native hooks own theirs.
-        with_visitor_def_region(self.runtime, kind, || {
-            let active = unsafe { std::mem::transmute((*self.runtime).def_region_mode) };
-            visit_raw::<Base, V, PRE_ORDER>(raw_of(child), self.visitor, active, self.runtime)
-        })
+    fn dispatch_tuple(
+        self,
+        (value, visitor): (
+            AnyView<'v>,
+            &'c mut StructuralVisitorView<'r, WalkVisitor<V, PRE_ORDER>>,
+        ),
+    ) -> Option<Result<Option<VisitInterrupt>>> {
+        Some(self.visit(value, visitor))
     }
 }
 
-#[inline(always)]
-fn visit_raw<Base: StructuralVisitorBase, V: NativeVisit, const PRE_ORDER: bool>(
-    value: TVMFFIAny,
-    visitor: &mut V,
-    def_region_kind: DefRegionKind,
-    runtime: StructuralVisitorHandle,
-) -> Any {
-    if value.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
-        return Any::new();
-    }
-    let visit_value = unsafe { borrowed_view(&value) };
-    if PRE_ORDER {
-        match visitor.visit(visit_value, def_region_kind) {
-            Ok(WalkResult::Advance) => {}
-            Ok(WalkResult::Skip) => return Any::new(),
-            Ok(WalkResult::Interrupt) => return interrupt_result(Any::new()),
-            Ok(WalkResult::InterruptWith(payload)) => return interrupt_result(payload),
-            Err(error) => return with_value_context(error.into(), value),
+impl<V: NativeVisit, const PRE_ORDER: bool> WalkVisitor<V, PRE_ORDER> {
+    #[inline(always)]
+    fn visit(
+        &mut self,
+        value: AnyView<'_>,
+        visitor: &mut StructuralVisitorView<'_, Self>,
+    ) -> Result<Option<VisitInterrupt>> {
+        let kind = visitor.def_region_kind();
+        if !PRE_ORDER {
+            if let Some(interrupt) = visitor.default_visit(self, value)? {
+                return Ok(Some(interrupt));
+            }
+        }
+        match self.observer.visit(value, kind)? {
+            WalkResult::Advance if PRE_ORDER => visitor.default_visit(self, value),
+            WalkResult::Advance | WalkResult::Skip => Ok(None),
+            WalkResult::Interrupt => Ok(Some(VisitInterrupt::with(Any::new()))),
+            WalkResult::InterruptWith(payload) => Ok(Some(VisitInterrupt::with(payload))),
         }
     }
-    let result = unsafe {
-        base_default_visit::<Base, V, WalkDriver<Base, PRE_ORDER>>(runtime, visitor, value)
-    };
-    if result.type_index() != TVMFFITypeIndex::kTVMFFINone as i32 || PRE_ORDER {
-        return result;
-    }
-    match visitor.visit(visit_value, def_region_kind) {
-        Ok(WalkResult::Advance | WalkResult::Skip) => Any::new(),
-        Ok(WalkResult::Interrupt) => interrupt_result(Any::new()),
-        Ok(WalkResult::InterruptWith(payload)) => interrupt_result(payload),
-        Err(error) => with_value_context(error.into(), value),
-    }
 }
 
-// The Rust extension projects state after the concrete, potentially aligned Base.
-fn walk_runtime_vtable<Base: StructuralVisitorBase, S: VisitorStorage, const PRE_ORDER: bool>(
-) -> &'static StructuralVisitorVTable
-where
-    S::Dispatcher: NativeVisit,
-{
-    &StructuralVisitorVTable {
-        visit: rust_vtable_walk::<Base, S::Dispatcher, PRE_ORDER>,
-        state_offset: std::mem::offset_of!(StructuralVisitEngine<Base, S>, state),
-    }
-}
-
-unsafe extern "C" fn rust_vtable_walk<
-    Base: StructuralVisitorBase,
-    V: NativeVisit,
-    const PRE_ORDER: bool,
->(
-    visitor: StructuralVisitorHandle,
-    value: AnyView<'static>,
-) -> TVMFFIAny {
-    rust_vtable_visit_impl(visitor, value, |context, raw, kind| {
-        runtime_walk::<Base, V, PRE_ORDER>(visitor, context, raw, kind)
-    })
-}
-
-#[inline(always)]
-unsafe fn runtime_walk<Base: StructuralVisitorBase, V: NativeVisit, const PRE_ORDER: bool>(
-    runtime: StructuralVisitorHandle,
-    context: *mut c_void,
-    raw: TVMFFIAny,
-    def_region_kind: DefRegionKind,
-) -> Any {
-    visit_raw::<Base, V, PRE_ORDER>(raw, &mut *context.cast::<V>(), def_region_kind, runtime)
-}
-
-struct WalkDriver<Base, const PRE_ORDER: bool>(PhantomData<Base>);
-impl<Base: StructuralVisitorBase, D: NativeVisit, const PRE_ORDER: bool> VisitDriver<D>
-    for WalkDriver<Base, PRE_ORDER>
-{
-    #[inline(always)]
-    unsafe fn children(runtime: StructuralVisitorHandle, dispatch: &mut D, raw: TVMFFIAny) -> Any {
-        let kind = std::mem::transmute((*runtime).def_region_mode);
-        with_value_context(
-            visit_children_raw(
-                raw,
-                &mut WalkChildren::<Base, D, PRE_ORDER> {
-                    visitor: dispatch,
-                    runtime,
-                    _base: PhantomData,
-                },
-                kind,
-                runtime,
-            ),
-            raw,
-        )
-    }
-}
-fn run_walker<Base: StructuralVisitorBase, S: VisitorStorage>(
-    root: TVMFFIAny,
-    base: Base,
-    storage: S,
+fn run_walker<D: NativeVisit>(
+    root: crate::tvm_ffi_sys::TVMFFIAny,
+    observer: D,
     order: WalkOrder,
-) -> Any
-where
-    S::Dispatcher: NativeVisit,
-{
+) -> Any {
     match order {
         WalkOrder::PreOrder => {
-            run_visitor_engine(root, base, storage, walk_runtime_vtable::<Base, S, true>())
+            StructuralVisitEngine::run_visitor(root, &mut WalkVisitor::<D, true> { observer })
         }
         WalkOrder::PostOrder => {
-            run_visitor_engine(root, base, storage, walk_runtime_vtable::<Base, S, false>())
+            StructuralVisitEngine::run_visitor(root, &mut WalkVisitor::<D, false> { observer })
         }
     }
 }
@@ -717,7 +606,12 @@ where
 ///
 /// The walker owns recursion: the handler runs once per value,
 /// before or after the value's children according to `order`, and steers
-/// traversal through the returned [`WalkResult`].
+/// traversal through the returned [`WalkResult`]. Walk accepts its existing
+/// dispatcher borrows, closure observers and callback tuples; each adapter runs
+/// through the same borrowed traversal engine.
+///
+/// Callbacks must report failures through [`Result`] and must not panic: a panic
+/// reaching the non-unwinding native callback boundary aborts the process.
 pub fn structural_walk<'input, R, M, H>(
     root: R,
     walker: H,

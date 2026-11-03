@@ -139,7 +139,7 @@ fn stops_on_interrupt_with_payload() {
         panic!("traversal unexpectedly completed");
     };
     assert_eq!(
-        FfiString::try_from(interrupt.value).unwrap().as_str(),
+        interrupt.value.try_as::<FfiString>().unwrap().as_str(),
         "stop"
     );
     assert_eq!(visitor.visited, vec!["array", "10", "20"]);
