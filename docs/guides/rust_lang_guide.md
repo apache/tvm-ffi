@@ -457,11 +457,28 @@ fn may_fail(value: i32) -> Result<()> {
 ### Structural Walk and Visit
 
 Rust provides equivalents of the C++ `StructuralWalk`/`StructuralVisitor`
-APIs. An inherent `#[dispatch(walk)]` impl groups `walk_*` handlers for
+APIs. An inherent `#[dispatch(walk, (AnyView<'_>, DefRegionKind), Result<WalkResult>)]`
+impl groups `walk_*` handlers for
 `structural_walk`. The named handlers return the common `Result<WalkResult>`
 type to advance, skip children, or interrupt traversal.
-Handlers dispatch on their argument type and may take an optional trailing
-`DefRegionKind` argument:
+The attribute always declares `#[dispatch(prefix, args_as_tuple, ret)]`:
+`args_as_tuple` is a nonempty tuple whose first element is the match carrier,
+`AnyView<'_>` or `MutationView<'_>`, followed by the arguments passed to handlers.
+Each handler consumes its typed first value and an initial prefix of the
+remaining arguments. The declared signature does not depend on the longest
+handler. `dispatch` returns `Option<ret>`: the first matched handler's result
+converts through standard `Into<ret>` and is wrapped in `Some`; outer `None`
+means no match. A matched error or inner `None` stops dispatch. This conversion
+does not recursively convert results or wrap scalar values in `Ok`.
+
+Elided input lifetimes are independent and elided output lifetimes borrow
+`self`. Use a shared named lifetime in the tuple and return type for a result
+borrowing an input. Names come from the enclosing impl or common handler generic
+declarations; those declarations and bounds must agree across handlers, except
+for unbounded pattern-only lifetimes. `Self` denotes the implementor. Carrier
+and handler type aliases are supported.
+
+Walk handlers may take an optional trailing `DefRegionKind` argument:
 
 ```rust
 use tvm_ffi::{dispatch, structural_walk, Array, DefRegionKind, Result, WalkOrder, WalkResult};
@@ -472,7 +489,7 @@ struct Probe {
     floats: usize,
 }
 
-#[dispatch(walk)]
+#[dispatch(walk, (tvm_ffi::AnyView<'_>, DefRegionKind), Result<WalkResult>)]
 impl Probe {
     fn walk_integer(&mut self, value: i64) -> Result<WalkResult> {
         self.total += value;
@@ -577,7 +594,11 @@ struct Stats {
     total: i64,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (tvm_ffi::AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl Stats {
     fn visit_integer(&mut self, value: i64, _visitor: &mut StructuralVisitorView<'_, Self>)
         -> Result<Option<VisitInterrupt>> {
@@ -601,8 +622,8 @@ does not need a region scope. Calls reborrow the same dispatcher, so state can b
 read and updated before and after recursion. Interrupt values must be
 returned explicitly because `?` only propagates errors.
 
-An inherent `#[dispatch(visit)]` impl groups typed `visit_*` methods. It supplies
-the engine signature directly, without a separate forwarding trait:
+An inherent `#[dispatch]` impl groups typed `visit_*` methods. Its declared
+argument tuple and return type supply the engine signature directly:
 
 ```rust
 use tvm_ffi::{
@@ -615,7 +636,11 @@ struct Depth {
     current: usize,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (tvm_ffi::AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl Depth {
     fn visit_any(&mut self, value: AnyView<'_>, visitor: &mut StructuralVisitorView<'_, Self>)
         -> Result<Option<VisitInterrupt>> {
@@ -653,8 +678,8 @@ permission.
 ### Structural Mapping and Mutation
 
 `structural_map` is the transforming counterpart to `structural_walk`. An
-inherent `#[dispatch(map)]` impl groups `map_*` methods returning the common
-engine result `Result<Any>`. Methods are tested in source order, the
+inherent `#[dispatch(map, (AnyView<'_>, DefRegionKind), Result<Any>)]` impl groups
+`map_*` methods returning the engine result `Result<Any>`. Methods are tested in source order, the
 first matching argument type wins, and an unmatched value is preserved. A
 method may take an optional trailing `DefRegionKind`; an `AnyView<'_>` method is a
 catch-all and should therefore come last:
@@ -669,7 +694,7 @@ struct Increment {
     integers: usize,
 }
 
-#[dispatch(map)]
+#[dispatch(map, (tvm_ffi::AnyView<'_>, DefRegionKind), Result<Any>)]
 impl Increment {
     fn map_integer(&mut self, value: i64, _kind: DefRegionKind) -> Result<Any> {
         self.integers += 1;
@@ -756,7 +781,7 @@ struct Stats {
     integers: usize,
 }
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl Stats {
     fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
         self.integers += 1;
@@ -799,10 +824,10 @@ writeback: preserve `Unchanged` or reconstruct the parent from replacement resul
 only copy permission. Read permission from `value.inplace_mode()`; see
 `MutationView` for ownership requirements.
 
-An inherent `#[dispatch(mutate, MutationView)]` impl supplies the engine's
-required signature directly. An unmatched value follows default mutation with
-its current permission. All handlers return `Result<Any>`; a handler may omit
-the context argument when another handler declares it:
+An inherent `#[dispatch]` impl declares the engine's required mutation tuple
+and `Result<Any>` return type. An unmatched value follows default mutation with
+its current permission. A handler may omit the context argument even when no
+other handler consumes it:
 
 ```rust
 use tvm_ffi::{
@@ -814,7 +839,7 @@ struct Increment {
     integers: usize,
 }
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl Increment {
     fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
         self.integers += 1;
@@ -841,7 +866,7 @@ use tvm_ffi::{
 
 struct Increment;
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl Increment {
     fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
         Ok(Any::from(value + 1))
