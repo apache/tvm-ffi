@@ -68,14 +68,6 @@ impl TypeAttrColumn {
         Some(Any::from(unsafe { AnyView::from_raw_ffi_any(raw) }))
     }
 
-    pub(crate) unsafe fn from_non_null(pointer: NonNull<TVMFFITypeAttrColumn>) -> Self {
-        Self(pointer)
-    }
-
-    pub(crate) fn as_ptr(self) -> *mut TVMFFITypeAttrColumn {
-        self.0.as_ptr()
-    }
-
     /// Copy one borrowed cell without taking ownership.
     pub(crate) fn get_raw(self, type_index: i32) -> Option<TVMFFIAny> {
         unsafe {

@@ -17,6 +17,7 @@
  * under the License.
  */
 use std::ops::Deref;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicU64;
 
 use crate::derive::ObjectRef;
@@ -427,10 +428,7 @@ pub mod unsafe_ {
     }
 
     /// Generic object deleter for objects allocated through Rust's global allocator.
-    pub(crate) unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32)
-    where
-        T: super::ObjectCore,
-    {
+    pub(crate) unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32) {
         let obj = ptr as *mut T;
         if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
             std::ptr::drop_in_place(obj);
@@ -511,34 +509,61 @@ unsafe impl ObjectCore for Object {
 // ObjectArc
 //---------------------
 
+// Allocate and initialize the normal FFI header while preserving the concrete
+// payload's alignment and drop/layout deleter. The payload starts with an Object.
+unsafe fn allocate_object<T>(data: T, type_index: i32) -> NonNull<T> {
+    let layout = std::alloc::Layout::new::<T>();
+    let allocation = std::alloc::alloc(layout);
+    if allocation.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+    let ptr = allocation.cast::<T>();
+    std::ptr::write(ptr, data);
+    std::ptr::write(
+        ptr.cast::<TVMFFIObject>(),
+        TVMFFIObject {
+            combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
+            type_index,
+            __padding: 0,
+            deleter: Some(unsafe_::object_deleter_for_new::<T>),
+        },
+    );
+    NonNull::new_unchecked(ptr)
+}
+
+impl ObjectArc<Object> {
+    /// Allocate a synchronous runtime payload that may contain borrowed Rust state.
+    ///
+    /// # Safety
+    /// `T` begins with a valid Object header and is ABI-compatible with the
+    /// registered `type_index`. The caller must keep this owner scoped to the
+    /// payload's borrows and ensure every temporary strong and weak reference
+    /// is released before those borrows end. Neither native handles nor this
+    /// erased owner may escape that synchronous scope. Destruction uses T's
+    /// exact layout and drop function, not the erased Object layout.
+    /// The erased owner and handles must remain on this thread unless the
+    /// concrete payload permits sharing or transfer; erasure grants neither.
+    pub(crate) unsafe fn new_opaque_unchecked<T>(data: T, type_index: i32) -> Self {
+        Self {
+            ptr: allocate_object(data, type_index).cast(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
 impl<T: ObjectCore> ObjectArc<T> {
     /// Allocate an initialized object at its stable managed address.
     pub fn new(data: T) -> Self {
+        // Resolve metadata before moving the payload into its allocation.
+        let type_index = T::type_index();
         unsafe {
-            let layout = std::alloc::Layout::new::<T>();
-            let raw_data_ptr = std::alloc::alloc(layout);
-            if raw_data_ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
-            let ptr = raw_data_ptr as *mut T;
-            std::ptr::write(ptr, data);
-            // now override the header directly
-            std::ptr::write(
-                ptr as *mut TVMFFIObject,
-                TVMFFIObject {
-                    combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
-                    type_index: T::type_index(),
-                    __padding: 0,
-                    deleter: Some(unsafe_::object_deleter_for_new::<T>),
-                },
-            );
-            // move into the object arc ptr
             Self {
-                ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
+                ptr: allocate_object(data, type_index),
                 _phantom: std::marker::PhantomData,
             }
         }
     }
+
     /// Allocate a stable object followed by its type's extra item storage.
     pub fn new_with_extra_items<U>(data: T) -> Self
     where

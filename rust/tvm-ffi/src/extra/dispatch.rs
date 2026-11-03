@@ -35,7 +35,7 @@ pub trait Dispatcher<Args, Ret> {
     fn dispatch_tuple(self, args: Args) -> Ret;
 }
 
-use crate::{error::Result, AnyView};
+use crate::AnyView;
 
 /// Compile-time source metadata for the supported dispatch carriers.
 #[doc(hidden)]
@@ -64,81 +64,4 @@ impl<'source, 'value> DispatchRecovery<crate::match_any_internal::ViewSource<'so
     for AnyView<'value>
 {
     type Recovery = ();
-}
-impl<'source, 'value, T: crate::type_traits::ContainerElement>
-    DispatchRecovery<crate::match_any_internal::CapabilitySource<'source>>
-    for crate::MutationView<'value, T>
-{
-    type Recovery = crate::MutationView<'source>;
-}
-
-use super::structural_visit::{DefRegionKind, IntoWalker, NativeVisit, WalkResult};
-
-// Borrowed traversal adapters forward this concrete tuple without making
-// unknown-Args trait solving recurse through mutable reference layers.
-impl<'receiver, 'inner, 'value, D, Ret> Dispatcher<(AnyView<'value>, DefRegionKind), Ret>
-    for &'receiver mut &'inner mut D
-where
-    &'receiver mut D: Dispatcher<(AnyView<'value>, DefRegionKind), Ret>,
-{
-    #[inline(always)]
-    fn dispatch_tuple(self, args: (AnyView<'value>, DefRegionKind)) -> Ret {
-        <&'receiver mut D as Dispatcher<(AnyView<'value>, DefRegionKind), Ret>>::dispatch_tuple(
-            &mut **self,
-            args,
-        )
-    }
-}
-
-/// Dispatch for typed `structural_walk` observer callbacks.
-///
-/// This private engine bridge consumes the common normalized walk signature.
-/// Matching is supplied by `Dispatcher`; its outer `None` means no match.
-pub(crate) trait WalkDispatch: Sized {
-    fn dispatch_walk(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<WalkResult>>;
-}
-
-impl<V> WalkDispatch for V
-where
-    for<'receiver, 'value> &'receiver mut V:
-        Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<WalkResult>>>,
-{
-    #[inline(always)]
-    fn dispatch_walk(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<WalkResult>> {
-        self.dispatch_tuple((value, def_region_kind))
-    }
-}
-
-#[doc(hidden)]
-pub enum ByWalkDispatch {}
-
-impl<'a, V: WalkDispatch> IntoWalker<ByWalkDispatch> for &'a mut V {
-    type Walker = DispatchWalker<&'a mut V>;
-    fn into_walker(self) -> Self::Walker {
-        DispatchWalker { walker: self }
-    }
-}
-
-/// Adapter from [`Dispatcher`](crate::Dispatcher) to the traversal's native callback.
-#[doc(hidden)]
-pub struct DispatchWalker<V> {
-    walker: V,
-}
-
-impl<V> super::structural_visit::NativeContext for DispatchWalker<V> {}
-
-impl<V: WalkDispatch> NativeVisit for DispatchWalker<&mut V> {
-    fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        self.walker
-            .dispatch_walk(value, def_region_kind)
-            .unwrap_or_else(|| Ok(WalkResult::Advance))
-    }
 }

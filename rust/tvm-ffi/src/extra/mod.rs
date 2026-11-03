@@ -19,6 +19,8 @@
 pub mod dispatch;
 pub mod module;
 mod structural_common;
+pub mod structural_map;
 pub mod structural_mutate;
 pub mod structural_visit;
+pub mod structural_walk;
 pub mod unchanged;

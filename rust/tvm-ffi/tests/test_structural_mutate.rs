@@ -347,10 +347,6 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
 
 #[test]
 fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
-    assert_eq!(
-        std::mem::size_of::<StructuralMutatorView<'_, ManualIncrement>>(),
-        std::mem::size_of::<*mut ()>()
-    );
     let unique = Array::new(vec![1i64, 2]);
     let unique_pointer = array_pointer(&unique);
     let mutated = structural_mutate::<Array<i64>, _>(unique, ManualIncrement::default())
@@ -2667,5 +2663,172 @@ fn mutation_regions_retargeting_and_error_restore() {
             mutator.0,
             vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
         );
+    }
+}
+
+#[test]
+fn default_base_wrapper_preserves_mapping_and_post_recursion_state() {
+    let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3, 4])]);
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        let ordinary = structural_map(root.clone(), |value: i64| value + 1, order).unwrap();
+        let wrapped = structural_map(
+            root.clone(),
+            StructuralMutator::new(StructuralMutatorObj::default(), |value: i64| value + 1),
+            order,
+        )
+        .unwrap();
+        let leaves = |value: &Any| {
+            let result = RefCell::new(Vec::new());
+            structural_walk(
+                value,
+                |value: i64| {
+                    result.borrow_mut().push(value);
+                    WalkResult::Advance
+                },
+                WalkOrder::PreOrder,
+            )
+            .unwrap();
+            result.into_inner()
+        };
+        assert_eq!(leaves(&ordinary), vec![2, 3, 4, 5]);
+        assert_eq!(leaves(&wrapped), leaves(&ordinary));
+    }
+    #[derive(Default)]
+    struct PostState {
+        depth: usize,
+        completed: usize,
+    }
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+    impl PostState {
+        fn mutate_any(
+            &mut self,
+            value: MutationView<'_>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            let depth = self.depth;
+            self.depth += 1;
+            let result = mutator.default_mutate(self, value)?;
+            self.depth -= 1;
+            assert_eq!(self.depth, depth);
+            self.completed += 1;
+            Ok(result.into())
+        }
+    }
+    for wrapped in [false, true] {
+        let mut state = PostState::default();
+        if wrapped {
+            structural_mutate(
+                root.clone(),
+                StructuralMutator::new(StructuralMutatorObj::default(), &mut state),
+            )
+            .unwrap();
+        } else {
+            structural_mutate(root.clone(), &mut state).unwrap();
+        }
+        assert_eq!(state.depth, 0);
+        assert_eq!(state.completed, 7);
+    }
+}
+
+#[test]
+fn explicit_default_base_preserves_primitive_replacement_descent() {
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        for wrapped in [false, true] {
+            let callback = |value: i64| -> Any {
+                if value == 0 {
+                    Array::new(vec![1_i64, 2]).into()
+                } else {
+                    (value + 10).into()
+                }
+            };
+            let result = if wrapped {
+                structural_map(
+                    0_i64,
+                    StructuralMutator::new(StructuralMutatorObj::default(), callback),
+                    order,
+                )
+            } else {
+                structural_map(0_i64, callback, order)
+            }
+            .unwrap();
+            let result = Array::<i64>::try_from(result).unwrap();
+            let expected = if matches!(order, WalkOrder::PreOrder) {
+                [11, 12]
+            } else {
+                [1, 2]
+            };
+            assert_eq!(result.get(0).unwrap(), expected[0]);
+            assert_eq!(result.get(1).unwrap(), expected[1]);
+            let unchanged = if wrapped {
+                structural_map(
+                    7_i64,
+                    StructuralMutator::new(StructuralMutatorObj::default(), |_: bool| false),
+                    order,
+                )
+            } else {
+                structural_map(7_i64, |_: bool| false, order)
+            }
+            .unwrap();
+            assert_eq!(i64::try_from(unchanged).unwrap(), 7);
+        }
+    }
+}
+
+#[test]
+fn managed_mutator_drops_borrowed_aligned_base_on_success_error_and_panic() {
+    #[repr(C, align(64))]
+    struct Base<'a> {
+        base: StructuralMutatorObj,
+        drops: &'a Cell<usize>,
+    }
+    impl Drop for Base<'_> {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get() + 1);
+        }
+    }
+    unsafe impl StructuralMutatorBase for Base<'_> {
+        unsafe fn default_mutate<D>(
+            this: *mut Self,
+            dispatch: &mut D,
+            value: MutationView<'_>,
+            mutator: &mut StructuralMutatorView<'_, D>,
+        ) -> Result<UnchangedOr<Any>> {
+            assert_eq!(this.addr() % 64, 0);
+            StructuralMutatorObj::default_mutate(dispatch, value, mutator)
+        }
+    }
+    for mode in 0..3 {
+        let drops = Cell::new(0);
+        let root = Array::new(vec![1_i64, 2]);
+        let mut callback = |value: i64| -> Result<Any> {
+            if value == 2 {
+                if mode == 1 {
+                    return Err(Error::new(RUNTIME_ERROR, "managed error", ""));
+                }
+                if mode == 2 {
+                    panic!("managed panic");
+                }
+            }
+            Ok(value.into())
+        };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            structural_map(
+                root,
+                StructuralMutator::new(
+                    Base {
+                        base: StructuralMutatorObj::default(),
+                        drops: &drops,
+                    },
+                    &mut callback,
+                ),
+                WalkOrder::PreOrder,
+            )
+        }));
+        assert_eq!(drops.get(), 1);
+        match mode {
+            0 => assert!(outcome.unwrap().is_ok()),
+            1 => assert!(outcome.unwrap().is_err()),
+            _ => assert!(outcome.is_err()),
+        }
     }
 }

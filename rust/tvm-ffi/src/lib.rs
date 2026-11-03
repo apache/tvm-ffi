@@ -54,15 +54,17 @@ pub use crate::error::{
 };
 pub use crate::extra::dispatch::Dispatcher;
 pub use crate::extra::module::Module;
+pub use crate::extra::structural_map::{structural_map, IntoMapper, MapChainLink};
 pub use crate::extra::structural_mutate::{
-    structural_map, structural_mutate, InplaceMode, IntoMapper, IntoMutator, MapChainLink,
-    MutationView, StructuralMutator, StructuralMutatorBase, StructuralMutatorObj,
-    StructuralMutatorView, StructuralVarRemap,
+    structural_mutate, InplaceMode, IntoMutator, MutationView, StructuralMutator,
+    StructuralMutatorBase, StructuralMutatorObj, StructuralMutatorView, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, structural_walk, DefRegionKind, IntoVisitor, IntoWalkResult, IntoWalker,
-    StructuralVisitor, StructuralVisitorBase, StructuralVisitorObj, StructuralVisitorView,
-    VisitInterrupt, WalkChainLink, WalkOrder, WalkResult,
+    structural_visit, DefRegionKind, IntoVisitor, StructuralVisitor, StructuralVisitorBase,
+    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt,
+};
+pub use crate::extra::structural_walk::{
+    structural_walk, IntoWalkResult, IntoWalker, WalkChainLink, WalkOrder, WalkResult,
 };
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;

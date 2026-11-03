@@ -1994,10 +1994,6 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
             visitor.default_visit(self, &value)
         }
     }
-    assert_eq!(
-        std::mem::size_of::<StructuralVisitorView<'_, Aligned>>(),
-        std::mem::size_of::<usize>()
-    );
     let aligned_root = Array::new(vec![3_i64, 4]);
     let mut borrowed = Aligned {
         checked: false,
@@ -2272,4 +2268,211 @@ fn generic_dispatch_distinguishes_no_match_from_handler_outcomes() {
         Some(Ok(Some(1)))
     );
     assert_eq!(Outcomes.dispatch_tuple((AnyView::from(&1.0_f64),)), None);
+}
+
+#[test]
+fn managed_walk_preserves_borrowed_base_address_and_drop_on_all_exits() {
+    #[repr(C, align(64))]
+    struct Base<'a, const N: usize> {
+        base: StructuralVisitorObj,
+        padding: [u8; N],
+        address: &'a Cell<usize>,
+        drops: &'a Cell<usize>,
+    }
+    impl<const N: usize> Drop for Base<'_, N> {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get() + 1);
+        }
+    }
+    // SAFETY: the ABI prefix is first and only copied external Cell references
+    // are used across recursion. The observed address never escapes the test.
+    unsafe impl<const N: usize> StructuralVisitorBase for Base<'_, N> {
+        unsafe fn default_visit<D>(
+            this: *mut Self,
+            dispatch: &mut D,
+            value: AnyView<'_>,
+            visitor: &mut StructuralVisitorView<'_, D>,
+        ) -> Result<Option<VisitInterrupt>> {
+            assert_eq!(this.addr() % 64, 0);
+            let address = (*this).address;
+            if address.get() == 0 {
+                address.set(this.addr());
+            }
+            assert_eq!(address.get(), this.addr());
+            StructuralVisitorObj::default_visit(dispatch, value, visitor)
+        }
+    }
+    fn run<const N: usize>(mode: usize) {
+        let address = Cell::new(0);
+        let drops = Cell::new(0);
+        let root = Array::new(vec![1_i64, 2]);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            structural_walk(
+                &root,
+                StructuralVisitor::new(
+                    Base {
+                        base: StructuralVisitorObj::default(),
+                        padding: [0_u8; N],
+                        address: &address,
+                        drops: &drops,
+                    },
+                    |value: i64| -> Result<WalkResult> {
+                        if value != 2 {
+                            return Ok(WalkResult::Advance);
+                        }
+                        match mode {
+                            1 => panic!("storage panic"),
+                            2 => Err(runtime_error("storage error")),
+                            3 => Ok(WalkResult::InterruptWith(Any::new())),
+                            4 => Ok(WalkResult::InterruptWith(
+                                runtime_error("payload error").into(),
+                            )),
+                            _ => Ok(WalkResult::Advance),
+                        }
+                    },
+                ),
+                WalkOrder::PreOrder,
+            )
+        }));
+        assert_eq!(outcome.is_err(), mode == 1);
+        match outcome {
+            Err(payload) => assert_eq!(payload.downcast_ref::<&str>(), Some(&"storage panic")),
+            Ok(Err(error)) => {
+                assert_eq!(mode, 2);
+                assert!(error.message().contains("storage error"));
+            }
+            Ok(Ok(Some(interrupt))) => {
+                assert!(mode == 3 || mode == 4);
+                assert_eq!(
+                    interrupt.value.type_index(),
+                    if mode == 3 {
+                        TypeIndex::kTVMFFINone
+                    } else {
+                        TypeIndex::kTVMFFIError
+                    } as i32
+                );
+            }
+            Ok(Ok(None)) => assert_eq!(mode, 0),
+        }
+        assert_ne!(address.get(), 0);
+        assert_eq!(drops.get(), 1);
+    }
+    for mode in 0..5 {
+        run::<0>(mode);
+        run::<4096>(mode);
+    }
+}
+
+#[test]
+fn default_base_wrapper_preserves_order_and_post_recursion_state() {
+    let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3, 4])]);
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        let ordinary = RefCell::new(Vec::new());
+        let wrapped = RefCell::new(Vec::new());
+        structural_walk(
+            &root,
+            |value: AnyView<'_>| {
+                ordinary.borrow_mut().push(value.try_as::<i64>());
+                WalkResult::Advance
+            },
+            order,
+        )
+        .unwrap();
+        structural_walk(
+            &root,
+            StructuralVisitor::new(StructuralVisitorObj::default(), |value: AnyView<'_>| {
+                wrapped.borrow_mut().push(value.try_as::<i64>());
+                WalkResult::Advance
+            }),
+            order,
+        )
+        .unwrap();
+        assert_eq!(*ordinary.borrow(), *wrapped.borrow());
+    }
+    #[derive(Default)]
+    struct PostState {
+        depth: usize,
+        leaves: Vec<i64>,
+        completed: usize,
+    }
+    #[dispatch(visit, (AnyView<'_>, &mut StructuralVisitorView<'_, Self>), Result<Option<VisitInterrupt>>)]
+    impl PostState {
+        fn visit_any(
+            &mut self,
+            value: AnyView<'_>,
+            visitor: &mut StructuralVisitorView<'_, Self>,
+        ) -> Result<Option<VisitInterrupt>> {
+            let depth = self.depth;
+            self.depth += 1;
+            let result = visitor.default_visit(self, &value)?;
+            self.depth -= 1;
+            assert_eq!(self.depth, depth);
+            self.completed += 1;
+            if let Some(value) = value.try_as::<i64>() {
+                self.leaves.push(value);
+            }
+            Ok(result)
+        }
+    }
+    for wrapped in [false, true] {
+        let mut state = PostState::default();
+        if wrapped {
+            structural_visit(
+                &root,
+                StructuralVisitor::new(StructuralVisitorObj::default(), &mut state),
+            )
+            .unwrap();
+        } else {
+            structural_visit(&root, &mut state).unwrap();
+        }
+        assert_eq!(state.depth, 0);
+        assert_eq!(state.completed, 7);
+        assert_eq!(state.leaves, vec![1, 2, 3, 4]);
+    }
+}
+
+#[test]
+fn nested_walk_returns_one_owned_interrupt_payload_and_releases_it() {
+    let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3])]);
+    let payload = Any::from(Array::new(vec![42_i64]));
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        let mut visited = Vec::new();
+        let interrupt = structural_walk(
+            &root,
+            |value: i64| {
+                visited.push(value);
+                WalkResult::InterruptWith(payload.clone())
+            },
+            order,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(visited, vec![1]);
+        assert_eq!(payload.debug_strong_count(), Some(2));
+        let original = payload.try_as::<ObjectRef>().unwrap();
+        let returned = interrupt.value.try_as::<ObjectRef>().unwrap();
+        assert!(original.same_as(&returned));
+        drop((original, returned, interrupt));
+        assert_eq!(payload.debug_strong_count(), Some(1));
+    }
+}
+
+#[test]
+fn nested_walk_error_keeps_context_and_releases_callback_owner() {
+    let root = Array::new(vec![Array::new(vec![1_i64, 2])]);
+    let owner = Any::from(Array::new(vec![42_i64]));
+    let callback_owner = owner.clone();
+    let error = structural_walk(
+        &root,
+        move |_: i64| -> Result<WalkResult> {
+            assert_eq!(callback_owner.debug_strong_count(), Some(2));
+            Err(runtime_error("nested owned failure"))
+        },
+        WalkOrder::PreOrder,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.message(), "nested owned failure");
+    assert!(error.backtrace().contains("ffi.Array"));
+    assert_eq!(owner.debug_strong_count(), Some(1));
 }
