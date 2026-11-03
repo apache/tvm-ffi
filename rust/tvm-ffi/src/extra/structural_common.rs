@@ -22,7 +22,27 @@ use crate::error::Error;
 use crate::function::Function;
 use crate::object::{self, ObjectRefCore};
 use crate::reflection::FieldGetter;
-use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeKeyToIndex};
+use crate::tvm_ffi_sys::{
+    TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
+};
+
+/// Return the registered type key for `type_index`.
+///
+/// When the runtime returns no type information, return `<type_index N>` for diagnostics.
+///
+/// # Arguments
+///
+/// * `type_index` - Runtime type index whose registered type key is requested.
+pub(crate) fn type_key_of(type_index: i32) -> String {
+    unsafe {
+        let info = TVMFFIGetTypeInfo(type_index);
+        if info.is_null() {
+            format!("<type_index {type_index}>")
+        } else {
+            (*info).type_key.as_str().to_string()
+        }
+    }
+}
 
 /// Add one structural traversal frame to an error's backtrace.
 #[cold]

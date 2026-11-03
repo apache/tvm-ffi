@@ -106,58 +106,16 @@ where
     }
 }
 
-/// Dispatch for typed `structural_walk` observer callbacks.
-///
-/// This private engine bridge consumes the common normalized walk signature.
-/// Matching is supplied by `Dispatcher`; its outer `None` means no match.
-pub(crate) trait WalkDispatch: Sized {
-    fn dispatch_walk(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<WalkResult>>;
-}
-
-impl<V> WalkDispatch for V
-where
-    for<'receiver, 'value> &'receiver mut V:
-        Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<WalkResult>>>,
-{
-    #[inline(always)]
-    fn dispatch_walk(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<WalkResult>> {
-        self.dispatch_tuple((value, def_region_kind))
-    }
-}
-
 #[doc(hidden)]
 pub enum ByWalkDispatch {}
 
-impl<'a, V: WalkDispatch> IntoWalker<ByWalkDispatch> for &'a mut V {
-    type Walker = DispatchWalker<&'a mut V>;
+impl<'a, V> IntoWalker<ByWalkDispatch> for &'a mut V
+where
+    for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
+{
     #[inline(always)]
-    fn into_walker(self) -> Self::Walker {
-        DispatchWalker { walker: self }
-    }
-}
-
-/// Adapter from [`Dispatcher`] to the traversal's native callback.
-#[doc(hidden)]
-pub struct DispatchWalker<V> {
-    walker: V,
-}
-
-impl<V> NativeContext for DispatchWalker<V> {}
-
-impl<V: WalkDispatch> NativeVisit for DispatchWalker<&mut V> {
-    #[inline(always)]
-    fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        self.walker
-            .dispatch_walk(value, def_region_kind)
-            .unwrap_or_else(|| Ok(WalkResult::Advance))
+    fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
+        run_walker::<Self>(root, self, order)
     }
 }
 
@@ -177,9 +135,7 @@ impl<V: WalkDispatch> NativeVisit for DispatchWalker<&mut V> {
 )]
 pub trait IntoWalker<Marker> {
     #[doc(hidden)]
-    type Walker: NativeVisit;
-    #[doc(hidden)]
-    fn into_walker(self) -> Self::Walker;
+    fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>>;
 }
 
 impl<F, O> IntoWalker<ByCatchAllLink> for F
@@ -187,10 +143,9 @@ where
     F: for<'a> FnMut(AnyView<'a>) -> O,
     O: IntoWalkResult,
 {
-    type Walker = ChainWalker<F, ByCatchAllLink>;
     #[inline(always)]
-    fn into_walker(self) -> Self::Walker {
-        ChainWalker::new(self)
+    fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
+        run_walker::<ChainWalker<F, ByCatchAllLink>>(root, ChainWalker::new(self), order)
     }
 }
 
@@ -199,10 +154,9 @@ where
     F: for<'a> FnMut(AnyView<'a>, DefRegionKind) -> O,
     O: IntoWalkResult,
 {
-    type Walker = ChainWalker<F, ByCatchAllKindLink>;
     #[inline(always)]
-    fn into_walker(self) -> Self::Walker {
-        ChainWalker::new(self)
+    fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
+        run_walker::<ChainWalker<F, ByCatchAllKindLink>>(root, ChainWalker::new(self), order)
     }
 }
 
@@ -222,13 +176,10 @@ pub trait WalkChainLink<Marker>: sealed::SealedLink<Marker> {
     ) -> Option<Result<WalkResult>>;
 }
 
-pub(crate) use sealed::NativeContext;
-
 mod sealed {
-    // Keep native observer implementations within the supported adapters.
-    pub trait NativeContext: Sized {}
-
-    use super::{AnyView, DefRegionKind, IntoWalkResult, ObjectCore, WalkDispatch};
+    use super::{
+        AnyView, DefRegionKind, Dispatcher, IntoWalkResult, ObjectCore, Result, WalkResult,
+    };
 
     pub trait SealedLink<Marker> {}
 
@@ -268,7 +219,10 @@ mod sealed {
         O: IntoWalkResult,
     {
     }
-    impl<V: WalkDispatch> SealedLink<super::ByWalkDispatchLink> for &mut V {}
+    impl<V> SealedLink<super::ByWalkDispatchLink> for &mut V where
+        for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>
+    {
+    }
 }
 
 #[doc(hidden)]
@@ -397,14 +351,17 @@ pub struct ByChainLink<Markers>(PhantomData<fn(Markers)>);
 #[doc(hidden)]
 pub enum ByWalkDispatchLink {}
 
-impl<V: WalkDispatch> WalkChainLink<ByWalkDispatchLink> for &mut V {
+impl<V> WalkChainLink<ByWalkDispatchLink> for &mut V
+where
+    for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
+{
     #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Option<Result<WalkResult>> {
-        self.dispatch_walk(value, def_region_kind)
+        self.dispatch_tuple((value, def_region_kind))
     }
 }
 
@@ -425,17 +382,17 @@ impl<Link, Marker> ChainWalker<Link, Marker> {
     }
 }
 
-impl<Link, Marker> NativeContext for ChainWalker<Link, Marker> {}
-
-impl<Link, Marker> NativeVisit for ChainWalker<Link, Marker>
+impl<'s, 'v, Link, Marker> Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>
+    for &'s mut ChainWalker<Link, Marker>
 where
     Link: WalkChainLink<Marker>,
 {
     #[inline(always)]
-    fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        self.link
-            .try_call(value, def_region_kind)
-            .unwrap_or_else(|| Ok(WalkResult::Advance))
+    fn dispatch_tuple(
+        self,
+        (value, def_region_kind): (AnyView<'v>, DefRegionKind),
+    ) -> Option<Result<WalkResult>> {
+        self.link.try_call(value, def_region_kind)
     }
 }
 
@@ -470,10 +427,9 @@ macro_rules! impl_chain_link {
         where
             $($F: WalkChainLink<$M>,)+
         {
-            type Walker = ChainWalker<($($F,)+), ByChainLink<($($M,)+)>>;
             #[inline(always)]
-            fn into_walker(self) -> Self::Walker {
-                ChainWalker::new(self)
+            fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
+                run_walker::<ChainWalker<($($F,)+), ByChainLink<($($M,)+)>>>(root, ChainWalker::new(self), order)
             }
         }
     };
@@ -490,10 +446,9 @@ macro_rules! impl_bare_link_walker {
                 Self: WalkChainLink<$marker<T>>,
                 O: IntoWalkResult,
             {
-                type Walker = ChainWalker<F, $marker<T>>;
                 #[inline(always)]
-                fn into_walker(self) -> Self::Walker {
-                    ChainWalker::new(self)
+                fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
+                    run_walker::<ChainWalker<F, $marker<T>>>(root, ChainWalker::new(self), order)
                 }
             }
         )+
@@ -507,28 +462,6 @@ impl_bare_link_walker!(
     (ByNodeKindLink, &T, DefRegionKind),
 );
 
-/// Internal callback protocol used by [`IntoWalker`].
-#[doc(hidden)]
-pub trait NativeVisit: Sized + sealed::NativeContext {
-    #[inline(always)]
-    fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
-        visit_result_from_any(unsafe {
-            Any::from_raw_ffi_any(run_walker_raw(raw_of(root), self, order))
-        })
-    }
-
-    fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult>;
-}
-
-impl<V: NativeVisit> NativeContext for &mut V {}
-
-impl<V: NativeVisit> NativeVisit for &mut V {
-    #[inline(always)]
-    fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        (**self).visit(value, def_region_kind)
-    }
-}
-
 // -----------------------------------------------------------------------------
 // Implementation of walk.
 // -----------------------------------------------------------------------------
@@ -540,7 +473,7 @@ struct WalkVisitor<V, const PRE_ORDER: bool> {
     observer: V,
 }
 
-impl<'s, 'v, 'c, 'r, V: NativeVisit, const PRE_ORDER: bool>
+impl<'s, 'v, 'c, 'r, V, const PRE_ORDER: bool>
     Dispatcher<
         (
             AnyView<'v>,
@@ -548,6 +481,8 @@ impl<'s, 'v, 'c, 'r, V: NativeVisit, const PRE_ORDER: bool>
         ),
         Option<Result<Option<VisitInterrupt>>>,
     > for &'s mut WalkVisitor<V, PRE_ORDER>
+where
+    for<'a, 'b> &'a mut V: Dispatcher<(AnyView<'b>, DefRegionKind), Option<Result<WalkResult>>>,
 {
     #[inline(always)]
     fn dispatch_tuple(
@@ -561,7 +496,10 @@ impl<'s, 'v, 'c, 'r, V: NativeVisit, const PRE_ORDER: bool>
     }
 }
 
-impl<V: NativeVisit, const PRE_ORDER: bool> WalkVisitor<V, PRE_ORDER> {
+impl<V, const PRE_ORDER: bool> WalkVisitor<V, PRE_ORDER>
+where
+    for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
+{
     #[inline(always)]
     fn visit(
         &mut self,
@@ -575,7 +513,10 @@ impl<V: NativeVisit, const PRE_ORDER: bool> WalkVisitor<V, PRE_ORDER> {
                 return Ok(Some(interrupt));
             }
         }
-        match self.observer.visit(value, kind)? {
+        match (&mut self.observer)
+            .dispatch_tuple((value, kind))
+            .unwrap_or_else(|| Ok(WalkResult::Advance))?
+        {
             WalkResult::Advance if PRE_ORDER => visitor.default_visit(self, value),
             WalkResult::Advance => Ok(None),
             WalkResult::Skip => {
@@ -595,32 +536,32 @@ impl<V: NativeVisit, const PRE_ORDER: bool> WalkVisitor<V, PRE_ORDER> {
 }
 
 #[inline(always)]
-fn run_walker_raw<D: NativeVisit>(
-    root: crate::tvm_ffi_sys::TVMFFIAny,
-    observer: D,
-    order: WalkOrder,
-) -> crate::tvm_ffi_sys::TVMFFIAny {
+fn run_walker<D>(root: AnyView<'_>, observer: D, order: WalkOrder) -> Result<Option<VisitInterrupt>>
+where
+    for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
+{
+    let root = raw_of(root);
     // Own the result while dropping the observer: user capture destructors can
     // unwind after the native callback has returned.
     let result = match order {
         WalkOrder::PreOrder => {
             let mut visitor = WalkVisitor::<D, true> { observer };
-            let result = unsafe {
-                Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(root, &mut visitor))
-            };
+            let raw =
+                StructuralVisitEngine::run_visitor_raw::<WalkVisitor<D, true>>(root, &mut visitor);
+            let result = unsafe { Any::from_raw_ffi_any(raw) };
             drop(visitor);
             result
         }
         WalkOrder::PostOrder => {
             let mut visitor = WalkVisitor::<D, false> { observer };
-            let result = unsafe {
-                Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(root, &mut visitor))
-            };
+            let raw =
+                StructuralVisitEngine::run_visitor_raw::<WalkVisitor<D, false>>(root, &mut visitor);
+            let result = unsafe { Any::from_raw_ffi_any(raw) };
             drop(visitor);
             result
         }
     };
-    unsafe { Any::into_raw_ffi_any(result) }
+    visit_result_from_any(result)
 }
 
 /// Walk `root` with an observer, the Rust analog of C++
@@ -634,6 +575,7 @@ fn run_walker_raw<D: NativeVisit>(
 /// chain.
 /// Callback views cannot escape their invocation; retain an [`Any`] explicitly
 /// when a value must outlive the callback:
+///
 /// ```compile_fail,E0521
 /// use tvm_ffi::{structural_walk, AnyView, WalkOrder, WalkResult};
 /// let mut retained: Option<AnyView<'static>> = None;
@@ -651,6 +593,33 @@ fn run_walker_raw<D: NativeVisit>(
 ///
 /// Callbacks must report failures through [`Result`] and must not panic: a panic
 /// reaching the non-unwinding native callback boundary aborts the process.
+///
+/// # Arguments
+///
+/// * `root` - Value borrowed for traversal, convertible into an [`AnyView`].
+/// * `walker` - Mutable dispatcher, closure, or first-match callback tuple
+///   implementing [`IntoWalker`]. Each callback observes a value and returns a
+///   result convertible through [`IntoWalkResult`] to control traversal.
+/// * `order` - [`WalkOrder::PreOrder`] observes each value before its children;
+///   [`WalkOrder::PostOrder`] observes it after its children. Skipping children
+///   with [`WalkResult::Skip`] only affects pre-order traversal.
+///
+/// # Examples
+///
+/// Collect integer leaves with a typed closure:
+///
+/// ```
+/// use tvm_ffi::{structural_walk, Array, WalkOrder, WalkResult};
+///
+/// let root = Array::new(vec![1_i64, 2, 3]);
+/// let mut integers = Vec::new();
+/// structural_walk(&root, |value: i64| {
+///     integers.push(value);
+///     WalkResult::Advance
+/// }, WalkOrder::PreOrder)?;
+/// assert_eq!(integers, vec![1, 2, 3]);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 pub fn structural_walk<'input, R, M, H>(
     root: R,
     walker: H,
@@ -660,5 +629,5 @@ where
     H: IntoWalker<M>,
     R: Into<AnyView<'input>>,
 {
-    walker.into_walker().walk_root(root.into(), order)
+    walker.walk_root(root.into(), order)
 }

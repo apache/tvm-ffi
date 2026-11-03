@@ -72,7 +72,7 @@ use crate::tvm_ffi_sys::{
 };
 
 use super::structural_common::{
-    borrowed_view, raw_of, with_structural_error_context, with_visit_error_context,
+    borrowed_view, raw_of, type_key_of, with_structural_error_context, with_visit_error_context,
 };
 
 const STRUCTURAL_VISIT_ATTR: &str = "__s_visit__";
@@ -763,17 +763,6 @@ fn initialize_structural_visit_column() -> TypeAttrColumn {
     *LazyLock::force(&STRUCTURAL_VISIT_COLUMN)
 }
 
-pub(crate) fn type_key_of(type_index: i32) -> String {
-    unsafe {
-        let info = TVMFFIGetTypeInfo(type_index);
-        if info.is_null() {
-            format!("<type_index {type_index}>")
-        } else {
-            (*info).type_key.as_str().to_string()
-        }
-    }
-}
-
 /// Visit every reflected field described by `info` and its ancestors in the
 /// same parent-to-child order as C++ `ForEachFieldInfoWithEarlyStop`.
 ///
@@ -903,7 +892,7 @@ where
     #[inline(always)]
     fn visit_root(mut self, root: AnyView<'_>) -> Result<Option<VisitInterrupt>> {
         visit_result_from_any(unsafe {
-            Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(
+            Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw::<D>(
                 raw_of(root),
                 &mut self,
             ))
@@ -921,7 +910,10 @@ where
     #[inline(always)]
     fn visit_root(self, root: AnyView<'_>) -> Result<Option<VisitInterrupt>> {
         visit_result_from_any(unsafe {
-            Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(raw_of(root), self))
+            Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw::<D>(
+                raw_of(root),
+                self,
+            ))
         })
     }
 }
@@ -935,6 +927,46 @@ where
 ///
 /// Callbacks must report failures through [`Result`] and must not panic: a panic
 /// reaching the non-unwinding native callback boundary aborts the process.
+///
+/// # Arguments
+///
+/// * `root` - Value borrowed for traversal, convertible into an [`AnyView`].
+/// * `visitor` - Owned or mutably borrowed dispatcher implementing [`IntoVisitor`].
+///   Matching handlers control recursion through [`StructuralVisitorView`];
+///   unmatched values use default child traversal.
+///
+/// # Examples
+///
+/// Sum integer leaves while default traversal descends into the array:
+///
+/// ```
+/// # pub use tvm_ffi::{extra, match_any, match_any_internal, Dispatcher};
+/// # fn main() -> tvm_ffi::Result<()> {
+/// use tvm_ffi::{
+///     dispatch, structural_visit, AnyView, Array, Result, StructuralVisitorView,
+///     VisitInterrupt,
+/// };
+///
+/// struct Sum(i64);
+/// #[dispatch(visit, (AnyView<'_>, &mut StructuralVisitorView<'_, Self>), Result<Option<VisitInterrupt>>)]
+/// impl Sum {
+///     fn visit_integer(
+///         &mut self,
+///         value: i64,
+///         _: &mut StructuralVisitorView<'_, Self>,
+///     ) -> Result<Option<VisitInterrupt>> {
+///         self.0 += value;
+///         Ok(None)
+///     }
+/// }
+///
+/// let root = Array::new(vec![1_i64, 2, 3]);
+/// let mut sum = Sum(0);
+/// assert!(structural_visit(&root, &mut sum)?.is_none());
+/// assert_eq!(sum.0, 6);
+/// # Ok(())
+/// # }
+/// ```
 pub fn structural_visit<'input, R, M>(
     root: R,
     visitor: impl IntoVisitor<M>,

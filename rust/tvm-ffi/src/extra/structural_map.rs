@@ -540,6 +540,32 @@ impl<D: MapDispatch, const PRE_ORDER: bool> NativeMapper<'_, D, PRE_ORDER> {
 /// In-place changes completed before an error are not rolled back. Because
 /// this function consumes `root`, an error does not return the partly mapped
 /// root to the caller.
+///
+/// # Arguments
+///
+/// * `root` - Owned value to transform, convertible into an [`Any`]. Clone it
+///   first to preserve the original through copy-on-write behavior.
+/// * `mapper` - Mutable dispatcher, closure, or first-match callback tuple
+///   implementing [`IntoMapper`]. Callbacks return replacements; unmatched
+///   values retain their value while default traversal maps their children.
+/// * `order` - [`WalkOrder::PreOrder`] applies the callback before traversing the
+///   replacement's children; [`WalkOrder::PostOrder`] maps children before
+///   applying the callback to their parent.
+///
+/// # Examples
+///
+/// Increment integer leaves while keeping a shared original unchanged:
+///
+/// ```
+/// use tvm_ffi::{structural_map, Array, WalkOrder};
+///
+/// let root = Array::new(vec![1_i64, 2, 3]);
+/// let mapped = structural_map(root.clone(), |value: i64| value + 1, WalkOrder::PostOrder)?;
+/// let mapped = Array::<i64>::try_from(mapped)?;
+/// assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3, 4]);
+/// assert_eq!(root.iter().collect::<Vec<_>>(), vec![1, 2, 3]);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 pub fn structural_map<R, M, H>(root: R, mapper: H, order: WalkOrder) -> Result<Any>
 where
     R: Into<Any>,

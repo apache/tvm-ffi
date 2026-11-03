@@ -52,11 +52,11 @@ use crate::tvm_ffi_sys::{
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
-    borrowed_view, raw_of, same_shallow, try_to_owned_without_normalization,
+    borrowed_view, raw_of, same_shallow, try_to_owned_without_normalization, type_key_of,
     with_structural_error_context, with_visit_error_context,
 };
 use super::structural_visit::{
-    field_def_region, for_each_field_info, free_var_child_region, type_key_of, DefRegionKind,
+    field_def_region, for_each_field_info, free_var_child_region, DefRegionKind,
 };
 use super::unchanged::is_unchanged;
 pub use super::unchanged::{Unchanged, UnchangedOr};
@@ -1453,6 +1453,45 @@ where
 /// The root is consumed to establish the ownership boundary for optional
 /// in-place mutation. A matching callback supplies the final value; unmatched
 /// values use default mutation.
+///
+/// # Arguments
+///
+/// * `root` - Owned value to mutate, convertible into an [`Any`]. A uniquely
+///   owned container may be reused in place; clone first to preserve the original.
+/// * `mutator` - Owned or mutably borrowed dispatcher implementing [`IntoMutator`].
+///   Matching handlers return replacements and control recursion through
+///   [`StructuralMutatorView`]; unmatched values use default mutation. For closure
+///   callbacks with automatic recursion, use [`structural_map`].
+///
+/// # Examples
+///
+/// Double integer leaves with a typed handler; default mutation visits the array:
+///
+/// ```
+/// # pub use tvm_ffi::{extra, match_any, match_any_internal, Dispatcher};
+/// # fn main() -> tvm_ffi::Result<()> {
+/// use tvm_ffi::{
+///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
+/// };
+///
+/// struct Double;
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+/// impl Double {
+///     fn mutate_integer(
+///         &mut self,
+///         value: i64,
+///         _: &mut StructuralMutatorView<'_, Self>,
+///     ) -> Result<Any> {
+///         Ok(Any::from(value * 2))
+///     }
+/// }
+///
+/// let result = structural_mutate(Array::new(vec![1_i64, 2, 3]), Double)?;
+/// let result = Array::<i64>::try_from(result)?;
+/// assert_eq!(result.iter().collect::<Vec<_>>(), vec![2, 4, 6]);
+/// # Ok(())
+/// # }
+/// ```
 pub fn structural_mutate<R, M>(root: R, mutator: impl IntoMutator<M>) -> Result<Any>
 where
     R: Into<Any>,
