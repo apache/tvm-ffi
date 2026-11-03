@@ -482,6 +482,14 @@ unsafe extern "C" {
     pub fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
     pub fn TVMFFITypeRegisterMethod(type_index: i32, info: *const TVMFFIMethodInfo) -> i32;
     pub fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
+    /// Register a low-level type attribute.
+    ///
+    /// # Safety
+    /// Structural hooks (opaque or Function-valued) require synchronous same-thread
+    /// invocation, borrowed non-escaping runtime/input, no retained
+    /// strong/weak runtime handle or forwarding to unrestricted callbacks/results/storage,
+    /// no out-of-band recursion during a dispatcher borrow, and valid mutation permissions.
+    /// Failures must return through the ABI; unwinding across it is prohibited.
     pub fn TVMFFITypeRegisterAttr(
         type_index: i32,
         attr_name: *const TVMFFIByteArray,

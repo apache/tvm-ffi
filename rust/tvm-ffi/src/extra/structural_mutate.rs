@@ -22,7 +22,7 @@
 //! [`structural_mutate`] lets a mutator drive recursion, while
 //! [`structural_map`] applies callbacks around engine-owned recursion.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -33,10 +33,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
 
+use super::dispatch::Dispatcher;
 use crate::any::{Any, AnyView};
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
 use crate::function::Function;
-use crate::object::{self, Object, ObjectArc, ObjectCore};
+use crate::object::{self, Object, ObjectCore};
 use crate::reflection::TypeAttrColumn;
 use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashIgnore, kTVMFFIFieldFlagBitSetterIsFunctionObj,
@@ -49,8 +50,9 @@ use crate::tvm_ffi_sys::{
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
-    borrowed_view, impl_callback_chain_tuple_arities, is_plain_inline, raw_of, same_shallow,
-    try_to_owned_without_normalization, with_structural_error_context, with_visit_error_context,
+    borrowed_view, impl_callback_chain_tuple_arities, initialize_scoped_runtime, is_plain_inline,
+    raw_of, same_shallow, try_to_owned_without_normalization, with_structural_error_context,
+    with_visit_error_context,
 };
 use super::structural_visit::{
     field_def_region, for_each_field_info, free_var_child_region, type_attr_column, type_key_of,
@@ -64,9 +66,6 @@ const STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR: &str = "__s_maybe_inplace_mutate__";
 const SHALLOW_COPY_ATTR: &str = "__ffi_shallow_copy__";
 const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
 const FLAG_SETTER_IS_FUNCTION: i64 = kTVMFFIFieldFlagBitSetterIsFunctionObj as i64;
-
-mod policy;
-pub use policy::{DefaultMutationContextPolicy, MapWithContextPolicy, MutationContextPolicy};
 
 mod callback_result_sealed {
     use super::{Any, Result};
@@ -104,9 +103,8 @@ impl<T: Into<Any>> IntoMutateResult for Result<T> {
 
 /// Permission to attempt in-place structural mutation along an owned path.
 ///
-/// `Allow` still requires unique ownership; it does not grant permission to
-/// modify a borrowed value. Use an owned value or an engine-issued
-/// [`MutationView`] with the mode-aware mutation helpers.
+/// `Allow` still requires unique ownership. A [`MutationView`] from an exclusive
+/// borrow of an owning `Any` may allow reuse; a shared borrow never grants it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum InplaceMode {
     /// Use ordinary mutation, including for uniquely owned values.
@@ -125,55 +123,65 @@ impl InplaceMode {
     }
 }
 
-/// A non-owning, move-only view carrying the engine's in-place permission.
+/// A non-owning, move-only view carrying in-place permission.
 ///
 /// This view cannot be copied or cloned. Consuming it transfers the same
 /// permission; narrowing its matched type does not acquire ownership.
 ///
 /// Unlike an owning typed argument, this handle does not increment the reference
 /// count. Borrow through it to inspect the node, then consume it in
-/// `default_maybe_inplace_mutate` to continue recursion. A surviving owning alias
+/// `default_mutate` to continue recursion. A surviving owning alias
 /// still forces copying. Node borrows come from this handle, not from the
 /// callback context, so the handle can safely be passed to another context.
 /// `T` selects the callback's matched FFI type; `Any` matches every value.
-/// The same handle is used by low-level [`StructuralMutator`] hooks. A publicly
-/// borrowed handle always disallows reuse; only the engine can issue permission.
+/// The same handle is passed to consuming [`Dispatcher`] handlers. A publicly
+/// shared-borrow handle always disallows reuse. An exclusive `&mut Any` borrow
+/// grants permission to attempt reuse while keeping its owner borrowed.
 ///
 /// A node borrowed through a copied view cannot survive consumption of the handle:
 /// ```compile_fail,E0505
-/// use tvm_ffi::{MutationContext, MutationView};
-/// fn invalid(value: MutationView<'_>, ctx: &mut MutationContext<'_>) {
+/// use tvm_ffi::{StructuralMutatorView, MutationView};
+/// fn invalid<D>(value: MutationView<'_>, dispatch: &mut D, mutator: &mut StructuralMutatorView<'_, D>) {
 ///     let view = value.as_any_view();
 ///     let copy = view;
 ///     let node = copy.downcast_ref::<tvm_ffi::collections::array::ArrayObj>().unwrap();
-///     ctx.default_maybe_inplace_mutate(value).unwrap();
+///     mutator.default_mutate(dispatch, value).unwrap();
 ///     println!("{}", node.size);
 /// }
 /// ```
 ///
 /// Moving the handle into a nested callback cannot bypass that borrow:
 /// ```compile_fail,E0505
-/// use std::cell::RefCell;
-/// use tvm_ffi::{structural_mutate, MutationContext, MutationView};
+/// use tvm_ffi::{dispatch, structural_mutate, Any, MutationView, StructuralMutatorView, Result};
+/// struct Inner<'a>(Option<MutationView<'a>>);
+/// #[dispatch(mutate, MutationView)]
+/// impl<'a> Inner<'a> {
+///     fn mutate_bool(&mut self, _: bool, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+///         let pending = self.0.take().unwrap();
+///         mutator.default_mutate(self, pending).map(Into::into)
+///     }
+/// }
 /// fn invalid(value: MutationView<'_>) {
 ///     let view = value.as_any_view();
 ///     let node = view.downcast_ref::<tvm_ffi::collections::array::ArrayObj>().unwrap();
-///     let pending = RefCell::new(Some(value));
-///     structural_mutate(true, |_: bool, inner: &mut MutationContext<'_>| {
-///         inner.default_maybe_inplace_mutate(pending.borrow_mut().take().unwrap())
-///     }).unwrap();
+///     structural_mutate(true, Inner(Some(value))).unwrap();
 ///     println!("{}", node.size);
 /// }
 /// ```
 ///
 /// A copied inspection view also cannot survive low-level default mutation:
 /// ```compile_fail,E0505
-/// use tvm_ffi::{DefRegionKind, MutationView, StructuralMutator};
-/// fn invalid<M: StructuralMutator>(value: MutationView<'_>, mutator: &mut M) {
-///     let view = value.as_any_view();
-///     let copy = view;
-///     mutator.default_maybe_inplace_mutate(value, DefRegionKind::None).unwrap();
-///     println!("{}", copy.type_index());
+/// use tvm_ffi::{dispatch, Any, MutationView, StructuralMutatorView, Result, Unchanged};
+/// struct Pass;
+/// #[dispatch(mutate, MutationView)]
+/// impl Pass {
+///     fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+///         let view = value.as_any_view();
+///         let copy = view;
+///         mutator.default_mutate(self, value).unwrap();
+///         println!("{}", copy.type_index());
+///         Ok(Any::from(Unchanged))
+///     }
 /// }
 /// ```
 pub struct MutationView<'a, T = Any> {
@@ -185,6 +193,7 @@ pub struct MutationView<'a, T = Any> {
 }
 
 impl<'a> MutationView<'a> {
+    #[inline(always)]
     fn new(value: AnyView<'a>, mode: InplaceMode) -> Self {
         Self {
             value: raw_of(value),
@@ -196,30 +205,66 @@ impl<'a> MutationView<'a> {
     }
 
     /// Wrap a borrowed value without granting in-place permission.
+    #[inline(always)]
     pub fn borrowed(value: AnyView<'a>) -> Self {
         Self::new(value, InplaceMode::Disallow)
     }
 }
 
+impl<'a> From<&'a mut Any> for MutationView<'a> {
+    /// Borrow an owner exclusively without acquiring a reference count.
+    /// Reuse still requires the runtime's uniqueness and alias checks.
+    #[inline(always)]
+    fn from(value: &'a mut Any) -> Self {
+        Self::new(AnyView::from(&*value), InplaceMode::Allow)
+    }
+}
+
 impl<'a, T> MutationView<'a, T> {
-    /// Permission established before callback arguments acquire ownership.
+    /// Permission carried independently of temporary owning aliases.
+    #[inline(always)]
     pub fn inplace_mode(&self) -> InplaceMode {
         self.mode
     }
 
+    /// Restrict permission without upgrading a shared-borrow capability.
+    #[inline(always)]
+    pub fn with_inplace_mode(mut self, requested: InplaceMode) -> Self {
+        if requested == InplaceMode::Disallow {
+            self.mode = InplaceMode::Disallow;
+        }
+        self
+    }
+
     /// Borrow the current value. The view and its copies borrow this handle,
     /// so their last use must precede consuming it for default mutation.
+    #[inline(always)]
     pub fn as_any_view(&self) -> AnyView<'_> {
-        // SAFETY: the engine keeps this payload live while the capability is
+        // SAFETY: the input owner keeps this payload live while the capability is
         // borrowed. The returned lifetime is bounded by self, not by 'a.
         unsafe { borrowed_view(&self.value) }
     }
 
+    /// Borrow an object or subtype as `U` without changing ownership or permission.
+    /// The reference borrows this capability and cannot survive its consumption.
+    #[inline(always)]
+    pub fn downcast_ref<U: ObjectCore>(&self) -> Option<&U> {
+        if self.value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
+            || !object::is_instance_of::<U>(self.value.type_index)
+        {
+            return None;
+        }
+        // SAFETY: the type check establishes U's layout; the capability keeps
+        // the allocation borrowed for the lifetime of the returned reference.
+        Some(unsafe { &*self.value.data_union.v_obj.cast::<U>() })
+    }
+
     /// Narrow the matched type without acquiring an owning reference.
+    #[inline(always)]
     pub fn try_cast<U: crate::type_traits::ContainerElement>(
         self,
     ) -> std::result::Result<MutationView<'a, U>, Self> {
-        // SAFETY: the engine keeps the borrowed value live for this handle's
+        // SAFETY: the input owner keeps the borrowed value live for this handle's
         // lifetime. This only checks its type and does not acquire ownership.
         if unsafe { U::container_check_any_strict(&self.value) } {
             Ok(MutationView {
@@ -234,7 +279,8 @@ impl<'a, T> MutationView<'a, T> {
         }
     }
 
-    /// Erase the matched type while preserving the engine-issued permission.
+    /// Erase the matched type while preserving the carried permission.
+    #[inline(always)]
     pub fn into_untyped(self) -> MutationView<'a> {
         MutationView {
             value: self.value,
@@ -245,856 +291,344 @@ impl<'a, T> MutationView<'a, T> {
         }
     }
 
-    // Combine permissions here; policy entry and built-in descent recheck ownership.
-    fn permit(&self, requested: InplaceMode) -> Permit {
-        if self.mode == InplaceMode::Disallow {
-            Permit::Copy
-        } else {
-            requested.permit()
+    // Built-in descent rechecks ownership before using this permission.
+    #[inline(always)]
+    fn permit(&self) -> Permit {
+        self.mode.permit()
+    }
+}
+
+mod mutation_field {
+    pub trait Sealed {}
+    impl Sealed for crate::Any {}
+    impl<T: crate::object::ObjectRefCore + crate::type_traits::AnyCompatible> Sealed for T {}
+}
+
+/// Owned storage supported by [`MutationView::field`].
+/// Sealed to `Any` and owning object handles; borrowed conversion adapters do not qualify.
+#[doc(hidden)]
+pub trait MutationField: crate::type_traits::ContainerElement + mutation_field::Sealed {}
+impl MutationField for Any {}
+impl<T: object::ObjectRefCore + crate::type_traits::AnyCompatible> MutationField for T {}
+
+impl<T: object::ObjectRefCore> std::ops::Deref for MutationView<'_, T> {
+    type Target = T::ContainerType;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: typed capability construction establishes T's object layout;
+        // this shared borrow cannot outlive or survive consumption of the handle.
+        unsafe { &*self.value.data_union.v_obj.cast::<T::ContainerType>() }
+    }
+}
+
+impl<T: object::ObjectRefCore> MutationView<'_, T> {
+    /// Borrow a direct owning field while exclusively borrowing this capability.
+    /// Permission also requires the parent to remain unique after selection.
+    /// This does not grant writeback to the parent field.
+    ///
+    /// Panics if the selector returns storage outside the parent representation.
+    #[inline(always)]
+    pub fn field<U: MutationField>(
+        &mut self,
+        selector: impl for<'node> FnOnce(&'node T::ContainerType) -> &'node U,
+    ) -> MutationView<'_, U> {
+        let node: &T::ContainerType = self;
+        let child = selector(node);
+        let offset = (child as *const U)
+            .addr()
+            .checked_sub((node as *const T::ContainerType).addr());
+        assert!(
+            offset.is_some_and(|offset| {
+                offset <= std::mem::size_of::<T::ContainerType>()
+                    && std::mem::size_of::<U>() > 0
+                    && std::mem::size_of::<U>() <= std::mem::size_of::<T::ContainerType>() - offset
+            }),
+            "MutationView::field must select a direct owning field"
+        );
+        let mut value = TVMFFIAny::new();
+        // SAFETY: child is a live owning field. Copying its view acquires no owner;
+        // the returned capability exclusively borrows the parent capability.
+        unsafe { U::container_copy_to_any_view(child, &mut value) };
+        // Selection and conversion may retain aliases, so check the parent last.
+        let mode = self.permit().inplace_mode(self.value);
+        MutationView {
+            value,
+            mode,
+            _scope: PhantomData,
+            _type: PhantomData,
+            _not_send_sync: PhantomData,
         }
     }
 }
 
-/// State and recursive operations shared by mutation callbacks and context policies.
+/// Recursive mutation and default descent for a dispatcher.
 ///
-/// A matched callback owns mutation of its value. Recursive operations
-/// reborrow the mutator, so mutable state cannot remain borrowed across them.
-/// The context does not store a node: inspect the callback argument and pass
-/// it explicitly to default recursion.
-pub struct MutationContext<'a, State = ()> {
-    driver: &'a mut dyn MutateContextDriver<State>,
-    def_region_kind: DefRegionKind,
-    inplace_mode: InplaceMode,
+/// Pass the handler's `self` to mutation methods to recurse with the same state.
+/// Full mutation re-enters dispatch; default mutation runs Base descent.
+/// Both preserve [`UnchangedOr`]; resolve it only when an owning value is needed.
+#[repr(transparent)]
+pub struct StructuralMutatorView<'a, D> {
+    runtime: StructuralMutatorHandle,
+    _scope: PhantomData<&'a mut ()>,
+    _dispatcher: PhantomData<fn(D) -> D>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
-/// Recursion control passed to a typed `#[dispatch(mutate)]` handler.
-///
-/// The dispatch object owns all pass state. Recursive operations take that
-/// object explicitly so Rust can safely reborrow the same `&mut self` for the
-/// child call. Node access comes only from the callback argument; default
-/// recursion takes that value explicitly.
-pub struct Mutator {
-    def_region_kind: DefRegionKind,
-    inplace_mode: InplaceMode,
-    _not_send_sync: PhantomData<Rc<()>>,
-}
-
-impl Mutator {
-    /// Engine-established permission for this callback's current value.
-    ///
-    /// This is not authority to modify a borrow: default in-place descent also
-    /// requires consuming a [`MutationView`].
-    pub fn inplace_mode(&self) -> InplaceMode {
-        self.inplace_mode
+impl<D> StructuralMutatorView<'_, D> {
+    #[inline(always)]
+    fn reborrow(&self) -> StructuralMutatorView<'_, D> {
+        StructuralMutatorView {
+            runtime: self.runtime,
+            _scope: PhantomData,
+            _dispatcher: PhantomData,
+            _not_send_sync: PhantomData,
+        }
     }
-
-    /// Definition-region state active at the callback's current value.
     #[inline(always)]
     pub fn def_region_kind(&self) -> DefRegionKind {
-        self.def_region_kind
+        // Registered hooks preserve the definition-region ABI enum.
+        unsafe { std::mem::transmute((*self.runtime).def_region_mode) }
     }
 
-    /// Mutate a borrowed child through the same typed dispatch object.
+    /// Run recursive operations under a scoped definition region.
+    /// An enclosing Pattern wins; the original region is restored on all exits.
     #[inline(always)]
-    pub fn mutate<'input, D, T>(&mut self, dispatch: &mut D, value: &'input T) -> Result<Any>
-    where
-        D: MutateDispatch,
-        AnyView<'input>: From<&'input T>,
-    {
-        StructuralMutator::mutate(dispatch, value, self.def_region_kind)
-    }
-
-    /// Mutate a borrowed child under an explicit definition-region state.
-    #[inline(always)]
-    pub fn mutate_with<'input, D, T>(
+    pub fn with_def_region_kind<R>(
         &mut self,
-        dispatch: &mut D,
-        value: &'input T,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any>
-    where
-        D: MutateDispatch,
-        AnyView<'input>: From<&'input T>,
-    {
-        StructuralMutator::mutate(dispatch, value, def_region_kind)
-    }
-
-    /// Mutate an owned child and permit reuse when it remains uniquely owned.
-    #[inline(always)]
-    pub fn maybe_inplace_mutate<D, T>(&mut self, dispatch: &mut D, value: T) -> Result<Any>
-    where
-        D: MutateDispatch,
-        T: Into<Any>,
-    {
-        self.maybe_inplace_mutate_with(dispatch, value, self.def_region_kind)
-    }
-
-    /// Mutate an owned child under an explicit definition-region state.
-    #[inline(always)]
-    pub fn maybe_inplace_mutate_with<D, T>(
-        &mut self,
-        dispatch: &mut D,
-        value: T,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any>
-    where
-        D: MutateDispatch,
-        T: Into<Any>,
-    {
-        self.maybe_inplace_mutate_with_mode(dispatch, value, def_region_kind, InplaceMode::Allow)
-    }
-
-    /// Mutate an owned child under an explicit region and in-place permission.
-    ///
-    /// `Disallow` keeps this input on the copy path even when uniquely owned.
-    #[inline(always)]
-    pub fn maybe_inplace_mutate_with_mode<D, T>(
-        &mut self,
-        dispatch: &mut D,
-        value: T,
-        def_region_kind: DefRegionKind,
-        mode: InplaceMode,
-    ) -> Result<Any>
-    where
-        D: MutateDispatch,
-        T: Into<Any>,
-    {
-        StructuralMutator::maybe_inplace_mutate_with_mode(dispatch, value, def_region_kind, mode)
-    }
-
-    /// Apply default copy-only mutation to an explicitly borrowed value.
-    #[inline(always)]
-    pub fn default_mutate<'input, D, T>(
-        &mut self,
-        dispatch: &mut D,
-        value: &'input T,
-    ) -> Result<Any>
-    where
-        D: MutateDispatch,
-        AnyView<'input>: From<&'input T>,
-    {
-        StructuralMutator::default_mutate(dispatch, value, self.def_region_kind)
-    }
-
-    /// Mutate a borrowed child while preserving an unchanged result.
-    #[inline]
-    pub fn mutate_result<'input, D, T>(
-        &mut self,
-        dispatch: &mut D,
-        value: &'input T,
-    ) -> Result<UnchangedOr<Any>>
-    where
-        D: MutateDispatch,
-        AnyView<'input>: From<&'input T>,
-    {
-        self.mutate_with_result(dispatch, value, self.def_region_kind)
-    }
-
-    /// Mutate a borrowed child under an explicit region, preserving unchanged.
-    #[inline]
-    pub fn mutate_with_result<'input, D, T>(
-        &mut self,
-        dispatch: &mut D,
-        value: &'input T,
         kind: DefRegionKind,
-    ) -> Result<UnchangedOr<Any>>
-    where
-        D: MutateDispatch,
-        AnyView<'input>: From<&'input T>,
-    {
-        StructuralMutator::mutate_result(dispatch, value, kind)
+        callback: impl FnOnce(&mut StructuralMutatorView<'_, D>) -> R,
+    ) -> R {
+        with_mutator_def_region(self.runtime, kind, |_| callback(&mut self.reborrow()))
     }
 
-    /// Apply default mutation without materializing an unchanged original.
-    #[inline]
-    pub fn default_mutate_result<'input, D, T>(
-        &mut self,
+    #[inline(always)]
+    fn dispatch_raw(
+        &self,
         dispatch: &mut D,
-        value: &'input T,
-    ) -> Result<UnchangedOr<Any>>
-    where
-        D: MutateDispatch,
-        AnyView<'input>: From<&'input T>,
-    {
-        StructuralMutator::default_mutate_result(dispatch, value, self.def_region_kind)
-    }
-
-    /// Consume the handle for default descent with its existing permission.
-    #[inline]
-    pub fn default_maybe_inplace_mutate<D: MutateDispatch, T>(
-        &mut self,
-        dispatch: &mut D,
-        value: MutationView<'_, T>,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
     ) -> Result<Any> {
-        let mode = value.inplace_mode();
-        self.default_mutate_with_mode(dispatch, value, mode)
+        let _binding = bind_dispatcher(self.runtime, dispatch);
+        unsafe { ((*runtime_state(self.runtime)).recurse)(self.runtime, raw, kind, permit) }
     }
-
-    /// Consume the handle for default descent, preserving permission and `Unchanged`.
-    #[inline]
-    pub fn default_maybe_inplace_mutate_result<D: MutateDispatch, T>(
-        &mut self,
+    #[inline(always)]
+    fn default_raw(
+        &self,
         dispatch: &mut D,
-        value: MutationView<'_, T>,
-    ) -> Result<UnchangedOr<Any>> {
-        let mode = value.inplace_mode();
-        self.default_mutate_with_mode_result(dispatch, value, mode)
-    }
-
-    /// Continue default mutation after relinquishing the callback value's borrows.
-    ///
-    /// The requested mode can restrict, but cannot upgrade, the engine-issued
-    /// permission. Retained owning aliases force copying.
-    pub fn default_mutate_with_mode<D: MutateDispatch, T>(
-        &mut self,
-        dispatch: &mut D,
-        value: MutationView<'_, T>,
-        mode: InplaceMode,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
     ) -> Result<Any> {
-        let raw = value.value;
-        let permit = value.permit(mode);
-        user_default_mutate(dispatch, raw, self.def_region_kind, permit)
-            .and_then(|result| resolve_result(result, raw))
+        let _binding = bind_dispatcher(self.runtime, dispatch);
+        unsafe { ((*runtime_state(self.runtime)).default_mutate)(self.runtime, raw, kind, permit) }
     }
 
-    /// Consume the callback value for default descent, preserving `Unchanged`.
-    pub fn default_mutate_with_mode_result<D: MutateDispatch, T>(
+    /// Re-enter dispatch with the capability's carried permission.
+    #[inline(always)]
+    pub fn mutate<'input, T>(
         &mut self,
         dispatch: &mut D,
-        value: MutationView<'_, T>,
-        mode: InplaceMode,
+        value: impl Into<MutationView<'input, T>>,
     ) -> Result<UnchangedOr<Any>> {
-        let permit = value.permit(mode);
-        user_default_mutate(dispatch, value.value, self.def_region_kind, permit)
+        let value = value.into();
+        let kind = self.def_region_kind();
+        self.dispatch_raw(dispatch, value.value, kind, value.permit())
             .and_then(UnchangedOr::from_carrier)
     }
-
-    /// Look up an invocation-local identity substitution.
+    /// Run Base default descent with the capability's carried permission.
     #[inline(always)]
-    pub fn var_remap_get<D: MutateDispatch>(
+    pub fn default_mutate<'input, T>(
         &mut self,
         dispatch: &mut D,
-        var: AnyView<'_>,
-    ) -> Result<Option<Any>> {
-        StructuralMutator::var_remap_get(dispatch, var)
+        value: impl Into<MutationView<'input, T>>,
+    ) -> Result<UnchangedOr<Any>> {
+        let value = value.into();
+        let kind = self.def_region_kind();
+        self.default_raw(dispatch, value.value, kind, value.permit())
+            .and_then(UnchangedOr::from_carrier)
     }
-
-    /// Store an invocation-local identity substitution.
     #[inline(always)]
-    pub fn var_remap_set<D: MutateDispatch>(
-        &mut self,
-        dispatch: &mut D,
-        var: AnyView<'_>,
-        mutated_value: &Any,
-    ) -> Result<()> {
-        StructuralMutator::var_remap_set(dispatch, var, mutated_value)
+    pub fn var_remap_get(&mut self, dispatch: &mut D, var: AnyView<'_>) -> Result<Option<Any>> {
+        let _binding = bind_dispatcher(self.runtime, dispatch);
+        unsafe { runtime_var_remap_get(self.runtime, raw_of(var)) }
+    }
+    #[inline(always)]
+    pub fn var_remap_set(&mut self, dispatch: &mut D, var: AnyView<'_>, value: &Any) -> Result<()> {
+        let _binding = bind_dispatcher(self.runtime, dispatch);
+        unsafe { runtime_var_remap_set(self.runtime, raw_of(var), value) }
     }
 }
 
-/// Internal operations used by [`MutationContext`].
-///
-/// Borrowed inputs carry a lifetime; in-place entry requires an owned
-/// value or a consumed capability, never a bare ABI value plus permission.
-trait MutateContextDriver<State> {
-    fn state(&self) -> &State;
-    fn state_mut(&mut self) -> &mut State;
-    fn mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any>;
-    fn mutate_owned(&mut self, value: Any, kind: DefRegionKind, mode: InplaceMode) -> Result<Any>;
-    fn default_mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any>;
-    /// Consume the handle to exclude node borrows before default descent.
-    fn default_mutate_value(
+pub(crate) trait MutateDispatch: Sized {
+    fn dispatch_mutate(
         &mut self,
         value: MutationView<'_>,
-        kind: DefRegionKind,
-        _mode: InplaceMode,
-    ) -> Result<Any> {
-        self.default_mutate_borrowed(value.as_any_view(), kind)
-    }
-    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>>;
-    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()>;
-}
-
-impl<State> MutationContext<'_, State> {
-    /// User state shared by every callback in this mutation.
-    #[inline(always)]
-    pub fn state(&self) -> &State {
-        self.driver.state()
-    }
-
-    /// Mutably borrow the user state.
-    #[inline(always)]
-    pub fn state_mut(&mut self) -> &mut State {
-        self.driver.state_mut()
-    }
-
-    /// Engine-established permission for this callback's current value.
-    ///
-    /// This is not authority to modify a borrow: default in-place descent also
-    /// requires consuming a [`MutationView`].
-    pub fn inplace_mode(&self) -> InplaceMode {
-        self.inplace_mode
-    }
-
-    /// Definition-region state active at the callback's current value.
-    #[inline(always)]
-    pub fn def_region_kind(&self) -> DefRegionKind {
-        self.def_region_kind
-    }
-
-    /// Run recursive operations in a definition region, preserving an outer Pattern.
-    /// The previous context is restored on return, error, or unwinding.
-    pub fn with_def_region_kind<T>(
-        &mut self,
-        kind: DefRegionKind,
-        callback: impl FnOnce(&mut MutationContext<'_, State>) -> Result<T>,
-    ) -> Result<T> {
-        with_mutation_region(kind, |kind| {
-            callback(&mut MutationContext {
-                driver: &mut *self.driver,
-                def_region_kind: kind,
-                inplace_mode: self.inplace_mode,
-                _not_send_sync: PhantomData,
-            })
-        })
-    }
-
-    /// Mutate a borrowed value through the same callback chain. The value and
-    /// its descendants begin on the non-in-place path.
-    #[inline(always)]
-    pub fn mutate<'input, T>(&mut self, value: &'input T) -> Result<Any>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        self.mutate_with(value, self.def_region_kind)
-    }
-
-    /// Mutate a borrowed value under an explicit definition-region state.
-    #[inline(always)]
-    pub fn mutate_with<'input, T>(
-        &mut self,
-        value: &'input T,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        self.driver
-            .mutate_borrowed(view, def_region_kind)
-            .and_then(|result| resolve_result(result, *view.as_raw_ffi_any()))
-    }
-
-    /// Mutate an owned value, allowing an in-place attempt when it remains
-    /// uniquely owned and no matched callback borrows it.
-    #[inline(always)]
-    pub fn maybe_inplace_mutate<T: Into<Any>>(&mut self, value: T) -> Result<Any> {
-        self.maybe_inplace_mutate_with(value, self.def_region_kind)
-    }
-
-    /// Mutate an owned value under an explicit definition-region state.
-    #[inline(always)]
-    pub fn maybe_inplace_mutate_with<T: Into<Any>>(
-        &mut self,
-        value: T,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.maybe_inplace_mutate_with_mode(value, def_region_kind, InplaceMode::Allow)
-    }
-
-    /// Mutate an owned value under an explicit region and in-place permission.
-    ///
-    /// `Disallow` keeps this input on the copy path even when uniquely owned.
-    #[inline(always)]
-    pub fn maybe_inplace_mutate_with_mode<T: Into<Any>>(
-        &mut self,
-        value: T,
-        def_region_kind: DefRegionKind,
-        mode: InplaceMode,
-    ) -> Result<Any> {
-        self.driver
-            .mutate_owned(value.into(), def_region_kind, mode)
-    }
-
-    /// Apply default copy-only mutation to an explicitly borrowed value.
-    ///
-    /// This may be called repeatedly while holding node borrows. The value's
-    /// children re-enter callback dispatch, but the value itself does not.
-    #[inline(always)]
-    pub fn default_mutate<'input, T>(&mut self, value: &'input T) -> Result<Any>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        let raw = *view.as_raw_ffi_any();
-        self.driver
-            .default_mutate_borrowed(view, self.def_region_kind)
-            .and_then(|result| resolve_result(result, raw))
-    }
-
-    /// Mutate a borrowed child while preserving an unchanged result.
-    #[inline]
-    pub fn mutate_result<'input, T>(&mut self, value: &'input T) -> Result<UnchangedOr<Any>>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        self.mutate_with_result(value, self.def_region_kind)
-    }
-
-    /// Mutate a borrowed child under an explicit region, preserving unchanged.
-    #[inline]
-    pub fn mutate_with_result<'input, T>(
-        &mut self,
-        value: &'input T,
-        kind: DefRegionKind,
-    ) -> Result<UnchangedOr<Any>>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        self.driver
-            .mutate_borrowed(view, kind)
-            .and_then(UnchangedOr::from_carrier)
-    }
-
-    /// Apply default mutation without materializing an unchanged original.
-    #[inline]
-    pub fn default_mutate_result<'input, T>(&mut self, value: &'input T) -> Result<UnchangedOr<Any>>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        self.driver
-            .default_mutate_borrowed(view, self.def_region_kind)
-            .and_then(UnchangedOr::from_carrier)
-    }
-
-    /// Consume the handle for default descent with its existing permission.
-    #[inline]
-    pub fn default_maybe_inplace_mutate<T>(&mut self, value: MutationView<'_, T>) -> Result<Any> {
-        let mode = value.inplace_mode();
-        self.default_mutate_with_mode(value, mode)
-    }
-
-    /// Consume the handle for default descent, preserving permission and `Unchanged`.
-    #[inline]
-    pub fn default_maybe_inplace_mutate_result<T>(
-        &mut self,
-        value: MutationView<'_, T>,
-    ) -> Result<UnchangedOr<Any>> {
-        let mode = value.inplace_mode();
-        self.default_mutate_with_mode_result(value, mode)
-    }
-
-    /// Continue default mutation after relinquishing the callback value's borrows.
-    ///
-    /// The mode can restrict, but cannot upgrade, the handle's permission.
-    /// Retained owning aliases force copying; temporary handles can be dropped
-    /// before this call to preserve reuse of the current value.
-    pub fn default_mutate_with_mode<T>(
-        &mut self,
-        value: MutationView<'_, T>,
-        mode: InplaceMode,
-    ) -> Result<Any> {
-        let raw = value.value;
-        self.driver
-            .default_mutate_value(value.into_untyped(), self.def_region_kind, mode)
-            .and_then(|result| resolve_result(result, raw))
-    }
-
-    /// Consume the callback value for default descent, preserving `Unchanged`.
-    pub fn default_mutate_with_mode_result<T>(
-        &mut self,
-        value: MutationView<'_, T>,
-        mode: InplaceMode,
-    ) -> Result<UnchangedOr<Any>> {
-        self.driver
-            .default_mutate_value(value.into_untyped(), self.def_region_kind, mode)
-            .and_then(UnchangedOr::from_carrier)
-    }
-
-    /// Look up an invocation-local identity substitution.
-    #[inline(always)]
-    pub fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
-        self.driver.var_remap_get(var)
-    }
-
-    /// Store an invocation-local identity substitution.
-    #[inline(always)]
-    pub fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
-        self.driver.var_remap_set(var, mutated_value)
-    }
-}
-
-/// Conversion into the mutator argument accepted by [`structural_mutate`].
-///
-/// Accepts a mutable low-level [`StructuralMutator`], a generated
-/// [`MutateDispatch`], or a first-match callback chain. Generated dispatch
-/// objects keep mutable pass state directly on themselves; [`MutateCallbacks`]
-/// remains available for closure callback chains with separate state.
-#[diagnostic::on_unimplemented(
-    message = "`{Self}` is not a supported `structural_mutate` mutator",
-    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `AnyView<'_>`, or a consuming `MutationView<T>`, followed by `&mut MutationContext<'_, State>`; or a tuple of up to 12 such callbacks (tuples may nest)",
-    note = "callback arguments need explicit type annotations; use `MutateCallbacks::new(state, callbacks)` for ordinary mutable callback state"
-)]
-pub trait IntoMutator<Marker> {
-    #[doc(hidden)]
-    fn mutate_root(self, root: Any) -> Result<Any>;
-}
-
-impl<U: StructuralMutator> IntoMutator<U> for &mut U {
-    fn mutate_root(self, root: Any) -> Result<Any> {
-        run_structural_mutator(root, self)
-    }
-}
-
-/// One typed callback in a callback-driven structural mutator.
-pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marker> {
-    #[doc(hidden)]
-    fn try_mutate(
-        &self,
-        value: &mut Option<MutationView<'_>>,
-        mutator: &mut MutationContext<'_, State>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
     ) -> Option<Result<Any>>;
 }
-
-/// Ordered typed callback dispatch for [`structural_mutate`].
-///
-/// `None` means no handler matched, so structural mutation applies its default
-/// behavior. A generated `#[dispatch(mutate)]` implementation tests
-/// `mutate_*` methods in source order and passes the same [`Mutator`] to the
-/// first match. The implementation owns its pass state and receives `&mut
-/// self`, while [`Mutator`] controls recursion, the definition region, and
-/// in-place permission. Handlers can consume [`MutationView`] and take an
-/// optional `&mut Mutator` to inspect the region and in-place permission.
-pub trait MutateDispatch: Sized {
-    fn dispatch_mutate(&mut self, value: AnyView<'_>, mutator: &mut Mutator)
-        -> Option<Result<Any>>;
-
-    /// Dispatch an engine-issued value. Existing borrowed dispatchers retain
-    /// their copy-only default recursion; generated dispatch supports consuming it.
-    fn dispatch_mutate_value(
+impl<D> MutateDispatch for D
+where
+    for<'s, 'v, 'c, 'r> &'s mut D:
+        Dispatcher<(MutationView<'v>, &'c mut StructuralMutatorView<'r, D>), Option<Result<Any>>>,
+{
+    #[inline(always)]
+    fn dispatch_mutate(
         &mut self,
         value: MutationView<'_>,
-        mutator: &mut Mutator,
+        mutator: &mut StructuralMutatorView<'_, Self>,
     ) -> Option<Result<Any>> {
-        self.dispatch_mutate(value.as_any_view(), mutator)
-    }
-
-    #[doc(hidden)]
-    fn on_default_mutate(&mut self, value: MutationView<'_>, kind: DefRegionKind) -> Result<Any> {
-        default_mutate_driver(self, value.value, kind, value.permit(value.inplace_mode()))
+        self.dispatch_tuple((value, mutator))
     }
 }
 
-impl<D: MutateDispatch> IntoMutator<ByMutateDispatch> for D {
-    #[inline]
-    fn mutate_root(mut self, root: Any) -> Result<Any> {
-        run_structural_mutator(root, &mut self)
+/// A concrete mutation Base and its owned or borrowed dispatcher.
+pub struct StructuralMutator<Base, D> {
+    base: Base,
+    dispatch: D,
+}
+
+impl<Base, D> StructuralMutator<Base, D> {
+    pub fn new(base: Base, dispatch: D) -> Self {
+        Self { base, dispatch }
     }
 }
 
-mod mutate_sealed {
-    use super::{AnyView, IntoMutateResult, MutationContext, MutationView, ObjectCore};
-
-    pub trait SealedLink<State, Marker> {}
-
-    impl<F, State, T, O> SealedLink<State, super::ByMutateValue<T>> for F
-    where
-        F: for<'value, 'mutator, 'driver> Fn(
-            MutationView<'value, T>,
-            &'mutator mut MutationContext<'driver, State>,
-        ) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, State, T, O> SealedLink<State, super::ByMutateOwned<T>> for F
-    where
-        F: for<'mutator, 'driver> Fn(T, &'mutator mut MutationContext<'driver, State>) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, State, N: ObjectCore, O> SealedLink<State, super::ByMutateNode<N>> for F
-    where
-        F: for<'value, 'mutator, 'driver> Fn(
-            &'value N,
-            &'mutator mut MutationContext<'driver, State>,
-        ) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, State, O> SealedLink<State, super::ByMutateCatchAll> for F
-    where
-        F: for<'value, 'mutator, 'driver> Fn(
-            AnyView<'value>,
-            &'mutator mut MutationContext<'driver, State>,
-        ) -> O,
-        O: IntoMutateResult,
-    {
+/// Default descent for a concrete structural-mutation Base.
+///
+/// # Safety
+/// Self must start with StructuralMutatorObj at offset zero and preserve its
+/// engine-initialized header/vtable. Callbacks are synchronous and non-escaping;
+/// no reference to reentered Base state may span recursive calls. Project only
+/// fields needed for each operation, never borrow the whole Base or engine.
+pub unsafe trait StructuralMutatorBase: Sized {
+    /// Delegate to StructuralMutatorObj::default_mutate for built-in descent.
+    ///
+    /// # Safety
+    /// `this` is the live Base of `mutator`, valid only during this synchronous call.
+    unsafe fn default_mutate<D>(
+        _this: *mut Self,
+        dispatch: &mut D,
+        value: MutationView<'_>,
+        mutator: &mut StructuralMutatorView<'_, D>,
+    ) -> Result<UnchangedOr<Any>> {
+        StructuralMutatorObj::default_mutate(dispatch, value, mutator)
     }
 }
 
-#[doc(hidden)]
-pub enum ByMutateDispatch {}
-
-#[doc(hidden)]
-pub struct ByMutateValue<T>(PhantomData<T>);
-
-impl<F, State, T, O> MutateChainLink<State, ByMutateValue<T>> for F
-where
-    F: for<'value, 'mutator, 'driver> Fn(
-        MutationView<'value, T>,
-        &'mutator mut MutationContext<'driver, State>,
-    ) -> O,
-    T: crate::type_traits::ContainerElement,
-    O: IntoMutateResult,
-{
-    fn try_mutate(
-        &self,
-        value: &mut Option<MutationView<'_>>,
-        mutator: &mut MutationContext<'_, State>,
-    ) -> Option<Result<Any>> {
-        match value
-            .take()
-            .expect("unconsumed callback value")
-            .try_cast::<T>()
-        {
-            Ok(typed) => Some(self(typed, mutator).into_mutate_result()),
-            Err(original) => {
-                *value = Some(original);
-                None
-            }
+impl Default for StructuralMutatorObj {
+    fn default() -> Self {
+        Self {
+            base: Object::new(),
+            vtable: std::ptr::null(),
+            def_region_mode: DefRegionKind::None as i32,
         }
     }
 }
 
-#[doc(hidden)]
-pub struct ByMutateOwned<T>(PhantomData<T>);
-
-impl<F, State, T, O> MutateChainLink<State, ByMutateOwned<T>> for F
-where
-    F: for<'mutator, 'driver> Fn(T, &'mutator mut MutationContext<'driver, State>) -> O,
-    T: crate::type_traits::AnyCompatible,
-    O: IntoMutateResult,
-{
-    fn try_mutate(
-        &self,
-        value: &mut Option<MutationView<'_>>,
-        mutator: &mut MutationContext<'_, State>,
-    ) -> Option<Result<Any>> {
-        value
-            .as_ref()
-            .expect("unconsumed callback value")
-            .as_any_view()
-            .try_as::<T>()
-            .map(|typed| self(typed, mutator).into_mutate_result())
+impl StructuralMutatorObj {
+    /// Delegate to built-in hooks/reflection without invoking the Base override again.
+    #[inline(always)]
+    pub fn default_mutate<'input, D, T>(
+        dispatch: &mut D,
+        value: impl Into<MutationView<'input, T>>,
+        mutator: &mut StructuralMutatorView<'_, D>,
+    ) -> Result<UnchangedOr<Any>> {
+        let value = value.into();
+        let _binding = bind_dispatcher(mutator.runtime, dispatch);
+        let kind = mutator.def_region_kind();
+        let permit = value.permit();
+        unsafe {
+            ((*runtime_state(mutator.runtime)).builtin_default)(
+                mutator.runtime,
+                value.value,
+                kind,
+                permit,
+            )
+        }
+        .and_then(UnchangedOr::from_carrier)
     }
 }
 
-#[doc(hidden)]
-pub struct ByMutateNode<N>(PhantomData<N>);
+// SAFETY: this is the exact ABI prefix and delegates without holding a Base borrow.
+unsafe impl StructuralMutatorBase for StructuralMutatorObj {}
 
-impl<F, State, N, O> MutateChainLink<State, ByMutateNode<N>> for F
-where
-    F: for<'value, 'mutator, 'driver> Fn(
-        &'value N,
-        &'mutator mut MutationContext<'driver, State>,
-    ) -> O,
-    N: ObjectCore,
-    O: IntoMutateResult,
-{
-    fn try_mutate(
-        &self,
-        value: &mut Option<MutationView<'_>>,
-        mutator: &mut MutationContext<'_, State>,
-    ) -> Option<Result<Any>> {
-        value
-            .as_ref()
-            .expect("unconsumed callback value")
-            .as_any_view()
-            .downcast_ref::<N>()
-            .map(|node| self(node, mutator).into_mutate_result())
-    }
-}
-
-#[doc(hidden)]
-pub enum ByMutateCatchAll {}
-
-impl<F, State, O> MutateChainLink<State, ByMutateCatchAll> for F
-where
-    F: for<'value, 'mutator, 'driver> Fn(
-        AnyView<'value>,
-        &'mutator mut MutationContext<'driver, State>,
-    ) -> O,
-    O: IntoMutateResult,
-{
-    fn try_mutate(
-        &self,
-        value: &mut Option<MutationView<'_>>,
-        mutator: &mut MutationContext<'_, State>,
-    ) -> Option<Result<Any>> {
-        Some(
-            self(
-                value
-                    .as_ref()
-                    .expect("unconsumed callback value")
-                    .as_any_view(),
+unsafe fn base_default_mutate<B: StructuralMutatorBase, D>(
+    runtime: StructuralMutatorHandle,
+    raw: TVMFFIAny,
+    kind: DefRegionKind,
+    permit: Permit,
+) -> Result<Any> {
+    with_mutator_def_region(runtime, kind, |_| {
+        let mode = permit.inplace_mode(raw);
+        let dispatch = &mut *(*runtime_state(runtime)).context.cast::<D>();
+        with_mutation_view(dispatch, runtime, |dispatch, mutator| {
+            B::default_mutate(
+                runtime.cast(),
+                dispatch,
+                MutationView::new(borrowed_view(&raw), mode),
                 mutator,
             )
-            .into_mutate_result(),
+            .map(Into::into)
+            .map_err(|error| with_value_context(error, raw))
+        })
+    })
+}
+
+#[doc(hidden)]
+pub enum ByBaseMutator {}
+
+impl<B: StructuralMutatorBase, D: MutateDispatch> IntoMutator<(ByBaseMutator, ByOwnedMutator)>
+    for StructuralMutator<B, D>
+{
+    fn mutate_root(self, root: Any) -> Result<Any> {
+        run_mutator_engine::<UserMutator<'_, D>, _, _>(
+            root,
+            OwnedDispatcher(self.dispatch),
+            self.base,
+            false,
+        )
+    }
+}
+impl<B: StructuralMutatorBase, D: MutateDispatch> IntoMutator<(ByBaseMutator, ByBorrowedMutator)>
+    for StructuralMutator<B, &mut D>
+{
+    fn mutate_root(self, root: Any) -> Result<Any> {
+        run_mutator_engine::<UserMutator<'_, D>, _, _>(
+            root,
+            BorrowedDispatcher(self.dispatch),
+            self.base,
+            false,
         )
     }
 }
 
+/// Conversion into a dispatcher-driven mutation. Closures belong to structural_map.
+pub trait IntoMutator<Marker> {
+    #[doc(hidden)]
+    fn mutate_root(self, root: Any) -> Result<Any>;
+}
 #[doc(hidden)]
-pub struct ByMutateChainLink<Markers>(PhantomData<fn(Markers)>);
-
-macro_rules! impl_mutate_chain_link {
-    ($(($F:ident, $M:ident, $idx:tt)),+) => {
-        impl<State, $($F, $M,)+>
-            mutate_sealed::SealedLink<State, ByMutateChainLink<($($M,)+)>> for ($($F,)+)
-        where
-            $($F: MutateChainLink<State, $M>,)+
-        {
-        }
-
-        impl<State, $($F, $M,)+> MutateChainLink<State, ByMutateChainLink<($($M,)+)>>
-            for ($($F,)+)
-        where
-            $($F: MutateChainLink<State, $M>,)+
-        {
-            fn try_mutate(
-                &self,
-                value: &mut Option<MutationView<'_>>,
-                mutator: &mut MutationContext<'_, State>,
-            ) -> Option<Result<Any>> {
-                $(
-                    if let Some(result) = self.$idx.try_mutate(value, mutator) {
-                        return Some(result);
-                    }
-                )+
-                None
-            }
-        }
-    };
-}
-
-impl_callback_chain_tuple_arities!(impl_mutate_chain_link);
-
-/// A reusable typed-dispatch or callback mutator with shared user state.
-pub struct MutateCallbacks<State, Link, Marker, Policy = DefaultMutationContextPolicy> {
-    policy: Option<Rc<Policy>>,
-    state: State,
-    callbacks: Rc<Link>,
-    _marker: PhantomData<fn(Marker)>,
-}
-
-impl<State, Link, Marker> MutateCallbacks<State, Link, Marker>
-where
-    Link: MutateChainLink<State, Marker>,
-{
-    /// Construct a stateful callback mutator.
-    pub fn new(state: State, callbacks: Link) -> Self {
-        Self {
-            state,
-            callbacks: Rc::new(callbacks),
-            policy: None,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<State, Link, Marker, Policy> MutateCallbacks<State, Link, Marker, Policy> {
-    /// Customize default descent while sharing the callback state.
-    pub fn with_policy<P: MutationContextPolicy<State>>(
-        self,
-        policy: P,
-    ) -> MutateCallbacks<State, Link, Marker, P> {
-        MutateCallbacks {
-            policy: Some(Rc::new(policy)),
-            state: self.state,
-            callbacks: self.callbacks,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Shared access to the callback state.
-    pub fn state(&self) -> &State {
-        &self.state
-    }
-
-    /// Mutable access to callback state outside an active recursive call.
-    pub fn state_mut(&mut self) -> &mut State {
-        &mut self.state
-    }
-
-    /// Consume the mutator and return its state.
-    pub fn into_state(self) -> State {
-        self.state
-    }
-}
-
-struct DirectMutateCallbacks<'a, Link, Marker> {
-    state: (),
-    callbacks: &'a Link,
-    _marker: PhantomData<fn(Marker)>,
-}
-
+pub enum ByOwnedMutator {}
 #[doc(hidden)]
-pub trait MutateCallbackState<State> {
-    fn callback_state(&self) -> &State;
-    fn callback_state_mut(&mut self) -> &mut State;
-}
-
-impl<State, Link, Marker, Policy> MutateCallbackState<State>
-    for MutateCallbacks<State, Link, Marker, Policy>
-{
-    fn callback_state(&self) -> &State {
-        &self.state
-    }
-
-    fn callback_state_mut(&mut self) -> &mut State {
-        &mut self.state
-    }
-}
-
-impl<Link, Marker> MutateCallbackState<()> for DirectMutateCallbacks<'_, Link, Marker> {
-    fn callback_state(&self) -> &() {
-        &self.state
-    }
-
-    fn callback_state_mut(&mut self) -> &mut () {
-        &mut self.state
-    }
-}
-
-#[doc(hidden)]
-pub struct ByMutateCallbacks<Marker>(PhantomData<fn(Marker)>);
-
-impl<Link, Marker> IntoMutator<ByMutateCallbacks<Marker>> for Link
-where
-    Link: MutateChainLink<(), Marker>,
-{
+pub enum ByBorrowedMutator {}
+impl<D: MutateDispatch> IntoMutator<ByOwnedMutator> for D {
     fn mutate_root(self, root: Any) -> Result<Any> {
-        let callbacks = self;
-        let mut mutator = DirectMutateCallbacks::<Link, Marker> {
-            state: (),
-            callbacks: &callbacks,
-            _marker: PhantomData,
-        };
-        run_structural_mutator(root, &mut mutator)
+        run_user_mutator(root, OwnedDispatcher(self))
     }
 }
-
+impl<D: MutateDispatch> IntoMutator<ByBorrowedMutator> for &mut D {
+    fn mutate_root(self, root: Any) -> Result<Any> {
+        run_user_mutator(root, BorrowedDispatcher(self))
+    }
+}
 /// Ordered typed replacement dispatch for [`structural_map`].
 ///
-/// `None` means no handler matched and preserves the current value.  A
-/// generated `#[dispatch(map)]` implementation tests `map_*` methods in
-/// source order and returns the first match.
-pub trait MapDispatch: Sized {
+/// This private engine bridge consumes the common normalized map signature.
+/// `None` means no handler matched and preserves the current value; matching
+/// and handler conversion are supplied by `Dispatcher`.
+pub(crate) trait MapDispatch: Sized {
     fn dispatch_map(
         &mut self,
         value: AnyView<'_>,
@@ -1105,23 +639,27 @@ pub trait MapDispatch: Sized {
 /// Internal root-mapping protocol used by [`IntoMapper`].
 #[doc(hidden)]
 pub trait NativeMap: Sized {
-    fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any>;
+    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any>;
 }
 
 impl<D: MapDispatch> NativeMap for D {
-    fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_native_mapper::<_, DefaultMutationContextPolicy>(root, self, None, order)
+    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
+        run_native_mapper(root, OwnedDispatcher(self), order)
     }
 }
 
-impl<V: MapDispatch> MapDispatch for &mut V {
-    #[inline]
+impl<V> MapDispatch for V
+where
+    for<'receiver, 'value> &'receiver mut V:
+        Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Any>>>,
+{
+    #[inline(always)]
     fn dispatch_map(
         &mut self,
         value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Option<Result<Any>> {
-        (**self).dispatch_map(value, def_region_kind)
+        self.dispatch_tuple((value, def_region_kind))
     }
 }
 
@@ -1129,7 +667,7 @@ impl<V: MapDispatch> MapDispatch for &mut V {
 #[diagnostic::on_unimplemented(
     message = "unsupported structural-map callback shape",
     label = "this value cannot be used as a structural mapper",
-    note = "pass `&mut` a `MapDispatch`, a supported closure or callback tuple, or a `MapWithContextPolicy`"
+    note = "pass `&mut` a matching `Dispatcher`, a supported closure or callback tuple"
 )]
 pub trait IntoMapper<Marker> {
     type Mapper: NativeMap;
@@ -1140,11 +678,85 @@ pub trait IntoMapper<Marker> {
 pub enum ByMapDispatch {}
 
 impl<'a, V: MapDispatch> IntoMapper<ByMapDispatch> for &'a mut V {
-    type Mapper = &'a mut V;
+    type Mapper = DispatchMapper<'a, V>;
 
     #[inline]
     fn into_mapper(self) -> Self::Mapper {
-        self
+        DispatchMapper(self)
+    }
+}
+
+#[doc(hidden)]
+pub struct DispatchMapper<'a, V>(&'a mut V);
+
+impl<V: MapDispatch> NativeMap for DispatchMapper<'_, V> {
+    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
+        run_native_mapper(root, BorrowedDispatcher(self.0), order)
+    }
+}
+
+trait MapWithBase: Sized {
+    fn map_with_base<B: StructuralMutatorBase>(
+        self,
+        root: Any,
+        order: WalkOrder,
+        base: B,
+    ) -> Result<Any>;
+}
+impl<D: MapDispatch> MapWithBase for D {
+    fn map_with_base<B: StructuralMutatorBase>(
+        self,
+        root: Any,
+        order: WalkOrder,
+        base: B,
+    ) -> Result<Any> {
+        run_mapper_with_base(root, OwnedDispatcher(self), order, base)
+    }
+}
+impl<D: MapDispatch> MapWithBase for DispatchMapper<'_, D> {
+    fn map_with_base<B: StructuralMutatorBase>(
+        self,
+        root: Any,
+        order: WalkOrder,
+        base: B,
+    ) -> Result<Any> {
+        run_mapper_with_base(root, BorrowedDispatcher(self.0), order, base)
+    }
+}
+#[doc(hidden)]
+pub struct BaseMapper<B, M>(B, M);
+impl<B: StructuralMutatorBase, M: MapWithBase> NativeMap for BaseMapper<B, M> {
+    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
+        self.1.map_with_base(root, order, self.0)
+    }
+}
+impl<B, H, M> IntoMapper<(ByBaseMutator, M)> for StructuralMutator<B, H>
+where
+    B: StructuralMutatorBase,
+    H: IntoMapper<M>,
+    H::Mapper: MapWithBase,
+{
+    type Mapper = BaseMapper<B, H::Mapper>;
+    fn into_mapper(self) -> Self::Mapper {
+        BaseMapper(self.base, self.dispatch.into_mapper())
+    }
+}
+fn run_mapper_with_base<S: DispatcherStorage, B: StructuralMutatorBase>(
+    root: Any,
+    dispatch: S,
+    order: WalkOrder,
+    base: B,
+) -> Result<Any>
+where
+    S::Dispatch: MapDispatch,
+{
+    match order {
+        WalkOrder::PreOrder => run_mutator_engine::<NativeMapper<'_, S::Dispatch, true>, _, _>(
+            root, dispatch, base, false,
+        ),
+        WalkOrder::PostOrder => run_mutator_engine::<NativeMapper<'_, S::Dispatch, false>, _, _>(
+            root, dispatch, base, false,
+        ),
     }
 }
 
@@ -1348,7 +960,7 @@ impl<V: MapDispatch> MapChainLink<ByMapDispatchLink> for &mut V {
     }
 }
 
-/// Adapter from a [`MapChainLink`] to [`MapDispatch`].
+/// Adapter from a [`MapChainLink`] to [`Dispatcher`](crate::Dispatcher).
 #[doc(hidden)]
 pub struct MapChain<Link, Marker> {
     link: Link,
@@ -1365,15 +977,16 @@ impl<Link, Marker> MapChain<Link, Marker> {
     }
 }
 
-impl<Link, Marker> MapDispatch for MapChain<Link, Marker>
+impl<'receiver, 'value, Link, Marker>
+    Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Any>>>
+    for &'receiver mut MapChain<Link, Marker>
 where
     Link: MapChainLink<Marker>,
 {
-    #[inline]
-    fn dispatch_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
+    #[inline(always)]
+    fn dispatch_tuple(
+        self,
+        (value, def_region_kind): (AnyView<'value>, DefRegionKind),
     ) -> Option<Result<Any>> {
         self.link.try_map(value, def_region_kind)
     }
@@ -1475,7 +1088,7 @@ where
     }
 }
 
-/// Identity substitutions for a custom [`StructuralMutator`] remapping policy.
+/// Identity substitutions for structural mutation within one invocation.
 ///
 /// The map owns its keys and values so object addresses remain stable.
 #[derive(Default)]
@@ -1511,428 +1124,6 @@ impl StructuralVarRemap {
 
 /// A low-level mutator that controls its own recursion.
 ///
-/// Implementations descend with the `mutate` or `default_*` helpers.
-/// Prefer mutation callbacks or `#[dispatch(mutate)]` for typed dispatch with
-/// recursion supplied through [`Mutator`].
-pub trait StructuralMutator: Sized {
-    /// Dispatch one borrowed value without modifying its source storage.
-    ///
-    /// The structural-mutation engine calls this hook for each value.
-    fn dispatch_mutate(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any>;
-
-    /// Dispatch one value with its stored in-place permission.
-    ///
-    /// The engine uses this hook when reuse is permitted, but callers may also
-    /// pass a borrowed handle with `Disallow`. Overrides must preserve that mode.
-    /// The default delegates to [`Self::dispatch_mutate`] and therefore remains
-    /// non-in-place. Override this method to opt into the default container
-    /// reuse path.
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.dispatch_mutate(value.as_any_view(), def_region_kind)
-    }
-
-    #[doc(hidden)]
-    fn on_default_mutate(&mut self, value: MutationView<'_>, kind: DefRegionKind) -> Result<Any> {
-        default_mutate_driver(self, value.value, kind, value.permit(value.inplace_mode()))
-    }
-
-    /// Re-enter this mutator for a borrowed value. The value and all of its
-    /// descendants use the non-in-place path.
-    fn mutate<'input, T>(&mut self, value: &'input T, def_region_kind: DefRegionKind) -> Result<Any>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        dispatch_user_raw(self, *view.as_raw_ffi_any(), def_region_kind, Permit::Copy)
-            .and_then(|result| resolve_result(result, *view.as_raw_ffi_any()))
-    }
-
-    /// Re-enter this mutator for an owned value, permitting reuse only when
-    /// the converted value remains uniquely owned.
-    fn maybe_inplace_mutate<T>(&mut self, value: T, def_region_kind: DefRegionKind) -> Result<Any>
-    where
-        T: Into<Any>,
-    {
-        self.maybe_inplace_mutate_with_mode(value, def_region_kind, InplaceMode::Allow)
-    }
-
-    /// Re-enter for an owned value with an explicit region and in-place permission.
-    ///
-    /// `Allow` checks uniqueness before dispatch; `Disallow` uses ordinary
-    /// mutation without checking uniqueness. An independently owned replacement
-    /// or a later explicit owned entry can establish a new permission boundary.
-    fn maybe_inplace_mutate_with_mode<T>(
-        &mut self,
-        value: T,
-        def_region_kind: DefRegionKind,
-        mode: InplaceMode,
-    ) -> Result<Any>
-    where
-        T: Into<Any>,
-    {
-        let value = value.into();
-        let result = dispatch_user_raw(
-            self,
-            *value.as_raw_ffi_any(),
-            def_region_kind,
-            mode.permit(),
-        )?;
-        Ok(if is_unchanged(&result) { value } else { result })
-    }
-
-    /// Apply default non-in-place mutation to a borrowed typed value.
-    ///
-    /// Unlike [Self::mutate], this bypasses dispatch for the value
-    /// itself while its children still re-enter this mutator. This lets a
-    /// typed structural-mutate handler recurse through its current node
-    /// before applying a post-order rewrite.
-    fn default_mutate<'input, T>(
-        &mut self,
-        value: &'input T,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        user_default_mutate(self, *view.as_raw_ffi_any(), def_region_kind, Permit::Copy)
-            .and_then(|result| resolve_result(result, *view.as_raw_ffi_any()))
-    }
-
-    /// Apply default mutation with the handle's existing in-place permission.
-    ///
-    /// Uniqueness is checked again here because user code may have retained
-    /// an owning alias after the capability was issued.
-    fn default_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        let mode = value.inplace_mode();
-        self.default_maybe_inplace_mutate_with_mode(value, def_region_kind, mode)
-    }
-
-    /// Apply default mutation with a capability and an explicit permission.
-    ///
-    /// The requested mode can restrict, but cannot upgrade, the capability.
-    /// `Allow` rechecks uniqueness because the handler may have retained an owning
-    /// alias. Consuming the capability prevents a borrow from it surviving this
-    /// call. Unlike the C++ default-descent API, safe Rust cannot simply trust
-    /// the earlier uniqueness check after arbitrary user code has run.
-    fn default_maybe_inplace_mutate_with_mode(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-        mode: InplaceMode,
-    ) -> Result<Any> {
-        let raw = value.value;
-        let permit = value.permit(mode);
-        user_default_mutate(self, raw, def_region_kind, permit)
-            .and_then(|result| resolve_result(result, raw))
-    }
-
-    /// Re-enter this mutator for a borrowed value, preserving unchanged.
-    fn mutate_result<'input, T>(
-        &mut self,
-        value: &'input T,
-        kind: DefRegionKind,
-    ) -> Result<UnchangedOr<Any>>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        dispatch_user_raw(self, *view.as_raw_ffi_any(), kind, Permit::Copy)
-            .and_then(UnchangedOr::from_carrier)
-    }
-
-    /// Default mutation of a borrowed typed value, preserving unchanged.
-    fn default_mutate_result<'input, T>(
-        &mut self,
-        value: &'input T,
-        kind: DefRegionKind,
-    ) -> Result<UnchangedOr<Any>>
-    where
-        AnyView<'input>: From<&'input T>,
-    {
-        let view = AnyView::from(value);
-        user_default_mutate(self, *view.as_raw_ffi_any(), kind, Permit::Copy)
-            .and_then(UnchangedOr::from_carrier)
-    }
-
-    /// Default mutation with the handle's existing permission, preserving unchanged.
-    fn default_maybe_inplace_mutate_result(
-        &mut self,
-        value: MutationView<'_>,
-        kind: DefRegionKind,
-    ) -> Result<UnchangedOr<Any>> {
-        let mode = value.inplace_mode();
-        self.default_maybe_inplace_mutate_with_mode_result(value, kind, mode)
-    }
-
-    /// Default mutation with a capability and permission, preserving unchanged.
-    ///
-    /// Uses the same ownership checks as [`Self::default_maybe_inplace_mutate_with_mode`].
-    fn default_maybe_inplace_mutate_with_mode_result(
-        &mut self,
-        value: MutationView<'_>,
-        kind: DefRegionKind,
-        mode: InplaceMode,
-    ) -> Result<UnchangedOr<Any>> {
-        let raw = value.value;
-        let permit = value.permit(mode);
-        user_default_mutate(self, raw, kind, permit).and_then(UnchangedOr::from_carrier)
-    }
-
-    /// Look up a FreeVar or DAG-node substitution from the active mutation.
-    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
-        invocation_var_remap_get(self, var)
-    }
-
-    /// Store a FreeVar or DAG-node substitution for the active mutation.
-    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
-        invocation_var_remap_set(self, var, mutated_value)
-    }
-}
-
-impl<D: MutateDispatch> StructuralMutator for D {
-    fn on_default_mutate(&mut self, value: MutationView<'_>, kind: DefRegionKind) -> Result<Any> {
-        MutateDispatch::on_default_mutate(self, value, kind)
-    }
-
-    #[inline(always)]
-    fn dispatch_mutate(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        let mut mutator = Mutator {
-            def_region_kind,
-            inplace_mode: InplaceMode::Disallow,
-            _not_send_sync: PhantomData,
-        };
-        match MutateDispatch::dispatch_mutate_value(
-            self,
-            MutationView::borrowed(value),
-            &mut mutator,
-        ) {
-            Some(result) => result,
-            None => user_default_mutate(self, raw_of(value), def_region_kind, Permit::Copy),
-        }
-    }
-
-    #[inline(always)]
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        let raw = value.value;
-        let mode = value.inplace_mode();
-        let mut mutator = Mutator {
-            def_region_kind,
-            inplace_mode: mode,
-            _not_send_sync: PhantomData,
-        };
-        match MutateDispatch::dispatch_mutate_value(self, value, &mut mutator) {
-            Some(result) => result,
-            // The engine keeps the input live through dispatch. Default descent
-            // rechecks ownership because a callback may have retained an alias.
-            None => user_default_mutate(self, raw, def_region_kind, mode.permit()),
-        }
-    }
-}
-
-#[doc(hidden)]
-pub fn default_mutate_with_policy<D: MutateDispatch + MutateCallbackState<D>>(
-    dispatch: &mut D,
-    policy: &impl MutationContextPolicy<D>,
-    value: MutationView<'_>,
-    kind: DefRegionKind,
-) -> Result<Any> {
-    policy::mutate_with_policy(
-        &mut policy::MutationDescent { driver: dispatch },
-        policy,
-        value,
-        kind,
-    )
-}
-
-// Closure callback chains use a type-erased context driver so one concrete
-// function signature can recurse through the complete chain.
-#[inline(always)]
-fn try_mutate_callbacks<State, Link, Marker, Driver>(
-    driver: &mut Driver,
-    callback_ptr: *const Link,
-    value: &mut Option<MutationView<'_>>,
-    def_region_kind: DefRegionKind,
-) -> Option<Result<Any>>
-where
-    Link: MutateChainLink<State, Marker>,
-    Driver: MutateContextDriver<State>,
-{
-    let mut mutator = MutationContext {
-        driver,
-        def_region_kind,
-        inplace_mode: value
-            .as_ref()
-            .expect("unconsumed callback value")
-            .inplace_mode(),
-        _not_send_sync: PhantomData,
-    };
-    // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
-    // and is never modified through the driver during recursive reentry.
-    unsafe { (&*callback_ptr).try_mutate(value, &mut mutator) }
-}
-
-impl<State, Link, Marker, Policy> StructuralMutator for MutateCallbacks<State, Link, Marker, Policy>
-where
-    Policy: MutationContextPolicy<State>,
-    Link: MutateChainLink<State, Marker>,
-{
-    #[inline(always)]
-    fn dispatch_mutate(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.dispatch_maybe_inplace_mutate(MutationView::borrowed(value), def_region_kind)
-    }
-
-    #[inline(always)]
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        let mut value = Some(value);
-        let callback_ptr = Rc::as_ptr(&self.callbacks);
-        match try_mutate_callbacks::<State, Link, Marker, _>(
-            self,
-            callback_ptr,
-            &mut value,
-            def_region_kind,
-        ) {
-            Some(result) => result,
-            None => self
-                .default_maybe_inplace_mutate_result(
-                    value.expect("unmatched callback value"),
-                    def_region_kind,
-                )
-                .map(Any::from),
-        }
-    }
-
-    fn on_default_mutate(&mut self, value: MutationView<'_>, kind: DefRegionKind) -> Result<Any> {
-        match self.policy.clone() {
-            Some(policy) => policy::mutate_with_policy(
-                &mut policy::MutationDescent { driver: self },
-                policy.as_ref(),
-                value,
-                kind,
-            ),
-            None => {
-                default_mutate_driver(self, value.value, kind, value.permit(value.inplace_mode()))
-            }
-        }
-    }
-}
-
-impl<Link, Marker> StructuralMutator for DirectMutateCallbacks<'_, Link, Marker>
-where
-    Link: MutateChainLink<(), Marker>,
-{
-    #[inline(always)]
-    fn dispatch_mutate(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.dispatch_maybe_inplace_mutate(MutationView::borrowed(value), def_region_kind)
-    }
-
-    #[inline(always)]
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        let mut value = Some(value);
-        let callback_ptr = std::ptr::from_ref(self.callbacks);
-        match try_mutate_callbacks::<(), Link, Marker, _>(
-            self,
-            callback_ptr,
-            &mut value,
-            def_region_kind,
-        ) {
-            Some(result) => result,
-            None => self
-                .default_maybe_inplace_mutate_result(
-                    value.expect("unmatched callback value"),
-                    def_region_kind,
-                )
-                .map(Any::from),
-        }
-    }
-}
-
-impl<State, Driver> MutateContextDriver<State> for Driver
-where
-    Driver: StructuralMutator + MutateCallbackState<State>,
-{
-    #[inline(always)]
-    fn state(&self) -> &State {
-        self.callback_state()
-    }
-
-    #[inline(always)]
-    fn state_mut(&mut self) -> &mut State {
-        self.callback_state_mut()
-    }
-
-    #[inline(always)]
-    fn mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
-        dispatch_user_raw(self, *value.as_raw_ffi_any(), kind, Permit::Copy)
-    }
-
-    #[inline(always)]
-    fn mutate_owned(&mut self, value: Any, kind: DefRegionKind, mode: InplaceMode) -> Result<Any> {
-        StructuralMutator::maybe_inplace_mutate_with_mode(self, value, kind, mode)
-    }
-
-    #[inline(always)]
-    fn default_mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
-        user_default_mutate(self, *value.as_raw_ffi_any(), kind, Permit::Copy)
-    }
-
-    fn default_mutate_value(
-        &mut self,
-        value: MutationView<'_>,
-        kind: DefRegionKind,
-        mode: InplaceMode,
-    ) -> Result<Any> {
-        let permit = value.permit(mode);
-        user_default_mutate(self, value.value, kind, permit)
-    }
-
-    #[inline(always)]
-    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
-        <Self as StructuralMutator>::var_remap_get(self, var)
-    }
-
-    #[inline(always)]
-    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
-        <Self as StructuralMutator>::var_remap_set(self, var, mutated_value)
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Permit {
     Copy,
@@ -1940,7 +1131,7 @@ enum Permit {
 }
 
 impl Permit {
-    #[inline]
+    #[inline(always)]
     fn inplace_mode(self, raw: TVMFFIAny) -> InplaceMode {
         if self == Self::MaybeInPlace && object_is_unique(raw) {
             InplaceMode::Allow
@@ -1957,38 +1148,34 @@ struct MemoEntry {
     result: Any,
 }
 
-struct NativeMapper<'a, D, Policy, const PRE_ORDER: bool> {
+struct NativeMapper<'a, D, const PRE_ORDER: bool> {
     dispatch: &'a mut D,
-    policy: Option<Rc<Policy>>,
-    remap: StructuralVarRemap,
+    runtime: StructuralMutatorHandle,
 }
 
-fn run_native_mapper<D: MapDispatch, Policy: MutationContextPolicy<D>>(
-    root: Any,
-    dispatch: &mut D,
-    policy: Option<Rc<Policy>>,
-    order: WalkOrder,
-) -> Result<Any> {
-    match order {
-        WalkOrder::PreOrder => NativeMapper::<_, _, true>::run(root, dispatch, policy),
-        WalkOrder::PostOrder => NativeMapper::<_, _, false>::run(root, dispatch, policy),
-    }
-}
-
-impl<D: MapDispatch, Policy: MutationContextPolicy<D>, const PRE_ORDER: bool>
-    NativeMapper<'_, D, Policy, PRE_ORDER>
+fn run_native_mapper<S: DispatcherStorage>(root: Any, dispatch: S, order: WalkOrder) -> Result<Any>
+where
+    S::Dispatch: MapDispatch,
 {
-    fn run(root: Any, dispatch: &mut D, policy: Option<Rc<Policy>>) -> Result<Any> {
-        run_structural_mutator(
-            root,
-            &mut NativeMapper::<_, _, PRE_ORDER> {
-                dispatch,
-                policy,
-                remap: StructuralVarRemap::default(),
-            },
-        )
+    match order {
+        WalkOrder::PreOrder => run_map_engine::<S, true>(root, dispatch),
+        WalkOrder::PostOrder => run_map_engine::<S, false>(root, dispatch),
     }
+}
 
+fn run_map_engine<S: DispatcherStorage, const PRE: bool>(root: Any, dispatch: S) -> Result<Any>
+where
+    S::Dispatch: MapDispatch,
+{
+    run_mutator_engine::<NativeMapper<'_, S::Dispatch, PRE>, S, _>(
+        root,
+        dispatch,
+        StructuralMutatorObj::default(),
+        true,
+    )
+}
+
+impl<D: MapDispatch, const PRE_ORDER: bool> NativeMapper<'_, D, PRE_ORDER> {
     #[inline(always)]
     fn map_raw(
         &mut self,
@@ -2002,7 +1189,9 @@ impl<D: MapDispatch, Policy: MutationContextPolicy<D>, const PRE_ORDER: bool>
         // Raw strings, byte-array views, and ObjectRValueRef are deliberately
         // excluded because converting those borrowed special values into an
         // Any performs normalization rather than a bitwise copy.
-        if self.policy.is_none() && is_plain_inline(raw.type_index) {
+        if is_plain_inline(raw.type_index)
+            && unsafe { (*runtime_state(self.runtime)).plain_inline_fastpath }
+        {
             let value = unsafe { borrowed_view(&raw) };
             return match self.dispatch.dispatch_map(value, def_region_kind) {
                 Some(result) => {
@@ -2096,8 +1285,17 @@ impl<D: MapDispatch, Policy: MutationContextPolicy<D>, const PRE_ORDER: bool>
 }
 
 /// Internal mutation operations shared by the native mapper and a user
-/// [`StructuralMutator`].
+/// [`StructuralMutatorView`].
 trait MutationDriver: Sized {
+    fn runtime(&self) -> StructuralMutatorHandle;
+    /// Expose only the current dispatcher reborrow, never this driver wrapper.
+    fn context(&mut self) -> *mut c_void;
+    // Each static callback reconstructs a temporary driver around that reborrow.
+    unsafe fn runtime_dispatch<const INPLACE: bool>(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> TVMFFIAny;
     fn dispatch_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -2120,9 +1318,25 @@ trait MutationDriver: Sized {
         result_into_raw(self.dispatch_raw(raw, kind, permit))
     }
 
-    fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>>;
+    unsafe fn runtime_recurse(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any>;
+    unsafe fn runtime_default(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any>;
 
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()>;
+    fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>> {
+        unsafe { runtime_var_remap_get(self.runtime(), raw) }
+    }
+    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()> {
+        unsafe { runtime_var_remap_set(self.runtime(), raw, replacement) }
+    }
 
     fn call_registered_hook(
         &mut self,
@@ -2130,7 +1344,8 @@ trait MutationDriver: Sized {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Option<Any>> {
-        let (mutator, context) = checked_driver_context(self)?;
+        let mutator = self.runtime();
+        let context = self.context();
         let Some(attr) = structural_mutate_hook(raw, permit) else {
             // No foreign call needs access to the driver on a hook miss.
             return Ok(None);
@@ -2146,7 +1361,11 @@ trait MutationDriver: Sized {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        default_mutate_driver(self, raw, def_region_kind, permit)
+        let runtime = self.runtime();
+        let context = self.context();
+        with_current_driver_context(runtime, context, || unsafe {
+            ((*runtime_state(runtime)).default_mutate)(runtime, raw, def_region_kind, permit)
+        })
     }
 
     fn map_reflected(
@@ -2262,8 +1481,7 @@ trait MutationDriver: Sized {
     }
 }
 
-type StructuralMutatorHandle = *mut RuntimeStructuralMutatorObj;
-
+type StructuralMutatorHandle = *mut StructuralMutatorObj;
 type FStructuralMutate =
     unsafe extern "C" fn(StructuralMutatorHandle, AnyView<'static>) -> TVMFFIAny;
 type FStructuralVarRemapGet =
@@ -2271,69 +1489,72 @@ type FStructuralVarRemapGet =
 type FStructuralVarRemapSet =
     unsafe extern "C" fn(StructuralMutatorHandle, AnyView<'static>, AnyView<'static>) -> TVMFFIAny;
 
-/// Rust mirror of the C++ `StructuralMutatorVTable` ABI.
 #[repr(C)]
 struct StructuralMutatorVTable {
     mutate: FStructuralMutate,
     maybe_inplace_mutate: FStructuralMutate,
     var_remap_get: FStructuralVarRemapGet,
     var_remap_set: FStructuralVarRemapSet,
+    state_offset: usize,
 }
 
-type RuntimeVarRemapGetCallback = unsafe fn(*mut c_void, TVMFFIAny) -> Result<Option<Any>>;
-type RuntimeVarRemapSetCallback = unsafe fn(*mut c_void, TVMFFIAny, &Any) -> Result<()>;
-
-struct RuntimeMutatorCallbacks {
-    var_remap_get: RuntimeVarRemapGetCallback,
-    var_remap_set: RuntimeVarRemapSetCallback,
-}
-
-/// Active Rust mutator with the exact C++ `StructuralMutatorObj` prefix.
-///
-/// C++ type hooks read `vtable` and `def_region_mode`; Rust keeps its erased
-/// driver state after that shared prefix.
+/// Exact C++ StructuralMutatorObj ABI prefix, with no Rust traversal state.
 #[repr(C)]
-struct RuntimeStructuralMutatorObj {
+pub struct StructuralMutatorObj {
     base: Object,
     vtable: *const StructuralMutatorVTable,
     def_region_mode: i32,
-    // `context` is available only while a registered type hook is allowed to
-    // re-enter Rust. `context_identity` is never dereferenced; it verifies
-    // that a helper is being called on the mutator that started this run.
+}
+
+type MutationCallback =
+    unsafe fn(StructuralMutatorHandle, TVMFFIAny, DefRegionKind, Permit) -> Result<Any>;
+struct MutationState {
     context: *mut c_void,
     context_identity: *mut c_void,
-    owner_thread: std::thread::ThreadId,
-    callbacks: RuntimeMutatorCallbacks,
-    // Identity substitutions for the active traversal.
+    recurse: MutationCallback,
+    default_mutate: MutationCallback,
+    builtin_default: MutationCallback,
+    plain_inline_fastpath: bool,
     remap: RefCell<StructuralVarRemap>,
     panic: Option<Box<dyn std::any::Any + Send>>,
 }
 
+// The final inline field owns D or the explicitly borrowed dispatcher storage.
+// Its offset depends on Dispatcher alignment, not just the size of Base.
+#[repr(C)]
+struct StructuralMutateEngine<Base, Dispatcher> {
+    base: Base,
+    state: MutationState,
+    dispatcher: Dispatcher,
+}
+
+#[inline(always)]
+unsafe fn runtime_state(runtime: StructuralMutatorHandle) -> *mut MutationState {
+    // Only Rust-created engine handles use this extended vtable.
+    runtime
+        .cast::<u8>()
+        .add((*(*runtime).vtable).state_offset)
+        .cast()
+}
+
 const _: () = {
     assert!(
-        std::mem::offset_of!(RuntimeStructuralMutatorObj, vtable)
-            == std::mem::size_of::<TVMFFIObject>()
+        std::mem::offset_of!(StructuralMutatorObj, vtable) == std::mem::size_of::<TVMFFIObject>()
     );
     assert!(
-        std::mem::offset_of!(RuntimeStructuralMutatorObj, def_region_mode)
+        std::mem::offset_of!(StructuralMutatorObj, def_region_mode)
             == std::mem::size_of::<TVMFFIObject>() + std::mem::size_of::<*const c_void>()
     );
 };
 
-// SAFETY: `RuntimeStructuralMutatorObj` is `repr(C)` and starts with `Object`,
-// so `object_header_mut` returns the allocation's actual TVMFFIObject header.
-// `type_index` resolves the registered `ffi.StructuralMutator` subtype whose
-// C++ prefix is checked by the compile-time offset assertions above.
-unsafe impl ObjectCore for RuntimeStructuralMutatorObj {
+// Scoped runtime prefixes are not independently allocatable ObjectCore values.
+impl StructuralMutatorObj {
     const TYPE_KEY: &'static str = "ffi.StructuralMutator";
-    const TYPE_DEPTH: i32 = Object::TYPE_DEPTH + 1;
-
     fn type_index() -> i32 {
         static TYPE_INDEX: LazyLock<i32> = LazyLock::new(|| unsafe {
-            let key = TVMFFIByteArray::from_str(RuntimeStructuralMutatorObj::TYPE_KEY);
+            let key = TVMFFIByteArray::from_str(StructuralMutatorObj::TYPE_KEY);
             let mut type_index = 0;
-            let return_code = TVMFFITypeKeyToIndex(&key, &mut type_index);
-            if return_code != 0 {
+            if TVMFFITypeKeyToIndex(&key, &mut type_index) != 0 {
                 panic!(
                     "ffi.StructuralMutator is not registered: {}",
                     Error::from_raised()
@@ -2343,62 +1564,55 @@ unsafe impl ObjectCore for RuntimeStructuralMutatorObj {
         });
         *TYPE_INDEX
     }
-
-    unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
-        Object::object_header_mut(&mut this.base)
-    }
 }
 
-struct RuntimeMutatorVTable<D>(PhantomData<D>);
+struct RuntimeMutatorVTable<D, B, S>(PhantomData<(D, B, S)>);
 
-impl<D: MutationDriver> RuntimeMutatorVTable<D> {
+impl<D: MutationDriver, B, S> RuntimeMutatorVTable<D, B, S> {
     const VTABLE: StructuralMutatorVTable = StructuralMutatorVTable {
         mutate: rust_vtable_mutate::<D>,
         maybe_inplace_mutate: rust_vtable_maybe_inplace_mutate::<D>,
         var_remap_get: rust_vtable_var_remap_get,
         var_remap_set: rust_vtable_var_remap_set,
+        state_offset: std::mem::offset_of!(StructuralMutateEngine<B, S>, state),
     };
 }
 
 struct RuntimeContextGuard {
-    mutator: StructuralMutatorHandle,
-    context: *mut c_void,
+    runtime: StructuralMutatorHandle,
+    previous: *mut c_void,
 }
-
+impl RuntimeContextGuard {
+    #[inline(always)]
+    unsafe fn bind(runtime: StructuralMutatorHandle, context: *mut c_void) -> Self {
+        let previous = (*runtime_state(runtime)).context;
+        (*runtime_state(runtime)).context = context;
+        Self { runtime, previous }
+    }
+}
 impl Drop for RuntimeContextGuard {
+    #[inline(always)]
     fn drop(&mut self) {
-        // SAFETY: the guard is created only for a live mutator on its owner
-        // thread. Restoring the pointer makes the same registered hook able to
-        // invoke another child after this callback returns.
-        unsafe { (*self.mutator).context = self.context };
+        unsafe {
+            (*runtime_state(self.runtime)).context = self.previous;
+        }
     }
 }
 
-/// Temporarily take the erased driver context out of the runtime object.
-///
-/// # Safety
-///
-/// `mutator` must be null or point to a live [`RuntimeStructuralMutatorObj`].
-/// A non-null context must have been installed by the current run. Its runtime
-/// callback table must reconstruct it according to that run's mutable-driver
-/// contract.
-unsafe fn take_runtime_context(mutator: StructuralMutatorHandle) -> Result<RuntimeContextGuard> {
-    if !is_active_mutator(mutator) {
-        return Err(inactive_mutator_error(mutator, "callback"));
+#[inline(always)]
+fn bind_dispatcher<D>(runtime: StructuralMutatorHandle, dispatch: &mut D) -> RuntimeContextGuard {
+    let context = std::ptr::from_mut(dispatch).cast();
+    // D type equality does not prove instance identity or that this borrow
+    // covers the runtime dispatcher. Keep this one comparison in release builds.
+    if context != unsafe { (*runtime_state(runtime)).context_identity } {
+        wrong_mutation_dispatcher();
     }
-    let context = (*mutator).context;
-    if context.is_null() {
-        let message = if (*mutator).context_identity.is_null() {
-            "structural mutator was retained after its active call"
-        } else {
-            "structural mutator may only be called by its active registered hook"
-        };
-        return Err(runtime_error(message));
-    }
-    // No raw context pointer remains callable while Rust executes the selected
-    // mutable-driver entry.
-    (*mutator).context = std::ptr::null_mut();
-    Ok(RuntimeContextGuard { mutator, context })
+    unsafe { RuntimeContextGuard::bind(runtime, context) }
+}
+#[cold]
+#[inline(never)]
+fn wrong_mutation_dispatcher() -> ! {
+    panic!("mutation context used with a different dispatcher instance")
 }
 
 unsafe extern "C" fn rust_vtable_mutate<D: MutationDriver>(
@@ -2406,7 +1620,7 @@ unsafe extern "C" fn rust_vtable_mutate<D: MutationDriver>(
     value: AnyView<'static>,
 ) -> TVMFFIAny {
     // SAFETY: this function is installed only in the vtable of a live
-    // RuntimeStructuralMutatorObj built for D; `value` is borrowed for this call.
+    // StructuralMutatorObj built for D; `value` is borrowed for this call.
     rust_vtable_mutate_impl::<D, false>(mutator, value)
 }
 
@@ -2430,21 +1644,12 @@ unsafe fn rust_vtable_mutate_impl<D: MutationDriver, const INPLACE: bool>(
     mutator: StructuralMutatorHandle,
     value: AnyView<'static>,
 ) -> TVMFFIAny {
-    let context_guard = match take_runtime_context(mutator) {
-        Ok(guard) => guard,
-        Err(error) => return result_into_raw(Err(error)),
-    };
-    let context = context_guard.context;
     let raw = *value.as_raw_ffi_any();
     let outcome = catch_unwind(AssertUnwindSafe(
         #[inline]
         || {
-            let kind = match def_region_from_raw((*mutator).def_region_mode) {
-                Ok(kind) => kind,
-                Err(error) => return result_into_raw(Err(error)),
-            };
-            // take_runtime_context verified that this mutator is already active.
-            runtime_dispatch_mutate::<D, INPLACE>(context, raw, kind)
+            let kind = std::mem::transmute((*mutator).def_region_mode);
+            D::runtime_dispatch::<INPLACE>(mutator, raw, kind)
         },
     ));
     match outcome {
@@ -2458,7 +1663,7 @@ unsafe fn mutation_panic_result(
     mutator: StructuralMutatorHandle,
     payload: Box<dyn std::any::Any + Send>,
 ) -> TVMFFIAny {
-    (*mutator).panic = Some(payload);
+    (*runtime_state(mutator)).panic = Some(payload);
     result_into_raw(Err(runtime_error("panic in structural mutator callback")))
 }
 
@@ -2466,19 +1671,13 @@ unsafe extern "C" fn rust_vtable_var_remap_get(
     mutator: StructuralMutatorHandle,
     var: AnyView<'static>,
 ) -> TVMFFIAny {
-    let context_guard = match take_runtime_context(mutator) {
-        Ok(guard) => guard,
-        Err(error) => return result_into_raw(Err(error)),
-    };
-    let callback = (*mutator).callbacks.var_remap_get;
-    let context = context_guard.context;
     let raw = *var.as_raw_ffi_any();
-    match catch_unwind(AssertUnwindSafe(|| callback(context, raw))) {
+    match catch_unwind(AssertUnwindSafe(|| runtime_var_remap_get(mutator, raw))) {
         Ok(Ok(Some(replacement))) => Any::into_raw_ffi_any(replacement),
         Ok(Ok(None)) => TVMFFIAny::new(),
         Ok(Err(error)) => result_into_raw(Err(error)),
         Err(payload) => {
-            (*mutator).panic = Some(payload);
+            (*runtime_state(mutator)).panic = Some(payload);
             result_into_raw(Err(runtime_error("panic in structural var-remap lookup")))
         }
     }
@@ -2489,22 +1688,16 @@ unsafe extern "C" fn rust_vtable_var_remap_set(
     var: AnyView<'static>,
     replacement: AnyView<'static>,
 ) -> TVMFFIAny {
-    let context_guard = match take_runtime_context(mutator) {
-        Ok(guard) => guard,
-        Err(error) => return result_into_raw(Err(error)),
-    };
-    let callback = (*mutator).callbacks.var_remap_set;
-    let context = context_guard.context;
     let var_raw = *var.as_raw_ffi_any();
     let replacement_raw = *replacement.as_raw_ffi_any();
     match catch_unwind(AssertUnwindSafe(|| {
         let replacement = owned_from_raw(replacement_raw)?;
-        callback(context, var_raw, &replacement)
+        runtime_var_remap_set(mutator, var_raw, &replacement)
     })) {
         Ok(Ok(())) => TVMFFIAny::new(),
         Ok(Err(error)) => result_into_raw(Err(error)),
         Err(payload) => {
-            (*mutator).panic = Some(payload);
+            (*runtime_state(mutator)).panic = Some(payload);
             result_into_raw(Err(runtime_error(
                 "panic in structural var-remap insertion",
             )))
@@ -2512,165 +1705,73 @@ unsafe extern "C" fn rust_vtable_var_remap_set(
     }
 }
 
-thread_local! {
-    static ACTIVE_MUTATOR: Cell<StructuralMutatorHandle> = const {
-        Cell::new(std::ptr::null_mut())
-    };
-}
-
-fn with_active_mutator<T>(handle: StructuralMutatorHandle, callback: impl FnOnce() -> T) -> T {
-    ACTIVE_MUTATOR.with(|active| {
-        let previous = active.replace(handle);
-        struct Restore<'a> {
-            active: &'a Cell<StructuralMutatorHandle>,
-            previous: StructuralMutatorHandle,
-        }
-        impl Drop for Restore<'_> {
-            fn drop(&mut self) {
-                self.active.set(self.previous);
-            }
-        }
-        let _restore = Restore { active, previous };
-        callback()
-    })
-}
-
-fn active_mutator() -> Result<StructuralMutatorHandle> {
-    ACTIVE_MUTATOR.with(|active| {
-        let handle = active.get();
-        if handle.is_null() {
-            Err(runtime_error(
-                "structural mutator helper called outside structural_mutate",
-            ))
-        } else {
-            Ok(handle)
-        }
-    })
-}
-
-fn invocation_var_remap_get<U: Sized>(mutator: &mut U, var: AnyView<'_>) -> Result<Option<Any>> {
-    let active = active_mutator()?;
-    let context = std::ptr::from_mut(mutator).cast::<c_void>();
-    unsafe {
-        if (*active).context_identity != context {
-            return Err(runtime_error(
-                "default structural var-remap used by a non-active mutator",
-            ));
-        }
-        (*active).remap.borrow().get(var)
-    }
-}
-
-fn invocation_var_remap_set<U: Sized>(
-    mutator: &mut U,
-    var: AnyView<'_>,
-    mutated_value: &Any,
-) -> Result<()> {
-    let active = active_mutator()?;
-    let context = std::ptr::from_mut(mutator).cast::<c_void>();
-    unsafe {
-        if (*active).context_identity != context {
-            return Err(runtime_error(
-                "default structural var-remap used by a non-active mutator",
-            ));
-        }
-        (*active).remap.borrow_mut().set(var, mutated_value)
-    }
-}
-
-#[inline]
-fn is_active_mutator(handle: StructuralMutatorHandle) -> bool {
-    !handle.is_null() && ACTIVE_MUTATOR.with(|active| active.get() == handle)
-}
-
-#[cold]
-fn inactive_mutator_error(mutator: StructuralMutatorHandle, operation: &str) -> Error {
-    if mutator.is_null() {
-        return runtime_error("null active structural mutator");
-    }
-    // The immutable owner id lets a foreign thread be rejected before reading
-    // context fields that the owner thread may be updating.
-    unsafe {
-        if (*mutator).owner_thread != std::thread::current().id() {
-            return runtime_error(&format!(
-                "structural mutator {operation} invoked from a different thread"
-            ));
-        }
-        if (*mutator).context_identity.is_null() {
-            runtime_error("structural mutator was retained after its active call")
-        } else {
-            runtime_error(&format!(
-                "structural mutator {operation} may only be used by its active registered hook"
-            ))
-        }
-    }
-}
-
-/// Expose the current mutable reborrow only for the duration of one registered
-/// type hook. Nested vtable calls then reborrow from this pointer, and
-/// [`take_runtime_context`] hides it again while Rust is executing.
+#[inline(always)]
 fn with_current_driver_context<T>(
-    mutator: StructuralMutatorHandle,
+    runtime: StructuralMutatorHandle,
     context: *mut c_void,
     callback: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    // checked_driver_context validated this reborrow; no user code runs
-    // between that check and exposing the pointer to the registered hook.
-    unsafe {
-        (*mutator).context = context;
-        struct HideContext {
-            mutator: StructuralMutatorHandle,
-        }
-        impl Drop for HideContext {
-            fn drop(&mut self) {
-                // SAFETY: this scope owns the temporary exposure and runs on
-                // the mutator's owner thread.
-                unsafe { (*self.mutator).context = std::ptr::null_mut() };
-            }
-        }
-        let _hide = HideContext { mutator };
-        callback()
-    }
+    let _binding = unsafe { RuntimeContextGuard::bind(runtime, context) };
+    callback()
 }
 
-fn checked_driver_context<D>(driver: &mut D) -> Result<(StructuralMutatorHandle, *mut c_void)> {
-    let mutator = active_mutator()?;
-    let context = std::ptr::from_mut(driver).cast::<c_void>();
-    unsafe {
-        if (*mutator).context_identity != context {
-            return Err(runtime_error(
-                "structural mutator helper called on a non-active mutator",
-            ));
-        }
-        if !(*mutator).context.is_null() {
-            return Err(runtime_error(
-                "structural mutator driver context is already exposed",
-            ));
-        }
-
-        Ok((mutator, context))
+impl<D: MapDispatch, const PRE_ORDER: bool> MutationDriver for NativeMapper<'_, D, PRE_ORDER> {
+    fn runtime(&self) -> StructuralMutatorHandle {
+        self.runtime
     }
-}
-
-fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
-    match kind {
-        x if x == DefRegionKind::None as i32 => Ok(DefRegionKind::None),
-        x if x == DefRegionKind::Pattern as i32 => Ok(DefRegionKind::Pattern),
-        x if x == DefRegionKind::Simple as i32 => Ok(DefRegionKind::Simple),
-        _ => Err(runtime_error("invalid structural definition-region kind")),
+    fn context(&mut self) -> *mut c_void {
+        std::ptr::from_mut(&mut *self.dispatch).cast()
     }
-}
-
-impl<D: MapDispatch, Policy: MutationContextPolicy<D>, const PRE_ORDER: bool> MutationDriver
-    for NativeMapper<'_, D, Policy, PRE_ORDER>
-{
+    unsafe fn runtime_dispatch<const INPLACE: bool>(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> TVMFFIAny {
+        NativeMapper::<_, PRE_ORDER> {
+            dispatch: &mut *(*runtime_state(runtime)).context.cast::<D>(),
+            runtime,
+        }
+        .dispatch_abi_raw::<INPLACE>(raw, kind)
+    }
+    unsafe fn runtime_recurse(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any> {
+        NativeMapper::<D, PRE_ORDER> {
+            dispatch: &mut *(*runtime_state(runtime)).context.cast::<D>(),
+            runtime,
+        }
+        .dispatch_raw(raw, kind, permit)
+    }
+    unsafe fn runtime_default(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any> {
+        with_mutation_region(runtime, kind, |kind| {
+            default_mutate_driver(
+                &mut NativeMapper::<D, PRE_ORDER> {
+                    dispatch: &mut *(*runtime_state(runtime)).context.cast::<D>(),
+                    runtime,
+                },
+                raw,
+                kind,
+                permit,
+            )
+        })
+    }
     fn dispatch_raw(
         &mut self,
         raw: TVMFFIAny,
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        with_mutation_region(def_region_kind, |kind| self.map_raw(raw, kind, permit))
+        with_mutation_region(self.runtime, def_region_kind, |kind| {
+            self.map_raw(raw, kind, permit)
+        })
     }
 
     #[inline(always)]
@@ -2686,168 +1787,205 @@ impl<D: MapDispatch, Policy: MutationContextPolicy<D>, const PRE_ORDER: bool> Mu
         };
         result_into_raw(self.map_raw(raw, kind, permit))
     }
-
-    #[inline]
-    fn default_map_current_raw(
-        &mut self,
-        raw: TVMFFIAny,
-        kind: DefRegionKind,
-        permit: Permit,
-    ) -> Result<Any> {
-        match self.policy.clone() {
-            Some(policy) => {
-                let view = unsafe { borrowed_view(&raw) };
-                policy::mutate_with_policy(
-                    &mut policy::MutationDescent { driver: self },
-                    policy.as_ref(),
-                    MutationView::new(view, permit.inplace_mode(raw)),
-                    kind,
-                )
-            }
-            None => default_mutate_driver(self, raw, kind, permit),
-        }
-    }
-
-    fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>> {
-        self.remap.get(unsafe { borrowed_view(&raw) })
-    }
-
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()> {
-        self.remap.set(unsafe { borrowed_view(&raw) }, replacement)
-    }
 }
 
-impl<U: StructuralMutator> MutationDriver for U {
-    #[inline]
-    fn dispatch_raw(
-        &mut self,
-        raw: TVMFFIAny,
-        def_region_kind: DefRegionKind,
-        permit: Permit,
-    ) -> Result<Any> {
-        dispatch_user_raw(self, raw, def_region_kind, permit)
+struct UserMutator<'a, D> {
+    dispatch: &'a mut D,
+    runtime: StructuralMutatorHandle,
+}
+
+impl<D: MutateDispatch> MutationDriver for UserMutator<'_, D> {
+    fn runtime(&self) -> StructuralMutatorHandle {
+        self.runtime
+    }
+    fn context(&mut self) -> *mut c_void {
+        std::ptr::from_mut(&mut *self.dispatch).cast()
     }
 
-    #[inline(always)]
-    fn dispatch_abi_raw<const INPLACE: bool>(
-        &mut self,
+    unsafe fn runtime_dispatch<const INPLACE: bool>(
+        runtime: StructuralMutatorHandle,
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> TVMFFIAny {
-        if INPLACE && raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-            return result_into_raw(
-                self.dispatch_mutate(unsafe { borrowed_view(&raw) }, kind)
-                    .map_err(|error| with_value_context(error, raw)),
-            );
-        }
-        let permit = if INPLACE {
-            Permit::MaybeInPlace
-        } else {
-            Permit::Copy
+        let mut driver = UserMutator {
+            dispatch: &mut *(*runtime_state(runtime)).context.cast::<D>(),
+            runtime,
         };
-        result_into_raw(dispatch_user_current_raw(self, raw, kind, permit))
+        driver.dispatch_abi_raw::<INPLACE>(raw, kind)
     }
-
-    fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>> {
-        self.var_remap_get(unsafe { borrowed_view(&raw) })
+    unsafe fn runtime_recurse(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any> {
+        UserMutator {
+            dispatch: &mut *(*runtime_state(runtime)).context.cast::<D>(),
+            runtime,
+        }
+        .dispatch_raw(raw, kind, permit)
     }
-
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()> {
-        self.var_remap_set(unsafe { borrowed_view(&raw) }, replacement)
+    unsafe fn runtime_default(
+        runtime: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any> {
+        with_mutation_region(runtime, kind, |kind| {
+            default_mutate_driver(
+                &mut UserMutator {
+                    dispatch: &mut *(*runtime_state(runtime)).context.cast::<D>(),
+                    runtime,
+                },
+                raw,
+                kind,
+                permit,
+            )
+        })
+    }
+    fn dispatch_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind, permit: Permit) -> Result<Any> {
+        with_mutation_region(self.runtime, kind, |kind| {
+            let mode = permit.inplace_mode(raw);
+            with_mutation_view(self.dispatch, self.runtime, |dispatch, mutator| {
+                let value = MutationView::new(unsafe { borrowed_view(&raw) }, mode);
+                match dispatch.dispatch_mutate(value, mutator) {
+                    Some(result) => result,
+                    None => UserMutator {
+                        dispatch,
+                        runtime: self.runtime,
+                    }
+                    .default_map_current_raw(raw, kind, mode.permit()),
+                }
+            })
+        })
+        .map_err(|error| with_value_context(error, raw))
     }
 }
 
-/// Invoke the concrete Rust driver selected when the runtime mutator was built.
-///
-/// # Safety
-///
-/// `context` must come from the current mutable reborrow of a live `D`; the
-/// runtime object hides that pointer until this call returns.
+struct MutationScope {
+    runtime: StructuralMutatorHandle,
+}
+impl MutationScope {
+    #[inline(always)]
+    fn context<D>(&mut self) -> StructuralMutatorView<'_, D> {
+        StructuralMutatorView {
+            runtime: self.runtime,
+            _scope: PhantomData,
+            _dispatcher: PhantomData,
+            _not_send_sync: PhantomData,
+        }
+    }
+}
+
 #[inline(always)]
-unsafe fn runtime_dispatch_mutate<D: MutationDriver, const INPLACE: bool>(
-    context: *mut c_void,
-    raw: TVMFFIAny,
-    def_region_kind: DefRegionKind,
-) -> TVMFFIAny {
-    (&mut *context.cast::<D>()).dispatch_abi_raw::<INPLACE>(raw, def_region_kind)
+fn with_mutation_view<D, T>(
+    dispatch: &mut D,
+    runtime: StructuralMutatorHandle,
+    callback: impl FnOnce(&mut D, &mut StructuralMutatorView<'_, D>) -> T,
+) -> T {
+    let mut scope = MutationScope { runtime };
+    callback(dispatch, &mut scope.context())
 }
 
-/// Dispatch a variable-remap lookup through the erased driver context.
-///
-/// # Safety
-///
-/// `context` must satisfy the same requirements as [`runtime_dispatch_mutate`].
-unsafe fn runtime_var_remap_get<D: MutationDriver>(
-    context: *mut c_void,
-    raw: TVMFFIAny,
-) -> Result<Option<Any>> {
-    (&mut *context.cast::<D>()).var_remap_get_raw(raw)
-}
-
-/// Dispatch a variable-remap insertion through the erased driver context.
-///
-/// # Safety
-///
-/// `context` must satisfy the same requirements as [`runtime_dispatch_mutate`], and
-/// `replacement` must remain alive for this call.
-unsafe fn runtime_var_remap_set<D: MutationDriver>(
-    context: *mut c_void,
-    raw: TVMFFIAny,
-    replacement: &Any,
-) -> Result<()> {
-    (&mut *context.cast::<D>()).var_remap_set_raw(raw, replacement)
-}
-
-fn run_structural_mutator<D: MutationDriver>(root: Any, driver: &mut D) -> Result<Any> {
-    let context = std::ptr::from_mut(driver).cast::<c_void>();
-    let callbacks = RuntimeMutatorCallbacks {
-        var_remap_get: runtime_var_remap_get::<D>,
-        var_remap_set: runtime_var_remap_set::<D>,
-    };
-    run_structural_mutator_with_context(
+fn run_user_mutator<S: DispatcherStorage>(root: Any, dispatch: S) -> Result<Any>
+where
+    S::Dispatch: MutateDispatch,
+{
+    run_mutator_engine::<UserMutator<'_, S::Dispatch>, S, _>(
         root,
-        context,
-        callbacks,
-        &RuntimeMutatorVTable::<D>::VTABLE,
+        dispatch,
+        StructuralMutatorObj::default(),
+        true,
     )
 }
 
-fn run_structural_mutator_with_context(
-    root: Any,
-    context: *mut c_void,
-    callbacks: RuntimeMutatorCallbacks,
-    vtable: &'static StructuralMutatorVTable,
-) -> Result<Any> {
-    let mut active = ObjectArc::new(RuntimeStructuralMutatorObj {
-        base: Object::new(),
-        vtable,
-        def_region_mode: DefRegionKind::None as i32,
-        context,
-        context_identity: context,
-        owner_thread: std::thread::current().id(),
-        callbacks,
-        remap: RefCell::new(StructuralVarRemap::default()),
-        panic: None,
-    });
-    let handle = unsafe { ObjectArc::as_raw_mut(&mut active) };
-    let result = with_active_mutator(handle, || {
-        call_mutator(
-            handle,
-            *root.as_raw_ffi_any(),
-            DefRegionKind::None,
-            Permit::MaybeInPlace,
-        )
-    });
-    // A structural hook may only use the active mutator synchronously on this
-    // thread. Make a retained reference fail instead of exposing a dangling
-    // Rust state pointer. Release invocation-local identity owners here as
-    // well: foreign code may retain the ABI object after the run ends.
-    unsafe {
-        (*handle).remap.get_mut().clear();
-        (*handle).context = std::ptr::null_mut();
-        (*handle).context_identity = std::ptr::null_mut();
+unsafe fn runtime_var_remap_get(
+    runtime: StructuralMutatorHandle,
+    raw: TVMFFIAny,
+) -> Result<Option<Any>> {
+    (*runtime_state(runtime))
+        .remap
+        .borrow()
+        .get(borrowed_view(&raw))
+}
+unsafe fn runtime_var_remap_set(
+    runtime: StructuralMutatorHandle,
+    raw: TVMFFIAny,
+    value: &Any,
+) -> Result<()> {
+    (*runtime_state(runtime))
+        .remap
+        .borrow_mut()
+        .set(borrowed_view(&raw), value)
+}
+trait DispatcherStorage {
+    type Dispatch;
+    /// Project only during startup, after the engine has reached its stable allocation.
+    unsafe fn project(storage: *mut Self) -> *mut Self::Dispatch;
+}
+#[repr(transparent)]
+struct OwnedDispatcher<D>(D);
+#[repr(transparent)]
+struct BorrowedDispatcher<'a, D>(&'a mut D);
+impl<D> DispatcherStorage for OwnedDispatcher<D> {
+    type Dispatch = D;
+    unsafe fn project(storage: *mut Self) -> *mut D {
+        std::ptr::addr_of_mut!((*storage).0)
     }
-    let panic = unsafe { (*handle).panic.take() };
+}
+impl<D> DispatcherStorage for BorrowedDispatcher<'_, D> {
+    type Dispatch = D;
+    unsafe fn project(storage: *mut Self) -> *mut D {
+        std::ptr::from_mut(&mut *(*storage).0)
+    }
+}
+
+fn run_mutator_engine<D: MutationDriver, S: DispatcherStorage, B: StructuralMutatorBase>(
+    root: Any,
+    dispatcher: S,
+    base: B,
+    plain_inline_fastpath: bool,
+) -> Result<Any> {
+    let mut engine = Box::new(StructuralMutateEngine {
+        base,
+        state: MutationState {
+            context: std::ptr::null_mut(),
+            context_identity: std::ptr::null_mut(),
+            recurse: D::runtime_recurse,
+            default_mutate: base_default_mutate::<B, S::Dispatch>,
+            builtin_default: D::runtime_default,
+            plain_inline_fastpath,
+            remap: RefCell::new(StructuralVarRemap::default()),
+            panic: None,
+        },
+        dispatcher,
+    });
+    let allocation = std::ptr::from_mut(&mut *engine);
+    let handle = allocation.cast::<StructuralMutatorObj>();
+    unsafe {
+        // The scoped Box owns the reserved strong/weak counts; trusted hooks
+        // balance temporary references before returning and cannot retain them.
+        (*handle).vtable = &RuntimeMutatorVTable::<D, B, S>::VTABLE;
+        (*handle).def_region_mode = DefRegionKind::None as i32;
+        initialize_scoped_runtime(handle.cast(), StructuralMutatorObj::type_index());
+        // Project the tail only here, after the Box is stable. Recursive calls
+        // use the current D reborrow in runtime metadata, never this projection.
+        let storage = allocation
+            .cast::<u8>()
+            .add(std::mem::offset_of!(StructuralMutateEngine<B, S>, dispatcher))
+            .cast::<S>();
+        let context = S::project(storage).cast::<c_void>();
+        (*runtime_state(handle)).context = context;
+        (*runtime_state(handle)).context_identity = context;
+    }
+    let result = call_mutator(
+        handle,
+        *root.as_raw_ffi_any(),
+        DefRegionKind::None,
+        Permit::MaybeInPlace,
+    );
+    let panic = unsafe { (*runtime_state(handle)).panic.take() };
+    drop(engine);
     if let Some(payload) = panic {
         drop(result);
         resume_unwind(payload);
@@ -2861,9 +1999,6 @@ fn call_mutator(
     def_region_kind: DefRegionKind,
     permit: Permit,
 ) -> Result<Any> {
-    if mutator.is_null() {
-        return Err(runtime_error("no active structural mutator"));
-    }
     let use_inplace = permit == Permit::MaybeInPlace && object_is_unique(raw);
     let callback = unsafe {
         if use_inplace {
@@ -2956,17 +2091,6 @@ fn result_into_raw(result: Result<Any>) -> TVMFFIAny {
     }
 }
 
-/// Resolve only at an owning-value API boundary; internal Any carriers and
-/// native hooks keep the unchanged tag to avoid acquiring the original.
-#[inline]
-fn resolve_result(result: Any, original: TVMFFIAny) -> Result<Any> {
-    if is_unchanged(&result) {
-        owned_from_raw(original)
-    } else {
-        Ok(result)
-    }
-}
-
 /// Take ownership of one value returned by a structural-mutation ABI hook.
 ///
 /// # Safety
@@ -3018,56 +2142,11 @@ fn with_mutator_def_region<T>(
 
 #[inline(always)]
 fn with_mutation_region<T>(
+    runtime: StructuralMutatorHandle,
     kind: DefRegionKind,
     callback: impl FnOnce(DefRegionKind) -> Result<T>,
 ) -> Result<T> {
-    let mutator = active_mutator()?;
-    with_mutator_def_region(mutator, kind, callback)
-}
-
-#[inline(always)]
-fn dispatch_user_raw<U: StructuralMutator>(
-    mutator: &mut U,
-    raw: TVMFFIAny,
-    def_region_kind: DefRegionKind,
-    permit: Permit,
-) -> Result<Any> {
-    with_mutation_region(
-        def_region_kind,
-        #[inline(always)]
-        |kind| dispatch_user_current_raw(mutator, raw, kind, permit),
-    )
-}
-
-#[inline(always)]
-fn dispatch_user_current_raw<U: StructuralMutator>(
-    mutator: &mut U,
-    raw: TVMFFIAny,
-    kind: DefRegionKind,
-    permit: Permit,
-) -> Result<Any> {
-    let result = if permit == Permit::MaybeInPlace && object_is_unique(raw) {
-        // The engine keeps the input live for this call; the capability's
-        // inspection borrows remain bounded by the handle itself.
-        let view = unsafe { borrowed_view(&raw) };
-        mutator.dispatch_maybe_inplace_mutate(MutationView::new(view, InplaceMode::Allow), kind)
-    } else {
-        mutator.dispatch_mutate(unsafe { borrowed_view(&raw) }, kind)
-    };
-    result.map_err(|error| with_value_context(error, raw))
-}
-
-fn user_default_mutate<U: StructuralMutator>(
-    mutator: &mut U,
-    raw: TVMFFIAny,
-    def_region_kind: DefRegionKind,
-    permit: Permit,
-) -> Result<Any> {
-    with_mutation_region(def_region_kind, |kind| {
-        let value = unsafe { borrowed_view(&raw) };
-        mutator.on_default_mutate(MutationView::new(value, permit.inplace_mode(raw)), kind)
-    })
-    .map_err(|error| with_value_context(error, raw))
+    with_mutator_def_region(runtime, kind, callback)
 }
 
 fn default_mutate_driver<D: MutationDriver>(
@@ -3130,7 +2209,7 @@ fn default_mutate_driver_impl<D: MutationDriver>(
     Ok(result)
 }
 
-/// Mutate a structured value with a mutator or typed callback chain.
+/// Mutate a structured value with an owned or borrowed [`Dispatcher`].
 ///
 /// The root is consumed to establish the ownership boundary for optional
 /// in-place mutation. A matching callback supplies the final value; unmatched
@@ -3288,7 +2367,7 @@ fn unregistered_type_error(type_index: i32) -> Error {
     ))
 }
 
-#[inline]
+#[inline(always)]
 fn object_is_unique(raw: TVMFFIAny) -> bool {
     if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
         return false;

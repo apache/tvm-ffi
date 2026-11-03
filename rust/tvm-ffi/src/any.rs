@@ -48,12 +48,38 @@ impl<'a> AnyView<'a> {
         }
     }
 
-    #[inline]
+    /// Borrow a live managed object without acquiring ownership.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn from_object<T: object::ObjectCore>(value: &'a T) -> Self {
+        let pointer = std::ptr::from_ref(value).cast::<tvm_ffi_sys::TVMFFIObject>();
+        // ObjectCore guarantees the prefix and stable managed allocation. A
+        // builder or a moved-out destructor value is not a live managed object.
+        let header = unsafe { &*pointer };
+        assert!(
+            header.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32
+                && header.deleter.is_some()
+                && header
+                    .combined_ref_count
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    & tvm_ffi_sys::COMBINED_REF_COUNT_MASK_U32
+                    != 0,
+            "cannot borrow an unmanaged or dead object as AnyView"
+        );
+        let mut data = TVMFFIAny::new();
+        data.type_index = header.type_index;
+        data.data_union.v_obj = pointer.cast_mut();
+        // The source borrow bounds the view; the dynamic type comes from the
+        // allocation even when value borrows a base-class prefix.
+        unsafe { Self::from_raw_ffi_any(data) }
+    }
+
+    #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
@@ -70,7 +96,7 @@ impl<'a> AnyView<'a> {
     /// reference. Owning the view takes that reference and writes null back
     /// through the pointer, so the view must be converted at most once and no
     /// other access to the slot may overlap the conversion.
-    #[inline]
+    #[inline(always)]
     pub(crate) unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
         Self {
             data,
@@ -84,7 +110,7 @@ impl<'a> AnyView<'a> {
     /// values and unrelated object types return `None`. This does not change
     /// the object's reference count; the borrow cannot outlive this view or
     /// the owner it borrows. See [`Any::downcast_ref`] for an example.
-    #[inline]
+    #[inline(always)]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
         if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
             || !object::is_instance_of::<T>(self.data.type_index)
@@ -104,7 +130,7 @@ impl<'a> AnyView<'a> {
     ///
     /// will return Some(T) if the type is exactly compatible with T
     /// will return None if the type is not compatible with T
-    #[inline]
+    #[inline(always)]
     pub fn try_as<T>(&self) -> Option<T>
     where
         T: AnyCompatible,
@@ -132,8 +158,15 @@ impl<'a> AnyView<'a> {
     }
 }
 
+impl<'a> From<&'a object::Object> for AnyView<'a> {
+    #[inline(always)]
+    fn from(value: &'a object::Object) -> Self {
+        Self::from_object(value)
+    }
+}
+
 impl<'a, T: AnyCompatible> From<&'a T> for AnyView<'a> {
-    #[inline]
+    #[inline(always)]
     fn from(value: &'a T) -> Self {
         unsafe {
             let mut data = TVMFFIAny::new();
@@ -147,7 +180,7 @@ impl<'a, T: AnyCompatible> From<&'a T> for AnyView<'a> {
 }
 
 impl<'a> From<&AnyView<'a>> for AnyView<'a> {
-    #[inline]
+    #[inline(always)]
     fn from(value: &AnyView<'a>) -> Self {
         *value
     }
@@ -319,7 +352,7 @@ impl Drop for Any {
 
 // convert Any ref to AnyView
 impl<'a> From<&'a Any> for AnyView<'a> {
-    #[inline]
+    #[inline(always)]
     fn from(value: &'a Any) -> Self {
         Self {
             data: value.data,

@@ -249,6 +249,13 @@ pub(crate) fn expand_object(
             #base_def_tokens
         }
 
+        impl<'a> ::core::convert::From<&'a #struct_name> for #tvm_ffi_crate::AnyView<'a> {
+            #[inline(always)]
+            fn from(value: &'a #struct_name) -> Self {
+                Self::from_object(value)
+            }
+        }
+
         #shallow_copy_impl
     }
 }

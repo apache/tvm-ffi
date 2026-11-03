@@ -146,7 +146,8 @@ impl BigInt {
                 object: Object::new(),
                 size,
             });
-            BigIntObj::extra_items_mut(&mut obj).copy_from_slice(&words[..size]);
+            BigIntObj::extra_items_mut(&mut *ObjectArc::as_raw_mut(&mut obj))
+                .copy_from_slice(&words[..size]);
             Self::from_obj(ObjectArc::into_raw(obj) as *mut BigIntObj)
         }
     }

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 
 use crate::derive::ObjectRef;
@@ -50,10 +50,18 @@ pub struct ObjectArc<T: ObjectCore> {
 unsafe impl<T: Send + Sync + ObjectCore> Send for ObjectArc<T> {}
 unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
 
-/// Traits that can be used to check if a type is an object
+/// The native representation of an object-system type.
 ///
-/// This trait is unsafe because it is used to access the object header
-/// and the object header is unsafe to access
+/// # Safety
+/// `Self` must have a compatible C layout with a valid `TVMFFIObject` prefix
+/// at offset zero. Its registered type, inheritance and payload must describe
+/// that layout correctly, including for foreign declarations.
+///
+/// A live managed object and its header must remain at their original allocation
+/// address until destruction. Safe APIs must not move, replace or expose mutable
+/// access to that header while managed; payload mutation must preserve its type
+/// invariants. Preallocation builders and values moved out during destruction
+/// are not live managed objects and cannot be borrowed as `AnyView`.
 pub unsafe trait ObjectCore: Sized + 'static {
     /// the type key of the object
     const TYPE_KEY: &'static str;
@@ -79,6 +87,10 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// # Returns
     /// * `&mut TVMFFIObject` - The object header
     /// \return The object header
+    ///
+    /// # Safety
+    /// The caller must have exclusive access to the header and preserve the
+    /// managed allocation's address, reference counts, deleter and dynamic type.
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject;
 }
 
@@ -352,7 +364,7 @@ pub mod unsafe_ {
     /// * `obj` - The object to increase the reference count
     #[inline]
     pub unsafe fn inc_ref(handle: *mut TVMFFIObject) {
-        let obj = &mut *handle;
+        let obj = &*handle;
         obj.combined_ref_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -364,15 +376,14 @@ pub mod unsafe_ {
     /// * `obj` - The object to decrease the reference count
     #[inline]
     pub(crate) unsafe fn dec_ref(handle: *mut TVMFFIObject) {
-        let obj = &mut *handle;
-        let old_combined_count = obj
+        let old_combined_count = (*handle)
             .combined_ref_count
             .fetch_sub(COMBINED_REF_COUNT_STRONG_ONE, Ordering::Relaxed);
         if old_combined_count == COMBINED_REF_COUNT_BOTH_ONE {
-            if let Some(deleter) = obj.deleter {
+            if let Some(deleter) = (*handle).deleter {
                 fence(Ordering::Acquire);
                 deleter(
-                    obj as *mut TVMFFIObject as *mut c_void,
+                    handle.cast::<c_void>(),
                     kTVMFFIObjectDeleterFlagBitMaskBoth as i32,
                 );
             }
@@ -382,20 +393,20 @@ pub mod unsafe_ {
             // slow path, there is still a weak reference left
             // need to run two phase decrement
             fence(Ordering::Acquire);
-            if let Some(deleter) = obj.deleter {
+            if let Some(deleter) = (*handle).deleter {
                 deleter(
-                    obj as *mut TVMFFIObject as *mut c_void,
+                    handle.cast::<c_void>(),
                     kTVMFFIObjectDeleterFlagBitMaskStrong as i32,
                 );
             }
-            let old_weak_count = obj
+            let old_weak_count = (*handle)
                 .combined_ref_count
                 .fetch_sub(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Release);
             if old_weak_count == COMBINED_REF_COUNT_WEAK_ONE {
                 fence(Ordering::Acquire);
-                if let Some(deleter) = obj.deleter {
+                if let Some(deleter) = (*handle).deleter {
                     deleter(
-                        obj as *mut TVMFFIObject as *mut c_void,
+                        handle.cast::<c_void>(),
                         kTVMFFIObjectDeleterFlagBitMaskWeak as i32,
                     );
                 }
@@ -405,13 +416,13 @@ pub mod unsafe_ {
 
     #[inline]
     pub(crate) unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
-        let obj = &mut *handle;
+        let obj = &*handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) & COMBINED_REF_COUNT_MASK_U32) as usize
     }
 
     #[inline]
     pub(crate) unsafe fn weak_count(handle: *mut TVMFFIObject) -> usize {
-        let obj = &mut *handle;
+        let obj = &*handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) >> 32) as usize
     }
 
@@ -501,6 +512,7 @@ unsafe impl ObjectCore for Object {
 //---------------------
 
 impl<T: ObjectCore> ObjectArc<T> {
+    /// Allocate an initialized object at its stable managed address.
     pub fn new(data: T) -> Self {
         unsafe {
             let layout = std::alloc::Layout::new::<T>();
@@ -527,6 +539,7 @@ impl<T: ObjectCore> ObjectArc<T> {
             }
         }
     }
+    /// Allocate a stable object followed by its type's extra item storage.
     pub fn new_with_extra_items<U>(data: T) -> Self
     where
         T: ObjectCoreWithExtraItems<ExtraItem = U>,
@@ -582,6 +595,11 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Returns
     /// * `ObjectArc<T>` - The ObjectArc
     /// \return The ObjectArc
+    ///
+    /// # Safety
+    /// `ptr` must own one strong reference to a live, stable managed allocation
+    /// whose dynamic type is compatible with `T` and whose payload is valid.
+    /// Ownership of that reference is transferred into the returned handle.
     #[inline]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self {
@@ -613,6 +631,10 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Returns
     /// * `*const T` - The raw pointer
     /// \return The raw pointer
+    ///
+    /// # Safety
+    /// Access must respect existing borrows, and the pointer cannot outlive an
+    /// owning handle. The object and header must not be moved or replaced.
     #[inline]
     pub unsafe fn as_raw(this: &Self) -> *const T {
         this.ptr.as_ptr() as *const T
@@ -627,9 +649,13 @@ impl<T: ObjectCore> ObjectArc<T> {
     ///
     /// # Returns
     /// * `*mut T` - The raw pointer
+    ///
+    /// # Safety
+    /// The handle need not be unique. The caller must establish exclusive access
+    /// for each mutation and must not move or replace the object or its header.
     #[inline]
     pub unsafe fn as_raw_mut(this: &mut Self) -> *mut T {
-        this.ptr.as_mut()
+        this.ptr.as_ptr()
     }
 
     /// Get the strong reference count of the ObjectArc
@@ -641,9 +667,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `usize` - The strong reference count
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
-        unsafe {
-            unsafe_::strong_count(this.ptr.as_ref() as *const T as *mut T as *mut TVMFFIObject)
-        }
+        unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
     /// Get the weak reference count of the ObjectArc
@@ -655,7 +679,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `usize` - The weak reference count
     #[inline]
     pub fn weak_count(this: &Self) -> usize {
-        unsafe { unsafe_::weak_count(this.ptr.as_ref() as *const T as *mut T as *mut TVMFFIObject) }
+        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 }
 
@@ -668,18 +692,10 @@ impl<T: ObjectCore> Deref for ObjectArc<T> {
     }
 }
 
-// implement DerefMut for ObjectArc
-impl<T: ObjectCore> DerefMut for ObjectArc<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.ptr.as_mut() }
-    }
-}
-
 // implement Drop for ObjectArc
 impl<T: ObjectCore> Drop for ObjectArc<T> {
     fn drop(&mut self) {
-        unsafe { unsafe_::dec_ref(self.ptr.as_mut() as *mut T as *mut TVMFFIObject) }
+        unsafe { unsafe_::dec_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 }
 
@@ -687,7 +703,7 @@ impl<T: ObjectCore> Drop for ObjectArc<T> {
 impl<T: ObjectCore> Clone for ObjectArc<T> {
     #[inline]
     fn clone(&self) -> Self {
-        unsafe { unsafe_::inc_ref(self.ptr.as_ref() as *const T as *mut T as *mut TVMFFIObject) }
+        unsafe { unsafe_::inc_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
         Self {
             ptr: self.ptr,
             _phantom: std::marker::PhantomData,

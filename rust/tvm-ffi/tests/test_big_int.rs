@@ -515,16 +515,22 @@ fn test_big_int_structural_traversal() {
         .as_ptr();
 
     // A BigInt callback also accepts inline integers, mirroring the C++ cast rule.
-    let seen = std::cell::RefCell::new(Vec::new());
-    assert!(structural_visit(
-        &root,
-        |value: BigInt, _visitor: &mut VisitContext<'_, ()>| {
-            seen.borrow_mut().push(value);
+    #[derive(Default)]
+    struct Integers(Vec<BigInt>);
+    #[dispatch(visit)]
+    impl Integers {
+        fn visit_integer(
+            &mut self,
+            value: BigInt,
+            _: &mut StructuralVisitorView<'_, Self>,
+        ) -> Result<Option<VisitInterrupt>> {
+            self.0.push(value);
+            Ok(None)
         }
-    )
-    .unwrap()
-    .is_none());
-    assert_eq!(seen.into_inner(), vec![BigInt::from(1i64), wide()]);
+    }
+    let mut seen = Integers::default();
+    assert!(structural_visit(&root, &mut seen).unwrap().is_none());
+    assert_eq!(seen.0, vec![BigInt::from(1i64), wide()]);
 
     // The heap integer is a leaf: mapping the inline integer leaves it untouched.
     let mapped = structural_map(
