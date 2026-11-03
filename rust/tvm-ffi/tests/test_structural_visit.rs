@@ -90,7 +90,11 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
         seen: Vec<(i64, DefRegionKind)>,
         regions: Vec<DefRegionKind>,
     }
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl Probe {
         fn visit_any(
             &mut self,
@@ -195,7 +199,11 @@ fn visit_region_graph(with_hook: bool) -> Any {
 fn default_descent_retargets_without_dispatching_the_container() {
     #[derive(Default)]
     struct Probe(Vec<(&'static str, i64, DefRegionKind)>, Option<Any>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl Probe {
         fn visit_any(
             &mut self,
@@ -267,7 +275,11 @@ fn regions_compose_with_field_flags_and_function_hooks() {
         region: DefRegionKind,
         seen: Vec<(i64, DefRegionKind)>,
     }
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl Trace {
         fn visit_any(
             &mut self,
@@ -342,7 +354,11 @@ fn regions_compose_with_field_flags_and_function_hooks() {
 #[test]
 fn reflected_pattern_precedes_default_descent() {
     struct Trace(Vec<(i64, DefRegionKind)>, DefRegionKind);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl Trace {
         fn visit_any(
             &mut self,
@@ -671,7 +687,11 @@ struct ManualRegionVisitor {
     seen: Vec<DefRegionKind>,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl ManualRegionVisitor {
     fn visit_any(
         &mut self,
@@ -714,7 +734,11 @@ struct GeneratedLeafVisitor {
     integers: Vec<(i64, DefRegionKind)>,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl GeneratedLeafVisitor {
     fn visit_integer(
         &mut self,
@@ -760,7 +784,11 @@ struct GeneratedRecursiveVisitor {
     events: Vec<String>,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl GeneratedRecursiveVisitor {
     fn visit_array(
         &mut self,
@@ -806,7 +834,7 @@ struct GenericDispatchProbe {
     catch_all: usize,
 }
 
-#[dispatch(walk)]
+#[dispatch(walk, (AnyView<'_>, DefRegionKind), Result<WalkResult>)]
 impl GenericDispatchProbe {
     fn walk_integer(&mut self, value: i64) -> Result<WalkResult> {
         self.integers.push(value);
@@ -829,7 +857,7 @@ impl GenericDispatchProbe {
 struct DispatchLabel(String);
 struct DescribeDispatchProbe;
 
-#[dispatch(describe)]
+#[dispatch(describe, (AnyView<'_>, DispatchLabel, &str), String)]
 impl DescribeDispatchProbe {
     fn describe_integer(&mut self, value: i64, prefix: DispatchLabel) -> String {
         format!("{}{value}", prefix.0)
@@ -852,7 +880,7 @@ impl DescribeDispatchProbe {
     fn dispatch_describe(&self) {}
 }
 
-#[dispatch(describe)]
+#[dispatch(describe, (AnyView<'_>, MissingType), MissingType)]
 #[cfg_attr(all(), cfg_attr(all(), cfg(any())))]
 impl MissingWholeImpl {
     fn describe_disabled(&mut self, _: MissingType, _: MissingType) -> MissingType {
@@ -915,7 +943,11 @@ struct StraddleVisitor {
     events: Vec<String>,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl StraddleVisitor {
     fn visit_any(
         &mut self,
@@ -961,7 +993,7 @@ struct OrderProbe {
     events: Vec<String>,
 }
 
-#[dispatch(walk)]
+#[dispatch(walk, (AnyView<'_>, DefRegionKind), Result<WalkResult>)]
 impl OrderProbe {
     fn walk_array(&mut self, _array: Array<i64>, _kind: DefRegionKind) -> Result<WalkResult> {
         self.events.push("array".to_string());
@@ -1066,7 +1098,11 @@ fn handler_errors_include_native_visit_path() {
 fn visitor_errors_include_native_visit_path() {
     struct FailingVisitor;
 
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl FailingVisitor {
         fn visit_any(
             &mut self,
@@ -1092,7 +1128,11 @@ fn visitor_errors_include_native_visit_path() {
     assert!(error.backtrace().contains("object `ffi.Array`"));
 
     struct FailingLeaf;
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl FailingLeaf {
         fn visit_integer(
             &mut self,
@@ -1134,7 +1174,11 @@ fn callback_panics_resume_after_the_registered_hook_returns() {
 fn visitor_interrupt_propagates_through_default_children() {
     struct InterruptingVisitor;
 
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl InterruptingVisitor {
         fn visit_any(
             &mut self,
@@ -1338,7 +1382,7 @@ struct ObjectCounter {
     objects: usize,
 }
 
-#[dispatch(walk)]
+#[dispatch(walk, (AnyView<'_>, DefRegionKind), Result<WalkResult>)]
 impl ObjectCounter {
     fn walk_object(&mut self, _value: &Object, _kind: DefRegionKind) -> Result<WalkResult> {
         self.objects += 1;
@@ -1459,7 +1503,11 @@ struct InheritedRegionProbe {
     seen: Vec<DefRegionKind>,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl InheritedRegionProbe {
     fn visit_any(
         &mut self,
@@ -1619,7 +1667,11 @@ fn nested_tuple_first_match_order_is_flattened() {
 #[test]
 fn callback_visit_defaults_only_when_no_link_matches() {
     struct Integers<'a>(&'a Cell<i64>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Integers<'a> {
         fn visit_integer(
             &mut self,
@@ -1631,7 +1683,11 @@ fn callback_visit_defaults_only_when_no_link_matches() {
         }
     }
     struct SkipArray<'a>(&'a Cell<i64>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> SkipArray<'a> {
         fn visit_array(
             &mut self,
@@ -1678,7 +1734,11 @@ struct StatefulVisitStats {
     integer_sum: i64,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl StatefulVisitStats {
     fn visit_array(
         &mut self,
@@ -1716,7 +1776,11 @@ struct StatefulVisitDepth {
     calls: usize,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl StatefulVisitDepth {
     fn visit_any(
         &mut self,
@@ -1747,7 +1811,11 @@ fn stateful_callback_visit_reborrows_visitor_during_recursion() {
 #[test]
 fn callback_visit_can_reenter_the_same_fn_through_visitor() {
     struct Reenter<'a>(&'a Cell<i32>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Reenter<'a> {
         fn visit_any(
             &mut self,
@@ -1768,7 +1836,11 @@ fn callback_visit_can_reenter_the_same_fn_through_visitor() {
 fn callback_visit_tuple_is_first_match_and_can_interrupt() {
     type View<'value> = AnyView<'value>;
     struct Stop<'a>(&'a Cell<i32>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Stop<'a> {
         fn visit_integer(
             &mut self,
@@ -1796,7 +1868,11 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
 #[test]
 fn callback_visit_supports_node_links_and_nested_tuples() {
     struct Nodes<'a>(&'a RefCell<Vec<(i64, DefRegionKind)>>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Nodes<'a> {
         fn visit_float(
             &mut self,
@@ -1837,7 +1913,11 @@ fn callback_visit_supports_node_links_and_nested_tuples() {
 #[test]
 fn callback_visit_with_overrides_child_def_region() {
     struct Regions<'a>(&'a RefCell<Vec<(i64, DefRegionKind)>>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Regions<'a> {
         fn visit_array(
             &mut self,
@@ -1880,7 +1960,11 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
         checked: bool,
         calls: usize,
     }
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl Aligned {
         fn visit_any(
             &mut self,
@@ -1958,7 +2042,11 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
     }
     assert_eq!(defaults.get(), 12);
     struct Inner<'a>(&'a RefCell<Vec<i64>>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Inner<'a> {
         fn visit_integer(
             &mut self,
@@ -1976,7 +2064,11 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
         inner_values: &'a RefCell<Vec<i64>>,
         depth: &'a Cell<usize>,
     }
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Outer<'a> {
         fn visit_any(
             &mut self,
@@ -2023,7 +2115,11 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
 #[test]
 fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
     struct Panic<'a>(&'a Cell<bool>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Panic<'a> {
         fn visit_integer(
             &mut self,
@@ -2035,7 +2131,11 @@ fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
         }
     }
     struct Count<'a>(&'a Cell<i32>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl<'a> Count<'a> {
         fn visit_integer(
             &mut self,
@@ -2084,7 +2184,7 @@ fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
     let root = Any::from(Array::new(vec![1_i64, 2]));
     let view = AnyView::from(&root);
     struct Identity;
-    #[dispatch(identity)]
+    #[dispatch(identity, (AnyView<'a>,), AnyView<'a>)]
     impl Identity {
         fn identity_any<'a>(&self, value: AnyView<'a>) -> AnyView<'a> {
             value
@@ -2117,7 +2217,11 @@ fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
     )
     .unwrap();
     struct Descend;
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl Descend {
         fn visit_array(
             &mut self,
@@ -2143,7 +2247,7 @@ fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
 #[test]
 fn generic_dispatch_distinguishes_no_match_from_handler_outcomes() {
     struct Outcomes;
-    #[dispatch(walk, AnyView)]
+    #[dispatch(walk, (AnyView<'_>,), std::result::Result<Option<i64>, &'static str>)]
     impl Outcomes {
         fn walk_integer(&self, _: i64) -> std::result::Result<Option<i64>, &'static str> {
             Err("matched error")

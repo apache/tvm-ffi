@@ -42,7 +42,11 @@ struct RecordingVisitor {
     interrupt_on: Option<i64>,
 }
 
-#[dispatch(visit)]
+#[dispatch(
+    visit,
+    (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+    Result<Option<VisitInterrupt>>
+)]
 impl RecordingVisitor {
     /// C++ analog: `TestVisitorObj::VisitImpl` — record every value together
     /// with the active def-region state, optionally interrupt with a payload,

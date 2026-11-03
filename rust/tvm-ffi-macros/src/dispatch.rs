@@ -22,7 +22,7 @@ use proc_macro2::{Span, TokenStream as TokenStream2, TokenTree};
 use quote::{format_ident, quote, quote_spanned, ToTokens};
 use syn::{
     parse_macro_input, FnArg, GenericParam, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta,
-    ReturnType, Token, Type,
+    Token, Type,
 };
 
 use crate::utils::get_tvm_ffi_crate;
@@ -40,49 +40,39 @@ pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Carrier {
-    AnyView,
-    MutationView,
-}
-
 struct DispatchArgs {
     prefix: syn::Ident,
-    carrier: Option<Carrier>,
+    arguments: syn::TypeTuple,
+    output: Type,
 }
 
 impl syn::parse::Parse for DispatchArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut args = Self {
-            prefix: input.parse()?,
-            carrier: None,
+        let prefix = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let arguments = match input.parse::<Type>()? {
+            Type::Tuple(tuple) if !tuple.elems.is_empty() => tuple,
+            ty => return Err(syn::Error::new_spanned(
+                ty,
+                "dispatch requires a nonempty argument tuple, starting with AnyView or MutationView",
+            )),
         };
-        while !input.is_empty() {
-            input.parse::<Token![,]>()?;
-            if input.is_empty() {
-                break;
-            }
-            let option: syn::Ident = input.parse()?;
-            if option == "AnyView" || option == "MutationView" {
-                if args.carrier.is_some() {
-                    return Err(syn::Error::new(
-                        option.span(),
-                        "duplicate dispatch input carrier",
-                    ));
-                }
-                args.carrier = Some(if option == "MutationView" {
-                    Carrier::MutationView
-                } else {
-                    Carrier::AnyView
-                });
-                continue;
-            }
-            return Err(syn::Error::new(
-                option.span(),
-                "expected `AnyView` or `MutationView`",
+        input.parse::<Token![,]>()?;
+        let output = input.parse::<Type>()?;
+        if matches!(output, Type::Infer(_) | Type::ImplTrait(_)) {
+            return Err(syn::Error::new_spanned(
+                output,
+                "dispatch requires an explicit return type",
             ));
         }
-        Ok(args)
+        if !input.is_empty() {
+            input.parse::<Token![,]>()?;
+        }
+        Ok(Self {
+            prefix,
+            arguments,
+            output,
+        })
     }
 }
 
@@ -110,15 +100,12 @@ fn expand(item: &ItemImpl, args: &DispatchArgs) -> syn::Result<TokenStream2> {
             ImplItem::Method(method)
                 if method.sig.ident.to_string().starts_with(&method_prefix) =>
             {
-                Some(parse_handler(method))
+                Some(parse_handler(method, args))
             }
             _ => None,
         })
         .collect::<syn::Result<Vec<_>>>()?;
-    let Some(anchor) = handlers
-        .iter()
-        .min_by_key(|handler| std::cmp::Reverse(handler.trailing))
-    else {
+    let Some(first) = handlers.first() else {
         return Err(syn::Error::new_spanned(
             item,
             format!("no `{method_prefix}*` handlers"),
@@ -136,41 +123,19 @@ fn expand(item: &ItemImpl, args: &DispatchArgs) -> syn::Result<TokenStream2> {
             ));
         }
     }
-    // Preserve the input lifetime independently of the longest trailing list.
-    let view_lifetime = handlers
-        .iter()
-        .filter(|handler| match args.carrier.unwrap_or(Carrier::AnyView) {
-            Carrier::AnyView => matches!(handler.argument, Argument::Value),
-            Carrier::MutationView => handler.capability.is_some(),
-        })
-        .find_map(|handler| {
-            let FnArg::Typed(arg) = &handler.method.sig.inputs[1] else {
-                unreachable!()
-            };
-            value_lifetime(&arg.ty)
-                .filter(|lifetime| !handler.local_lifetimes.contains(&lifetime.ident))
-        });
-    expand_impl(item, args, &handlers, anchor, view_lifetime)
-}
-
-fn expand_impl(
-    item: &ItemImpl,
-    args: &DispatchArgs,
-    handlers: &[Handler<'_>],
-    anchor: &Handler<'_>,
-    view_lifetime: Option<syn::Lifetime>,
-) -> syn::Result<TokenStream2> {
     let tvm_ffi = get_tvm_ffi_crate();
+    // Only binder declarations and the receiver are shared between handlers.
+    // The attribute alone supplies the argument and result contract.
     let mut generics = item.generics.clone();
-    generics.params.extend(anchor.generics.params.clone());
-    if let Some(method_where) = &anchor.generics.where_clause {
+    generics.params.extend(first.generics.params.clone());
+    if let Some(method_where) = &first.generics.where_clause {
         generics
             .make_where_clause()
             .predicates
             .extend(method_where.predicates.clone());
     }
     let mut lifetimes = Lifetimes::new(&generics);
-    let FnArg::Receiver(receiver) = &anchor.method.sig.inputs[0] else {
+    let FnArg::Receiver(receiver) = &first.method.sig.inputs[0] else {
         unreachable!()
     };
     let receiver_lifetime = receiver
@@ -179,40 +144,28 @@ fn expand_impl(
         .and_then(|(_, l)| l.clone())
         .filter(|l| l.ident != "_")
         .unwrap_or_else(|| lifetimes.fresh());
-    let view_lifetime = view_lifetime.unwrap_or_else(|| lifetimes.fresh());
-    let trailing: Vec<_> = anchor
-        .method
-        .sig
-        .inputs
-        .iter()
-        .skip(2)
-        .map(|arg| {
-            let FnArg::Typed(arg) = arg else {
-                unreachable!()
-            };
-            &arg.ty
-        })
-        .collect();
-    let output = &anchor.method.sig.output;
-    let carrier = match args.carrier.unwrap_or(Carrier::AnyView) {
-        Carrier::AnyView => quote!(#tvm_ffi::AnyView),
-        Carrier::MutationView => quote!(#tvm_ffi::MutationView),
-    };
-    let mut signature: syn::TypeBareFn =
-        syn::parse_quote!(fn(#carrier<#view_lifetime> #(, #trailing)*) #output);
-    let consuming = args.carrier == Some(Carrier::MutationView);
-    let source = if consuming {
-        quote!(#tvm_ffi::match_any_internal::CapabilitySource<#view_lifetime>)
-    } else {
-        quote!(#tvm_ffi::match_any_internal::ViewSource<#view_lifetime>)
-    };
+    let mut arguments = args.arguments.clone();
+    for ty in &mut arguments.elems {
+        lifetimes.normalize(ty, None);
+    }
+    let mut output = args.output.clone();
+    // As in an ordinary method, result lifetime elision borrows the receiver.
+    lifetimes.normalize(&mut output, Some(&receiver_lifetime));
+    let carrier = &arguments.elems[0];
+    generics
+        .make_where_clause()
+        .predicates
+        .push(syn::parse_quote!(
+            #carrier: #tvm_ffi::extra::dispatch::DispatchInput
+        ));
+    let source = quote!(<#carrier as #tvm_ffi::extra::dispatch::DispatchInput>::Source);
     let mut borrow_name = "__tvm_ffi_match_borrow".to_owned();
     while lifetimes.used.contains(&borrow_name) {
         borrow_name.push('_');
     }
     let borrow = syn::Lifetime::new(&format!("'{borrow_name}"), Span::mixed_site());
     let mut patterns = Vec::new();
-    for handler in handlers {
+    for handler in &handlers {
         let FnArg::Typed(value) = &handler.method.sig.inputs[1] else {
             unreachable!()
         };
@@ -222,7 +175,7 @@ fn expand_impl(
         ))?;
         if matches!(handler.argument, Argument::Owned)
             && handler.capability.is_none()
-            && value_lifetime(&ty).is_some()
+            && has_pattern_lifetime(&ty)
         {
             lifetimes.normalize(&mut ty, None);
             // Fix recovery independently of the arm-local mutable source borrow.
@@ -234,14 +187,6 @@ fn expand_impl(
         }
         patterns.push(ty);
     }
-    for input in &mut signature.inputs {
-        lifetimes.normalize(&mut input.ty, None);
-        input.name = None;
-    }
-    if let ReturnType::Type(_, output) = &mut signature.output {
-        // Handler return elision is bound to the receiver.
-        lifetimes.normalize(output, Some(&receiver_lifetime));
-    }
     generics.params.extend(
         lifetimes
             .added
@@ -252,10 +197,10 @@ fn expand_impl(
     let mut params: Vec<_> = generics.params.into_iter().collect();
     params.sort_by_key(|param| !matches!(param, GenericParam::Lifetime(_)));
     generics.params = params.into_iter().collect();
-    // Self in a handler signature means the original implementor, not the
-    // reference type on which the generated Dispatcher is implemented.
-    let signature: syn::TypeBareFn =
-        syn::parse2(replace_self(signature.into_token_stream(), &item.self_ty))?;
+    // Self in the contract means the implementor, not its receiver reference.
+    let arguments: syn::TypeTuple =
+        syn::parse2(replace_self(arguments.into_token_stream(), &item.self_ty))?;
+    let output: Type = syn::parse2(replace_self(output.into_token_stream(), &item.self_ty))?;
     let where_clause = generics
         .where_clause
         .take()
@@ -263,7 +208,7 @@ fn expand_impl(
         .transpose()?;
     generics = syn::parse2(replace_self(generics.into_token_stream(), &item.self_ty))?;
     generics.where_clause = where_clause;
-    let mut constrained = quote!(#signature).into_iter().collect::<Vec<_>>();
+    let mut constrained = quote!(#arguments #output).into_iter().collect::<Vec<_>>();
     constrained.extend(item.self_ty.to_token_stream());
     for param in &generics.params {
         let ident = match param {
@@ -281,27 +226,21 @@ fn expand_impl(
     let mutable = &receiver.mutability;
     let value = format_ident!("__tvm_ffi_value", span = Span::mixed_site());
     let bound = format_ident!("__tvm_ffi_matched", span = Span::mixed_site());
-    let names: Vec<_> = (0..signature.inputs.len() - 1)
+    let names: Vec<_> = (0..arguments.elems.len() - 1)
         .map(|i| format_ident!("__tvm_ffi_arg_{i}", span = Span::mixed_site()))
         .collect();
-    let types: Vec<_> = signature.inputs.iter().map(|arg| &arg.ty).collect();
-    let output: Type = match &signature.output {
-        ReturnType::Default => syn::parse_quote!(()),
-        ReturnType::Type(_, output) => (**output).clone(),
-    };
+    let types: Vec<_> = arguments.elems.iter().collect();
     let dispatch_self = format_ident!("self", span = Span::mixed_site());
     let mut errors = Vec::new();
     let mut arms = Vec::new();
     for (handler, pattern_type) in handlers.iter().zip(&patterns) {
         let method = &handler.method.sig.ident;
-        let error = if anchor.generics != handler.generics
-            || anchor.method.sig.inputs[0] != handler.method.sig.inputs[0]
+        let error = if first.generics != handler.generics
+            || first.method.sig.inputs[0] != handler.method.sig.inputs[0]
         {
             Some("dispatch handlers must use the same receiver and method generics")
         } else if handler.trailing > names.len() {
             Some("dispatch handler has more trailing arguments than the dispatch signature")
-        } else if handler.capability.is_some() && !consuming {
-            Some("MutationView handlers require `#[dispatch(prefix, MutationView)]`")
         } else {
             None
         };
@@ -334,7 +273,7 @@ fn expand_impl(
             quote!(::<#(#type_args),*>)
         };
         let invocation = quote_spanned! {method.span()=> #dispatch_self.#method #type_args (#bound #(, #forwarded)*) };
-        let call = quote_spanned! {method.span()=> ::core::option::Option::Some(#invocation) };
+        let call = quote_spanned! {method.span()=> ::core::option::Option::Some(::core::convert::Into::<#output>::into(#invocation)) };
         let pattern = match &handler.argument {
             Argument::BorrowedNode => {
                 let Type::Reference(reference) = pattern_type else {
@@ -419,7 +358,7 @@ fn expand_impl(
     })
 }
 
-fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler<'_>> {
+fn parse_handler<'a>(method: &'a ImplItemMethod, args: &DispatchArgs) -> syn::Result<Handler<'a>> {
     if let Some(attribute) = method
         .attrs
         .iter()
@@ -463,17 +402,18 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler<'_>> {
         None
     };
     let receiver = &signature.inputs[0];
-    let trailing = signature.inputs.iter().skip(2);
-    let output = &signature.output;
+    let arguments = &args.arguments;
+    let output = &args.output;
     let where_clause = &signature.generics.where_clause;
-    let mut visible = quote!(#receiver #(#trailing)* #output #where_clause);
+    let mut visible = quote!(#receiver #arguments #output #where_clause);
     for param in &signature.generics.params {
         match param {
             GenericParam::Lifetime(param) => param.bounds.to_tokens(&mut visible),
             param => param.to_tokens(&mut visible),
         }
     }
-    // Each handler infers its own input-only lifetimes at the call site.
+    // Lifetimes absent from the explicit contract and shared bounds stay local
+    // to each handler's matching pattern.
     let local_lifetimes: Vec<_> = signature
         .generics
         .lifetimes()
@@ -504,23 +444,19 @@ fn is_capability(ty: &Type) -> bool {
     matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|s| s.ident == "MutationView"))
 }
 
-fn value_lifetime(ty: &Type) -> Option<syn::Lifetime> {
-    let Type::Path(path) = ty else { return None };
+fn has_pattern_lifetime(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
     path.qself
         .as_ref()
-        .and_then(|qualified| value_lifetime(&qualified.ty))
-        .or_else(|| {
-            path.path.segments.iter().find_map(|segment| {
-                let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
-                    return None;
-                };
-                args.args.iter().find_map(|arg| match arg {
-                    syn::GenericArgument::Lifetime(lifetime) if lifetime.ident != "_" => {
-                        Some(lifetime.clone())
-                    }
-                    syn::GenericArgument::Type(ty) => value_lifetime(ty),
-                    _ => None,
-                })
+        .is_some_and(|qualified| has_pattern_lifetime(&qualified.ty))
+        || path.path.segments.iter().any(|segment| {
+            let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+                return false;
+            };
+            args.args.iter().any(|arg| match arg {
+                syn::GenericArgument::Lifetime(lifetime) => lifetime.ident != "_",
+                syn::GenericArgument::Type(ty) => has_pattern_lifetime(ty),
+                _ => false,
             })
         })
 }

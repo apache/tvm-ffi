@@ -163,13 +163,13 @@ impl<'s, 'v, 'c, 'r>
         })
     }
 }
-#[dispatch(map)]
+#[dispatch(map, (AnyView<'_>, DefRegionKind), Result<Any>)]
 impl ManualIncrement {
     fn map_integer(&mut self, value: i64, _: DefRegionKind) -> Result<Any> {
         Ok(Any::from(value + 1))
     }
 }
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl ReplaceNone {
     fn mutate_any(
         &mut self,
@@ -184,7 +184,7 @@ impl ReplaceNone {
         }
     }
 }
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl RecursiveEntryMutator {
     fn mutate_any(
         &mut self,
@@ -493,7 +493,7 @@ fn user_mutator_recursive_entries_reenter_the_same_mutator() {
     struct BoundDispatcher {
         visits: usize,
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl BoundDispatcher {
         fn mutate_bool(
             &mut self,
@@ -554,7 +554,7 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         increment: bool,
     }
 
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Controlled {
         fn mutate_integer(&mut self, value: i64) -> Result<Any> {
             Ok(if self.increment {
@@ -599,7 +599,7 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
 #[test]
 fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
     struct BorrowedEntry;
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl BorrowedEntry {
         fn mutate_any(
             &mut self,
@@ -642,7 +642,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
         source: &'a Array<i64>,
         result: Option<Any>,
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Inspect<'a> {
         fn mutate_bool(
             &mut self,
@@ -689,7 +689,7 @@ fn owned_entry_mode_is_forwarded_by_generated_callbacks() {
         increment: bool,
         shared: bool,
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Entry {
         fn mutate_bool(
             &mut self,
@@ -793,7 +793,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
             drop(temporary);
         }
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Forward {
         fn mutate_string(&mut self, _: MutationView<'_, FfiString>) -> Result<Any> {
             panic!("typed miss must preserve the capability for the next handler")
@@ -899,7 +899,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
         value: Option<MutationView<'a>>,
         result: Any,
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Inner<'a> {
         fn mutate_bool(
             &mut self,
@@ -934,7 +934,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
     struct Outer {
         retain: bool,
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Outer {
         fn mutate_any(
             &mut self,
@@ -965,7 +965,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
 #[test]
 fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
     struct Preserve(bool);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Preserve {
         fn mutate_any(
             &mut self,
@@ -1073,7 +1073,11 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
 fn callback_errors_preserve_message_and_add_object_context() {
     struct Delegate(Error);
     struct VisitDelegate(Error);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl VisitDelegate {
         fn visit_any(
             &mut self,
@@ -1087,7 +1091,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
         }
     }
 
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Delegate {
         fn mutate_any(
             &mut self,
@@ -1462,7 +1466,7 @@ struct GeneratedMapper {
     catch_all: usize,
 }
 
-#[dispatch(map)]
+#[dispatch(map, (AnyView<'_>, DefRegionKind), Result<Any>)]
 impl GeneratedMapper {
     fn map_integer(&mut self, value: i64, kind: DefRegionKind) -> Result<Any> {
         self.integers.push((value, kind));
@@ -1495,7 +1499,7 @@ struct GeneratedLeafDispatch {
     integers: Vec<(i64, DefRegionKind)>,
 }
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl GeneratedLeafDispatch {
     fn mutate_integer(
         &mut self,
@@ -1510,7 +1514,7 @@ impl GeneratedLeafDispatch {
 
 struct GeneratedStatelessDispatch;
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl GeneratedStatelessDispatch {
     fn mutate_integer(
         &mut self,
@@ -1554,7 +1558,7 @@ struct GeneratedRecursiveDispatch {
     integers: Vec<(i64, DefRegionKind)>,
 }
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl GeneratedRecursiveDispatch {
     fn mutate_array(
         &mut self,
@@ -1606,7 +1610,7 @@ struct GeneratedDefaultingDispatch {
     integers: Vec<i64>,
 }
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl GeneratedDefaultingDispatch {
     fn mutate_array(
         &mut self,
@@ -1745,7 +1749,7 @@ fn callbacks_return_values_convertible_into_any() {
     assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![21, 22]);
 
     struct Double;
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Double {
         fn mutate_integer(
             &mut self,
@@ -1764,7 +1768,7 @@ fn callbacks_return_values_convertible_into_any() {
 #[test]
 fn recursive_mutate_returns_unchanged_or_a_replacement() {
     struct ClampNegativeIntegers;
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl ClampNegativeIntegers {
         fn mutate_any(
             &mut self,
@@ -2034,7 +2038,7 @@ struct CallbackMutateStats {
     defaults: usize,
 }
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl CallbackMutateStats {
     fn mutate_integer(&mut self, value: i64) -> Result<Any> {
         self.integers.push(value);
@@ -2080,7 +2084,7 @@ struct CallbackMutateDepth {
     exits: usize,
 }
 
-#[dispatch(mutate, MutationView)]
+#[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 impl CallbackMutateDepth {
     fn mutate_any(
         &mut self,
@@ -2119,7 +2123,7 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
     let root_pointer = array_pointer(&root);
     let defaults = Cell::new(0);
     struct Repeat<'a>(&'a Cell<i32>);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Repeat<'a> {
         fn mutate_integer(&mut self, value: i64) -> Result<Any> {
             Ok(Any::from(value + 1))
@@ -2152,7 +2156,7 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
 fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let integer_calls = Cell::new(0);
     struct First<'a>(&'a Cell<i32>);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> First<'a> {
         fn mutate_array(
             &mut self,
@@ -2174,7 +2178,7 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
 
     let calls = Cell::new(0);
     struct Reenter<'a>(&'a Cell<i32>);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Reenter<'a> {
         fn mutate_any(
             &mut self,
@@ -2205,7 +2209,7 @@ fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
     );
     let regions = RefCell::new(Vec::new());
     struct Nodes<'a>(&'a RefCell<Vec<DefRegionKind>>);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Nodes<'a> {
         fn mutate_bool(&mut self, _: bool) -> Result<Any> {
             Ok(Any::new())
@@ -2240,7 +2244,7 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
     let borrowed_child = Array::new(vec![1i64]);
     let borrowed_pointer = array_pointer(&borrowed_child);
     struct Borrowed<'a>(&'a Array<i64>);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Borrowed<'a> {
         fn mutate_bool(
             &mut self,
@@ -2265,7 +2269,7 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
 
     let owned_pointer = Cell::new(0usize);
     struct Owned<'a>(&'a Cell<usize>);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Owned<'a> {
         fn mutate_bool(
             &mut self,
@@ -2292,7 +2296,7 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
 #[test]
 fn nested_callback_mutate_restores_the_outer_active_mutator() {
     struct Inner;
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Inner {
         fn mutate_integer(
             &mut self,
@@ -2304,7 +2308,7 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
     }
     #[repr(align(128))]
     struct Outer<'a>(&'a Cell<usize>);
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl<'a> Outer<'a> {
         fn mutate_integer(
             &mut self,
@@ -2339,7 +2343,7 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
 #[test]
 fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
     struct Panic;
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Panic {
         fn mutate_integer(
             &mut self,
@@ -2430,13 +2434,13 @@ fn mutation_descent_preserves_ownership_and_markers() {
         }
     }
     struct MapOwnership(Ownership);
-    #[dispatch(map)]
+    #[dispatch(map, (AnyView<'_>, DefRegionKind), Result<Any>)]
     impl MapOwnership {
         fn map_integer(&mut self, value: i64, kind: DefRegionKind) -> Result<Any> {
             self.0.map_integer(value, kind)
         }
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Ownership {
         fn mutate_integer(&mut self, value: i64) -> Result<Any> {
             self.map_integer(value, DefRegionKind::None)
@@ -2532,7 +2536,7 @@ fn mutation_regions_retargeting_and_error_restore() {
     }
     #[derive(Default)]
     struct MapRegions(Regions);
-    #[dispatch(map)]
+    #[dispatch(map, (AnyView<'_>, DefRegionKind), Result<Any>)]
     impl MapRegions {
         fn map_integer(&mut self, value: i64, kind: DefRegionKind) -> Result<Any> {
             self.0.map_integer(value, kind)
@@ -2541,7 +2545,7 @@ fn mutation_regions_retargeting_and_error_restore() {
             self.0.map_array(value, kind)
         }
     }
-    #[dispatch(mutate, MutationView)]
+    #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
     impl Regions {
         fn mutate_any(
             &mut self,

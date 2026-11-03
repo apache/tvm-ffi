@@ -154,7 +154,7 @@ impl InplaceMode {
 /// ```compile_fail,E0505
 /// use tvm_ffi::{dispatch, structural_mutate, Any, MutationView, StructuralMutatorView, Result};
 /// struct Inner<'a>(Option<MutationView<'a>>);
-/// #[dispatch(mutate, MutationView)]
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 /// impl<'a> Inner<'a> {
 ///     fn mutate_bool(&mut self, _: bool, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
 ///         let pending = self.0.take().unwrap();
@@ -173,7 +173,7 @@ impl InplaceMode {
 /// ```compile_fail,E0505
 /// use tvm_ffi::{dispatch, Any, MutationView, StructuralMutatorView, Result, Unchanged};
 /// struct Pass;
-/// #[dispatch(mutate, MutationView)]
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
 /// impl Pass {
 ///     fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
 ///         let view = value.as_any_view();

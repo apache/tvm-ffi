@@ -71,25 +71,25 @@ macro_rules! define_expr_leaves {
         )+
 
         struct OwnedClassifier;
-        #[dispatch(classify)]
+        #[dispatch(classify, (AnyView<'_>,), &'static str)]
         impl OwnedClassifier {
             $(fn $method(&self, _value: $handle) -> &'static str { $label })+
         }
 
         struct BorrowedClassifier;
-        #[dispatch(classify)]
+        #[dispatch(classify, (AnyView<'_>,), &'static str)]
         impl BorrowedClassifier {
             $(fn $method(&self, _value: &$object) -> &'static str { $label })+
         }
 
         struct CapabilityClassifier;
-        #[dispatch(classify, MutationView)]
+        #[dispatch(classify, (MutationView<'_>,), &'static str)]
         impl CapabilityClassifier {
             $(fn $method(&self, _value: MutationView<'_, $handle>) -> &'static str { $label })+
         }
 
         struct MixedClassifier;
-        #[dispatch(classify)]
+        #[dispatch(classify, (AnyView<'_>,), &'static str)]
         impl MixedClassifier {
             $(fn $method(&self, _value: $handle) -> &'static str { $label })+
             fn classify_integer_array(&self, _value: Array<i64>) -> &'static str {

@@ -29,26 +29,33 @@ mod utils;
 
 /// Generate source-ordered runtime type dispatch from `prefix_*` handlers.
 ///
-/// `#[dispatch(prefix)]` implements `Dispatcher<(AnyView<'_>, ...), Option<R>>`
-/// for the receiver reference (`&T` or `&mut T`). `#[dispatch(prefix, AnyView)]`
-/// selects that carrier explicitly; `#[dispatch(prefix, MutationView)]` selects
-/// a consuming mutation view. The inherent `.dispatch(value, ...)` method owns
-/// matching; the trait's `.dispatch_tuple((value, ...))` unpacks and forwards to it.
-/// Both methods always inline. The result is `Option<R>`, preserving the complete handler outcome. Only
-/// the outer `None` means no match; matched errors and inner `None` are final.
-/// The receiver reference is consumed, allowing results to borrow it safely.
+/// `#[dispatch(prefix, (Carrier, Arg, ...), Ret)]` declares the complete input
+/// tuple and result type. The first input is `AnyView<'_>` or `MutationView<'_>`
+/// (including aliases); subsequent inputs are passed to matching handlers.
+/// The macro implements `Dispatcher<(Carrier, Arg, ...), Option<Ret>>` for the
+/// receiver reference (`&T` or `&mut T`). The inherent `.dispatch(value, ...)`
+/// method owns matching; `.dispatch_tuple((value, ...))` unpacks and forwards.
+/// Both methods always inline. A matched result is converted with `Into<Ret>`
+/// and wrapped in `Some`. Only the outer `None` means no match; matched errors
+/// and inner `None` are final. Conversion uses ordinary trait implementations,
+/// without recursively converting results or wrapping values in `Ok`.
 ///
 /// Handlers match an owned FFI value, a borrowed object node, or an optional
-/// by-value `AnyView` catch-all, which must be last.
-/// The longest handler determines trailing arguments and output;
-/// other handlers may consume a compatible prefix without cloning. Method
-/// generics must be constrained by the receiver, argument tuple or return type.
+/// by-value `AnyView` catch-all, which must be last. Each handler receives its
+/// typed first value and may consume an initial prefix of the remaining declared
+/// arguments without cloning. Neither arguments nor results are deduced from a
+/// handler signature, and no handler needs to consume every declared argument.
 ///
-/// Handlers share a common return type, with any normalization written explicitly
-/// in their bodies. Handler-level `cfg`/`cfg_attr` attributes are unsupported;
-/// configure the whole impl instead.
-/// A consuming `MutationView` retains mutation permission; its typed misses
-/// recover the same handle, and `AnyView` cannot grant it.
+/// Handlers share the same receiver and method generic declarations and bounds.
+/// Pattern-only, unbounded lifetimes may differ between handlers. Shared method
+/// generics must occur in the receiver, declared tuple or declared return type.
+/// Named lifetimes come from those shared declarations or the enclosing impl;
+/// use the same name in input and output to return a borrow of that input.
+/// Elided input lifetimes are independent; elided output lifetimes borrow the
+/// receiver. `Self` in the declared types denotes the original implementor.
+/// Handler-level `cfg`/`cfg_attr` attributes are unsupported; configure the whole
+/// impl instead. A consuming `MutationView` retains mutation permission; its
+/// typed misses recover the same handle, and `AnyView` cannot grant it.
 ///
 /// Matching invokes the public `match_any!` macro and its exact-final-type
 /// lookup for eligible larger handler sets. Dispatch also matches scalar payloads

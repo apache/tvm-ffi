@@ -1565,7 +1565,7 @@ where
 /// `StructuralWalk<order>(root, callbacks...)`.
 ///
 /// `walker` is anything implementing [`IntoWalker`]: a `&mut` reference to a
-/// stateful [`Dispatcher`](crate::Dispatcher) walker (`#[dispatch(walk)]`), a bare closure
+/// stateful [`Dispatcher`](crate::Dispatcher) walker (declared with `#[dispatch]`), a bare closure
 /// in any [`WalkChainLink`] shape (catch-all `AnyView<'_>`, typed, or node,
 /// with an optional trailing [`DefRegionKind`]), or a tuple of such
 /// callbacks tried in order — the C++ callback overloads and variadic

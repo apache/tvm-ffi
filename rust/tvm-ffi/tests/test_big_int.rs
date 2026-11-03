@@ -517,7 +517,11 @@ fn test_big_int_structural_traversal() {
     // A BigInt callback also accepts inline integers, mirroring the C++ cast rule.
     #[derive(Default)]
     struct Integers(Vec<BigInt>);
-    #[dispatch(visit)]
+    #[dispatch(
+        visit,
+        (AnyView<'_>, &mut StructuralVisitorView<'_, Self>),
+        Result<Option<VisitInterrupt>>
+    )]
     impl Integers {
         fn visit_integer(
             &mut self,
