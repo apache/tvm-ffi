@@ -218,16 +218,17 @@ impl<T> TryFromTemp<T> {
 // Any
 //---------------------
 impl Any {
+    #[inline(always)]
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny::new(),
         }
     }
-    #[inline]
+    #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
     }
-    #[inline]
+    #[inline(always)]
     pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
@@ -295,18 +296,18 @@ impl Any {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub unsafe fn as_data_ptr(&mut self) -> *mut TVMFFIAny {
         &mut self.data
     }
 
-    #[inline]
+    #[inline(always)]
     pub unsafe fn into_raw_ffi_any(this: Self) -> TVMFFIAny {
         let this = std::mem::ManuallyDrop::new(this);
         this.data
     }
 
-    #[inline]
+    #[inline(always)]
     pub unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
         Self { data }
     }
@@ -326,6 +327,7 @@ impl Any {
 }
 
 impl Default for Any {
+    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }
@@ -342,7 +344,7 @@ impl Clone for Any {
 }
 
 impl Drop for Any {
-    #[inline]
+    #[inline(always)]
     fn drop(&mut self) {
         if self.data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
             unsafe { object::unsafe_::dec_ref(self.data.data_union.v_obj) }
@@ -402,7 +404,7 @@ fn any_view_to_owned_via_runtime(view: TVMFFIAny) -> Any {
 }
 
 impl<T: AnyCompatible> From<T> for Any {
-    #[inline]
+    #[inline(always)]
     fn from(value: T) -> Self {
         unsafe {
             let mut data = TVMFFIAny::new();

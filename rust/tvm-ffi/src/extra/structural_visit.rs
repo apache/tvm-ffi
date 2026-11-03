@@ -67,8 +67,8 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashIgnore,
 };
 use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIDefRegionKind, TVMFFIFieldInfo, TVMFFIGetTypeInfo,
-    TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIByteArray, TVMFFIDefRegionKind, TVMFFIFieldInfo,
+    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 
 use super::structural_common::{
@@ -155,6 +155,7 @@ pub(super) struct StructuralVisitEngine {
 }
 
 impl Default for StructuralVisitorObj {
+    #[inline(always)]
     fn default() -> Self {
         Self {
             base: Object::new(),
@@ -206,6 +207,7 @@ crate::def_object_ref! {
 
 impl VisitInterrupt {
     /// Interrupt carrying an FFI-compatible payload.
+    #[inline(always)]
     pub fn with<T: Into<Any>>(payload: T) -> Self {
         VisitInterruptObj {
             base: Object::new(),
@@ -219,7 +221,55 @@ impl VisitInterrupt {
 // StructuralVisitEngine implementation
 // -----------------------------------------------------------------------------
 
+// Operate in the raw path to optimize stack frame cost. Each `_raw` result
+// carries one owned ABI value: forward it exactly once or import it into Any
+// before any operation that can unwind or discard it.
 impl StructuralVisitEngine {
+    #[inline(always)]
+    fn with_visit_context_raw(result: TVMFFIAny, value: TVMFFIAny) -> TVMFFIAny {
+        if result.type_index != TVMFFITypeIndex::kTVMFFIError as i32
+            || value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
+        {
+            result
+        } else {
+            core::hint::cold_path();
+            // SAFETY: the Error tag establishes the owned object's representation.
+            unsafe {
+                let error = take_error(Any::from_raw_ffi_any(result));
+                Any::into_raw_ffi_any(
+                    Self::annotate_visit_error(
+                        error,
+                        value.type_index,
+                        value.small_str_len,
+                        value.data_union,
+                    )
+                    .into(),
+                )
+            }
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn annotate_visit_error(
+        error: Error,
+        type_index: i32,
+        small_str_len: u32,
+        data_union: TVMFFIAnyDataUnion,
+    ) -> Error {
+        let value = TVMFFIAny {
+            type_index,
+            small_str_len,
+            data_union,
+        };
+        let error = with_visit_error_context(error, value);
+        with_structural_error_context(
+            error,
+            "visit",
+            &format!("object `{}`", type_key_of(value.type_index)),
+        )
+    }
+
     /// Recover the Rust engine whose first field is this ABI base.
     ///
     /// # Safety
@@ -236,29 +286,48 @@ impl StructuralVisitEngine {
     /// Descent itself never accesses D: every child reenters the same visitor
     /// callback, which restores its incoming pointer before the next sibling.
     #[inline(always)]
-    unsafe fn visit_children(runtime: StructuralVisitorHandle, value: TVMFFIAny) -> Any {
-        if let Some(attr) = STRUCTURAL_VISIT_COLUMN.get_raw(value.type_index) {
+    unsafe fn visit_children_raw(runtime: StructuralVisitorHandle, value: TVMFFIAny) -> TVMFFIAny {
+        if let Some(attr) = structural_visit_column().get_raw(value.type_index) {
             if attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32 {
-                return Self::call_structural_visit_hook(runtime, value, attr);
+                return Self::call_structural_visit_hook_raw(runtime, value, attr);
             }
         }
 
         if value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-            Any::new()
+            TVMFFIAny::new()
         } else {
-            Self::visit_reflected_fields(runtime, value)
+            Self::visit_reflected_fields_raw(
+                runtime,
+                value.type_index,
+                value.small_str_len,
+                value.data_union,
+            )
         }
     }
 
+    // The AArch64 C ABI returns TVMFFIAny in registers; C-unwind preserves
+    // Rust cleanup if reflected traversal panics inside this private helper.
     #[inline(never)]
-    unsafe fn visit_reflected_fields(runtime: StructuralVisitorHandle, value: TVMFFIAny) -> Any {
+    unsafe extern "C-unwind" fn visit_reflected_fields_raw(
+        runtime: StructuralVisitorHandle,
+        type_index: i32,
+        small_str_len: u32,
+        data_union: TVMFFIAnyDataUnion,
+    ) -> TVMFFIAny {
+        let value = TVMFFIAny {
+            type_index,
+            small_str_len,
+            data_union,
+        };
         let type_info = unsafe { TVMFFIGetTypeInfo(value.type_index) };
         if type_info.is_null() {
-            return runtime_error(&format!(
-                "native visitor: unregistered type index {}",
-                value.type_index
-            ))
-            .into();
+            return Any::into_raw_ffi_any(
+                runtime_error(&format!(
+                    "native visitor: unregistered type index {}",
+                    value.type_index
+                ))
+                .into(),
+            );
         }
         let seq_hash_kind = unsafe {
             let metadata = (*type_info).metadata;
@@ -281,7 +350,7 @@ impl StructuralVisitEngine {
                 }
             })
         };
-        halted.unwrap_or_else(Any::new)
+        Any::into_raw_ffi_any(halted.unwrap_or_else(Any::new))
     }
 
     unsafe fn visit_reflected_field(
@@ -314,17 +383,21 @@ impl StructuralVisitEngine {
         let child_region = field_def_region(field, inherited_region);
         with_error_context(
             Self::with_visitor_def_region(runtime, child_region, || {
-                Self::call_visitor(runtime, raw_of(borrowed))
+                Any::from_raw_ffi_any(Self::call_visitor_raw(runtime, raw_of(borrowed)))
             }),
             &format!("field `{}`", field.name.as_str()),
         )
     }
 
     #[inline(always)]
-    unsafe fn visit<D>(runtime: StructuralVisitorHandle, dispatch: &mut D, raw: TVMFFIAny) -> Any {
+    unsafe fn visit_raw<D>(
+        runtime: StructuralVisitorHandle,
+        dispatch: &mut D,
+        raw: TVMFFIAny,
+    ) -> TVMFFIAny {
         let context = Self::checked_dispatcher(runtime, dispatch);
         (*Self::from_handle(runtime)).dispatcher = context;
-        Self::call_visitor(runtime, raw)
+        Self::call_visitor_raw(runtime, raw)
     }
 
     // The caller has already established matching runtime/D types and scope.
@@ -336,11 +409,13 @@ impl StructuralVisitEngine {
     ) -> *mut c_void {
         let current = dispatcher_context(dispatch);
         if current != (*Self::from_handle(runtime)).dispatcher {
+            core::hint::cold_path();
             wrong_visitor_dispatcher();
         }
         current
     }
 
+    #[inline(always)]
     fn vtable<D>() -> &'static StructuralVisitorVTable
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
@@ -349,11 +424,11 @@ impl StructuralVisitEngine {
         >,
     {
         &StructuralVisitorVTable {
-            visit: Self::rust_vtable_visit::<D>,
+            visit: Self::rust_vtable_visit_raw::<D>,
         }
     }
 
-    unsafe extern "C" fn rust_vtable_visit<D>(
+    unsafe extern "C" fn rust_vtable_visit_raw<D>(
         runtime: StructuralVisitorHandle,
         value: AnyView<'static>,
     ) -> TVMFFIAny
@@ -366,7 +441,8 @@ impl StructuralVisitEngine {
         let context = (*Self::from_handle(runtime)).dispatcher;
         let raw = *value.as_raw_ffi_any();
         let result = if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
-            Any::new()
+            core::hint::cold_path();
+            TVMFFIAny::new()
         } else {
             let dispatch = &mut *context.cast::<D>();
             let mut visitor = Self::visitor_context::<D>(runtime);
@@ -374,14 +450,14 @@ impl StructuralVisitEngine {
                 &mut *dispatch,
                 (borrowed_view(&raw), &mut visitor),
             ) {
-                Some(result) => visit_result(result, raw),
+                Some(result) => visit_result_raw(result, raw),
                 None => Self::default_visit_raw(runtime, dispatcher_context(dispatch), raw),
             }
         };
         // The enclosing callback may resume using its ancestor mutable borrow.
         // Native hooks cannot restore Rust-only borrow provenance for us.
         (*Self::from_handle(runtime)).dispatcher = context;
-        Any::into_raw_ffi_any(result)
+        result
     }
 
     /// # Safety
@@ -402,14 +478,14 @@ impl StructuralVisitEngine {
         runtime: StructuralVisitorHandle,
         context: *mut c_void,
         raw: TVMFFIAny,
-    ) -> Any {
+    ) -> TVMFFIAny {
         // Context is the supplied exclusive reborrow. Publish it before descent;
         // the handle-only scanner never creates or uses a competing D reference.
         (*Self::from_handle(runtime)).dispatcher = context;
-        with_value_context(Self::visit_children(runtime, raw), raw)
+        Self::with_visit_context_raw(Self::visit_children_raw(runtime, raw), raw)
     }
 
-    pub(super) fn run_visitor<D>(root: TVMFFIAny, dispatch: &mut D) -> Any
+    pub(super) fn run_visitor_raw<D>(root: TVMFFIAny, dispatch: &mut D) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
             (AnyView<'v>, &'c mut StructuralVisitorView<'r, D>),
@@ -435,49 +511,78 @@ impl StructuralVisitEngine {
             (*handle).vtable = Self::vtable::<D>();
             (*handle).def_region_mode = DefRegionKind::None as i32;
         }
-        let result = Self::call_visitor(handle, root);
+        // Keep the result owned while releasing the runtime, including on unwind.
+        let result = unsafe { Any::from_raw_ffi_any(Self::call_visitor_raw(handle, root)) };
         // Trusted hooks have released every temporary strong/weak runtime reference.
         drop(engine);
-        result
+        unsafe { Any::into_raw_ffi_any(result) }
     }
 
     #[inline(always)]
-    fn call_visitor(visitor: StructuralVisitorHandle, raw: TVMFFIAny) -> Any {
+    fn call_visitor_raw(visitor: StructuralVisitorHandle, raw: TVMFFIAny) -> TVMFFIAny {
         if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
-            return Any::new();
+            core::hint::cold_path();
+            return TVMFFIAny::new();
         }
         unsafe {
             let callback = (*(*visitor).vtable).visit;
-            Any::from_raw_ffi_any(callback(visitor, AnyView::from_raw_ffi_any(raw)))
+            callback(visitor, AnyView::from_raw_ffi_any(raw))
         }
     }
 
     #[inline(always)]
-    fn call_structural_visit_hook(
+    fn call_structural_visit_hook_raw(
         visitor: StructuralVisitorHandle,
         raw: TVMFFIAny,
         attr: TVMFFIAny,
-    ) -> Any {
+    ) -> TVMFFIAny {
         unsafe {
             if attr.type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32 {
                 let pointer = attr.data_union.v_ptr;
                 // Native pointer registration is an unsafe contract: a non-null
                 // callback with this ABI, borrowed runtime lifetime and owning result.
                 let hook: FStructuralVisit = std::mem::transmute(pointer);
-                Any::from_raw_ffi_any(hook(visitor, AnyView::from_raw_ffi_any(raw)))
+                hook(visitor, AnyView::from_raw_ffi_any(raw))
             } else {
-                Self::call_structural_visit_hook_slow(visitor, raw, attr)
+                core::hint::cold_path();
+                Self::call_structural_visit_hook_slow_raw(
+                    visitor,
+                    raw.type_index,
+                    raw.small_str_len,
+                    raw.data_union,
+                    attr.type_index,
+                    attr.small_str_len,
+                    attr.data_union,
+                )
             }
         }
     }
 
     // Keep packed calls and malformed registrations out of the native-hook hot path.
+    // Match the native raw-result ABI (registers on AArch64), without adding
+    // an abort boundary around Rust packed-call cleanup.
     #[cold]
-    fn call_structural_visit_hook_slow(
+    #[inline(never)]
+    extern "C-unwind" fn call_structural_visit_hook_slow_raw(
         visitor: StructuralVisitorHandle,
-        raw: TVMFFIAny,
-        attr: TVMFFIAny,
-    ) -> Any {
+        value_type_index: i32,
+        value_small_str_len: u32,
+        value_data: TVMFFIAnyDataUnion,
+        attr_type_index: i32,
+        attr_small_str_len: u32,
+        attr_data: TVMFFIAnyDataUnion,
+    ) -> TVMFFIAny {
+        // Construct addressable packed-call arguments only on this cold path.
+        let raw = TVMFFIAny {
+            type_index: value_type_index,
+            small_str_len: value_small_str_len,
+            data_union: value_data,
+        };
+        let attr = TVMFFIAny {
+            type_index: attr_type_index,
+            small_str_len: attr_small_str_len,
+            data_union: attr_data,
+        };
         // Packed hooks (including Python class methods) can return any well-formed
         // Any through safe APIs. Their result tag needs validation before decoding.
         let result = unsafe {
@@ -488,12 +593,14 @@ impl StructuralVisitEngine {
                 ])
             })
         };
-        match result {
+        let result = match result {
             Ok(value) => checked_hook_result(value),
             Err(error) => error.into(),
-        }
+        };
+        unsafe { Any::into_raw_ffi_any(result) }
     }
 
+    #[inline(always)]
     unsafe fn borrowed_visitor_view<'a>(visitor: StructuralVisitorHandle) -> AnyView<'a> {
         let object = visitor.cast::<TVMFFIObject>();
         let mut raw = TVMFFIAny::new();
@@ -521,6 +628,7 @@ impl StructuralVisitEngine {
                 previous: i32,
             }
             impl Drop for Restore {
+                #[inline(always)]
                 fn drop(&mut self) {
                     unsafe { (*self.visitor).def_region_mode = self.previous };
                 }
@@ -531,6 +639,7 @@ impl StructuralVisitEngine {
     }
 }
 
+#[inline(always)]
 fn dispatcher_context<D>(dispatch: &mut D) -> *mut c_void {
     std::ptr::from_mut(dispatch).cast()
 }
@@ -542,15 +651,22 @@ fn wrong_visitor_dispatcher() -> ! {
 }
 
 #[inline(always)]
-fn visit_result(result: Result<Option<VisitInterrupt>>, raw: TVMFFIAny) -> Any {
+fn visit_result_raw(result: Result<Option<VisitInterrupt>>, raw: TVMFFIAny) -> TVMFFIAny {
     match result {
-        Ok(None) => Any::new(),
-        Ok(Some(interrupt)) => interrupt.into(),
-        Err(error) => with_value_context(error.into(), raw),
+        Ok(None) => TVMFFIAny::new(),
+        Ok(Some(interrupt)) => unsafe { Any::into_raw_ffi_any(interrupt.into()) },
+        Err(error) => {
+            core::hint::cold_path();
+            StructuralVisitEngine::with_visit_context_raw(
+                unsafe { Any::into_raw_ffi_any(error.into()) },
+                raw,
+            )
+        }
     }
 }
 
 // A packed hook's owning Any is valid, but its result type is dynamic.
+#[inline(always)]
 fn checked_hook_result(value: Any) -> Any {
     let tag = value.type_index();
     if tag == TVMFFITypeIndex::kTVMFFINone as i32
@@ -569,31 +685,14 @@ fn checked_hook_result(value: Any) -> Any {
 }
 
 /// Consume exactly one Error reference after its integer tag was checked.
+#[inline(always)]
 unsafe fn take_error(value: Any) -> Error {
     use crate::type_traits::AnyCompatible;
     let mut raw = Any::into_raw_ffi_any(value);
     Error::move_from_any_after_check(&mut raw)
 }
 
-#[inline]
-fn with_value_context(result: Any, value: TVMFFIAny) -> Any {
-    if result.type_index() != TVMFFITypeIndex::kTVMFFIError as i32
-        || value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
-    {
-        result
-    } else {
-        // SAFETY: the Error tag establishes the owned object's representation.
-        let error = with_visit_error_context(unsafe { take_error(result) }, value);
-        with_structural_error_context(
-            error,
-            "visit",
-            &format!("object `{}`", type_key_of(value.type_index)),
-        )
-        .into()
-    }
-}
-
-#[inline]
+#[inline(always)]
 pub(crate) fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefRegionKind {
     // Precedence: a pattern region propagates; entering any kind inside it has no effect.
     if inherited == DefRegionKind::Pattern {
@@ -611,7 +710,7 @@ pub(crate) fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind
 /// the FreeVar's own reflected children: nested free vars there must resolve
 /// against an outer binding instead of rebinding. Mirrors C++
 /// `VisitReflectedFieldsExpected`.
-#[inline]
+#[inline(always)]
 pub(crate) fn free_var_child_region(
     inherited: DefRegionKind,
     structural_eq_hash_kind: i32,
@@ -625,9 +724,10 @@ pub(crate) fn free_var_child_region(
     }
 }
 
-#[inline]
+#[inline(always)]
 fn with_error_context(result: Any, frame: &str) -> Any {
     if result.type_index() == TVMFFITypeIndex::kTVMFFIError as i32 {
+        core::hint::cold_path();
         // SAFETY: direct tag check establishes the Error representation.
         with_structural_error_context(unsafe { take_error(result) }, "visit", frame).into()
     } else {
@@ -646,6 +746,22 @@ fn runtime_error(message: &str) -> Error {
 static STRUCTURAL_VISIT_COLUMN: LazyLock<TypeAttrColumn> = LazyLock::new(|| {
     TypeAttrColumn::new(STRUCTURAL_VISIT_ATTR).expect("missing __s_visit__ column")
 });
+
+#[inline(always)]
+fn structural_visit_column() -> TypeAttrColumn {
+    if let Some(column) = LazyLock::get(&STRUCTURAL_VISIT_COLUMN) {
+        *column
+    } else {
+        initialize_structural_visit_column()
+    }
+}
+
+// Keep Once's initialization descriptors out of each recursive caller's frame.
+#[cold]
+#[inline(never)]
+fn initialize_structural_visit_column() -> TypeAttrColumn {
+    *LazyLock::force(&STRUCTURAL_VISIT_COLUMN)
+}
 
 pub(crate) fn type_key_of(type_index: i32) -> String {
     unsafe {
@@ -738,11 +854,11 @@ impl<D> StructuralVisitorView<'_, D> {
         // SAFETY: the view ties this runtime to D; the check establishes the
         // instance, and publishing uses the caller's actual exclusive reborrow.
         unsafe {
-            finish(StructuralVisitEngine::visit(
+            visit_result_from_any(Any::from_raw_ffi_any(StructuralVisitEngine::visit_raw(
                 self.runtime,
                 dispatch,
                 raw_of(value.into()),
-            ))
+            )))
         }
     }
     /// Run default descent through registered hooks or reflected fields.
@@ -760,10 +876,12 @@ impl<D> StructuralVisitorView<'_, D> {
         // the supplied borrow must identify this runtime's dispatcher instance.
         unsafe {
             let context = StructuralVisitEngine::checked_dispatcher(self.runtime, dispatch);
-            finish(StructuralVisitEngine::default_visit_raw(
-                self.runtime,
-                context,
-                raw_of(value.into()),
+            visit_result_from_any(Any::from_raw_ffi_any(
+                StructuralVisitEngine::default_visit_raw(
+                    self.runtime,
+                    context,
+                    raw_of(value.into()),
+                ),
             ))
         }
     }
@@ -782,8 +900,14 @@ where
         Option<Result<Option<VisitInterrupt>>>,
     >,
 {
+    #[inline(always)]
     fn visit_root(mut self, root: AnyView<'_>) -> Result<Option<VisitInterrupt>> {
-        finish(StructuralVisitEngine::run_visitor(raw_of(root), &mut self))
+        visit_result_from_any(unsafe {
+            Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(
+                raw_of(root),
+                &mut self,
+            ))
+        })
     }
 }
 
@@ -794,8 +918,11 @@ where
         Option<Result<Option<VisitInterrupt>>>,
     >,
 {
+    #[inline(always)]
     fn visit_root(self, root: AnyView<'_>) -> Result<Option<VisitInterrupt>> {
-        finish(StructuralVisitEngine::run_visitor(raw_of(root), self))
+        visit_result_from_any(unsafe {
+            Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(raw_of(root), self))
+        })
     }
 }
 
@@ -818,11 +945,14 @@ where
     visitor.visit_root(root.into())
 }
 
-pub(super) fn finish(result: Any) -> Result<Option<VisitInterrupt>> {
+#[inline(always)]
+pub(super) fn visit_result_from_any(result: Any) -> Result<Option<VisitInterrupt>> {
     let tag = result.type_index();
     if tag == TVMFFITypeIndex::kTVMFFINone as i32 {
-        Ok(None)
-    } else if tag == TVMFFITypeIndex::kTVMFFIError as i32 {
+        return Ok(None);
+    }
+    core::hint::cold_path();
+    if tag == TVMFFITypeIndex::kTVMFFIError as i32 {
         // SAFETY: internal results obey the documented owning carrier protocol.
         Err(unsafe { take_error(result) })
     } else {

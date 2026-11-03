@@ -69,6 +69,7 @@ impl TypeAttrColumn {
     }
 
     /// Copy one borrowed cell without taking ownership.
+    #[inline(always)]
     pub(crate) fn get_raw(self, type_index: i32) -> Option<TVMFFIAny> {
         unsafe {
             let column = self.0.as_ref();

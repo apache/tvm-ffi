@@ -24,7 +24,8 @@
 
 use super::structural_common::{impl_callback_chain_tuple_arities, raw_of};
 use super::structural_visit::{
-    finish, DefRegionKind, StructuralVisitEngine, StructuralVisitorView, VisitInterrupt,
+    visit_result_from_any, DefRegionKind, StructuralVisitEngine, StructuralVisitorView,
+    VisitInterrupt,
 };
 use crate::{Any, AnyView, Dispatcher, ObjectCore, Result};
 use std::marker::PhantomData;
@@ -47,6 +48,7 @@ pub enum WalkResult {
 
 impl WalkResult {
     /// Halt traversal with an FFI-compatible payload.
+    #[inline(always)]
     pub fn interrupt_with<T: Into<Any>>(payload: T) -> Self {
         Self::InterruptWith(payload.into())
     }
@@ -61,12 +63,14 @@ pub trait IntoWalkResult {
 }
 
 impl IntoWalkResult for WalkResult {
+    #[inline(always)]
     fn into_walk_result(self) -> Result<WalkResult> {
         Ok(self)
     }
 }
 
 impl IntoWalkResult for Result<WalkResult> {
+    #[inline(always)]
     fn into_walk_result(self) -> Result<WalkResult> {
         self
     }
@@ -134,6 +138,7 @@ pub enum ByWalkDispatch {}
 
 impl<'a, V: WalkDispatch> IntoWalker<ByWalkDispatch> for &'a mut V {
     type Walker = DispatchWalker<&'a mut V>;
+    #[inline(always)]
     fn into_walker(self) -> Self::Walker {
         DispatchWalker { walker: self }
     }
@@ -148,6 +153,7 @@ pub struct DispatchWalker<V> {
 impl<V> NativeContext for DispatchWalker<V> {}
 
 impl<V: WalkDispatch> NativeVisit for DispatchWalker<&mut V> {
+    #[inline(always)]
     fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         self.walker
             .dispatch_walk(value, def_region_kind)
@@ -182,6 +188,7 @@ where
     O: IntoWalkResult,
 {
     type Walker = ChainWalker<F, ByCatchAllLink>;
+    #[inline(always)]
     fn into_walker(self) -> Self::Walker {
         ChainWalker::new(self)
     }
@@ -193,6 +200,7 @@ where
     O: IntoWalkResult,
 {
     type Walker = ChainWalker<F, ByCatchAllKindLink>;
+    #[inline(always)]
     fn into_walker(self) -> Self::Walker {
         ChainWalker::new(self)
     }
@@ -272,7 +280,7 @@ where
     T: crate::type_traits::AnyCompatible,
     O: IntoWalkResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
@@ -293,7 +301,7 @@ where
     T: crate::type_traits::AnyCompatible,
     O: IntoWalkResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
@@ -314,7 +322,7 @@ where
     N: ObjectCore,
     O: IntoWalkResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
@@ -335,7 +343,7 @@ where
     N: ObjectCore,
     O: IntoWalkResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
@@ -355,7 +363,7 @@ where
     F: for<'a> FnMut(AnyView<'a>) -> O,
     O: IntoWalkResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
@@ -373,7 +381,7 @@ where
     F: for<'a> FnMut(AnyView<'a>, DefRegionKind) -> O,
     O: IntoWalkResult,
 {
-    #[inline]
+    #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
@@ -390,7 +398,7 @@ pub struct ByChainLink<Markers>(PhantomData<fn(Markers)>);
 pub enum ByWalkDispatchLink {}
 
 impl<V: WalkDispatch> WalkChainLink<ByWalkDispatchLink> for &mut V {
-    #[inline]
+    #[inline(always)]
     fn try_call(
         &mut self,
         value: AnyView<'_>,
@@ -408,7 +416,7 @@ pub struct ChainWalker<Link, Marker> {
 }
 
 impl<Link, Marker> ChainWalker<Link, Marker> {
-    #[inline]
+    #[inline(always)]
     fn new(link: Link) -> Self {
         ChainWalker {
             link,
@@ -423,7 +431,7 @@ impl<Link, Marker> NativeVisit for ChainWalker<Link, Marker>
 where
     Link: WalkChainLink<Marker>,
 {
-    #[inline]
+    #[inline(always)]
     fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         self.link
             .try_call(value, def_region_kind)
@@ -443,7 +451,7 @@ macro_rules! impl_chain_link {
         where
             $($F: WalkChainLink<$M>,)+
         {
-            #[inline]
+            #[inline(always)]
             fn try_call(
                 &mut self,
                 value: AnyView<'_>,
@@ -463,6 +471,7 @@ macro_rules! impl_chain_link {
             $($F: WalkChainLink<$M>,)+
         {
             type Walker = ChainWalker<($($F,)+), ByChainLink<($($M,)+)>>;
+            #[inline(always)]
             fn into_walker(self) -> Self::Walker {
                 ChainWalker::new(self)
             }
@@ -482,6 +491,7 @@ macro_rules! impl_bare_link_walker {
                 O: IntoWalkResult,
             {
                 type Walker = ChainWalker<F, $marker<T>>;
+                #[inline(always)]
                 fn into_walker(self) -> Self::Walker {
                     ChainWalker::new(self)
                 }
@@ -500,8 +510,11 @@ impl_bare_link_walker!(
 /// Internal callback protocol used by [`IntoWalker`].
 #[doc(hidden)]
 pub trait NativeVisit: Sized + sealed::NativeContext {
+    #[inline(always)]
     fn walk_root(self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
-        finish(run_walker(raw_of(root), self, order))
+        visit_result_from_any(unsafe {
+            Any::from_raw_ffi_any(run_walker_raw(raw_of(root), self, order))
+        })
     }
 
     fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult>;
@@ -510,6 +523,7 @@ pub trait NativeVisit: Sized + sealed::NativeContext {
 impl<V: NativeVisit> NativeContext for &mut V {}
 
 impl<V: NativeVisit> NativeVisit for &mut V {
+    #[inline(always)]
     fn visit(&mut self, value: AnyView<'_>, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         (**self).visit(value, def_region_kind)
     }
@@ -557,31 +571,56 @@ impl<V: NativeVisit, const PRE_ORDER: bool> WalkVisitor<V, PRE_ORDER> {
         let kind = visitor.def_region_kind();
         if !PRE_ORDER {
             if let Some(interrupt) = visitor.default_visit(self, value)? {
+                core::hint::cold_path();
                 return Ok(Some(interrupt));
             }
         }
         match self.observer.visit(value, kind)? {
             WalkResult::Advance if PRE_ORDER => visitor.default_visit(self, value),
-            WalkResult::Advance | WalkResult::Skip => Ok(None),
-            WalkResult::Interrupt => Ok(Some(VisitInterrupt::with(Any::new()))),
-            WalkResult::InterruptWith(payload) => Ok(Some(VisitInterrupt::with(payload))),
+            WalkResult::Advance => Ok(None),
+            WalkResult::Skip => {
+                core::hint::cold_path();
+                Ok(None)
+            }
+            WalkResult::Interrupt => {
+                core::hint::cold_path();
+                Ok(Some(VisitInterrupt::with(Any::new())))
+            }
+            WalkResult::InterruptWith(payload) => {
+                core::hint::cold_path();
+                Ok(Some(VisitInterrupt::with(payload)))
+            }
         }
     }
 }
 
-fn run_walker<D: NativeVisit>(
+#[inline(always)]
+fn run_walker_raw<D: NativeVisit>(
     root: crate::tvm_ffi_sys::TVMFFIAny,
     observer: D,
     order: WalkOrder,
-) -> Any {
-    match order {
+) -> crate::tvm_ffi_sys::TVMFFIAny {
+    // Own the result while dropping the observer: user capture destructors can
+    // unwind after the native callback has returned.
+    let result = match order {
         WalkOrder::PreOrder => {
-            StructuralVisitEngine::run_visitor(root, &mut WalkVisitor::<D, true> { observer })
+            let mut visitor = WalkVisitor::<D, true> { observer };
+            let result = unsafe {
+                Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(root, &mut visitor))
+            };
+            drop(visitor);
+            result
         }
         WalkOrder::PostOrder => {
-            StructuralVisitEngine::run_visitor(root, &mut WalkVisitor::<D, false> { observer })
+            let mut visitor = WalkVisitor::<D, false> { observer };
+            let result = unsafe {
+                Any::from_raw_ffi_any(StructuralVisitEngine::run_visitor_raw(root, &mut visitor))
+            };
+            drop(visitor);
+            result
         }
-    }
+    };
+    unsafe { Any::into_raw_ffi_any(result) }
 }
 
 /// Walk `root` with an observer, the Rust analog of C++
