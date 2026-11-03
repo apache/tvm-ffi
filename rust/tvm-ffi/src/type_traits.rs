@@ -37,6 +37,14 @@ pub unsafe trait AnyCompatible: Sized {
     #[doc(hidden)]
     const MATCH_ANY_EXACT: bool = false;
 
+    /// Whether strict matching accepts exactly `match_any_exact_type_index()`.
+    /// Unlike `MATCH_ANY_EXACT`, this covers every tag, including scalars:
+    /// `check_any_strict` and `match_constraints` together must succeed if and
+    /// only if the index matches.
+    /// Container-element checks must have the same acceptance set.
+    #[doc(hidden)]
+    const MATCH_ANY_STRICT_EXACT: bool = false;
+
     /// Return the sole runtime object type index accepted by this conversion.
     #[doc(hidden)]
     fn match_any_exact_type_index() -> i32 {
@@ -73,6 +81,16 @@ pub unsafe trait AnyCompatible: Sized {
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny);
     // check if the value is compatible with the type
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool;
+
+    /// Additional value-preservation checks used only by `match_any!`, after
+    /// `check_any_strict` succeeds. Ordinary conversion APIs are unchanged.
+    ///
+    /// # Safety
+    /// `data` must have passed `Self::check_any_strict`.
+    #[doc(hidden)]
+    unsafe fn match_constraints(_data: &TVMFFIAny) -> bool {
+        true
+    }
 
     /// Copy value from TVMFFIAny after checking
     /// caller must ensure that the value is compatible with the type
@@ -209,6 +227,7 @@ mod container_element_ops {
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
         unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
         unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool;
+        unsafe fn container_match_constraints(data: &TVMFFIAny) -> bool;
         unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self;
         unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
         unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
@@ -231,6 +250,10 @@ mod container_element_ops {
         #[inline]
         unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool {
             <T as AnyCompatible>::check_any_strict(data)
+        }
+        #[inline]
+        unsafe fn container_match_constraints(data: &TVMFFIAny) -> bool {
+            <T as AnyCompatible>::match_constraints(data)
         }
 
         #[inline]
@@ -279,6 +302,10 @@ mod container_element_ops {
 
         #[inline]
         unsafe fn container_check_any_strict(_data: &TVMFFIAny) -> bool {
+            true
+        }
+        #[inline]
+        unsafe fn container_match_constraints(_data: &TVMFFIAny) -> bool {
             true
         }
 
@@ -373,6 +400,10 @@ macro_rules! impl_any_compatible_for_int {
                     data.type_index == TypeIndex::kTVMFFIInt as i32
                 }
 
+                unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+                    <$int_type>::try_from(data.data_union.v_int64).is_ok()
+                }
+
                 unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
                     data.data_union.v_int64 as $int_type
                 }
@@ -448,6 +479,10 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
         return T::check_any_strict(data) || data.type_index == TypeIndex::kTVMFFINone as i32;
+    }
+
+    unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+        data.type_index == TypeIndex::kTVMFFINone as i32 || T::match_constraints(data)
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
@@ -532,6 +567,11 @@ macro_rules! impl_any_compatible_for_float {
 
                 unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
                     data.type_index == TypeIndex::kTVMFFIFloat as i32
+                }
+
+                unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+                    let value = data.data_union.v_float64;
+                    ((value as $float_type) as f64).to_bits() == value.to_bits()
                 }
 
                 unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {

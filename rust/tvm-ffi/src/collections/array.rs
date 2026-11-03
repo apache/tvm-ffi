@@ -271,6 +271,18 @@ where
         true
     }
 
+    unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+        let container = &*(data.data_union.v_obj as *const ArrayObj);
+        let base_ptr = container.data as *const TVMFFIAny;
+        for i in 0..container.size {
+            let elem_any = &*base_ptr.add(i as usize);
+            if !T::container_match_constraints(elem_any) {
+                return false;
+            }
+        }
+        true
+    }
+
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIArray as i32;
         data.data_union.v_obj = ObjectArc::as_raw(Self::data(src)) as *mut TVMFFIObject;

@@ -28,10 +28,213 @@ use crate::{AnyCompatible, AnyView};
 #[doc(hidden)]
 pub type ArmId = u32;
 
-/// Conversion adapter used by `match_any!` typed arms.
+impl<'a, T> From<&'a crate::MutationView<'_, T>> for AnyView<'a> {
+    #[inline(always)]
+    fn from(value: &'a crate::MutationView<'_, T>) -> Self {
+        value.as_any_view()
+    }
+}
+
+/// Own the scrutinee before selecting its source adapter.
+#[doc(hidden)]
+pub struct SourceProbe<T>(Option<T>);
+impl<T> SourceProbe<T> {
+    #[inline(always)]
+    pub fn new(value: T) -> Self {
+        Self(Some(value))
+    }
+}
+
+#[doc(hidden)]
+pub struct OwnedSource(crate::Any);
+#[doc(hidden)]
+pub struct ViewSource<'a>(AnyView<'a>);
+#[doc(hidden)]
+pub struct CapabilitySource<'a>(Option<crate::MutationView<'a>>);
+
+/// Object references move into an owning Any; inherent adapters preserve view and
+/// capability lifetimes independently of the local holder's lifetime.
+#[doc(hidden)]
+pub trait PrepareSource {
+    type Source;
+    fn prepare(&mut self) -> Self::Source;
+}
+impl<T: crate::ObjectRefCore + AnyCompatible> PrepareSource for SourceProbe<T> {
+    type Source = OwnedSource;
+    #[inline(always)]
+    fn prepare(&mut self) -> Self::Source {
+        OwnedSource(self.0.take().unwrap().into())
+    }
+}
+impl SourceProbe<crate::Any> {
+    #[inline(always)]
+    pub fn prepare(&mut self) -> OwnedSource {
+        OwnedSource(self.0.take().unwrap())
+    }
+}
+impl<'a> SourceProbe<AnyView<'a>> {
+    #[inline(always)]
+    pub fn prepare(&mut self) -> ViewSource<'a> {
+        ViewSource(self.0.take().unwrap())
+    }
+}
+impl<'a, T: ?Sized> SourceProbe<&'a T> {
+    #[inline(always)]
+    pub fn prepare<'out>(&mut self) -> ViewSource<'out>
+    where
+        AnyView<'out>: From<&'a T>,
+    {
+        ViewSource(self.0.take().unwrap().into())
+    }
+}
+impl<'a, T> SourceProbe<crate::MutationView<'a, T>> {
+    #[inline(always)]
+    pub fn prepare(&mut self) -> CapabilitySource<'a> {
+        CapabilitySource(Some(self.0.take().unwrap().into_untyped()))
+    }
+}
+
+#[doc(hidden)]
+pub trait SourceView {
+    fn view(&self) -> AnyView<'_>;
+}
+impl SourceView for OwnedSource {
+    #[inline(always)]
+    fn view(&self) -> AnyView<'_> {
+        (&self.0).into()
+    }
+}
+impl SourceView for ViewSource<'_> {
+    #[inline(always)]
+    fn view(&self) -> AnyView<'_> {
+        self.0
+    }
+}
+impl SourceView for CapabilitySource<'_> {
+    #[inline(always)]
+    fn view(&self) -> AnyView<'_> {
+        self.0.as_ref().unwrap().as_any_view()
+    }
+}
+
+/// A rejected guard drops an ordinary result or returns the original capability.
+/// There is no Drop implementation, so native match guards retain Rust's usual
+/// restriction against moving their bindings before the guard succeeds.
+#[doc(hidden)]
+pub struct Matched<T, R> {
+    pub value: T,
+    recover: fn(T) -> R,
+}
+impl<T, R> Matched<T, R> {
+    #[inline(always)]
+    pub fn recover(self) -> R {
+        (self.recover)(self.value)
+    }
+}
+#[doc(hidden)]
+pub trait Restore<R> {
+    fn restore(&mut self, recovery: R);
+}
+impl<S> Restore<()> for S {
+    #[inline(always)]
+    fn restore(&mut self, _: ()) {}
+}
+impl<'a> Restore<crate::MutationView<'a>> for CapabilitySource<'a> {
+    #[inline(always)]
+    fn restore(&mut self, recovery: crate::MutationView<'a>) {
+        debug_assert!(self.0.is_none());
+        self.0 = Some(recovery);
+    }
+}
+
+/// Type-directed matching. The source parameter also expresses whether an
+/// aliased result can retain the input lifetime or transfer its capability.
+#[doc(hidden)]
+pub trait MatchPattern<S>: Sized {
+    type Recovery;
+    fn try_match(source: S) -> Result<Matched<Self, Self::Recovery>, ()>;
+}
+impl<'b, T: crate::type_traits::ContainerElement, S: SourceView> MatchPattern<&'b mut S> for T {
+    type Recovery = ();
+    #[inline(always)]
+    fn try_match(source: &'b mut S) -> Result<Matched<Self, ()>, ()> {
+        let view = source.view();
+        let data = view.as_raw_ffi_any();
+        unsafe {
+            if T::container_check_any_strict(data) && T::container_match_constraints(data) {
+                Ok(Matched {
+                    value: T::container_copy_from_any_view_after_check(data),
+                    recover: drop,
+                })
+            } else {
+                Err(())
+            }
+        }
+    }
+}
+impl<'a, 'b, 'out> MatchPattern<&'b mut ViewSource<'a>> for AnyView<'out>
+where
+    'a: 'out,
+{
+    type Recovery = ();
+    #[inline(always)]
+    fn try_match(source: &'b mut ViewSource<'a>) -> Result<Matched<Self, ()>, ()> {
+        Ok(Matched {
+            value: source.0,
+            recover: drop,
+        })
+    }
+}
+impl<'b> MatchPattern<&'b mut OwnedSource> for AnyView<'b> {
+    type Recovery = ();
+    #[inline(always)]
+    fn try_match(source: &'b mut OwnedSource) -> Result<Matched<Self, ()>, ()> {
+        Ok(Matched {
+            value: source.view(),
+            recover: drop,
+        })
+    }
+}
+impl<'a, 'b> MatchPattern<&'b mut CapabilitySource<'a>> for AnyView<'b> {
+    type Recovery = ();
+    #[inline(always)]
+    fn try_match(source: &'b mut CapabilitySource<'a>) -> Result<Matched<Self, ()>, ()> {
+        Ok(Matched {
+            value: source.view(),
+            recover: drop,
+        })
+    }
+}
+impl<'a, 'b, T: crate::type_traits::ContainerElement> MatchPattern<&'b mut CapabilitySource<'a>>
+    for crate::MutationView<'a, T>
+{
+    type Recovery = crate::MutationView<'a>;
+    #[inline(always)]
+    fn try_match(
+        source: &'b mut CapabilitySource<'a>,
+    ) -> Result<Matched<Self, Self::Recovery>, ()> {
+        match source.0.take().unwrap().try_cast::<T>() {
+            Ok(value) => {
+                if unsafe { T::container_match_constraints(value.as_any_view().as_raw_ffi_any()) } {
+                    Ok(Matched {
+                        value,
+                        recover: crate::MutationView::into_untyped,
+                    })
+                } else {
+                    source.0 = Some(value.into_untyped());
+                    Err(())
+                }
+            }
+            Err(value) => {
+                source.0 = Some(value);
+                Err(())
+            }
+        }
+    }
+}
+
 #[doc(hidden)]
 pub struct PatternConversionProbe<T>(PhantomData<fn() -> T>);
-
 impl<T> PatternConversionProbe<T> {
     #[doc(hidden)]
     pub const fn new() -> Self {
@@ -39,111 +242,54 @@ impl<T> PatternConversionProbe<T> {
     }
 }
 
-/// Prefer the lightweight `AnyCompatible` conversion while retaining a
-/// `TryInto` fallback for custom matcher types.
 #[doc(hidden)]
-pub trait PatternConversion<'a, T> {
-    #[doc(hidden)]
-    fn try_convert(&self, view: AnyView<'a>) -> Result<T, ()>;
-
-    /// Convert after exact-leaf lookup has established that `view` matches
-    /// `T`. Custom `TryInto` matchers retain their checked conversion.
-    ///
-    /// # Safety
-    ///
-    /// The caller must establish the `AnyCompatible::MATCH_ANY_EXACT`
-    /// contract before using the unchecked implementation.
-    #[doc(hidden)]
-    unsafe fn try_convert_after_exact_match(&self, view: AnyView<'a>) -> Result<T, ()> {
-        self.try_convert(view)
-    }
-}
-
-impl<'a, T: AnyCompatible> PatternConversion<'a, T> for PatternConversionProbe<T> {
-    #[inline(always)]
-    fn try_convert(&self, view: AnyView<'a>) -> Result<T, ()> {
-        if T::MATCH_ANY_EXACT {
-            if view.type_index() == T::match_any_exact_type_index() {
-                Ok(unsafe { crate::any::copy_from_any_view_after_check::<T>(&view) })
-            } else {
-                Err(())
-            }
-        } else {
-            crate::any::try_cast_from_any_view::<T>(&view)
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn try_convert_after_exact_match(&self, view: AnyView<'a>) -> Result<T, ()> {
-        Ok(crate::any::copy_from_any_view_after_check::<T>(&view))
-    }
-}
-
-impl<'a, T> PatternConversion<'a, T> for &PatternConversionProbe<T>
-where
-    AnyView<'a>: TryInto<T>,
-{
-    #[inline(always)]
-    fn try_convert(&self, view: AnyView<'a>) -> Result<T, ()> {
-        view.try_into().map_err(|_| ())
-    }
-}
-
-/// Conversion for a shared `ref` binding, borrowing object nodes while retaining
-/// the ordinary owning conversion for object handles and custom matchers.
-#[doc(hidden)]
-pub trait RefPatternConversion<'view, 'value, T> {
-    #[doc(hidden)]
+pub trait RefPatternMetadata {
     type LeafPattern;
-
-    #[doc(hidden)]
     fn leaf_pattern(&self) -> PhantomData<Self::LeafPattern> {
         PhantomData
     }
-
-    #[doc(hidden)]
-    type Holder: std::borrow::Borrow<T>;
-
-    #[doc(hidden)]
-    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()>;
+}
+impl<T: crate::object::ObjectCore> RefPatternMetadata for &&PatternConversionProbe<T> {
+    type LeafPattern = BorrowedLeaf<T>;
+}
+impl<T> RefPatternMetadata for &PatternConversionProbe<T> {
+    type LeafPattern = StrictLeaf<T>;
 }
 
-// The macro starts at three references. Autoderef selects the first applicable
-// implementation: borrowed ObjectCore, AnyCompatible, then custom TryInto.
-impl<'view, 'value, T: crate::object::ObjectCore> RefPatternConversion<'view, 'value, T>
+#[doc(hidden)]
+pub trait RefPatternConversion<'b, S, T> {
+    type Holder: std::borrow::Borrow<T>;
+    type Recovery;
+    fn try_convert_ref(
+        &self,
+        source: &'b mut S,
+    ) -> Result<Matched<Self::Holder, Self::Recovery>, ()>;
+}
+impl<'b, T: crate::object::ObjectCore, S: SourceView> RefPatternConversion<'b, S, T>
     for &&PatternConversionProbe<T>
 {
-    type LeafPattern = BorrowedLeaf<T>;
-    type Holder = &'view T;
-
+    type Holder = &'b T;
+    type Recovery = ();
     #[inline(always)]
-    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()> {
-        view.downcast_ref::<T>().ok_or(())
+    fn try_convert_ref(&self, source: &'b mut S) -> Result<Matched<Self::Holder, ()>, ()> {
+        let view = source.view();
+        let node = view.downcast_ref::<T>().ok_or(())? as *const T;
+        // SAFETY: the checked node is borrowed from source for 'b. No owning
+        // conversion or capability transfer can occur while this borrow lives.
+        Ok(Matched {
+            value: unsafe { &*node },
+            recover: drop,
+        })
     }
 }
-
-impl<'view, 'value, T: AnyCompatible> RefPatternConversion<'view, 'value, T>
+impl<'b, S: 'b, T: MatchPattern<&'b mut S>> RefPatternConversion<'b, S, T>
     for &PatternConversionProbe<T>
 {
-    type LeafPattern = T;
     type Holder = T;
-
+    type Recovery = T::Recovery;
     #[inline(always)]
-    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()> {
-        (*self).try_convert(*view)
-    }
-}
-
-impl<'view, 'value, T> RefPatternConversion<'view, 'value, T> for PatternConversionProbe<T>
-where
-    AnyView<'value>: TryInto<T>,
-{
-    type LeafPattern = T;
-    type Holder = T;
-
-    #[inline(always)]
-    fn try_convert_ref(&self, view: &'view AnyView<'value>) -> Result<Self::Holder, ()> {
-        (*view).try_into().map_err(|_| ())
+    fn try_convert_ref(&self, source: &'b mut S) -> Result<Matched<T, Self::Recovery>, ()> {
+        T::try_match(source)
     }
 }
 
@@ -215,17 +361,32 @@ impl LeafLookupTable {
 }
 
 /// Type-level list used to collect leaf object-pattern metadata.
+/// Its cache identity uses final object representations, so matcher lifetimes
+/// never need to be static. Unknown generic/custom types use the probe fallback.
 #[doc(hidden)]
-pub trait LeafPatternList: 'static {
+pub trait LeafPatternList {
+    #[doc(hidden)]
+    type Key: 'static;
+
     #[doc(hidden)]
     const ALL_EXACT_LEAF: bool;
+
+    /// Validate that the final payload identity describes this exact matcher.
+    #[doc(hidden)]
+    fn matches_key() -> bool;
 
     #[doc(hidden)]
     fn fill_leaf_type_indices(out: &mut [i32]);
 }
 
 impl LeafPatternList for () {
+    type Key = ();
     const ALL_EXACT_LEAF: bool = true;
+
+    #[inline(always)]
+    fn matches_key() -> bool {
+        true
+    }
 
     #[inline(always)]
     fn fill_leaf_type_indices(out: &mut [i32]) {
@@ -235,10 +396,23 @@ impl LeafPatternList for () {
 
 impl<Head, Tail> LeafPatternList for (Head, Tail)
 where
-    Head: AnyCompatible + 'static,
+    Head: AnyCompatible + crate::object::ObjectRefCore,
     Tail: LeafPatternList,
 {
-    const ALL_EXACT_LEAF: bool = Head::MATCH_ANY_EXACT && Tail::ALL_EXACT_LEAF;
+    type Key = (
+        <Head as crate::object::ObjectRefCore>::ContainerType,
+        Tail::Key,
+    );
+    const ALL_EXACT_LEAF: bool = Head::MATCH_ANY_EXACT
+        && <Head::ContainerType as crate::object::ObjectCore>::TYPE_FINAL
+        && Tail::ALL_EXACT_LEAF;
+
+    #[inline(always)]
+    fn matches_key() -> bool {
+        Head::match_any_exact_type_index()
+            == <Head::ContainerType as crate::object::ObjectCore>::type_index()
+            && Tail::matches_key()
+    }
 
     #[inline(always)]
     fn fill_leaf_type_indices(out: &mut [i32]) {
@@ -250,6 +424,53 @@ where
     }
 }
 
+/// Strict matching metadata is independent of coercive conversion metadata.
+#[doc(hidden)]
+pub struct StrictLeaf<T>(PhantomData<fn() -> T>);
+
+impl<Head, Tail> LeafPatternList for (StrictLeaf<Head>, Tail)
+where
+    Head: AnyCompatible + crate::object::ObjectRefCore,
+    Tail: LeafPatternList,
+{
+    type Key = (
+        <Head as crate::object::ObjectRefCore>::ContainerType,
+        Tail::Key,
+    );
+    const ALL_EXACT_LEAF: bool = Head::MATCH_ANY_STRICT_EXACT
+        && <Head::ContainerType as crate::object::ObjectCore>::TYPE_FINAL
+        && Tail::ALL_EXACT_LEAF;
+
+    #[inline(always)]
+    fn matches_key() -> bool {
+        Head::match_any_exact_type_index()
+            == <Head::ContainerType as crate::object::ObjectCore>::type_index()
+            && Tail::matches_key()
+    }
+
+    #[inline(always)]
+    fn fill_leaf_type_indices(out: &mut [i32]) {
+        let (head, tail) = out.split_first_mut().expect("missing leaf pattern slot");
+        *head = Head::match_any_exact_type_index();
+        Tail::fill_leaf_type_indices(tail);
+    }
+}
+
+impl<'a, Head, Tail> LeafPatternList for (StrictLeaf<crate::MutationView<'a, Head>>, Tail)
+where
+    Head: AnyCompatible + crate::object::ObjectRefCore,
+    Tail: LeafPatternList,
+{
+    type Key = <(StrictLeaf<Head>, Tail) as LeafPatternList>::Key;
+    const ALL_EXACT_LEAF: bool = <(StrictLeaf<Head>, Tail) as LeafPatternList>::ALL_EXACT_LEAF;
+    fn matches_key() -> bool {
+        <(StrictLeaf<Head>, Tail) as LeafPatternList>::matches_key()
+    }
+    fn fill_leaf_type_indices(out: &mut [i32]) {
+        <(StrictLeaf<Head>, Tail) as LeafPatternList>::fill_leaf_type_indices(out);
+    }
+}
+
 /// Lifetime-free metadata for a borrowed object node pattern.
 #[doc(hidden)]
 pub struct BorrowedLeaf<T>(PhantomData<fn() -> T>);
@@ -257,7 +478,13 @@ pub struct BorrowedLeaf<T>(PhantomData<fn() -> T>);
 impl<Head: crate::object::ObjectCore, Tail: LeafPatternList> LeafPatternList
     for (BorrowedLeaf<Head>, Tail)
 {
+    type Key = (Head, Tail::Key);
     const ALL_EXACT_LEAF: bool = Head::TYPE_FINAL && Tail::ALL_EXACT_LEAF;
+
+    #[inline(always)]
+    fn matches_key() -> bool {
+        Tail::matches_key()
+    }
 
     #[inline(always)]
     fn fill_leaf_type_indices(out: &mut [i32]) {
@@ -300,7 +527,7 @@ impl<T> LeafPatternMetadata for &LeafPatternProbe<T> {}
 impl<T: LeafPatternList> LeafPatternMetadata for LeafPatternProbe<T> {
     #[inline(always)]
     fn leaf_pattern_list_id(&self) -> Option<TypeId> {
-        T::ALL_EXACT_LEAF.then(TypeId::of::<T>)
+        (T::ALL_EXACT_LEAF && T::matches_key()).then(TypeId::of::<T::Key>)
     }
 
     #[inline(always)]

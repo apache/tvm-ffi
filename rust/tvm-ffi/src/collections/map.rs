@@ -291,7 +291,7 @@ where
 
     /// Reads all entries as raw `(Any, Any)` pairs without converting to
     /// `K`/`V`, propagating FFI failures instead of panicking (unlike the
-    /// iterator API): this backs `check_any_strict` and
+    /// iterator API): this backs strict checks and the converting fallback in
     /// `try_cast_from_any_view`, which run during argument decoding where a
     /// panic could unwind across the C ABI.
     fn try_raw_entries(&self) -> Result<Vec<(Any, Any)>> {
@@ -491,6 +491,17 @@ where
             Ok(entries) => entries.iter().all(|(k, v)| unsafe {
                 K::container_check_any_strict(k.as_raw_ffi_any())
                     && V::container_check_any_strict(v.as_raw_ffi_any())
+            }),
+            Err(_) => false,
+        }
+    }
+
+    unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+        let map = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
+        match map.try_raw_entries() {
+            Ok(entries) => entries.iter().all(|(k, v)| unsafe {
+                K::container_match_constraints(k.as_raw_ffi_any())
+                    && V::container_match_constraints(v.as_raw_ffi_any())
             }),
             Err(_) => false,
         }
