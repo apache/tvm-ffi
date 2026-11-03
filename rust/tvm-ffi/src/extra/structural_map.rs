@@ -36,46 +36,6 @@ use std::marker::PhantomData;
 // Map adapter to Dispatcher.
 // -----------------------------------------------------------------------------
 
-/// Ordered typed replacement dispatch for [`structural_map`].
-///
-/// This private engine bridge consumes the common normalized map signature.
-/// `None` means no handler matched and preserves the current value; matching
-/// and handler conversion are supplied by `Dispatcher`.
-pub(crate) trait MapDispatch: Sized {
-    fn dispatch_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>>;
-}
-
-/// Internal root-mapping protocol used by [`IntoMapper`].
-#[doc(hidden)]
-pub trait NativeMap: Sized {
-    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any>;
-}
-
-impl<D: MapDispatch> NativeMap for D {
-    fn map_root(mut self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_native_mapper(root, &mut self, order)
-    }
-}
-
-impl<V> MapDispatch for V
-where
-    for<'receiver, 'value> &'receiver mut V:
-        Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Any>>>,
-{
-    #[inline(always)]
-    fn dispatch_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        self.dispatch_tuple((value, def_region_kind))
-    }
-}
-
 /// Conversion into the mapper consumed by [`structural_map`].
 #[diagnostic::on_unimplemented(
     message = "unsupported structural-map callback shape",
@@ -83,28 +43,29 @@ where
     note = "pass `&mut` a matching `Dispatcher`, a supported closure or callback tuple"
 )]
 pub trait IntoMapper<Marker> {
-    type Mapper: NativeMap;
+    type Mapper;
     fn into_mapper(self) -> Self::Mapper;
+    #[doc(hidden)]
+    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any>;
 }
 
 #[doc(hidden)]
 pub enum ByMapDispatch {}
 
-impl<'a, V: MapDispatch> IntoMapper<ByMapDispatch> for &'a mut V {
-    type Mapper = DispatchMapper<'a, V>;
+impl<'a, V> IntoMapper<ByMapDispatch> for &'a mut V
+where
+    for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
+{
+    type Mapper = &'a mut V;
 
     #[inline(always)]
     fn into_mapper(self) -> Self::Mapper {
-        DispatchMapper(self)
+        self
     }
-}
 
-#[doc(hidden)]
-pub struct DispatchMapper<'a, V>(&'a mut V);
-
-impl<V: MapDispatch> NativeMap for DispatchMapper<'_, V> {
+    #[inline(always)]
     fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_native_mapper(root, self.0, order)
+        run_mapper::<V>(root, self, order)
     }
 }
 
@@ -122,7 +83,7 @@ pub trait MapChainLink<Marker>: sealed_map::SealedMapLink<Marker> {
 }
 
 mod sealed_map {
-    use super::{AnyView, DefRegionKind, IntoMutateResult, MapDispatch, ObjectCore};
+    use super::{Any, AnyView, DefRegionKind, Dispatcher, IntoMutateResult, ObjectCore, Result};
 
     pub trait SealedMapLink<Marker> {}
 
@@ -168,7 +129,10 @@ mod sealed_map {
     {
     }
 
-    impl<V: MapDispatch> SealedMapLink<super::ByMapDispatchLink> for &mut V {}
+    impl<V> SealedMapLink<super::ByMapDispatchLink> for &mut V where
+        for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>
+    {
+    }
 }
 
 #[doc(hidden)]
@@ -297,14 +261,17 @@ pub struct ByMapChainLink<Markers>(PhantomData<fn(Markers)>);
 #[doc(hidden)]
 pub enum ByMapDispatchLink {}
 
-impl<V: MapDispatch> MapChainLink<ByMapDispatchLink> for &mut V {
+impl<V> MapChainLink<ByMapDispatchLink> for &mut V
+where
+    for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
+{
     #[inline(always)]
     fn try_map(
         &mut self,
         value: AnyView<'_>,
         def_region_kind: DefRegionKind,
     ) -> Option<Result<Any>> {
-        self.dispatch_map(value, def_region_kind)
+        self.dispatch_tuple((value, def_region_kind))
     }
 }
 
@@ -377,6 +344,11 @@ macro_rules! impl_map_chain_link {
             fn into_mapper(self) -> Self::Mapper {
                 MapChain::new(self)
             }
+
+            #[inline(always)]
+            fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
+                run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
+            }
         }
     };
 }
@@ -397,6 +369,11 @@ macro_rules! impl_bare_map_link {
                 #[inline(always)]
                 fn into_mapper(self) -> Self::Mapper {
                     MapChain::new(self)
+                }
+
+                #[inline(always)]
+                fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
+                    run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
                 }
             }
         )+
@@ -421,6 +398,11 @@ where
     fn into_mapper(self) -> Self::Mapper {
         MapChain::new(self)
     }
+
+    #[inline(always)]
+    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
+        run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
+    }
 }
 
 impl<F, O> IntoMapper<ByMapCatchAllKind> for F
@@ -434,51 +416,66 @@ where
     fn into_mapper(self) -> Self::Mapper {
         MapChain::new(self)
     }
+
+    #[inline(always)]
+    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
+        run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
+    }
 }
 
 // -----------------------------------------------------------------------------
 // Implementation of map.
 // -----------------------------------------------------------------------------
 
-struct NativeMapper<'a, D, const PRE_ORDER: bool> {
+struct MapMutator<'a, D, const PRE_ORDER: bool> {
     dispatch: &'a mut D,
 }
 
-fn run_native_mapper<D: MapDispatch>(root: Any, dispatch: &mut D, order: WalkOrder) -> Result<Any> {
+fn run_mapper<D>(root: Any, dispatch: &mut D, order: WalkOrder) -> Result<Any>
+where
+    for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
+{
     match order {
-        WalkOrder::PreOrder => StructuralMutateEngine::run_mutator::<_, false>(
-            root,
-            &mut NativeMapper::<D, true> { dispatch },
-        ),
-        WalkOrder::PostOrder => StructuralMutateEngine::run_mutator::<_, false>(
-            root,
-            &mut NativeMapper::<D, false> { dispatch },
-        ),
+        WalkOrder::PreOrder => {
+            StructuralMutateEngine::run_mutator::<MapMutator<'_, D, true>, false>(
+                root,
+                &mut MapMutator::<D, true> { dispatch },
+            )
+        }
+        WalkOrder::PostOrder => StructuralMutateEngine::run_mutator::<
+            MapMutator<'_, D, false>,
+            false,
+        >(root, &mut MapMutator::<D, false> { dispatch }),
     }
 }
 
-impl<'v, 'c, 'r, 'a, D: MapDispatch, const PRE_ORDER: bool>
+impl<'v, 'c, 'r, 'a, D, const PRE_ORDER: bool>
     Dispatcher<
         (
             MutationView<'v>,
-            &'c mut StructuralMutatorView<'r, NativeMapper<'a, D, PRE_ORDER>>,
+            &'c mut StructuralMutatorView<'r, MapMutator<'a, D, PRE_ORDER>>,
         ),
         Option<Result<Any>>,
-    > for &mut NativeMapper<'a, D, PRE_ORDER>
+    > for &mut MapMutator<'a, D, PRE_ORDER>
+where
+    for<'s, 'value> &'s mut D: Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Any>>>,
 {
     #[inline(always)]
     fn dispatch_tuple(
         self,
         (value, mutator): (
             MutationView<'v>,
-            &'c mut StructuralMutatorView<'r, NativeMapper<'a, D, PRE_ORDER>>,
+            &'c mut StructuralMutatorView<'r, MapMutator<'a, D, PRE_ORDER>>,
         ),
     ) -> Option<Result<Any>> {
         Some(self.map_current(value, mutator))
     }
 }
 
-impl<D: MapDispatch, const PRE_ORDER: bool> NativeMapper<'_, D, PRE_ORDER> {
+impl<D, const PRE_ORDER: bool> MapMutator<'_, D, PRE_ORDER>
+where
+    for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
+{
     #[inline(always)]
     fn map_current(
         &mut self,
@@ -492,7 +489,7 @@ impl<D: MapDispatch, const PRE_ORDER: bool> NativeMapper<'_, D, PRE_ORDER> {
             // Snapshot permission before a callback can retain or release ownership.
             let Some(callback_result) = self
                 .dispatch
-                .dispatch_map(unsafe { borrowed_view(&raw) }, kind)
+                .dispatch_tuple((unsafe { borrowed_view(&raw) }, kind))
             else {
                 return mutator.default_mutate(self, value).map(Into::into);
             };
@@ -517,7 +514,7 @@ impl<D: MapDispatch, const PRE_ORDER: bool> NativeMapper<'_, D, PRE_ORDER> {
             } else {
                 AnyView::from(&mapped)
             };
-            match self.dispatch.dispatch_map(current, kind) {
+            match self.dispatch.dispatch_tuple((current, kind)) {
                 Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
                 Some(result) => result.map_err(|error| with_value_context(error, raw_of(current))),
                 None => Ok(mapped),
@@ -571,5 +568,5 @@ where
     R: Into<Any>,
     H: IntoMapper<M>,
 {
-    mapper.into_mapper().map_root(root.into(), order)
+    mapper.map_root(root.into(), order)
 }
