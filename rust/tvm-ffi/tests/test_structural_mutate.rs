@@ -19,25 +19,28 @@
 
 use std::cell::{Cell, RefCell};
 use tvm_ffi::collections::map::MapObj;
+use tvm_ffi::extra::structural_mutate::{
+    IntoMutateResult, StructuralMutator, StructuralMutatorBase, StructuralMutatorObj,
+};
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
-    Array, DefRegionKind, DefaultContextPolicy, DefaultMutationContextPolicy, Error, FieldGetter,
-    Function, InplaceMode, IntoMapper, Map, MapDispatch, MapWithContextPolicy, MutateCallbacks,
-    MutationContext, MutationContextPolicy, MutationView, Mutator, Object, ObjectArc,
-    ObjectRefCore, Result, String as FfiString, StructuralMutator, StructuralVarRemap,
-    StructuralVisitor, TypeIndex, Unchanged, UnchangedOr, VisitCallbacks, VisitContext,
-    VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
+    Array, DefRegionKind, Dispatcher, Error, FieldGetter, Function, InplaceMode, IntoMapper, Map,
+    MutationView, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
+    StructuralMutatorView, StructuralVarRemap, StructuralVisitorView, TypeIndex, Unchanged,
+    UnchangedOr, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
 
-impl MapDispatch for IncrementIntegers {
-    fn dispatch_map(
-        &mut self,
-        value: AnyView<'_>,
-        _def_region_kind: DefRegionKind,
+impl<'receiver, 'value> Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Any>>>
+    for &'receiver mut IncrementIntegers
+{
+    #[inline(always)]
+    fn dispatch_tuple(
+        self,
+        (value, _def_region_kind): (AnyView<'value>, DefRegionKind),
     ) -> Option<Result<Any>> {
         value
             .try_as::<i64>()
@@ -45,120 +48,206 @@ impl MapDispatch for IncrementIntegers {
     }
 }
 
+#[repr(C, align(64))]
+struct ScopedMutateBase<'a> {
+    base: StructuralMutatorObj,
+    depth: &'a Cell<usize>,
+    calls: &'a Cell<usize>,
+}
+impl<'a> ScopedMutateBase<'a> {
+    fn new(depth: &'a Cell<usize>, calls: &'a Cell<usize>) -> Self {
+        Self {
+            base: StructuralMutatorObj::default(),
+            depth,
+            calls,
+        }
+    }
+}
+// SAFETY: the ABI prefix is first; only copied external Cell references span
+// recursion, and the guard restores scoped state on every exit.
+unsafe impl StructuralMutatorBase for ScopedMutateBase<'_> {
+    unsafe fn default_mutate<D>(
+        this: *mut Self,
+        dispatch: &mut D,
+        value: MutationView<'_>,
+        mutator: &mut StructuralMutatorView<'_, D>,
+    ) -> Result<UnchangedOr<Any>> {
+        assert_eq!(this.addr() % 64, 0);
+        let depth = (*this).depth;
+        let previous = depth.get();
+        depth.set(previous + 1);
+        (*this).calls.set((*this).calls.get() + 1);
+        struct Restore<'a>(&'a Cell<usize>, usize);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.1);
+            }
+        }
+        let _restore = Restore(depth, previous);
+        StructuralMutatorObj::default_mutate(dispatch, value, mutator)
+    }
+}
+
 #[derive(Default)]
 struct ManualIncrement {
     remap: StructuralVarRemap,
-}
-
-impl StructuralMutator for ManualIncrement {
-    fn dispatch_mutate(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        if let Some(integer) = value.try_as::<i64>() {
-            Ok(Any::from(integer + 1))
-        } else {
-            self.default_mutate(&value, def_region_kind)
-        }
-    }
-
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
-    }
-
-    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
-        self.remap.get(var)
-    }
-
-    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
-        self.remap.set(var, mutated_value)
-    }
+    remap_probe: Option<Any>,
 }
 
 #[derive(Default)]
 struct ReplaceNone {
-    remap: StructuralVarRemap,
     calls: usize,
 }
 
-impl StructuralMutator for ReplaceNone {
-    fn dispatch_mutate(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        if value.type_index() == TypeIndex::kTVMFFINone as i32 {
-            self.calls += 1;
-            Ok(Any::from(8i64))
-        } else {
-            self.default_mutate(&value, def_region_kind)
-        }
-    }
-
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
-    }
-
-    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
-        self.remap.get(var)
-    }
-
-    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
-        self.remap.set(var, mutated_value)
-    }
-}
-
 struct RecursiveEntryMutator {
-    remap: StructuralVarRemap,
     use_owned_value: bool,
     owned_value_pointer: Option<usize>,
 }
 
-impl StructuralMutator for RecursiveEntryMutator {
-    fn dispatch_mutate(
+impl<'s, 'v, 'c, 'r>
+    Dispatcher<
+        (
+            MutationView<'v>,
+            &'c mut StructuralMutatorView<'r, ManualIncrement>,
+        ),
+        Option<Result<Any>>,
+    > for &'s mut ManualIncrement
+{
+    #[inline(always)]
+    fn dispatch_tuple(
+        self,
+        (value, mutator): (
+            MutationView<'v>,
+            &'c mut StructuralMutatorView<'r, ManualIncrement>,
+        ),
+    ) -> Option<Result<Any>> {
+        Some(if value.as_any_view().try_as::<bool>() == Some(true) {
+            let key = self.remap_probe.as_ref().unwrap().clone();
+            (|| {
+                assert!(mutator.var_remap_get(self, AnyView::from(&key))?.is_none());
+                assert!(mutator.var_remap_get(self, AnyView::from(&1_i64)).is_err());
+                assert!(mutator
+                    .var_remap_set(self, AnyView::from(&1_i64), &Any::new())
+                    .is_err());
+                let initial = mutator.def_region_kind();
+                mutator.with_def_region_kind(DefRegionKind::Pattern, |mutator| {
+                    assert_eq!(mutator.def_region_kind(), DefRegionKind::Pattern);
+                    mutator.var_remap_set(self, AnyView::from(&key), &Any::new())?;
+                    assert_eq!(
+                        mutator
+                            .var_remap_get(self, AnyView::from(&key))?
+                            .unwrap()
+                            .type_index(),
+                        TypeIndex::kTVMFFINone as i32
+                    );
+                    // A None replacement does not suppress reflected descent.
+                    let result =
+                        mutator.mutate(self, MutationView::borrowed(AnyView::from(&key)))?;
+                    assert_eq!(
+                        RemapNode::try_from(result.value_or_else(|| key.clone()))?
+                            .data
+                            .value,
+                        8
+                    );
+                    mutator.var_remap_set(self, AnyView::from(&key), &Any::from(41i64))
+                })?;
+                assert_eq!(mutator.def_region_kind(), initial);
+                let replacement = mutator.var_remap_get(self, AnyView::from(&key))?.unwrap();
+                self.remap.set(AnyView::from(&key), &replacement)?;
+                Ok(replacement)
+            })()
+        } else if let Some(integer) = value.as_any_view().try_as::<i64>() {
+            Ok(Any::from(integer + 1))
+        } else {
+            mutator.default_mutate(self, value).map(Into::into)
+        })
+    }
+}
+#[dispatch(map)]
+impl ManualIncrement {
+    fn map_integer(&mut self, value: i64, _: DefRegionKind) -> Result<Any> {
+        Ok(Any::from(value + 1))
+    }
+}
+#[dispatch(mutate, MutationView)]
+impl ReplaceNone {
+    fn mutate_any(
         &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
+        value: MutationView<'_>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
     ) -> Result<Any> {
-        if value.type_index() == TypeIndex::kTVMFFINone as i32 {
+        if value.as_any_view().type_index() == TypeIndex::kTVMFFINone as i32 {
+            self.calls += 1;
+            Ok(Any::from(8i64))
+        } else {
+            mutator.default_mutate(self, value).map(Into::into)
+        }
+    }
+}
+#[dispatch(mutate, MutationView)]
+impl RecursiveEntryMutator {
+    fn mutate_any(
+        &mut self,
+        value: MutationView<'_>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
+        if value.as_any_view().type_index() == TypeIndex::kTVMFFINone as i32 {
             if self.use_owned_value {
                 let value = Array::new(vec![1i64]);
                 self.owned_value_pointer = Some(array_pointer(&value) as usize);
-                self.maybe_inplace_mutate(value, def_region_kind)
+                let mut owner: Any = value.into();
+                let change = mutator.mutate(self, &mut owner)?;
+                Ok(change.value_or(owner))
             } else {
-                self.mutate(&1i64, def_region_kind)
+                mutator
+                    .mutate(self, MutationView::borrowed(AnyView::from(&1i64)))
+                    .map(Into::into)
             }
-        } else if let Some(integer) = value.try_as::<i64>() {
+        } else if let Some(integer) = value.as_any_view().try_as::<i64>() {
             Ok(Any::from(integer + 1))
         } else {
-            self.default_mutate(&value, def_region_kind)
+            mutator.default_mutate(self, value).map(Into::into)
         }
     }
+}
 
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
-    }
+#[repr(C)]
+#[derive(tvm_ffi::derive::Object)]
+#[type_key = "testing.rust.MutationRemapNode"]
+#[type_register]
+#[type_s_eq_hash_kind = "DAGNode"]
+struct RemapNodeObj {
+    base: Object,
+    #[reflect]
+    value: i64,
+}
 
-    fn var_remap_get(&mut self, var: AnyView<'_>) -> Result<Option<Any>> {
-        self.remap.get(var)
-    }
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+struct RemapNode {
+    data: ObjectArc<RemapNodeObj>,
+}
 
-    fn var_remap_set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
-        self.remap.set(var, mutated_value)
-    }
+#[repr(C)]
+#[derive(tvm_ffi::derive::Object)]
+#[type_key = "testing.rust.MutationFieldNode"]
+#[type_register]
+struct FieldNodeObj {
+    base: Object,
+    a: Array<i64>,
+    b: Any,
+}
+
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+struct FieldNode {
+    data: ObjectArc<FieldNodeObj>,
+}
+
+tvm_ffi::static_init_block! {
+    // Register before the parallel tests read the runtime type table.
+    <RemapNodeObj as tvm_ffi::object::ObjectCore>::type_index();
+    <FieldNodeObj as tvm_ffi::object::ObjectCore>::type_index();
 }
 
 fn reflected_object() -> Any {
@@ -258,18 +347,21 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
 
 #[test]
 fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
+    assert_eq!(
+        std::mem::size_of::<StructuralMutatorView<'_, ManualIncrement>>(),
+        std::mem::size_of::<*mut ()>()
+    );
     let unique = Array::new(vec![1i64, 2]);
     let unique_pointer = array_pointer(&unique);
-    let mutated =
-        structural_mutate::<Array<i64>, ManualIncrement>(unique, &mut ManualIncrement::default())
-            .and_then(Array::<i64>::try_from)
-            .unwrap();
+    let mutated = structural_mutate::<Array<i64>, _>(unique, ManualIncrement::default())
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_eq!(array_pointer(&mutated), unique_pointer);
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 
     let source = Array::new(vec![3i64]);
     let source_pointer = array_pointer(&source);
-    let mutated = structural_mutate(source.clone(), &mut ManualIncrement::default())
+    let mutated = structural_mutate(source.clone(), ManualIncrement::default())
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_ne!(array_pointer(&mutated), source_pointer);
@@ -278,7 +370,7 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
 
     let map: Map<i64, i64> = [(1, 10)].into_iter().collect();
     let source_map_pointer = map_pointer(&map);
-    let mutated_map = structural_mutate(map, &mut ManualIncrement::default())
+    let mutated_map = structural_mutate(map, ManualIncrement::default())
         .and_then(Map::<i64, i64>::try_from)
         .unwrap();
     assert_eq!(map_pointer(&mutated_map), source_map_pointer);
@@ -286,9 +378,65 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
 
     let dict = call_global("ffi.Dict", &[Any::from(1i64), Any::from(10i64)]);
     let dict_pointer = any_object_pointer(&dict);
-    let mutated_dict = structural_mutate(dict, &mut ManualIncrement::default()).unwrap();
+    let mutated_dict = structural_mutate(dict, ManualIncrement::default()).unwrap();
     assert_eq!(any_object_pointer(&mutated_dict), dict_pointer);
     assert_eq!(dict_item(&mutated_dict, 1), 11);
+
+    let key = Any::from(RemapNode {
+        data: ObjectArc::new(RemapNodeObj {
+            base: Object::new(),
+            value: 7,
+        }),
+    });
+    let mut dispatch = ManualIncrement::default();
+    let first = structural_mutate(Array::new(vec![key.clone(), key.clone()]), &mut dispatch)
+        .and_then(Array::<Any>::try_from)
+        .unwrap();
+    let first_node = first.get(0).unwrap();
+    assert_eq!(
+        any_object_pointer(&first_node),
+        any_object_pointer(&first.get(1).unwrap())
+    );
+    assert_eq!(
+        RemapNode::try_from(first_node.clone()).unwrap().data.value,
+        8
+    );
+    let second = structural_mutate(key.clone(), &mut dispatch).unwrap();
+    assert_ne!(any_object_pointer(&first_node), any_object_pointer(&second));
+    assert_eq!(RemapNode::try_from(second).unwrap().data.value, 8);
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        let first = structural_map(
+            Array::new(vec![key.clone(), key.clone()]),
+            &mut dispatch,
+            order,
+        )
+        .and_then(Array::<Any>::try_from)
+        .unwrap();
+        let first_node = first.get(0).unwrap();
+        assert_eq!(
+            any_object_pointer(&first_node),
+            any_object_pointer(&first.get(1).unwrap())
+        );
+        assert_eq!(
+            RemapNode::try_from(first_node.clone()).unwrap().data.value,
+            8
+        );
+        let second = structural_map(key.clone(), &mut dispatch, order).unwrap();
+        assert_ne!(any_object_pointer(&first_node), any_object_pointer(&second));
+    }
+    dispatch.remap_probe = Some(key.clone());
+    for _ in 0..2 {
+        assert_eq!(
+            i64::try_from(structural_mutate(true, &mut dispatch).unwrap()).unwrap(),
+            41
+        );
+        assert_eq!(
+            i64::try_from(dispatch.remap.get(AnyView::from(&key)).unwrap().unwrap()).unwrap(),
+            41
+        );
+    }
+    dispatch.remap.clear();
+    assert!(dispatch.remap.get(AnyView::from(&key)).unwrap().is_none());
 }
 
 #[test]
@@ -319,7 +467,6 @@ fn none_values_are_dispatched_to_map_callbacks_and_user_mutators() {
 #[test]
 fn user_mutator_recursive_entries_reenter_the_same_mutator() {
     let mut borrowed = RecursiveEntryMutator {
-        remap: StructuralVarRemap::default(),
         use_owned_value: false,
         owned_value_pointer: None,
     };
@@ -329,7 +476,6 @@ fn user_mutator_recursive_entries_reenter_the_same_mutator() {
     assert_eq!(mutated, 2);
 
     let mut owned = RecursiveEntryMutator {
-        remap: StructuralVarRemap::default(),
         use_owned_value: true,
         owned_value_pointer: None,
     };
@@ -341,6 +487,64 @@ fn user_mutator_recursive_entries_reenter_the_same_mutator() {
         owned.owned_value_pointer.unwrap()
     );
     assert_eq!(mutated.get(0).unwrap(), 2);
+
+    #[repr(align(128))]
+    #[derive(Default)]
+    struct BoundDispatcher {
+        visits: usize,
+    }
+    #[dispatch(mutate, MutationView)]
+    impl BoundDispatcher {
+        fn mutate_bool(
+            &mut self,
+            _: bool,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            for operation in 0..4 {
+                let mut other = Self::default();
+                let key = Any::new();
+                let rejected =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match operation {
+                        0 => mutator
+                            .mutate(&mut other, MutationView::borrowed(AnyView::from(&1i64)))
+                            .map(Into::into),
+                        1 => mutator
+                            .default_mutate(
+                                &mut other,
+                                MutationView::borrowed(AnyView::from(&1i64)),
+                            )
+                            .map(Into::into),
+                        2 => mutator
+                            .var_remap_get(&mut other, AnyView::from(&key))
+                            .map(|_| Any::new()),
+                        _ => mutator
+                            .var_remap_set(&mut other, AnyView::from(&key), &key)
+                            .map(|_| Any::new()),
+                    }));
+                assert!(rejected.is_err());
+                assert_eq!(other.visits, 0);
+            }
+            mutator
+                .mutate(self, MutationView::borrowed(AnyView::from(&1i64)))
+                .map(Into::into)
+        }
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+            self.visits += 1;
+            Ok(Any::from(value + 1))
+        }
+    }
+    assert_eq!(
+        i64::try_from(structural_mutate(true, BoundDispatcher::default()).unwrap()).unwrap(),
+        2
+    );
+    let mut borrowed = BoundDispatcher::default();
+    for _ in 0..2 {
+        assert_eq!(
+            i64::try_from(structural_mutate(true, &mut borrowed).unwrap()).unwrap(),
+            2
+        );
+    }
+    assert_eq!(borrowed.visits, 2);
 }
 
 #[test]
@@ -349,25 +553,28 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         mode: InplaceMode,
         increment: bool,
     }
-    impl StructuralMutator for Controlled {
-        fn dispatch_mutate(&mut self, value: AnyView<'_>, _: DefRegionKind) -> Result<Any> {
-            let integer = value.try_as::<i64>().unwrap();
+
+    #[dispatch(mutate, MutationView)]
+    impl Controlled {
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
             Ok(if self.increment {
-                Any::from(integer + 1)
+                Any::from(value + 1)
             } else {
                 Unchanged.into()
             })
         }
-        fn dispatch_maybe_inplace_mutate(
+        fn mutate_any(
             &mut self,
             value: MutationView<'_>,
-            kind: DefRegionKind,
+            mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<Any> {
+            let mode = self.mode;
             if self.increment {
-                self.default_maybe_inplace_mutate_with_mode(value, kind, self.mode)
+                mutator
+                    .default_mutate(self, value.with_inplace_mode(mode))
+                    .map(Into::into)
             } else {
-                let result =
-                    self.default_maybe_inplace_mutate_with_mode_result(value, kind, self.mode)?;
+                let result = mutator.default_mutate(self, value.with_inplace_mode(mode))?;
                 assert!(result.is_unchanged());
                 Ok(result.into())
             }
@@ -391,35 +598,30 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
 
 #[test]
 fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
-    struct BorrowedEntry(usize);
-    impl StructuralMutator for BorrowedEntry {
-        fn dispatch_mutate(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
-            if let Some(integer) = value.try_as::<i64>() {
+    struct BorrowedEntry;
+    #[dispatch(mutate, MutationView)]
+    impl BorrowedEntry {
+        fn mutate_any(
+            &mut self,
+            value: MutationView<'_>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            if let Some(integer) = value.as_any_view().try_as::<i64>() {
                 return Ok(Any::from(integer + 1));
             }
-            assert_eq!(value.try_as::<bool>(), Some(true));
+            assert_eq!(value.as_any_view().try_as::<bool>(), Some(true));
             let source = Array::new(vec![1_i64]);
             let pointer = array_pointer(&source);
             let value = MutationView::borrowed(AnyView::from(&source));
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
-            // A count of one is insufficient: this handle only borrows source.
             assert_eq!(
                 ObjectArc::strong_count(<Array<i64> as ObjectRefCore>::data(&source)),
                 1
             );
-            let result = match self.0 {
-                0 => self.default_maybe_inplace_mutate(value, kind)?,
-                1 => {
-                    self.default_maybe_inplace_mutate_with_mode(value, kind, InplaceMode::Allow)?
-                }
-                2 => self
-                    .default_maybe_inplace_mutate_result(value, kind)?
-                    .into(),
-                _ => self
-                    .default_maybe_inplace_mutate_with_mode_result(value, kind, InplaceMode::Allow)?
-                    .into(),
-            };
-            let result = Array::<i64>::try_from(result)?;
+            let value = value.with_inplace_mode(InplaceMode::Allow);
+            assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
+            let result = mutator.default_mutate(self, value)?;
+            let result = Array::<i64>::try_from(result.value_or_else(|| source.clone().into()))?;
             assert_ne!(array_pointer(&result), pointer);
             assert_eq!(source.get(0).unwrap(), 1);
             assert_eq!(result.get(0).unwrap(), 2);
@@ -430,50 +632,48 @@ fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
             Ok(result.into())
         }
     }
-    for helper in 0..4 {
-        structural_mutate(true, &mut BorrowedEntry(helper)).unwrap();
-    }
+
+    structural_mutate(true, &mut BorrowedEntry).unwrap();
 }
 
 #[test]
 fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
-    struct Inspect;
-    #[dispatch(mutate)]
-    impl Inspect {
+    struct Inspect<'a> {
+        source: &'a Array<i64>,
+        result: Option<Any>,
+    }
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Inspect<'a> {
+        fn mutate_bool(
+            &mut self,
+            _: bool,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            let source = self.source;
+            let value = MutationView::borrowed(AnyView::from(source))
+                .try_cast::<Array<i64>>()
+                .unwrap_or_else(|_| unreachable!());
+            self.result = Some(mutator.mutate(self, value)?.into());
+            Ok(Any::new())
+        }
         fn mutate_array(
             &mut self,
-            value: tvm_ffi::MutationView<'_, Array<i64>>,
-            ctx: &mut Mutator,
-        ) -> Unchanged {
+            value: MutationView<'_, Array<i64>>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
-            assert_eq!(ctx.inplace_mode(), value.inplace_mode());
-            Unchanged
+            Unchanged.into_mutate_result()
         }
     }
     let source = Array::new(vec![1_i64]);
-    let result = StructuralMutator::dispatch_maybe_inplace_mutate(
-        &mut Inspect,
-        MutationView::borrowed(AnyView::from(&source)),
-        DefRegionKind::None,
-    )
-    .unwrap();
+    let mut inspect = Inspect {
+        source: &source,
+        result: None,
+    };
+    structural_mutate(true, &mut inspect).unwrap();
+    let result = inspect.result.take().unwrap();
     assert!(UnchangedOr::<Any>::try_from(result).unwrap().is_unchanged());
 
-    let mut callbacks = MutateCallbacks::new(
-        (),
-        |value: MutationView<'_, Array<i64>>, ctx: &mut MutationContext<'_>| {
-            assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
-            assert_eq!(ctx.inplace_mode(), value.inplace_mode());
-            Unchanged
-        },
-    );
-    let result = callbacks
-        .dispatch_maybe_inplace_mutate(
-            MutationView::borrowed(AnyView::from(&source)),
-            DefRegionKind::None,
-        )
-        .unwrap();
-    assert!(UnchangedOr::<Any>::try_from(result).unwrap().is_unchanged());
     assert_eq!(source.get(0).unwrap(), 1);
     assert_eq!(
         ObjectArc::strong_count(<Array<i64> as ObjectRefCore>::data(&source)),
@@ -482,57 +682,86 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
 }
 
 #[test]
-fn owned_entry_mode_is_forwarded_by_generated_and_closure_callbacks() {
+fn owned_entry_mode_is_forwarded_by_generated_callbacks() {
     struct Entry {
         mode: InplaceMode,
         pointer: usize,
+        increment: bool,
+        shared: bool,
     }
-    #[dispatch(mutate)]
+    #[dispatch(mutate, MutationView)]
     impl Entry {
-        fn mutate_bool(&mut self, _: bool, ctx: &mut Mutator) -> Result<Any> {
+        fn mutate_bool(
+            &mut self,
+            _: bool,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
             let child = Array::new(vec![1_i64]);
             self.pointer = array_pointer(&child) as usize;
-            ctx.maybe_inplace_mutate_with_mode(self, child, DefRegionKind::Pattern, self.mode)
+            mutator.with_def_region_kind(DefRegionKind::Pattern, |mutator| {
+                let mut owner: Any = child.into();
+                let alias = self.shared.then(|| owner.clone());
+                let count = if self.shared { 2 } else { 1 };
+                let capability = MutationView::from(&mut owner).with_inplace_mode(self.mode);
+                assert_eq!(capability.inplace_mode(), self.mode);
+                assert_eq!(capability.as_any_view().debug_strong_count(), Some(count));
+                assert_eq!(
+                    capability
+                        .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
+                        .unwrap()
+                        .size,
+                    1
+                );
+                assert!(capability.downcast_ref::<FunctionObj>().is_none());
+                assert_eq!(capability.as_any_view().debug_strong_count(), Some(count));
+                assert_eq!(capability.inplace_mode(), self.mode);
+                let change = mutator.mutate(self, capability)?;
+                if !self.increment {
+                    assert!(change.is_unchanged());
+                }
+                assert_eq!(owner.debug_strong_count(), Some(count));
+                let result = change.value_or(owner);
+                if let Some(alias) = alias {
+                    assert_eq!(Array::<i64>::try_from(alias)?.get(0)?, 1);
+                }
+                Ok(result)
+            })
         }
-        fn mutate_integer(&mut self, value: i64, ctx: &mut Mutator) -> i64 {
-            assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
-            value + 1
+        fn mutate_integer(
+            &mut self,
+            value: i64,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            assert_eq!(mutator.def_region_kind(), DefRegionKind::Pattern);
+            Ok(if self.increment {
+                Any::from(value + 1)
+            } else {
+                Unchanged.into()
+            })
         }
     }
+
     assert_eq!(InplaceMode::default(), InplaceMode::Disallow);
-    for mode in [InplaceMode::Disallow, InplaceMode::Allow] {
-        let mut entry = Entry { mode, pointer: 0 };
+    for (mode, increment, shared) in [
+        (InplaceMode::Disallow, true, false),
+        (InplaceMode::Allow, true, false),
+        (InplaceMode::Allow, false, false),
+        (InplaceMode::Allow, true, true),
+    ] {
+        let mut entry = Entry {
+            mode,
+            pointer: 0,
+            increment,
+            shared,
+        };
         let result = structural_mutate(true, &mut entry)
             .and_then(Array::<i64>::try_from)
             .unwrap();
         assert_eq!(
             array_pointer(&result) as usize == entry.pointer,
-            mode == InplaceMode::Allow
+            mode == InplaceMode::Allow && !shared
         );
-        assert_eq!(result.get(0).unwrap(), 2);
-
-        let pointer = Cell::new(0usize);
-        let result = structural_mutate(
-            true,
-            (
-                |_: bool, ctx: &mut MutationContext<'_>| {
-                    let child = Array::new(vec![1_i64]);
-                    pointer.set(array_pointer(&child) as usize);
-                    ctx.maybe_inplace_mutate_with_mode(child, DefRegionKind::Pattern, mode)
-                },
-                |value: i64, ctx: &mut MutationContext<'_>| {
-                    assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
-                    value + 1
-                },
-            ),
-        )
-        .and_then(Array::<i64>::try_from)
-        .unwrap();
-        assert_eq!(
-            array_pointer(&result) as usize == pointer.get(),
-            mode == InplaceMode::Allow
-        );
-        assert_eq!(result.get(0).unwrap(), 2);
+        assert_eq!(result.get(0).unwrap(), if increment { 2 } else { 1 });
     }
 }
 
@@ -547,11 +776,15 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     impl Forward {
         fn observe(&mut self, value: &MutationView<'_, Array<Any>>) {
             self.modes.push(value.inplace_mode());
-            let view = value.as_any_view();
-            let node = view
+            let count = value.as_any_view().debug_strong_count();
+            let node = value
                 .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .unwrap();
             assert_eq!(node.size, 1);
+            let base = value.downcast_ref::<Object>().unwrap();
+            assert_eq!(base as *const Object as usize, node as *const _ as usize);
+            assert!(value.downcast_ref::<FunctionObj>().is_none());
+            assert_eq!(value.as_any_view().debug_strong_count(), count);
             // A temporary typed handle must not permanently revoke permission.
             let temporary = value.as_any_view().try_as::<Array<Any>>().unwrap();
             if self.retain && self.alias.is_none() {
@@ -560,16 +793,16 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
             drop(temporary);
         }
     }
-    #[dispatch(mutate)]
+    #[dispatch(mutate, MutationView)]
     impl Forward {
-        fn mutate_string(&mut self, _: MutationView<'_, FfiString>) -> Any {
+        fn mutate_string(&mut self, _: MutationView<'_, FfiString>) -> Result<Any> {
             panic!("typed miss must preserve the capability for the next handler")
         }
         fn mutate_array(
             &mut self,
             value: MutationView<'_, Array<Any>>,
-            ctx: &mut Mutator,
-        ) -> Result<UnchangedOr<Any>> {
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
             let mode = value.inplace_mode();
             let count = value.as_any_view().debug_strong_count();
             let value = tvm_ffi::match_any!(value {
@@ -582,15 +815,20 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
                 MutationView<Array<Any>>(array) => array,
                 _ => unreachable!(),
             });
-            assert_eq!(ctx.inplace_mode(), value.inplace_mode());
             self.observe(&value);
-            ctx.default_mutate_with_mode_result(self, value, self.requested)
+            mutator
+                .default_mutate(self, value.with_inplace_mode(self.requested))
+                .into_mutate_result()
         }
-        fn mutate_integer(&mut self, value: i64, ctx: &mut Mutator) -> i64 {
-            assert_eq!(ctx.inplace_mode(), InplaceMode::Disallow);
-            value + 1
+        fn mutate_integer(
+            &mut self,
+            value: i64,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            Ok(Any::from(value + 1))
         }
     }
+
     use InplaceMode::{Allow, Disallow};
     for (requested, shared, retain) in [
         (Allow, false, false),
@@ -598,178 +836,158 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
         (Allow, true, false),
         (Allow, false, true),
     ] {
-        for generated in [true, false] {
-            let child = Array::new(vec![1_i64]);
-            let child_ptr = array_pointer(&child);
-            let root = Array::new(vec![child]);
-            let root_ptr = array_pointer(&root);
-            let original = shared.then(|| root.clone());
-            let mut state = Forward {
-                requested,
-                retain,
-                alias: None,
-                modes: vec![],
-            };
-            let result = if generated {
-                structural_mutate(root, &mut state).unwrap()
-            } else {
-                let miss = |_: MutationView<'_, FfiString>,
-                            _: &mut MutationContext<'_, Forward>|
-                 -> Any { panic!("typed miss must continue") };
-                let increment = |value: i64, _: &mut MutationContext<'_, Forward>| value + 1;
-                let descend =
-                    |value: MutationView<'_, Array<Any>>,
-                     ctx: &mut MutationContext<'_, Forward>| {
-                        assert_eq!(value.inplace_mode(), ctx.inplace_mode());
-                        ctx.state_mut().observe(&value);
-                        let requested = ctx.state().requested;
-                        ctx.default_mutate_with_mode(value, requested)
-                    };
-                let mut callbacks = MutateCallbacks::new(state, (miss, (increment, descend)));
-                let result = structural_mutate(root, &mut callbacks).unwrap();
-                state = callbacks.into_state();
-                result
-            };
-            let result = Array::<Array<i64>>::try_from(result).unwrap();
-            let child = result.get(0).unwrap();
-            let reuse = requested == Allow && !shared && !retain;
-            assert_eq!(
-                state.modes,
-                vec![
-                    if shared { Disallow } else { Allow },
-                    if reuse { Allow } else { Disallow }
-                ]
-            );
-            assert_eq!(array_pointer(&result) == root_ptr, reuse);
-            assert_eq!(array_pointer(&child) == child_ptr, reuse);
-            assert_eq!(child.get(0).unwrap(), 2);
-            for alias in original.map(Any::from).into_iter().chain(state.alias) {
-                let alias = Array::<Array<i64>>::try_from(alias).unwrap();
-                assert_eq!(alias.get(0).unwrap().get(0).unwrap(), 1);
-            }
+        let child = Array::new(vec![1_i64]);
+        let child_ptr = array_pointer(&child);
+        let root = Array::new(vec![child]);
+        let root_ptr = array_pointer(&root);
+        let original = shared.then(|| root.clone());
+        let mut state = Forward {
+            requested,
+            retain,
+            alias: None,
+            modes: vec![],
+        };
+        let result = structural_mutate(root, &mut state).unwrap();
+        let result = Array::<Array<i64>>::try_from(result).unwrap();
+        let child = result.get(0).unwrap();
+        let reuse = requested == Allow && !shared && !retain;
+        assert_eq!(
+            state.modes,
+            vec![
+                if shared { Disallow } else { Allow },
+                if reuse { Allow } else { Disallow }
+            ]
+        );
+        assert_eq!(array_pointer(&result) == root_ptr, reuse);
+        assert_eq!(array_pointer(&child) == child_ptr, reuse);
+        assert_eq!(child.get(0).unwrap(), 2);
+        for alias in original.map(Any::from).into_iter().chain(state.alias) {
+            let alias = Array::<Array<i64>>::try_from(alias).unwrap();
+            assert_eq!(alias.get(0).unwrap().get(0).unwrap(), 1);
         }
     }
+    let mut owner: Any = FieldNode {
+        data: ObjectArc::new(FieldNodeObj {
+            base: Object::new(),
+            a: Array::new(vec![1_i64]),
+            b: Array::new(vec![2_i64]).into(),
+        }),
+    }
+    .into();
+    let mut value = MutationView::from(&mut owner)
+        .try_cast::<FieldNode>()
+        .ok()
+        .unwrap();
+    assert_eq!(value.a.get(0).unwrap(), 1);
+    assert_eq!(value.as_any_view().debug_strong_count(), Some(1));
+    let a = value.field(|node| &node.a);
+    assert_eq!(a.size, 1);
+    assert_eq!(a.inplace_mode(), Allow);
+    assert_eq!(a.as_any_view().debug_strong_count(), Some(1));
+    drop(a);
+    let mut value = value.with_inplace_mode(Disallow);
+    let b = value.field(|node| &node.b);
+    assert_eq!(b.inplace_mode(), Disallow);
+    assert_eq!(b.as_any_view().debug_strong_count(), Some(1));
+    drop(b);
+    assert_eq!(value.as_any_view().debug_strong_count(), Some(1));
 }
 
 #[test]
 fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
     struct Inner<'a> {
         value: Option<MutationView<'a>>,
-        preserve_unchanged: bool,
         result: Any,
     }
-    #[dispatch(mutate)]
-    impl Inner<'_> {
-        fn mutate_bool(&mut self, _: bool, ctx: &mut Mutator) -> Result<Any> {
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Inner<'a> {
+        fn mutate_bool(
+            &mut self,
+            _: bool,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
             let value = self.value.take().unwrap();
-            self.result = if self.preserve_unchanged {
-                ctx.default_maybe_inplace_mutate_result(self, value)?.into()
-            } else {
-                ctx.default_maybe_inplace_mutate(self, value)?
-            };
+            self.result = mutator.default_mutate(self, value)?.into();
             Ok(Any::new())
         }
-        fn mutate_integer(&mut self, value: i64) -> i64 {
-            value + 1
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+            Ok(Any::from(value + 1))
         }
     }
-    fn transfer(
-        value: MutationView<'_>,
-        generated: bool,
-        preserve: bool,
-        retain: bool,
-    ) -> Result<Any> {
+
+    fn transfer(value: MutationView<'_>, retain: bool) -> Result<Any> {
         let alias = retain.then(|| value.as_any_view().try_as::<Array<i64>>().unwrap());
         assert_eq!(value.inplace_mode(), InplaceMode::Allow);
         // Carry the result back to the array callback: Unchanged belongs to
         // that input, not to the nested traversal's boolean root.
         let mut inner = Inner {
             value: Some(value),
-            preserve_unchanged: preserve,
             result: Any::new(),
         };
-        let result = if generated {
-            structural_mutate(true, &mut inner)?;
-            inner.result
-        } else {
-            let mut callbacks = MutateCallbacks::new(
-                inner,
-                (
-                    |_: bool, ctx: &mut MutationContext<'_, Inner<'_>>| -> Result<Any> {
-                        let value = ctx.state_mut().value.take().unwrap();
-                        let result = if ctx.state().preserve_unchanged {
-                            ctx.default_maybe_inplace_mutate_result(value)?.into()
-                        } else {
-                            ctx.default_maybe_inplace_mutate(value)?
-                        };
-                        ctx.state_mut().result = result;
-                        Ok(Any::new())
-                    },
-                    |value: i64, _: &mut MutationContext<'_, Inner<'_>>| value + 1,
-                ),
-            );
-            structural_mutate(true, &mut callbacks)?;
-            callbacks.into_state().result
-        };
+        structural_mutate(true, &mut inner)?;
+        let result = inner.result;
         if let Some(alias) = alias {
             assert_eq!(alias.get(0)?, 1);
         }
         Ok(result)
     }
     struct Outer {
-        preserve: bool,
         retain: bool,
     }
-    #[dispatch(mutate)]
+    #[dispatch(mutate, MutationView)]
     impl Outer {
-        fn mutate_any(&mut self, value: MutationView<'_>) -> Result<Any> {
-            transfer(value, true, self.preserve, self.retain)
+        fn mutate_any(
+            &mut self,
+            value: MutationView<'_>,
+            _mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            transfer(value, self.retain)
         }
     }
-    for preserve in [false, true] {
-        for retain in [false, true] {
-            for generated in [false, true] {
-                let root = Array::new(vec![1_i64]);
-                let pointer = array_pointer(&root);
-                let result = if generated {
-                    structural_mutate(root, &mut Outer { preserve, retain })
-                } else {
-                    structural_mutate(
-                        root,
-                        |value: MutationView<'_>, _: &mut MutationContext<'_>| {
-                            transfer(value, false, preserve, retain)
-                        },
-                    )
-                }
-                .and_then(Array::<i64>::try_from)
-                .unwrap();
-                assert_eq!(array_pointer(&result) == pointer, !retain);
-                assert_eq!(result.get(0).unwrap(), 2);
+
+    for retain in [false, true] {
+        for borrowed in [false, true] {
+            let root = Array::new(vec![1_i64]);
+            let pointer = array_pointer(&root);
+            let result = if borrowed {
+                structural_mutate(root, &mut Outer { retain })
+            } else {
+                structural_mutate(root, Outer { retain })
             }
+            .and_then(Array::<i64>::try_from)
+            .unwrap();
+            assert_eq!(array_pointer(&result) == pointer, !retain);
+            assert_eq!(result.get(0).unwrap(), 2);
         }
     }
 }
 
 #[test]
 fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
+    struct Preserve(bool);
+    #[dispatch(mutate, MutationView)]
+    impl Preserve {
+        fn mutate_any(
+            &mut self,
+            value: MutationView<'_>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            if value.as_any_view().try_as::<i64>().is_some() {
+                return if self.0 {
+                    Err(Error::new(RUNTIME_ERROR, "child failed", ""))
+                } else {
+                    Ok(UnchangedOr::<Any>::unchanged().into())
+                };
+            }
+            let result = mutator.default_mutate(self, value)?;
+            assert!(result.is_unchanged());
+            Ok(result.into())
+        }
+    }
     for fail in [false, true] {
         let root = Array::new(vec![1_i64]);
         let pointer = array_pointer(&root);
-        let result = structural_mutate(
-            root,
-            |value: MutationView<'_>, ctx: &mut MutationContext<'_>| -> Result<UnchangedOr<Any>> {
-                if value.as_any_view().try_as::<i64>().is_some() {
-                    return if fail {
-                        Err(Error::new(RUNTIME_ERROR, "child failed", ""))
-                    } else {
-                        Ok(UnchangedOr::unchanged())
-                    };
-                }
-                let result = ctx.default_maybe_inplace_mutate_result(value)?;
-                assert!(result.is_unchanged());
-                Ok(result)
-            },
-        );
+        let result = structural_mutate(root, Preserve(fail));
         if fail {
             assert!(result.err().unwrap().to_string().contains("child failed"));
         } else {
@@ -821,7 +1039,7 @@ fn reflected_no_change_returns_original() {
 fn native_unchanged_hook_returns_original_without_exposing_marker() {
     let source = Any::from(FfiString::from("unchanged"));
     let source_pointer = any_object_pointer(&source);
-    let mutated = structural_mutate(source, &mut ManualIncrement::default()).unwrap();
+    let mutated = structural_mutate(source, ManualIncrement::default()).unwrap();
 
     assert_eq!(any_object_pointer(&mutated), source_pointer);
     assert_ne!(mutated.type_index(), TypeIndex::kTVMFFIUnchanged as i32);
@@ -854,28 +1072,35 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
 #[test]
 fn callback_errors_preserve_message_and_add_object_context() {
     struct Delegate(Error);
-    #[dispatch(visit, policy = (DefaultContextPolicy, DefaultContextPolicy))]
-    impl Delegate {
+    struct VisitDelegate(Error);
+    #[dispatch(visit)]
+    impl VisitDelegate {
         fn visit_any(
             &mut self,
             value: AnyView<'_>,
-            kind: DefRegionKind,
+            visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             if value.try_as::<i64>().is_some() {
                 return Err(self.0.clone());
             }
-            self.default_visit_children(value, kind)
+            visitor.default_visit(self, &value)
         }
     }
-    #[dispatch(mutate, policy = (DefaultMutationContextPolicy, DefaultMutationContextPolicy))]
+
+    #[dispatch(mutate, MutationView)]
     impl Delegate {
-        fn mutate_any(&mut self, value: MutationView<'_>, ctx: &mut Mutator) -> Result<Any> {
+        fn mutate_any(
+            &mut self,
+            value: MutationView<'_>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
             if value.as_any_view().try_as::<i64>().is_some() {
                 return Err(self.0.clone());
             }
-            ctx.default_maybe_inplace_mutate(self, value)
+            mutator.default_mutate(self, value).map(Into::into)
         }
     }
+
     let child = reflected_object();
     let root = call_global(
         "ffi.MakeObjectFromPackedArgs",
@@ -933,52 +1158,20 @@ fn callback_errors_preserve_message_and_add_object_context() {
             .err()
             .unwrap(),
         );
-        let mut mapper = MapWithContextPolicy::new(
-            (|_: i64| -> Result<i64> { Err(source.clone()) }).into_mapper(),
-            (DefaultMutationContextPolicy, DefaultMutationContextPolicy),
-        );
-        errors.push(
-            structural_map(root.clone(), &mut mapper, order)
-                .err()
-                .unwrap(),
-        );
     }
+    let mut leaf = Delegate(source.clone());
+    errors.push(structural_mutate(root.clone(), &mut leaf).err().unwrap());
     errors.push(
-        structural_mutate(
-            root.clone(),
-            |_value: i64, _: &mut MutationContext| -> Result<i64> { Err(source.clone()) },
-        )
-        .err()
-        .unwrap(),
+        structural_visit(&root, &mut VisitDelegate(leaf.0.clone()))
+            .err()
+            .unwrap(),
     );
-    errors.push(
-        structural_visit(
-            &root,
-            |_value: i64, _: &mut VisitContext<'_, ()>| -> Result<()> { Err(source.clone()) },
-        )
-        .err()
-        .unwrap(),
-    );
-    let mut visitor =
-        VisitCallbacks::new((), |value: AnyView<'_>, ctx: &mut VisitContext<'_, ()>| {
-            if value.try_as::<i64>().is_some() {
-                return Err(source.clone());
-            }
-            ctx.visit_children()
-        })
-        .with_policy((DefaultContextPolicy, DefaultContextPolicy));
-    errors.push(structural_visit(&root, &mut visitor).err().unwrap());
-    let mut mutator =
-        MutateCallbacks::new((), |value: MutationView<'_>, ctx: &mut MutationContext| {
-            if value.as_any_view().try_as::<i64>().is_some() {
-                return Err(source.clone());
-            }
-            ctx.default_maybe_inplace_mutate(value)
-        })
-        .with_policy((DefaultMutationContextPolicy, DefaultMutationContextPolicy));
-    errors.push(structural_mutate(root.clone(), &mut mutator).err().unwrap());
     let mut delegate = Delegate(source.clone());
-    errors.push(structural_visit(&root, &mut delegate).err().unwrap());
+    errors.push(
+        structural_visit(&root, &mut VisitDelegate(delegate.0.clone()))
+            .err()
+            .unwrap(),
+    );
     errors.push(
         structural_mutate(root.clone(), &mut delegate)
             .err()
@@ -1206,6 +1399,31 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
     assert_eq!(error.message(), "map mapper failed");
     assert!(error.backtrace().contains("origin"));
     assert!(error.backtrace().contains("object `ffi.Map`"));
+
+    #[repr(C)]
+    struct RejectBase(StructuralMutatorObj);
+    // SAFETY: the exact prefix is first; no Base borrow survives the callback.
+    unsafe impl StructuralMutatorBase for RejectBase {
+        unsafe fn default_mutate<D>(
+            _this: *mut Self,
+            _dispatch: &mut D,
+            _value: MutationView<'_>,
+            _mutator: &mut StructuralMutatorView<'_, D>,
+        ) -> Result<UnchangedOr<Any>> {
+            Err(Error::new(RUNTIME_ERROR, "base failed", "base origin"))
+        }
+    }
+    let error = structural_map(
+        source.clone(),
+        StructuralMutator::new(RejectBase(StructuralMutatorObj::default()), |x: i64| x),
+        WalkOrder::PreOrder,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.message(), "base failed");
+    assert!(error.backtrace().contains("base origin"));
+    assert!(error.backtrace().contains("object `ffi.Map`"));
+    assert_eq!(source.get(&1).unwrap(), Some(10));
 }
 
 #[test]
@@ -1246,9 +1464,9 @@ struct GeneratedMapper {
 
 #[dispatch(map)]
 impl GeneratedMapper {
-    fn map_integer(&mut self, value: i64, kind: DefRegionKind) -> Any {
+    fn map_integer(&mut self, value: i64, kind: DefRegionKind) -> Result<Any> {
         self.integers.push((value, kind));
-        Any::from(value + 1)
+        Ok(Any::from(value + 1))
     }
 
     fn map_any(&mut self, value: tvm_ffi::AnyView<'_>) -> Result<Any> {
@@ -1277,21 +1495,29 @@ struct GeneratedLeafDispatch {
     integers: Vec<(i64, DefRegionKind)>,
 }
 
-#[dispatch(mutate)]
+#[dispatch(mutate, MutationView)]
 impl GeneratedLeafDispatch {
-    fn mutate_integer(&mut self, value: i64, mutator: &mut Mutator) -> Any {
+    fn mutate_integer(
+        &mut self,
+        value: i64,
+        mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
         let region = mutator.def_region_kind();
         self.integers.push((value, region));
-        Any::from(value + 1)
+        Ok(Any::from(value + 1))
     }
 }
 
 struct GeneratedStatelessDispatch;
 
-#[dispatch(mutate)]
+#[dispatch(mutate, MutationView)]
 impl GeneratedStatelessDispatch {
-    fn mutate_integer(&mut self, value: i64) -> i64 {
-        value + 1
+    fn mutate_integer(
+        &mut self,
+        value: i64,
+        _mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
+        Ok(Any::from(value + 1))
     }
 }
 
@@ -1328,22 +1554,34 @@ struct GeneratedRecursiveDispatch {
     integers: Vec<(i64, DefRegionKind)>,
 }
 
-#[dispatch(mutate)]
+#[dispatch(mutate, MutationView)]
 impl GeneratedRecursiveDispatch {
-    fn mutate_array(&mut self, array: Array<i64>, mutator: &mut Mutator) -> Result<Array<i64>> {
+    fn mutate_array(
+        &mut self,
+        array: Array<i64>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
         let region = mutator.def_region_kind();
         self.arrays.push(region);
         let mut mutated = Vec::with_capacity(array.len());
         for value in array.iter() {
-            mutated.push(i64::try_from(mutator.mutate(self, &value)?)?);
+            mutated.push(i64::try_from(
+                mutator
+                    .mutate(self, MutationView::borrowed(AnyView::from(&value)))?
+                    .value_or_else(|| value.into()),
+            )?);
         }
-        Ok(Array::new(mutated))
+        Ok(Array::new(mutated).into())
     }
 
-    fn mutate_integer(&mut self, value: i64, mutator: &mut Mutator) -> Any {
+    fn mutate_integer(
+        &mut self,
+        value: i64,
+        mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
         let region = mutator.def_region_kind();
         self.integers.push((value, region));
-        Any::from(value + 10)
+        Ok(Any::from(value + 10))
     }
 }
 
@@ -1364,123 +1602,89 @@ fn generated_mutate_dispatch_recurses_through_context() {
 
 #[derive(Default)]
 struct GeneratedDefaultingDispatch {
-    preserve_unchanged: bool,
     arrays: usize,
     integers: Vec<i64>,
 }
 
-#[dispatch(mutate)]
+#[dispatch(mutate, MutationView)]
 impl GeneratedDefaultingDispatch {
-    fn mutate_array(&mut self, array: Array<i64>, mutator: &mut Mutator) -> Result<Any> {
+    fn mutate_array(
+        &mut self,
+        array: Array<i64>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
         self.arrays += 1;
-        if self.preserve_unchanged {
-            mutator.default_mutate_result(self, &array).map(Into::into)
-        } else {
-            mutator.default_mutate(self, &array)
-        }
+        mutator
+            .default_mutate(self, MutationView::borrowed(AnyView::from(&array)))
+            .map(Into::into)
     }
 
-    fn mutate_integer(&mut self, value: i64) -> Any {
+    fn mutate_integer(&mut self, value: i64) -> Result<Any> {
         self.integers.push(value);
-        Any::from(value + 1)
+        Ok(Any::from(value + 1))
     }
 }
 
 #[test]
 fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
-    for preserve_unchanged in [false, true] {
-        let mut mutator = GeneratedDefaultingDispatch {
-            preserve_unchanged,
-            ..Default::default()
-        };
-        let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
-            .and_then(Array::<i64>::try_from)
-            .unwrap();
+    let mut mutator = GeneratedDefaultingDispatch::default();
+    let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
 
-        assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
-        assert_eq!(mutator.arrays, 1);
-        assert_eq!(mutator.integers, vec![1, 2]);
-    }
+    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mutator.arrays, 1);
+    assert_eq!(mutator.integers, vec![1, 2]);
 }
 
 #[test]
 fn pre_order_mapping_preserves_inplace_permission() {
-    struct Observe<'a>(&'a Cell<Option<InplaceMode>>);
-    impl<State> MutationContextPolicy<State> for Observe<'_> {
-        fn default_mutate(
-            &self,
-            value: MutationView<'_>,
-            ctx: &mut tvm_ffi::MutationContext<'_, State>,
-        ) -> Result<UnchangedOr<Any>> {
-            if value.as_any_view().type_index() >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
-                self.0.set(Some(value.inplace_mode()));
+    for case in ["inline", "unique", "shared", "retained"] {
+        let root = match case {
+            "inline" => Any::from(true),
+            "retained" => call_global("ffi.List", &[Any::from(1_i64)]),
+            _ => Any::from(Array::new(vec![true])),
+        };
+        let root_pointer = (case == "retained").then(|| any_object_pointer(&root));
+        let alias = (case == "shared").then(|| root.clone());
+        let mut retained = None;
+        let mut pointer = std::ptr::null();
+        let mut mapper = (|value: AnyView<'_>| {
+            if let Some(integer) = value.try_as::<i64>() {
+                return Any::from(integer + 1);
             }
-            ctx.default_maybe_inplace_mutate_result(value)
+            let mapped = if case == "retained" {
+                retained = Some(Any::from(value));
+                Any::from(value)
+            } else {
+                Array::new(vec![1_i64]).into()
+            };
+            pointer = any_object_pointer(&mapped);
+            mapped
+        })
+        .into_mapper();
+        let depth = Cell::new(0);
+        let calls = Cell::new(0);
+        let output = structural_map(
+            root,
+            StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), &mut mapper),
+            WalkOrder::PreOrder,
+        )
+        .unwrap();
+        assert_eq!(depth.get(), 0);
+        assert_eq!(calls.get(), 2);
+        let reuse = case == "unique";
+        assert_eq!(any_object_pointer(&output) == pointer, reuse, "{case}");
+        if case == "retained" {
+            let retained = retained.unwrap();
+            assert_eq!(any_object_pointer(&retained), root_pointer.unwrap());
+            assert_eq!(list_item(&retained, 0), 1);
+            assert_eq!(list_item(&output, 0), 2);
+        } else {
+            assert_eq!(Array::<i64>::try_from(output).unwrap().get(0).unwrap(), 2);
         }
-    }
-    for with_policy in [false, true] {
-        for case in ["inline", "unique", "shared", "retained"] {
-            let root = match case {
-                "inline" => Any::from(true),
-                "retained" => call_global("ffi.List", &[Any::from(1_i64)]),
-                _ => Any::from(Array::new(vec![true])),
-            };
-            let root_pointer = (case == "retained").then(|| any_object_pointer(&root));
-            let alias = (case == "shared").then(|| root.clone());
-            let mut retained = None;
-            let mut pointer = std::ptr::null();
-            let mode = Cell::new(None);
-            let mut mapper = (|value: AnyView<'_>| {
-                if let Some(integer) = value.try_as::<i64>() {
-                    return Any::from(integer + 1);
-                }
-                let mapped = if case == "retained" {
-                    retained = Some(Any::from(value));
-                    Any::from(value)
-                } else {
-                    Array::new(vec![1_i64]).into()
-                };
-                pointer = any_object_pointer(&mapped);
-                mapped
-            })
-            .into_mapper();
-            let output = if with_policy {
-                structural_map(
-                    root,
-                    MapWithContextPolicy::new(&mut mapper, Observe(&mode)),
-                    WalkOrder::PreOrder,
-                )
-                .unwrap()
-            } else {
-                structural_map(root, &mut mapper, WalkOrder::PreOrder).unwrap()
-            };
-            let reuse = case == "unique";
-            assert_eq!(
-                any_object_pointer(&output) == pointer,
-                reuse,
-                "{case}, policy={with_policy}"
-            );
-            if with_policy {
-                assert_eq!(
-                    mode.get(),
-                    Some(if reuse {
-                        InplaceMode::Allow
-                    } else {
-                        InplaceMode::Disallow
-                    })
-                );
-            }
-            if case == "retained" {
-                let retained = retained.unwrap();
-                assert_eq!(any_object_pointer(&retained), root_pointer.unwrap());
-                assert_eq!(list_item(&retained, 0), 1);
-                assert_eq!(list_item(&output, 0), 2);
-            } else {
-                assert_eq!(Array::<i64>::try_from(output).unwrap().get(0).unwrap(), 2);
-            }
-            if let Some(alias) = alias {
-                assert!(Array::<bool>::try_from(alias).unwrap().get(0).unwrap());
-            }
+        if let Some(alias) = alias {
+            assert!(Array::<bool>::try_from(alias).unwrap().get(0).unwrap());
         }
     }
 }
@@ -1540,36 +1744,48 @@ fn callbacks_return_values_convertible_into_any() {
     .unwrap();
     assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![21, 22]);
 
-    let mutated = structural_mutate(
-        Array::new(vec![1i64, 2]),
-        |integer: i64, _mutator: &mut MutationContext<'_>| integer * 2,
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    struct Double;
+    #[dispatch(mutate, MutationView)]
+    impl Double {
+        fn mutate_integer(
+            &mut self,
+            integer: i64,
+            _: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            (integer * 2).into_mutate_result()
+        }
+    }
+    let mutated = structural_mutate(Array::new(vec![1i64, 2]), Double)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 4]);
 }
 
 #[test]
 fn recursive_mutate_returns_unchanged_or_a_replacement() {
-    fn clamp_negative_integers(
-        value: AnyView<'_>,
-        mutator: &mut MutationContext<'_>,
-    ) -> Result<UnchangedOr<Any>> {
-        if let Some(integer) = value.try_as::<i64>() {
-            if integer >= 0 {
-                // Keep this input without constructing an owning return value.
-                return Ok(UnchangedOr::unchanged());
+    struct ClampNegativeIntegers;
+    #[dispatch(mutate, MutationView)]
+    impl ClampNegativeIntegers {
+        fn mutate_any(
+            &mut self,
+            value: MutationView<'_>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            if let Some(integer) = value.as_any_view().try_as::<i64>() {
+                if integer >= 0 {
+                    // Keep this input without constructing an owning return value.
+                    return Ok(UnchangedOr::<Any>::unchanged().into());
+                }
+                return Ok(UnchangedOr::changed(Any::from(0i64)).into());
             }
-            return Ok(UnchangedOr::changed(Any::from(0i64)));
+            // Keep the unchanged marker if no child changed.
+            mutator.default_mutate(self, value).into_mutate_result()
         }
-
-        // Recurse into containers. Keep the unchanged marker if no child changed.
-        mutator.default_mutate_result(&value)
     }
 
     // No rewrite: the public entry resolves unchanged to the original array.
     let source = Array::new(vec![1i64, 2]);
-    let result = structural_mutate(source.clone(), clamp_negative_integers)
+    let result = structural_mutate(source.clone(), ClampNegativeIntegers)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(result.iter().collect::<Vec<_>>(), vec![1, 2]);
@@ -1577,7 +1793,7 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
 
     // One rewrite: replace only the negative integer and keep the source intact.
     let source = Array::new(vec![-1i64, 2]);
-    let result = structural_mutate(source.clone(), clamp_negative_integers)
+    let result = structural_mutate(source.clone(), ClampNegativeIntegers)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(result.iter().collect::<Vec<_>>(), vec![0, 2]);
@@ -1626,7 +1842,7 @@ fn pre_order_unchanged_reuses_unmodified_subtrees() {
 
 #[test]
 fn post_order_unchanged_preserves_descendant_rewrites() {
-    for with_policy in [false, true] {
+    for borrowed in [false, true] {
         for shared in [false, true] {
             let root = Array::new(vec![1_i64]);
             let pointer = array_pointer(&root);
@@ -1638,15 +1854,9 @@ fn post_order_unchanged_preserves_descendant_rewrites() {
                     Unchanged
                 },
             );
-            let mapped = if with_policy {
-                structural_map(
-                    root,
-                    MapWithContextPolicy::new(
-                        callbacks.into_mapper(),
-                        DefaultMutationContextPolicy,
-                    ),
-                    WalkOrder::PostOrder,
-                )
+            let mapped = if borrowed {
+                let mut mapper = callbacks.into_mapper();
+                structural_map(root, &mut mapper, WalkOrder::PostOrder)
             } else {
                 structural_map(root, callbacks, WalkOrder::PostOrder)
             }
@@ -1811,11 +2021,9 @@ fn map_keys_are_anchors_and_object_leaves_are_preserved() {
 fn callback_mutate_defaults_unmatched_values_and_preserves_root_permit() {
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
-    let mutated = structural_mutate(root, |value: i64, _mutator: &mut MutationContext<'_>| {
-        Any::from(value + 1)
-    })
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    let mutated = structural_mutate(root, GeneratedStatelessDispatch)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_eq!(array_pointer(&mutated), root_pointer);
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 }
@@ -1826,42 +2034,41 @@ struct CallbackMutateStats {
     defaults: usize,
 }
 
-fn stateful_mutate_integer(
-    value: i64,
-    mutator: &mut MutationContext<'_, CallbackMutateStats>,
-) -> Any {
-    mutator.state_mut().integers.push(value);
-    Any::from(value + 1)
-}
-
-fn stateful_mutate_default(
-    value: tvm_ffi::AnyView<'_>,
-    mutator: &mut MutationContext<'_, CallbackMutateStats>,
-) -> Result<Any> {
-    mutator.state_mut().defaults += 1;
-    mutator.default_mutate(&value)
+#[dispatch(mutate, MutationView)]
+impl CallbackMutateStats {
+    fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+        self.integers.push(value);
+        Ok(Any::from(value + 1))
+    }
+    fn mutate_default(
+        &mut self,
+        value: AnyView<'_>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
+        self.defaults += 1;
+        mutator
+            .default_mutate(self, MutationView::borrowed(value))
+            .map(Into::into)
+    }
 }
 
 #[test]
 fn callback_mutator_carries_reusable_mutable_state() {
-    let mut mutator = MutateCallbacks::new(
-        CallbackMutateStats::default(),
-        (stateful_mutate_integer, stateful_mutate_default),
-    );
+    let mut mutator = CallbackMutateStats::default();
 
     let first = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(first.iter().collect::<Vec<_>>(), vec![2, 3]);
-    assert_eq!(mutator.state().integers, vec![1, 2]);
-    assert_eq!(mutator.state().defaults, 1);
+    assert_eq!(mutator.integers, vec![1, 2]);
+    assert_eq!(mutator.defaults, 1);
 
     let second = structural_mutate(Array::new(vec![3i64]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(second.iter().collect::<Vec<_>>(), vec![4]);
 
-    let state = mutator.into_state();
+    let state = mutator;
     assert_eq!(state.integers, vec![1, 2, 3]);
     assert_eq!(state.defaults, 2);
 }
@@ -1873,29 +2080,26 @@ struct CallbackMutateDepth {
     exits: usize,
 }
 
-fn stateful_mutate_recursive(
-    value: AnyView<'_>,
-    mutator: &mut MutationContext<'_, CallbackMutateDepth>,
-) -> Result<Any> {
-    {
-        let state = mutator.state_mut();
-        state.current += 1;
-        state.maximum = state.maximum.max(state.current);
+#[dispatch(mutate, MutationView)]
+impl CallbackMutateDepth {
+    fn mutate_any(
+        &mut self,
+        value: AnyView<'_>,
+        mutator: &mut StructuralMutatorView<'_, Self>,
+    ) -> Result<Any> {
+        self.current += 1;
+        self.maximum = self.maximum.max(self.current);
+        let mutated = mutator.default_mutate(self, MutationView::borrowed(value))?;
+        self.current -= 1;
+        self.exits += 1;
+        Ok(mutated.into())
     }
-    let mutated = mutator.default_mutate(&value)?;
-    {
-        let state = mutator.state_mut();
-        state.current -= 1;
-        state.exits += 1;
-    }
-    Ok(mutated)
 }
 
 #[test]
 fn callback_mutator_state_can_change_around_recursive_reborrows() {
     let root = Array::new(vec![Array::new(vec![1i64, 2])]);
-    let mut mutator =
-        MutateCallbacks::new(CallbackMutateDepth::default(), stateful_mutate_recursive);
+    let mut mutator = CallbackMutateDepth::default();
     let mutated = structural_mutate(root, &mut mutator)
         .and_then(Array::<Array<i64>>::try_from)
         .unwrap();
@@ -1904,9 +2108,9 @@ fn callback_mutator_state_can_change_around_recursive_reborrows() {
         mutated.get(0).unwrap().iter().collect::<Vec<_>>(),
         vec![1, 2]
     );
-    assert_eq!(mutator.state().current, 0);
-    assert_eq!(mutator.state().maximum, 3);
-    assert_eq!(mutator.state().exits, 4);
+    assert_eq!(mutator.current, 0);
+    assert_eq!(mutator.maximum, 3);
+    assert_eq!(mutator.exits, 4);
 }
 
 #[test]
@@ -1914,21 +2118,31 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let defaults = Cell::new(0);
-    let mutated = structural_mutate(
-        root,
-        (
-            |value: i64, _mutator: &mut MutationContext<'_>| Any::from(value + 1),
-            |value: AnyView<'_>, mutator: &mut MutationContext<'_>| -> Result<Any> {
-                defaults.set(defaults.get() + 1);
-                let first = mutator.default_mutate(&value)?;
-                let second = mutator.default_mutate(&value)?;
-                assert_ne!(any_object_pointer(&first), any_object_pointer(&second));
-                Ok(first)
-            },
-        ),
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    struct Repeat<'a>(&'a Cell<i32>);
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Repeat<'a> {
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+            Ok(Any::from(value + 1))
+        }
+        fn mutate_any(
+            &mut self,
+            value: AnyView<'_>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            self.0.set(self.0.get() + 1);
+            let first = mutator
+                .default_mutate(self, MutationView::borrowed(value))?
+                .value_or_else(|| value.into());
+            let second = mutator
+                .default_mutate(self, MutationView::borrowed(value))?
+                .value_or_else(|| value.into());
+            assert_ne!(any_object_pointer(&first), any_object_pointer(&second));
+            Ok(first)
+        }
+    }
+    let mutated = structural_mutate(root, Repeat(&defaults))
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_ne!(array_pointer(&mutated), root_pointer);
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(defaults.get(), 1);
@@ -1937,33 +2151,45 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
 #[test]
 fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let integer_calls = Cell::new(0);
-    let mutated = structural_mutate(
-        Array::new(vec![1i64]),
-        (
-            |_array: Array<i64>, _mutator: &mut MutationContext<'_>| {
-                Any::from(Array::new(vec![10i64]))
-            },
-            |value: i64, _mutator: &mut MutationContext<'_>| {
-                integer_calls.set(integer_calls.get() + 1);
-                Any::from(value + 1)
-            },
-        ),
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    struct First<'a>(&'a Cell<i32>);
+    #[dispatch(mutate, MutationView)]
+    impl<'a> First<'a> {
+        fn mutate_array(
+            &mut self,
+            _: Array<i64>,
+            _: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            Ok(Any::from(Array::new(vec![10i64])))
+        }
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+            self.0.set(self.0.get() + 1);
+            Ok(Any::from(value + 1))
+        }
+    }
+    let mutated = structural_mutate(Array::new(vec![1i64]), First(&integer_calls))
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![10]);
     assert_eq!(integer_calls.get(), 0);
 
     let calls = Cell::new(0);
-    let mutated = structural_mutate(
-        Array::new(vec![1i64, 2]),
-        |value: AnyView<'_>, mutator: &mut MutationContext<'_>| {
-            calls.set(calls.get() + 1);
-            mutator.default_mutate(&value)
-        },
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    struct Reenter<'a>(&'a Cell<i32>);
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Reenter<'a> {
+        fn mutate_any(
+            &mut self,
+            value: AnyView<'_>,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            self.0.set(self.0.get() + 1);
+            mutator
+                .default_mutate(self, MutationView::borrowed(value))
+                .map(Into::into)
+        }
+    }
+    let mutated = structural_mutate(Array::new(vec![1i64, 2]), Reenter(&calls))
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![1, 2]);
     assert_eq!(calls.get(), 3);
 }
@@ -1978,20 +2204,25 @@ fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
         ],
     );
     let regions = RefCell::new(Vec::new());
-    let mutated = structural_mutate(
-        root,
-        (
-            (
-                |_value: bool, _mutator: &mut MutationContext<'_>| Any::new(),
-                |_node: &FunctionObj, _mutator: &mut MutationContext<'_>| Any::from(7i64),
-            ),
-            |value: i64, mutator: &mut MutationContext<'_>| {
-                regions.borrow_mut().push(mutator.def_region_kind());
-                Any::from(value + 1)
-            },
-        ),
-    )
-    .unwrap();
+    struct Nodes<'a>(&'a RefCell<Vec<DefRegionKind>>);
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Nodes<'a> {
+        fn mutate_bool(&mut self, _: bool) -> Result<Any> {
+            Ok(Any::new())
+        }
+        fn mutate_function(&mut self, _: &FunctionObj) -> Result<Any> {
+            Ok(Any::from(7i64))
+        }
+        fn mutate_integer(
+            &mut self,
+            value: i64,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            self.0.borrow_mut().push(mutator.def_region_kind());
+            Ok(Any::from(value + 1))
+        }
+    }
+    let mutated = structural_mutate(root, Nodes(&regions)).unwrap();
 
     assert_eq!(i64::try_from(array_item(&mutated, 0)).unwrap(), 7);
     let object = array_item(&mutated, 1);
@@ -2008,66 +2239,122 @@ fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
 fn callback_mutate_distinguishes_borrowed_and_owned_children() {
     let borrowed_child = Array::new(vec![1i64]);
     let borrowed_pointer = array_pointer(&borrowed_child);
-    let mutated = structural_mutate(
-        true,
-        (
-            |_value: bool, mutator: &mut MutationContext<'_>| mutator.mutate(&borrowed_child),
-            |value: i64, _mutator: &mut MutationContext<'_>| Any::from(value + 1),
-        ),
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    struct Borrowed<'a>(&'a Array<i64>);
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Borrowed<'a> {
+        fn mutate_bool(
+            &mut self,
+            _: bool,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            let child = self.0;
+            mutator
+                .mutate(self, MutationView::borrowed(AnyView::from(child)))
+                .map(Into::into)
+        }
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+            Ok(Any::from(value + 1))
+        }
+    }
+    let mutated = structural_mutate(true, Borrowed(&borrowed_child))
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_ne!(array_pointer(&mutated), borrowed_pointer);
     assert_eq!(borrowed_child.get(0).unwrap(), 1);
     assert_eq!(mutated.get(0).unwrap(), 2);
 
     let owned_pointer = Cell::new(0usize);
-    let mutated = structural_mutate(
-        true,
-        (
-            |_value: bool, mutator: &mut MutationContext<'_>| {
-                let child = Array::new(vec![1i64]);
-                owned_pointer.set(array_pointer(&child) as usize);
-                mutator.maybe_inplace_mutate(child)
-            },
-            |value: i64, _mutator: &mut MutationContext<'_>| Any::from(value + 1),
-        ),
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    struct Owned<'a>(&'a Cell<usize>);
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Owned<'a> {
+        fn mutate_bool(
+            &mut self,
+            _: bool,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            let child = Array::new(vec![1i64]);
+            self.0.set(array_pointer(&child) as usize);
+            let mut owner: Any = child.into();
+            let change = mutator.mutate(self, MutationView::from(&mut owner))?;
+            Ok(change.value_or(owner))
+        }
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+            Ok(Any::from(value + 1))
+        }
+    }
+    let mutated = structural_mutate(true, Owned(&owned_pointer))
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_eq!(array_pointer(&mutated) as usize, owned_pointer.get());
     assert_eq!(mutated.get(0).unwrap(), 2);
 }
 
 #[test]
 fn nested_callback_mutate_restores_the_outer_active_mutator() {
-    let mutated = structural_mutate(
-        1i64,
-        |value: i64, mutator: &mut MutationContext<'_>| -> Result<Any> {
+    struct Inner;
+    #[dispatch(mutate, MutationView)]
+    impl Inner {
+        fn mutate_integer(
+            &mut self,
+            value: i64,
+            _: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            Ok(Any::from(value + 10))
+        }
+    }
+    #[repr(align(128))]
+    struct Outer<'a>(&'a Cell<usize>);
+    #[dispatch(mutate, MutationView)]
+    impl<'a> Outer<'a> {
+        fn mutate_integer(
+            &mut self,
+            value: i64,
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            assert_eq!(std::ptr::from_mut(self).addr() % 128, 0);
+            assert_eq!(self.0.get(), 1);
             if value != 1 {
                 return Ok(Any::from(value + 1));
             }
-            let inner =
-                structural_mutate(2i64, |value: i64, _mutator: &mut MutationContext<'_>| {
-                    Any::from(value + 10)
-                })?;
+            let inner = structural_mutate(2i64, Inner)?;
             assert_eq!(i64::try_from(inner).unwrap(), 12);
-            mutator.mutate(&3i64)
-        },
+            mutator
+                .mutate(self, MutationView::borrowed(AnyView::from(&3i64)))
+                .map(Into::into)
+        }
+    }
+    let depth = Cell::new(0);
+    let calls = Cell::new(0);
+    let mutated = structural_mutate(
+        Array::new(vec![1i64]),
+        StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), Outer(&depth)),
     )
-    .and_then(i64::try_from)
+    .and_then(Array::<i64>::try_from)
     .unwrap();
-    assert_eq!(mutated, 4);
+    assert_eq!(mutated.get(0).unwrap(), 4);
+    assert_eq!(depth.get(), 0);
+    assert_eq!(calls.get(), 1);
 }
 
 #[test]
 fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
+    struct Panic;
+    #[dispatch(mutate, MutationView)]
+    impl Panic {
+        fn mutate_integer(
+            &mut self,
+            _: i64,
+            _: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            panic!("callback mutator panic")
+        }
+    }
+    let depth = Cell::new(0);
+    let calls = Cell::new(0);
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_mutate(
             Array::new(vec![1i64]),
-            |_value: i64, _mutator: &mut MutationContext<'_>| -> Any {
-                panic!("callback mutator panic")
-            },
+            StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), Panic),
         )
     })) {
         Err(panic) => panic,
@@ -2078,297 +2365,123 @@ fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
         Some("callback mutator panic")
     );
 
-    let mutated = structural_mutate(
-        Array::new(vec![1i64]),
-        |value: i64, _mutator: &mut MutationContext<'_>| Any::from(value + 1),
-    )
-    .and_then(Array::<i64>::try_from)
-    .unwrap();
+    assert_eq!(depth.get(), 0);
+    assert_eq!(calls.get(), 1);
+    let mutated = structural_mutate(Array::new(vec![1i64]), GeneratedStatelessDispatch)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
     assert_eq!(mutated.get(0).unwrap(), 2);
 }
 
-#[derive(Default)]
-struct PolicyState {
-    depth: usize,
-    events: Vec<(&'static str, usize)>,
-}
-#[dispatch(map)]
-impl PolicyState {
-    fn map_integer(&mut self, value: i64) -> i64 {
-        self.events.push(("integer", self.depth));
-        value + 1
-    }
-    fn map_array(&mut self, value: Array<Any>) -> Any {
-        self.events.push(("callback", self.depth));
-        value.into()
-    }
-}
-
-struct ArrayPolicy;
-impl MutationContextPolicy<PolicyState> for ArrayPolicy {
-    fn default_mutate(
-        &self,
-        value: MutationView<'_>,
-        ctx: &mut MutationContext<'_, PolicyState>,
-    ) -> Result<UnchangedOr<Any>> {
-        if value
-            .as_any_view()
-            .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
-            .is_none()
-        {
-            return ctx.default_maybe_inplace_mutate_result(value);
-        }
-        ctx.state_mut().depth += 1;
-        let depth = ctx.state().depth;
-        ctx.state_mut().events.push(("enter", depth));
-        let result = ctx.default_maybe_inplace_mutate_result(value);
-        ctx.state_mut().depth -= 1;
-        let depth = ctx.state().depth;
-        ctx.state_mut().events.push(("exit", depth));
-        result
-    }
-}
-struct RecordPolicy;
-impl MutationContextPolicy<PolicyState> for RecordPolicy {
-    fn default_mutate(
-        &self,
-        value: MutationView<'_>,
-        ctx: &mut MutationContext<'_, PolicyState>,
-    ) -> Result<UnchangedOr<Any>> {
-        if value
-            .as_any_view()
-            .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
-            .is_some()
-        {
-            let depth = ctx.state().depth;
-            ctx.state_mut().events.push(("next", depth));
-        }
-        ctx.default_maybe_inplace_mutate_result(value)
-    }
-}
-
-#[dispatch(mutate, policy = (ArrayPolicy, RecordPolicy))]
-impl PolicyState {
-    fn mutate_integer(&mut self, value: i64) -> i64 {
-        self.map_integer(value)
-    }
-}
-
 #[test]
-fn mutation_policies_share_state_and_preserve_callback_order() {
-    let root = || Array::new(vec![Any::from(Array::new(vec![1_i64])), Any::from(2_i64)]);
-    let pre = vec![
-        ("callback", 0),
-        ("enter", 1),
-        ("next", 1),
-        ("callback", 1),
-        ("enter", 2),
-        ("next", 2),
-        ("integer", 2),
-        ("exit", 1),
-        ("integer", 1),
-        ("exit", 0),
-    ];
-    let post = vec![
-        ("enter", 1),
-        ("next", 1),
-        ("enter", 2),
-        ("next", 2),
-        ("integer", 2),
-        ("exit", 1),
-        ("callback", 1),
-        ("integer", 1),
-        ("exit", 0),
-        ("callback", 0),
-    ];
-    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-        let mut mapper = MapWithContextPolicy::new(
-            PolicyState::default(),
-            (ArrayPolicy, (RecordPolicy, DefaultMutationContextPolicy)),
-        );
-        let output = structural_map(root(), &mut mapper, order).unwrap();
-        assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
-        assert_eq!(
-            i64::try_from(array_item(&array_item(&output, 0), 0)).unwrap(),
-            2
-        );
-        assert_eq!(mapper.state().depth, 0);
-        assert_eq!(
-            &mapper.state().events,
-            if order == WalkOrder::PreOrder {
-                &pre
-            } else {
-                &post
-            }
-        );
-    }
-    let mut mutator = MutateCallbacks::new(
-        PolicyState::default(),
-        (
-            |x: i64, ctx: &mut MutationContext<'_, PolicyState>| {
-                let depth = ctx.state().depth;
-                ctx.state_mut().events.push(("integer", depth));
-                x + 1
-            },
-            |value: MutationView<'_>, ctx: &mut MutationContext<'_, PolicyState>| {
-                let depth = ctx.state().depth;
-                ctx.state_mut().events.push(("callback", depth));
-                ctx.default_maybe_inplace_mutate_result(value)
-            },
-        ),
-    )
-    .with_policy((ArrayPolicy, RecordPolicy));
-    let output = structural_mutate(root(), &mut mutator).unwrap();
-    assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
-    assert_eq!(mutator.state().events, pre);
-    assert_eq!(mutator.state().depth, 0);
-
-    let mut dispatch = PolicyState::default();
-    let output = structural_mutate(root(), &mut dispatch).unwrap();
-    assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
-    assert_eq!(
-        i64::try_from(array_item(&array_item(&output, 0), 0)).unwrap(),
-        2
-    );
-    assert_eq!(dispatch.depth, 0);
-    assert_eq!(
-        dispatch.events,
-        pre.into_iter()
-            .filter(|(tag, _)| *tag != "callback")
-            .collect::<Vec<_>>()
-    );
-}
-
-#[test]
-fn map_policy_entries_preserve_descent_and_callback_composition() {
-    struct Stop;
-    impl<State> MutationContextPolicy<State> for Stop {
-        fn default_mutate(
-            &self,
-            _: MutationView<'_>,
-            _: &mut MutationContext<'_, State>,
-        ) -> Result<UnchangedOr<Any>> {
-            Ok(UnchangedOr::unchanged())
-        }
-    }
-
+fn map_entries_preserve_descent_and_callback_composition() {
     let root = || Array::new(vec![1_i64]);
     let first = |value: Any| Array::<i64>::try_from(value).unwrap().get(0).unwrap();
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-        for entry in 0..2 {
-            let mut state = PolicyState::default();
-            let output = {
-                let mut mapper =
-                    MapWithContextPolicy::new(&mut state, (DefaultMutationContextPolicy, Stop));
-                match entry {
-                    0 => structural_map(root(), mapper, order),
-                    _ => structural_map(root(), &mut mapper, order),
-                }
-            }
-            .unwrap();
-            assert_eq!(first(output), 1);
-            assert_eq!(state.events, vec![("callback", 0)]);
-        }
-
+        let depth = Cell::new(0);
+        let calls = Cell::new(0);
         let mut dispatch = IncrementIntegers;
         let callbacks = (|s: FfiString| s, (&mut dispatch,));
-        assert_eq!(first(structural_map(root(), callbacks, order).unwrap()), 2);
+        assert_eq!(
+            first(
+                structural_map(
+                    root(),
+                    StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), callbacks),
+                    order
+                )
+                .unwrap()
+            ),
+            2
+        );
 
         let callbacks = (|x: i64| x + 1, (|s: FfiString| s,));
-        assert_eq!(first(structural_map(root(), callbacks, order).unwrap()), 2);
-        let mapper = MapWithContextPolicy::new(callbacks.into_mapper(), Stop);
-        assert_eq!(first(structural_map(root(), mapper, order).unwrap()), 1);
+        assert_eq!(
+            first(
+                structural_map(
+                    root(),
+                    StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), callbacks),
+                    order
+                )
+                .unwrap()
+            ),
+            2
+        );
+        assert_eq!(depth.get(), 0);
+        assert_eq!(calls.get(), 4);
     }
 }
 
 #[test]
-fn mutation_policy_continuations_preserve_ownership_and_markers() {
+fn mutation_descent_preserves_ownership_and_markers() {
     struct Ownership {
         increment: bool,
         retained: Option<Any>,
-        mode: InplaceMode,
         retain: bool,
+        mode: InplaceMode,
     }
-    #[dispatch(map)]
     impl Ownership {
-        fn map_integer(&mut self, x: i64) -> UnchangedOr<i64> {
-            if self.increment {
+        fn map_integer(&mut self, x: i64, _kind: DefRegionKind) -> Result<Any> {
+            (if self.increment {
                 UnchangedOr::changed(x + 1)
             } else {
                 UnchangedOr::unchanged()
-            }
+            })
+            .into_mutate_result()
         }
     }
-    struct Control {
-        mode: InplaceMode,
-        retain: bool,
-    }
-    impl MutationContextPolicy<Ownership> for Control {
-        fn default_mutate(
-            &self,
-            value: MutationView<'_>,
-            ctx: &mut MutationContext<'_, Ownership>,
-        ) -> Result<UnchangedOr<Any>> {
-            let array = value
-                .as_any_view()
-                .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
-                .is_some();
-            if array && self.retain {
-                ctx.state_mut().retained = Some(Any::from(value.as_any_view()));
-            }
-            let result = ctx.default_mutate_with_mode_result(value, self.mode)?;
-            if array && !ctx.state().increment {
-                assert!(result.is_unchanged());
-            }
-            Ok(result)
+    struct MapOwnership(Ownership);
+    #[dispatch(map)]
+    impl MapOwnership {
+        fn map_integer(&mut self, value: i64, kind: DefRegionKind) -> Result<Any> {
+            self.0.map_integer(value, kind)
         }
     }
-    #[dispatch(mutate, policy = (
-        Control { mode: self.mode, retain: self.retain },
-        DefaultMutationContextPolicy,
-    ))]
+    #[dispatch(mutate, MutationView)]
     impl Ownership {
-        fn mutate_integer(&mut self, value: i64) -> UnchangedOr<i64> {
-            self.map_integer(value)
+        fn mutate_integer(&mut self, value: i64) -> Result<Any> {
+            self.map_integer(value, DefRegionKind::None)
         }
         fn mutate_array(
             &mut self,
             value: MutationView<'_, Array<i64>>,
-            mutator: &mut Mutator,
-        ) -> Result<UnchangedOr<Any>> {
-            mutator.default_maybe_inplace_mutate_result(self, value)
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            if self.retain {
+                self.retained = Some(Any::from(value.as_any_view()));
+            }
+            let result = mutator.default_mutate(self, value.with_inplace_mode(self.mode))?;
+            if !self.increment {
+                assert!(result.is_unchanged());
+            }
+            result.into_mutate_result()
         }
     }
-    for entry in 0..4 {
-        // pre-order map, post-order map, closure mutation, generated mutation
+
+    for entry in 0..3 {
+        // Pre-order map, post-order map, handler-controlled mutation.
         for case in 0..4 {
-            // unique, shared, alias retained by policy, forced copy
+            // Unique, shared, retained alias, explicit copy descent.
             for increment in [false, true] {
                 let root = Array::new(vec![1_i64]);
                 let pointer = array_pointer(&root);
                 let alias = (case == 1).then(|| root.clone());
-                let policy = (
-                    Control {
-                        mode: if case == 3 {
-                            InplaceMode::Disallow
-                        } else {
-                            InplaceMode::Allow
-                        },
-                        retain: case == 2,
-                    },
-                    DefaultMutationContextPolicy,
-                );
                 let state = Ownership {
                     increment,
-                    retained: None,
-                    mode: policy.0.mode,
-                    retain: policy.0.retain,
+                    retained: (entry < 2 && case >= 2).then(|| Any::from(root.clone())),
+                    retain: case == 2,
+                    mode: if case == 3 {
+                        InplaceMode::Disallow
+                    } else {
+                        InplaceMode::Allow
+                    },
                 };
+                let depth = Cell::new(0);
+                let calls = Cell::new(0);
                 let (output, state) = if entry < 2 {
-                    let mut mapper = MapWithContextPolicy::new(state, policy);
+                    let mut mapper = MapOwnership(state);
                     let output = structural_map(
                         root,
-                        &mut mapper,
+                        StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), &mut mapper),
                         if entry == 0 {
                             WalkOrder::PreOrder
                         } else {
@@ -2376,27 +2489,18 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
                         },
                     )
                     .unwrap();
-                    (output, mapper.into_state())
-                } else if entry == 3 {
-                    let mut dispatch = state;
-                    let output = structural_mutate(root, &mut dispatch).unwrap();
-                    (output, dispatch)
+                    (output, mapper.0)
                 } else {
-                    let mut mutator = MutateCallbacks::new(
-                        state,
-                        (
-                            |x: i64, ctx: &mut MutationContext<'_, Ownership>| {
-                                ctx.state_mut().map_integer(x)
-                            },
-                            |value: MutationView<'_>, ctx: &mut MutationContext<'_, Ownership>| {
-                                ctx.default_maybe_inplace_mutate_result(value)
-                            },
-                        ),
+                    let mut mutator = state;
+                    let output = structural_mutate(
+                        root,
+                        StructuralMutator::new(ScopedMutateBase::new(&depth, &calls), &mut mutator),
                     )
-                    .with_policy(policy);
-                    let output = structural_mutate(root, &mut mutator).unwrap();
-                    (output, mutator.into_state())
+                    .unwrap();
+                    (output, mutator)
                 };
+                assert_eq!(depth.get(), 0);
+                assert_eq!(calls.get(), if entry < 2 { 2 } else { 1 });
                 let output = Array::<i64>::try_from(output).unwrap();
                 assert_eq!(output.get(0).unwrap(), if increment { 2 } else { 1 });
                 assert_eq!(array_pointer(&output) == pointer, !increment || case == 0);
@@ -2412,208 +2516,152 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
 }
 
 #[test]
-fn mutation_policy_regions_retargeting_and_error_restore() {
+fn mutation_regions_retargeting_and_error_restore() {
     use DefRegionKind::{None as Use, Pattern, Simple};
     #[derive(Default)]
     struct Regions(Vec<(i64, DefRegionKind)>, DefRegionKind);
-    #[dispatch(map)]
     impl Regions {
-        fn map_integer(&mut self, x: i64, kind: DefRegionKind) -> i64 {
+        fn map_integer(&mut self, x: i64, kind: DefRegionKind) -> Result<Any> {
             self.0.push((x, kind));
-            x
+            Ok(Any::from(x))
         }
-        fn map_array(&mut self, value: Array<i64>, kind: DefRegionKind) -> Any {
+        fn map_array(&mut self, value: Array<i64>, kind: DefRegionKind) -> Result<Any> {
             self.0.push((200, kind));
-            value.into()
+            Ok(value.into())
         }
     }
-    struct Redirect(DefRegionKind);
-    impl MutationContextPolicy<Regions> for Redirect {
-        fn default_mutate(
-            &self,
-            value: MutationView<'_>,
-            ctx: &mut MutationContext<'_, Regions>,
-        ) -> Result<UnchangedOr<Any>> {
-            if value.as_any_view().try_as::<bool>() == Some(false) {
-                // Bypass this container's callback, but enter the next policy and redispatch its children.
-                return ctx.with_def_region_kind(Pattern, |ctx| {
-                    ctx.default_mutate(&Array::new(vec![1_i64]))
-                        .map(UnchangedOr::changed)
-                });
-            }
-            if value.as_any_view().try_as::<i64>() == Some(2) {
-                assert_eq!(ctx.def_region_kind(), Pattern);
-                ctx.mutate_with(&99_i64, self.0)?;
-                let error: Result<()> = ctx.with_def_region_kind(Use, |ctx| {
-                    assert_eq!(ctx.def_region_kind(), Pattern);
-                    Err(Error::new(RUNTIME_ERROR, "scoped error", ""))
-                });
-                assert!(error.is_err());
-                assert_eq!(ctx.def_region_kind(), Pattern);
-            }
-            ctx.default_maybe_inplace_mutate_result(value)
+    #[derive(Default)]
+    struct MapRegions(Regions);
+    #[dispatch(map)]
+    impl MapRegions {
+        fn map_integer(&mut self, value: i64, kind: DefRegionKind) -> Result<Any> {
+            self.0.map_integer(value, kind)
+        }
+        fn map_array(&mut self, value: Array<i64>, kind: DefRegionKind) -> Result<Any> {
+            self.0.map_array(value, kind)
         }
     }
-    struct Observe;
-    impl MutationContextPolicy<Regions> for Observe {
-        fn default_mutate(
-            &self,
-            value: MutationView<'_>,
-            ctx: &mut MutationContext<'_, Regions>,
-        ) -> Result<UnchangedOr<Any>> {
-            if value
-                .as_any_view()
-                .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
-                .is_some()
-            {
-                assert_eq!(ctx.def_region_kind(), Pattern);
-                let kind = ctx.def_region_kind();
-                ctx.state_mut().0.push((100, kind));
-            }
-            ctx.default_maybe_inplace_mutate_result(value)
-        }
-    }
-    #[dispatch(mutate, policy = (Redirect(self.1), Observe))]
+    #[dispatch(mutate, MutationView)]
     impl Regions {
         fn mutate_any(
             &mut self,
             value: MutationView<'_>,
-            mutator: &mut Mutator,
-        ) -> Result<UnchangedOr<Any>> {
+            mutator: &mut StructuralMutatorView<'_, Self>,
+        ) -> Result<Any> {
+            if value.as_any_view().try_as::<bool>() == Some(true) {
+                assert_eq!(mutator.def_region_kind(), Use);
+                assert_eq!(
+                    mutator.with_def_region_kind(Pattern, |mutator| mutator.def_region_kind()),
+                    Pattern
+                );
+                assert_eq!(mutator.def_region_kind(), Use);
+                let result = mutator.with_def_region_kind(Pattern, |mutator| {
+                    assert_eq!(mutator.def_region_kind(), Pattern);
+                    mutator.with_def_region_kind(Use, |mutator| {
+                        assert_eq!(mutator.def_region_kind(), Pattern);
+                        self.0.push((100, mutator.def_region_kind()));
+                        {
+                            let array = Array::new(vec![5_i64]);
+                            mutator
+                                .default_mutate(self, MutationView::borrowed(AnyView::from(&array)))
+                                .map(|result| result.value_or_else(|| array.into()))
+                        }
+                    })
+                })?;
+                assert_eq!(mutator.def_region_kind(), Use);
+                let error: Result<()> = mutator.with_def_region_kind(Pattern, |mutator| {
+                    assert_eq!(mutator.def_region_kind(), Pattern);
+                    Err(Error::new(RUNTIME_ERROR, "handler region error", ""))
+                });
+                assert!(error
+                    .unwrap_err()
+                    .message()
+                    .contains("handler region error"));
+                assert_eq!(mutator.def_region_kind(), Use);
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    mutator.with_def_region_kind(Pattern, |mutator| -> Result<()> {
+                        assert_eq!(mutator.def_region_kind(), Pattern);
+                        panic!("handler region panic")
+                    })
+                }))
+                .err()
+                .unwrap();
+                assert_eq!(
+                    panic.downcast_ref::<&str>().copied(),
+                    Some("handler region panic")
+                );
+                assert_eq!(mutator.def_region_kind(), Use);
+                // The next callback also observes the restored ABI region.
+                mutator.mutate(self, MutationView::borrowed(AnyView::from(&6_i64)))?;
+                return Ok(result.into());
+            }
+            if value.as_any_view().try_as::<bool>() == Some(false) {
+                return mutator.with_def_region_kind(Pattern, |mutator| {
+                    self.0.push((100, mutator.def_region_kind()));
+                    let array = Array::new(vec![1_i64]);
+                    mutator
+                        .default_mutate(self, MutationView::borrowed(AnyView::from(&array)))
+                        .map(|result| result.value_or_else(|| array.into()))
+                });
+            }
             if let Some(x) = value.as_any_view().try_as::<i64>() {
-                self.map_integer(x, mutator.def_region_kind());
+                assert!(value.downcast_ref::<Object>().is_none());
+                self.map_integer(x, mutator.def_region_kind())?;
+                if x == 2 {
+                    assert_eq!(mutator.def_region_kind(), Pattern);
+                    mutator.with_def_region_kind(self.1, |mutator| {
+                        mutator.mutate(self, MutationView::borrowed(AnyView::from(&99_i64)))
+                    })?;
+                    let error: Result<()> = mutator.with_def_region_kind(Use, |mutator| {
+                        assert_eq!(mutator.def_region_kind(), Pattern);
+                        Err(Error::new(RUNTIME_ERROR, "scoped error", ""))
+                    });
+                    assert!(error.is_err());
+                    assert_eq!(mutator.def_region_kind(), Pattern);
+                }
             }
             if value
-                .as_any_view()
                 .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
                 .is_some()
             {
                 self.0.push((200, mutator.def_region_kind()));
             }
-            mutator.default_maybe_inplace_mutate_result(self, value)
+            mutator.default_mutate(self, value).into_mutate_result()
         }
     }
+
     assert_eq!(
         unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
         0
     );
     for requested in [Use, Simple] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-            let mut mapper =
-                MapWithContextPolicy::new(Regions::default(), (Redirect(requested), Observe));
-            let output = structural_map(false, &mut mapper, order).unwrap();
-            assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 1);
-            let mut expected = vec![(100, Pattern), (1, Pattern)];
-            if order == WalkOrder::PostOrder {
-                expected.push((200, Use)); // The root callback sees the result after descent.
-            }
-            assert_eq!(mapper.state().0, expected);
-            mapper.state_mut().0.clear();
+            let mut mapper = MapRegions::default();
             let graph = Function::get_global("testing.make_visit_region_graph")
                 .unwrap()
                 .call_tuple((false,))
                 .unwrap();
             structural_map(graph, &mut mapper, order).unwrap();
-            let expected = if order == WalkOrder::PreOrder {
-                vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
-            } else {
-                vec![(1, Simple), (99, Pattern), (2, Pattern), (3, Use)]
-            };
-            assert_eq!(mapper.state().0, expected);
+            let expected = vec![(1, Simple), (2, Pattern), (3, Use)];
+            assert_eq!(mapper.0 .0, expected);
         }
-        let mut mutator = MutateCallbacks::new(
-            Regions::default(),
-            |value: MutationView<'_>, ctx: &mut MutationContext<'_, Regions>| {
-                if let Some(x) = value.as_any_view().try_as::<i64>() {
-                    let kind = ctx.def_region_kind();
-                    ctx.state_mut().0.push((x, kind));
-                }
-                if value
-                    .as_any_view()
-                    .downcast_ref::<tvm_ffi::collections::array::ArrayObj>()
-                    .is_some()
-                {
-                    let kind = ctx.def_region_kind();
-                    ctx.state_mut().0.push((200, kind));
-                }
-                ctx.default_maybe_inplace_mutate_result(value)
-            },
-        )
-        .with_policy((Redirect(requested), Observe));
+        let mut scoped = Regions(vec![], requested);
+        let output = structural_mutate(true, &mut scoped).unwrap();
+        assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 5);
+        assert_eq!(scoped.0, vec![(100, Pattern), (5, Pattern), (6, Use)]);
+        let mut mutator = Regions(vec![], requested);
         let output = structural_mutate(false, &mut mutator).unwrap();
         assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 1);
-        assert_eq!(mutator.state().0, vec![(100, Pattern), (1, Pattern)]);
-        mutator.state_mut().0.clear();
+        assert_eq!(mutator.0, vec![(100, Pattern), (1, Pattern)]);
+        mutator.0.clear();
         let graph = Function::get_global("testing.make_visit_region_graph")
             .unwrap()
             .call_tuple((false,))
             .unwrap();
         structural_mutate(graph, &mut mutator).unwrap();
         assert_eq!(
-            mutator.state().0,
+            mutator.0,
             vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
         );
-        let mut dispatch = Regions(vec![], requested);
-        let output = structural_mutate(false, &mut dispatch).unwrap();
-        assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 1);
-        assert_eq!(dispatch.0, vec![(100, Pattern), (1, Pattern)]);
-        dispatch.0.clear();
-        let graph = Function::get_global("testing.make_visit_region_graph")
-            .unwrap()
-            .call_tuple((false,))
-            .unwrap();
-        structural_mutate(graph, &mut dispatch).unwrap();
-        assert_eq!(
-            dispatch.0,
-            vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
-        );
-    }
-}
-
-#[test]
-fn mutation_policy_halts_restore_state_and_skip_later_policies() {
-    struct Halt(bool);
-    impl MutationContextPolicy<PolicyState> for Halt {
-        fn default_mutate(
-            &self,
-            _: MutationView<'_>,
-            _: &mut MutationContext<'_, PolicyState>,
-        ) -> Result<UnchangedOr<Any>> {
-            if self.0 {
-                Err(Error::new(RUNTIME_ERROR, "stop descent", ""))
-            } else {
-                Ok(UnchangedOr::unchanged())
-            }
-        }
-    }
-    for fail in [false, true] {
-        for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-            let mut mapper = MapWithContextPolicy::new(
-                PolicyState::default(),
-                (ArrayPolicy, (Halt(fail), RecordPolicy)),
-            );
-            let result = structural_map(Array::new(vec![1_i64]), &mut mapper, order);
-            assert_eq!(result.is_err(), fail);
-            assert_eq!(mapper.state().depth, 0);
-            assert!(!mapper
-                .state()
-                .events
-                .iter()
-                .any(|(tag, _)| matches!(*tag, "integer" | "next")));
-            if let Err(error) = result {
-                assert!(error.message().contains("stop descent"));
-            }
-        }
-        let mut mutator = MutateCallbacks::new(
-            PolicyState::default(),
-            |x: i64, _: &mut MutationContext<'_, PolicyState>| x + 1,
-        )
-        .with_policy((ArrayPolicy, (Halt(fail), RecordPolicy)));
-        assert_eq!(
-            structural_mutate(Array::new(vec![1_i64]), &mut mutator).is_err(),
-            fail
-        );
-        assert_eq!(mutator.state().events, vec![("enter", 1), ("exit", 0)]);
-        assert_eq!(mutator.state().depth, 0);
     }
 }

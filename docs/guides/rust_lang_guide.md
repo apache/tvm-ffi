@@ -454,26 +454,17 @@ fn may_fail(value: i32) -> Result<()> {
 }
 ```
 
-`match_any!` provides typed checked-conversion arms for object-backed values.
-`MyPair(pair)` produces an owning handle; `MyPairObj(ref node)` binds a shared
-`&MyPairObj` without increasing its reference count. These are macro arm
-conventions, not native Rust destructuring. An owning or custom matcher such as
-`MyPair(ref pair)` still converts to its own value and borrows that local result.
-Guards retain source order, and a borrowed node cannot outlive its view or grant
-mutable access. Eligible final node and owning patterns share the exact-type
-lookup optimization; other patterns use ordered checked conversions.
-
 ### Structural Walk and Visit
 
 Rust provides equivalents of the C++ `StructuralWalk`/`StructuralVisitor`
-APIs. Put `#[dispatch(walk)]` on an impl to turn its `walk_*` methods into
-typed handlers, then pass it to `structural_walk`; each handler returns a
-`WalkResult` (`Advance`, `Skip`, or `Interrupt`) to steer the traversal.
+APIs. An inherent `#[dispatch(walk)]` impl groups `walk_*` handlers for
+`structural_walk`. The named handlers return the common `Result<WalkResult>`
+type to advance, skip children, or interrupt traversal.
 Handlers dispatch on their argument type and may take an optional trailing
 `DefRegionKind` argument:
 
 ```rust
-use tvm_ffi::{dispatch, structural_walk, Array, DefRegionKind, WalkOrder, WalkResult};
+use tvm_ffi::{dispatch, structural_walk, Array, DefRegionKind, Result, WalkOrder, WalkResult};
 
 #[derive(Default)]
 struct Probe {
@@ -483,14 +474,14 @@ struct Probe {
 
 #[dispatch(walk)]
 impl Probe {
-    fn walk_integer(&mut self, value: i64) -> WalkResult {
+    fn walk_integer(&mut self, value: i64) -> Result<WalkResult> {
         self.total += value;
-        WalkResult::Advance
+        Ok(WalkResult::Advance)
     }
 
-    fn walk_float(&mut self, _value: f64, _kind: DefRegionKind) -> WalkResult {
+    fn walk_float(&mut self, _value: f64, _kind: DefRegionKind) -> Result<WalkResult> {
         self.floats += 1;
-        WalkResult::Advance
+        Ok(WalkResult::Advance)
     }
 }
 
@@ -573,51 +564,49 @@ let found = structural_walk(
 assert_eq!(found.map(|i| i64::try_from(i.value).unwrap()), Some(2));
 ```
 
-`structural_visit` accepts typed callbacks in addition to a `StructuralVisitor`.
-Callbacks receive `VisitContext`, use first-match dispatch, and own traversal
-of matched values. `VisitCallbacks` adds state shared by the callback chain:
+`structural_visit` accepts a dispatcher, owned or borrowed. Pass state belongs
+on `self`; matching handlers control recursion through `StructuralVisitorView<'_, Self>`.
+Unmatched values use default child traversal. Walk continues to accept both
+dispatchers and closures.
 
 ```rust
-use tvm_ffi::{structural_visit, Array, VisitCallbacks, VisitContext, AnyView};
+use tvm_ffi::{dispatch, structural_visit, Array, Result, StructuralVisitorView, VisitInterrupt};
 
 #[derive(Default)]
 struct Stats {
     total: i64,
 }
 
+#[dispatch(visit)]
+impl Stats {
+    fn visit_integer(&mut self, value: i64, _visitor: &mut StructuralVisitorView<'_, Self>)
+        -> Result<Option<VisitInterrupt>> {
+        self.total += value;
+        Ok(None)
+    }
+}
+
 let values = Array::new(vec![1_i64, 2]);
-let mut visitor = VisitCallbacks::new(
-    Stats::default(),
-    (
-        |value: i64, visitor: &mut VisitContext<'_, Stats>| {
-            visitor.state_mut().total += value;
-        },
-        |_value: AnyView<'_>, visitor: &mut VisitContext<'_, Stats>| {
-            visitor.visit_children()
-        },
-    ),
-);
+let mut visitor = Stats::default();
 structural_visit(&values, &mut visitor)?;
-assert_eq!(visitor.state().total, 3);
+assert_eq!(visitor.total, 3);
 ```
 
-Callbacks are `Fn`; mutable data belongs in the visitor state. A catch-all
-callback must call `visit_children()` explicitly, and interrupt values must be
+A handler calls `visitor.default_visit(self, value)` to descend through its input,
+including a borrowed object node, without acquiring ownership.
+`visitor.visit(self, &child)` re-enters matching for a child. Both operations
+inherit the definition region established by the defining node or reflected
+field; handlers query it with `visitor.def_region_kind()`. Ordinary recursion
+does not need a region scope. Calls reborrow the same dispatcher, so state can be
+read and updated before and after recursion. Interrupt values must be
 returned explicitly because `?` only propagates errors.
 
-`VisitCallbacks::with_policy` and `WalkWithContextPolicy` use `ContextPolicy<State>`
-to manage context around default recursion. Pass `WalkWithContextPolicy` to
-`structural_walk`; pass `&mut walker` to reuse it and inspect its state afterward.
-See the `ContextPolicy` API documentation for composition and shared state access.
-
-For a named implementation, `#[dispatch(visit)]` generates
-`StructuralVisitor` from `visit_*` methods. Matching handlers own recursion;
-unmatched values use default child traversal:
+An inherent `#[dispatch(visit)]` impl groups typed `visit_*` methods. It supplies
+the engine signature directly, without a separate forwarding trait:
 
 ```rust
 use tvm_ffi::{
-    dispatch, structural_visit, Array, DefRegionKind, Result, StructuralVisitor, VisitInterrupt,
-    AnyView,
+    dispatch, structural_visit, AnyView, Array, Result, StructuralVisitorView, VisitInterrupt,
 };
 
 #[derive(Default)]
@@ -628,16 +617,13 @@ struct Depth {
 
 #[dispatch(visit)]
 impl Depth {
-    fn visit_any(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Option<VisitInterrupt>> {
+    fn visit_any(&mut self, value: AnyView<'_>, visitor: &mut StructuralVisitorView<'_, Self>)
+        -> Result<Option<VisitInterrupt>> {
         self.current += 1;
         self.max = self.max.max(self.current);
-        let interrupt = self.default_visit_children(value, def_region_kind)?;
+        let outcome = visitor.default_visit(self, &value);
         self.current -= 1;
-        Ok(interrupt)
+        outcome
     }
 }
 
@@ -647,22 +633,17 @@ structural_visit(&values, &mut depth)?;
 assert_eq!(depth.max, 2);
 ```
 
-Implement `StructuralVisitor` directly to override its low-level `visit`
-method.
+The engine owns a temporary FFI runtime object and lends each handler an explicit
+context for that invocation. Contexts do not own or retain a second reference to
+the dispatcher. They cannot escape the callback or move to another thread.
 
-Use `#[dispatch(visit, policy = MyPolicy)]` to apply a `ContextPolicy<Self>`
-to default recursion.
+Default descent uses registered structural hooks, then reflection for types
+without a hook.
 
-Two safety notes: mutable `List`/`Dict` contents are snapshotted before
-callbacks run, so mutation during traversal cannot invalidate the walk; and
-a non-container type with a foreign `__s_visit__` hook is rejected rather
-than silently walked through reflection — visit such a type's children
-explicitly from a `StructuralVisitor`, or skip it with a pre-order
-`WalkResult::Skip`.
-
-`AnyView<'_>` is passed by value to catch-all visit, walk, map, and mutate
-callbacks. Copying it preserves a borrow without incrementing a reference
-count. Bind the view before calling `downcast_ref::<Node>()` when the node
+`AnyView<'_>` is passed by value to catch-all visit, walk, and map callbacks;
+mutation dispatch consumes `MutationView<'_>` instead. Copying an `AnyView`
+preserves a borrow without incrementing a reference count. Bind the view
+before calling `downcast_ref::<Node>()` when the node
 reference is used across statements; that reference borrows the view.
 Use `try_as::<Handle>()` for an owned typed handle or `Any::from(value)` to
 retain an erased value beyond the callback. Mapping callbacks return
@@ -671,9 +652,9 @@ permission.
 
 ### Structural Mapping and Mutation
 
-`structural_map` is the transforming counterpart to `structural_walk`. Put
-`#[dispatch(map)]` on an impl whose `map_*` methods return any value convertible
-into `Any`, directly or in `Result`. Methods are tested in source order, the
+`structural_map` is the transforming counterpart to `structural_walk`. An
+inherent `#[dispatch(map)]` impl groups `map_*` methods returning the common
+engine result `Result<Any>`. Methods are tested in source order, the
 first matching argument type wins, and an unmatched value is preserved. A
 method may take an optional trailing `DefRegionKind`; an `AnyView<'_>` method is a
 catch-all and should therefore come last:
@@ -690,13 +671,13 @@ struct Increment {
 
 #[dispatch(map)]
 impl Increment {
-    fn map_integer(&mut self, value: i64, _kind: DefRegionKind) -> Result<i64> {
+    fn map_integer(&mut self, value: i64, _kind: DefRegionKind) -> Result<Any> {
         self.integers += 1;
-        Ok(value + 1)
+        Ok(Any::from(value + 1))
     }
 
-    fn map_other(&mut self, value: AnyView<'_>) -> Any {
-        Any::from(value)
+    fn map_other(&mut self, value: AnyView<'_>) -> Result<Any> {
+        Ok(Any::from(value))
     }
 }
 
@@ -737,14 +718,6 @@ Within one `structural_map` call, callbacks run at every occurrence; their
 results are not cached. Default recursion manages identity remapping with
 the same semantics as C++.
 
-`MutateCallbacks::with_policy` and `MapWithContextPolicy` use `MutationContextPolicy<State>`
-to manage context around default recursion. Policies consume `MutationView`
-and return `UnchangedOr<Any>`; see the API documentation for composition and
-scoped definition regions. Pass `MapWithContextPolicy` directly to `structural_map`,
-or pass `&mut mapper` to reuse it and inspect its state afterward;
-it cannot be a callback tuple member or another wrapper's dispatcher. Compose
-policies as `(outer, inner)` within one wrapper.
-
 Default recursion uses the same type attributes as C++: it calls
 `__s_maybe_inplace_mutate__` for a uniquely owned object when available, or
 falls back to `__s_mutate__`. Each hook receives the active Rust-backed
@@ -761,18 +734,21 @@ not returned on error.
 Callbacks can also return `Unchanged` or `UnchangedOr<T>`, optionally wrapped
 in `Result`. A pre-order map still maps the original value's children when
 a callback returns `Unchanged`; a post-order map keeps the result of child
-mapping. Use `mutate_result` and
-`default_mutate_result` to preserve unchanged during recursion; existing
-owning-value helpers and top-level functions resolve the marker to the
-original value.
+mapping. Use `mutate` and `default_mutate` to preserve unchanged during recursion.
+They return `Result<UnchangedOr<Any>>`; owning-value helpers and top-level
+functions resolve the marker to the original value.
 
-`structural_mutate` accepts typed callback chains in addition to a
-`StructuralMutator`. Closure callbacks receive a `MutationContext`;
-`MutateCallbacks` adds state shared by that callback chain:
+`structural_mutate` accepts an owned or borrowed dispatcher. Its handlers keep
+mutable pass state on `self` and receive `StructuralMutatorView<'_, Self>` for recursion.
+Map continues to accept both dispatchers and closures. A concrete Base can customize
+default descent through `StructuralVisitor::new(base, dispatcher)` or
+`StructuralMutator::new(base, dispatcher)`; the same composition works for walk/map.
+Base implementations delegate to the corresponding `StructuralVisitorObj` or
+`StructuralMutatorObj` default operation when they want ordinary hooks/reflection.
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Array, MutateCallbacks, MutationContext, MutationView,
+    dispatch, structural_mutate, Any, Array, MutationView, StructuralMutatorView, Result,
 };
 
 #[derive(Default)]
@@ -780,120 +756,111 @@ struct Stats {
     integers: usize,
 }
 
-let mut mutator = MutateCallbacks::new(
-    Stats::default(),
-    (
-        |value: i64, mutator: &mut MutationContext<'_, Stats>| {
-            mutator.state_mut().integers += 1;
-            value + 1
-        },
-        |value: MutationView<'_>, mutator: &mut MutationContext<'_, Stats>| {
-            mutator.default_maybe_inplace_mutate(value)
-        },
-    ),
-);
+#[dispatch(mutate, MutationView)]
+impl Stats {
+    fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+        self.integers += 1;
+        Ok(Any::from(value + 1))
+    }
+    fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+        mutator.default_mutate(self, value).map(Into::into)
+    }
+}
+
+let mut mutator = Stats::default();
 let mutated = structural_mutate(Array::new(vec![1_i64, 2]), &mut mutator)?;
 let mutated = Array::<i64>::try_from(mutated)?;
 assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
-assert_eq!(mutator.state().integers, 2);
+assert_eq!(mutator.integers, 2);
 ```
 
-`MutationContext::mutate` uses the copy path for a borrowed value, while
-`maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
-Closure callbacks are `Fn`; mutable data belongs in the callback state.
+`mutator.mutate(self, value)` re-enters dispatch with a `MutationView`, while
+`mutator.default_mutate(self, value)` runs default descent. Both return
+`Result<UnchangedOr<Any>>` and preserve the capability's permission. For a local owning
+`Any`, pass `&mut owned` and resolve the returned change with
+`change.value_or(owned)` after the borrow ends. These calls inherit the definition
+region established by the defining node or reflected field; handlers query it
+with `mutator.def_region_kind()`. Reserve `with_def_region_kind` on either view
+for hooks that establish a definition region according to their node's semantics.
+An enclosing Pattern region wins, and the prior region is restored even on error
+or panic. State remains available after the recursive call.
 
-Use `MutationView<'_, T>` with `default_maybe_inplace_mutate` to forward its
-permission, or `default_mutate_with_mode` to restrict it. Inspect it through
-`let view = value.as_any_view()` and `view.downcast_ref::<Node>()`; finish using
-that view before consuming the capability. Mutation contexts do not expose
-`current()`, and copy-only default descent takes an explicit borrow
-(`default_mutate(&view)`). Generated handlers can read the mode
-through `Mutator::inplace_mode()`; see `MutationView` for ownership requirements.
+Typed `MutationView<'_, T>` inputs work with the same recursive methods.
+Use `value.with_inplace_mode(InplaceMode::Disallow)` to restrict permission.
+Inspect an object through `value.downcast_ref::<NodeObj>()` or other payloads
+through `value.as_any_view()`; finish using those borrows before consuming the
+capability. A typed object capability also dereferences to its shared node.
+Use `value.field(|node| &node.a)` to borrow a direct `Any` or owning object-handle
+field for recursive mutation. The child capability exclusively borrows its parent
+and inherits permission only while that parent is unique; child uniqueness is
+checked again during mutation. Field projection does not grant parent-field
+writeback: preserve `Unchanged` or reconstruct the parent from replacement results.
+`MutationView::borrowed(view)` grants
+only copy permission. Read permission from `value.inplace_mode()`; see
+`MutationView` for ownership requirements.
 
-`#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
-owns its mutable pass state, while `Mutator` supplies recursion and the current
-definition region. `mutator.mutate(self, child)` safely reborrows that dispatch
-object and inherits the current region; `mutate_with` is available for an
-explicit override. An unmatched value follows default mutation with its
-current in-place permit. A handler that does not need these controls can omit
-the `&mut Mutator` parameter:
+An inherent `#[dispatch(mutate, MutationView)]` impl supplies the engine's
+required signature directly. An unmatched value follows default mutation with
+its current permission. All handlers return `Result<Any>`; a handler may omit
+the context argument when another handler declares it:
 
 ```rust
-use tvm_ffi::{dispatch, structural_mutate, Array};
+use tvm_ffi::{
+    dispatch, structural_mutate, Any, Array, StructuralMutatorView, Result,
+};
 
 #[derive(Default)]
 struct Increment {
     integers: usize,
 }
 
-#[dispatch(mutate)]
+#[dispatch(mutate, MutationView)]
 impl Increment {
-    fn mutate_integer(&mut self, value: i64) -> i64 {
+    fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
         self.integers += 1;
-        value + 1
+        Ok(Any::from(value + 1))
     }
 }
 
 let mut increment = Increment::default();
-let mutated = structural_mutate(
-    Array::new(vec![1_i64, 2]),
-    &mut increment,
-)?;
+let mutated = structural_mutate(Array::new(vec![1_i64, 2]), &mut increment)?;
 let mutated = Array::<i64>::try_from(mutated)?;
 assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(increment.integers, 2);
 ```
 
-Use `#[dispatch(mutate, policy = MyPolicy)]` to apply a `MutationContextPolicy<Self>`
-to default recursion.
-
-For low-level custom recursion, implement `StructuralMutator` and pass
-`&mut` it to `structural_mutate`. `MutationView` carries the engine's reuse
-permission. `MutationView::borrowed` wraps an `AnyView` with `Disallow`;
-only the engine can grant `Allow`, and explicit modes can only restrict it. Override
-`dispatch_maybe_inplace_mutate` to opt into default container reuse;
-`default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
-values can be re-entered with `mutate`, while owned values can use
-`maybe_inplace_mutate`:
+`MutationView::borrowed` wraps an `AnyView` with `Disallow`; an exclusive
+`&mut Any` borrow permits `Allow`. Explicit modes can only restrict permission. Default mutation
+rechecks uniqueness before writing. A catch-all can select copy-only recursion
+while retaining typed scalar replacements:
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Any, Array, DefRegionKind, MutationView, AnyView, Result,
-    StructuralMutator,
+    dispatch, structural_mutate, Any, Array, InplaceMode, MutationView, StructuralMutatorView, Result,
 };
 
-#[derive(Default)]
 struct Increment;
 
-impl StructuralMutator for Increment {
-    fn dispatch_mutate(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
-        match value.try_as::<i64>() {
-            Some(value) => Ok(Any::from(value + 1)),
-            None => self.default_mutate(&value, kind),
-        }
+#[dispatch(mutate, MutationView)]
+impl Increment {
+    fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+        Ok(Any::from(value + 1))
     }
-
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: MutationView<'_>,
-        kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, kind)
+    fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+        mutator.default_mutate(self, value.with_inplace_mode(InplaceMode::Disallow)).map(Into::into)
     }
 }
 
-let mutated = structural_mutate(
-    Array::new(vec![1_i64, 2]),
-    &mut Increment::default(),
-)?;
+let mutated = structural_mutate(Array::new(vec![1_i64, 2]), Increment)?;
 let mutated = Array::<i64>::try_from(mutated)?;
 assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 ```
 
-The default `var_remap_get` and `var_remap_set` methods use state local to one
-`structural_mutate` invocation, preserving completed `FreeVar` and `DAGNode`
-substitutions without adding a field to the mutator. Override them and use
-`StructuralVarRemap` when a custom identity policy is required.
+The context's `var_remap_get` and `var_remap_set` methods use state local to one
+invocation, preserving completed `FreeVar` and `DAGNode` substitutions without
+adding a field to the dispatcher. Explicit recursion and default descent share
+that invocation state. A dispatcher can also keep an explicit `StructuralVarRemap`
+when substitutions must persist across invocations.
 
 ## Examples
 

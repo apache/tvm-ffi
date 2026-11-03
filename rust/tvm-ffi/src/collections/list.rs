@@ -59,7 +59,7 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 #[type_key = "ffi.List"]
 #[type_index(TypeIndex::kTVMFFIList)]
 pub struct ListObj {
-    pub object: Object,
+    pub(crate) object: Object,
     /// Pointer to the start of the element buffer.
     pub data: *mut core::ffi::c_void,
     pub size: i64,

@@ -24,6 +24,25 @@ use crate::object::{self, ObjectRefCore};
 use crate::reflection::FieldGetter;
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeKeyToIndex};
 
+/// Initialize the borrowed ABI prefix of a scoped Rust-owned traversal engine.
+///
+/// # Safety
+///
+/// `header` points to the engine's stable Object prefix. The Box retains the
+/// reserved owner reference and destroys the engine itself; low-level hooks may
+/// only borrow it synchronously. All temporary strong and weak references must
+/// end before the Box is dropped, so the foreign deleter is never used.
+pub(crate) unsafe fn initialize_scoped_runtime(
+    header: *mut crate::tvm_ffi_sys::TVMFFIObject,
+    type_index: i32,
+) {
+    let mut value = crate::tvm_ffi_sys::TVMFFIObject::new();
+    value.combined_ref_count =
+        std::sync::atomic::AtomicU64::new(crate::tvm_ffi_sys::COMBINED_REF_COUNT_BOTH_ONE);
+    value.type_index = type_index;
+    std::ptr::write(header, value);
+}
+
 /// Add one structural traversal frame to an error's backtrace.
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
@@ -181,12 +200,12 @@ pub(crate) fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
 /// The cell must satisfy `AnyView::from_raw_ffi_any`'s requirements, including
 /// its unique, at-most-once conversion rule for rvalue slots. The traversal
 /// driver must keep the owning root, field, or replacement alive for the borrow.
-#[inline]
+#[inline(always)]
 pub(crate) unsafe fn borrowed_view(raw: &TVMFFIAny) -> AnyView<'_> {
     AnyView::from_raw_ffi_any(*raw)
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn raw_of(value: AnyView<'_>) -> TVMFFIAny {
     *value.as_raw_ffi_any()
 }

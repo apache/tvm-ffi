@@ -52,18 +52,17 @@ pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
     TYPE_ERROR, VALUE_ERROR, ZERO_DIVISION_ERROR,
 };
+pub use crate::extra::dispatch::Dispatcher;
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_mutate::{
-    structural_map, structural_mutate, DefaultMutationContextPolicy, InplaceMode, IntoMapper,
-    IntoMutator, MapChainLink, MapDispatch, MapWithContextPolicy, MutateCallbacks, MutateChainLink,
-    MutateDispatch, MutationContext, MutationContextPolicy, MutationView, Mutator,
-    StructuralMutator, StructuralVarRemap,
+    structural_map, structural_mutate, InplaceMode, IntoMapper, IntoMutator, MapChainLink,
+    MutationView, StructuralMutator, StructuralMutatorBase, StructuralMutatorObj,
+    StructuralMutatorView, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, structural_walk, ContextPolicy, DefRegionKind, DefaultContextPolicy,
-    IntoVisitor, IntoWalkResult, IntoWalker, StructuralVisitor, VisitCallbacks, VisitChainLink,
-    VisitContext, VisitInterrupt, WalkChainLink, WalkDispatch, WalkOrder, WalkResult,
-    WalkWithContextPolicy,
+    structural_visit, structural_walk, DefRegionKind, IntoVisitor, IntoWalkResult, IntoWalker,
+    StructuralVisitor, StructuralVisitorBase, StructuralVisitorObj, StructuralVisitorView,
+    VisitInterrupt, WalkChainLink, WalkOrder, WalkResult,
 };
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;

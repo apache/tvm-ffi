@@ -19,7 +19,9 @@
 
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{Object as ObjectBase, ObjectArc, ObjectCore};
-use tvm_ffi::{match_any, Any, Array, Shape, TypeIndex};
+use tvm_ffi::{
+    dispatch, match_any, Any, AnyView, Array, Dispatcher, MutationView, Shape, TypeIndex,
+};
 
 #[repr(C)]
 #[derive(Object)]
@@ -38,7 +40,7 @@ fn register_type<T: ObjectCore>() -> i32 {
 }
 
 macro_rules! define_expr_leaves {
-    ($(($object:ident, $handle:ident, $type_key:literal)),+ $(,)?) => {
+    ($(($object:ident, $handle:ident, $method:ident, $label:literal, $type_key:literal)),+ $(,)?) => {
         $(
             #[repr(C)]
             #[derive(Object)]
@@ -68,6 +70,43 @@ macro_rules! define_expr_leaves {
             }
         )+
 
+        struct OwnedClassifier;
+        #[dispatch(classify)]
+        impl OwnedClassifier {
+            $(fn $method(&self, _value: $handle) -> &'static str { $label })+
+        }
+
+        struct BorrowedClassifier;
+        #[dispatch(classify)]
+        impl BorrowedClassifier {
+            $(fn $method(&self, _value: &$object) -> &'static str { $label })+
+        }
+
+        struct CapabilityClassifier;
+        #[dispatch(classify, MutationView)]
+        impl CapabilityClassifier {
+            $(fn $method(&self, _value: MutationView<'_, $handle>) -> &'static str { $label })+
+        }
+
+        struct MixedClassifier;
+        #[dispatch(classify)]
+        impl MixedClassifier {
+            $(fn $method(&self, _value: $handle) -> &'static str { $label })+
+            fn classify_integer_array(&self, _value: Array<i64>) -> &'static str {
+                "integer_array"
+            }
+            fn classify_float_array(&self, _value: Array<f64>) -> &'static str {
+                "float_array"
+            }
+        }
+
+        fn classify_borrowed_pattern(value: AnyView<'_>) -> &'static str {
+            match_any! { value {
+                $($object(ref node) => { let _: &$object = node; $label },)+
+                _ => "unsupported",
+            }}
+        }
+
         fn register_expr_types() {
             register_type::<ExprObj>();
             $(
@@ -81,34 +120,146 @@ macro_rules! define_expr_leaves {
 // exact-leaf dispatch. This integration-test binary intentionally has one test,
 // so its process-wide type registrations happen before any concurrent lookup.
 define_expr_leaves!(
-    (AddExprObj, AddExpr, "testing.match_any.AddExpr"),
-    (SubExprObj, SubExpr, "testing.match_any.SubExpr"),
-    (MulExprObj, MulExpr, "testing.match_any.MulExpr"),
-    (DivExprObj, DivExpr, "testing.match_any.DivExpr"),
-    (ModExprObj, ModExpr, "testing.match_any.ModExpr"),
-    (NegExprObj, NegExpr, "testing.match_any.NegExpr"),
-    (CallExprObj, CallExpr, "testing.match_any.CallExpr"),
-    (LetExprObj, LetExpr, "testing.match_any.LetExpr"),
-    (IfExprObj, IfExpr, "testing.match_any.IfExpr"),
-    (TupleExprObj, TupleExpr, "testing.match_any.TupleExpr"),
+    (
+        AddExprObj,
+        AddExpr,
+        classify_add,
+        "add",
+        "testing.match_any.AddExpr"
+    ),
+    (
+        SubExprObj,
+        SubExpr,
+        classify_sub,
+        "sub",
+        "testing.match_any.SubExpr"
+    ),
+    (
+        MulExprObj,
+        MulExpr,
+        classify_mul,
+        "mul",
+        "testing.match_any.MulExpr"
+    ),
+    (
+        DivExprObj,
+        DivExpr,
+        classify_div,
+        "div",
+        "testing.match_any.DivExpr"
+    ),
+    (
+        ModExprObj,
+        ModExpr,
+        classify_mod,
+        "mod",
+        "testing.match_any.ModExpr"
+    ),
+    (
+        NegExprObj,
+        NegExpr,
+        classify_neg,
+        "neg",
+        "testing.match_any.NegExpr"
+    ),
+    (
+        CallExprObj,
+        CallExpr,
+        classify_call,
+        "call",
+        "testing.match_any.CallExpr"
+    ),
+    (
+        LetExprObj,
+        LetExpr,
+        classify_let,
+        "let",
+        "testing.match_any.LetExpr"
+    ),
+    (
+        IfExprObj,
+        IfExpr,
+        classify_if,
+        "if",
+        "testing.match_any.IfExpr"
+    ),
+    (
+        TupleExprObj,
+        TupleExpr,
+        classify_tuple,
+        "tuple",
+        "testing.match_any.TupleExpr"
+    ),
     (
         TupleGetItemExprObj,
         TupleGetItemExpr,
+        classify_tuple_get_item,
+        "tuple_get_item",
         "testing.match_any.TupleGetItemExpr"
     ),
-    (CastExprObj, CastExpr, "testing.match_any.CastExpr"),
-    (LoadExprObj, LoadExpr, "testing.match_any.LoadExpr"),
-    (StoreExprObj, StoreExpr, "testing.match_any.StoreExpr"),
-    (ForExprObj, ForExpr, "testing.match_any.ForExpr"),
-    (WhileExprObj, WhileExpr, "testing.match_any.WhileExpr"),
-    (SeqExprObj, SeqExpr, "testing.match_any.SeqExpr"),
-    (ReturnExprObj, ReturnExpr, "testing.match_any.ReturnExpr"),
+    (
+        CastExprObj,
+        CastExpr,
+        classify_cast,
+        "cast",
+        "testing.match_any.CastExpr"
+    ),
+    (
+        LoadExprObj,
+        LoadExpr,
+        classify_load,
+        "load",
+        "testing.match_any.LoadExpr"
+    ),
+    (
+        StoreExprObj,
+        StoreExpr,
+        classify_store,
+        "store",
+        "testing.match_any.StoreExpr"
+    ),
+    (
+        ForExprObj,
+        ForExpr,
+        classify_for,
+        "for",
+        "testing.match_any.ForExpr"
+    ),
+    (
+        WhileExprObj,
+        WhileExpr,
+        classify_while,
+        "while",
+        "testing.match_any.WhileExpr"
+    ),
+    (
+        SeqExprObj,
+        SeqExpr,
+        classify_seq,
+        "seq",
+        "testing.match_any.SeqExpr"
+    ),
+    (
+        ReturnExprObj,
+        ReturnExpr,
+        classify_return,
+        "return",
+        "testing.match_any.ReturnExpr"
+    ),
     (
         ConstantExprObj,
         ConstantExpr,
+        classify_constant,
+        "constant",
         "testing.match_any.ConstantExpr"
     ),
-    (VarExprObj, VarExpr, "testing.match_any.VarExpr"),
+    (
+        VarExprObj,
+        VarExpr,
+        classify_var,
+        "var",
+        "testing.match_any.VarExpr"
+    ),
 );
 
 #[test]
@@ -225,6 +376,15 @@ fn dispatches_representative_ast_leaf_nodes() {
             assert_eq!(classify_refs::<AddExprObj>(&value), expected);
             assert_eq!(value.debug_strong_count(), Some(1));
         }
+        let view = AnyView::from(&value);
+        assert_eq!(OwnedClassifier.dispatch_tuple((view,)), Some(expected));
+        assert_eq!(BorrowedClassifier.dispatch_tuple((view,)), Some(expected));
+        assert_eq!(
+            CapabilityClassifier.dispatch_tuple((MutationView::borrowed(view),)),
+            Some(expected)
+        );
+        assert_eq!(MixedClassifier.dispatch_tuple((view,)), Some(expected));
+        assert_eq!(classify_borrowed_pattern(view), expected);
         assert_eq!(classify_all!(&value; Owned), expected);
         assert_eq!(
             classify_all!(MutationView::borrowed(tvm_ffi::AnyView::from(&value)); MutationView),
@@ -234,8 +394,18 @@ fn dispatches_representative_ast_leaf_nodes() {
         assert_eq!(classify(value), expected);
     }
 
+    let scalar = 1_i64;
+    let view = AnyView::from(&scalar);
+    assert_eq!(OwnedClassifier.dispatch_tuple((view,)), None);
+    assert_eq!(BorrowedClassifier.dispatch_tuple((view,)), None);
+    assert_eq!(
+        CapabilityClassifier.dispatch_tuple((MutationView::borrowed(view),)),
+        None
+    );
+
     assert_eq!(classify(Any::from(Shape::from([1_i64, 2]))), "unsupported");
     assert_eq!(classify(Any::from(1_i64)), "unsupported");
+
     // The call-site cache was initialized for AddExprObj; another generic
     // instantiation must take the ordered path and preserve its first arm.
     assert_eq!(
@@ -282,5 +452,9 @@ fn dispatches_representative_ast_leaf_nodes() {
         "add"
     );
     let array = [1.5_f64, 2.5].into_iter().collect::<Array<f64>>();
+    assert_eq!(
+        MixedClassifier.dispatch_tuple((AnyView::from(&array),)),
+        Some("float_array")
+    );
     assert_eq!(classify_mixed_patterns(Any::from(array)), "float_array");
 }

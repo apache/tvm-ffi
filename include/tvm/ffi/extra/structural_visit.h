@@ -142,6 +142,10 @@ namespace type_attr {
  *
  * Value type: either an opaque native hook pointer or an ``ffi::Function``.
  *
+ * Structural visitor and mutator hooks run synchronously on the calling thread. Their runtime
+ * handles and inputs are borrowed; keep runtime handles within the hook call and preserve input
+ * lifetimes and mutation permissions.
+ *
  * On success, the hook returns ``None`` for no interrupt, or a
  * ``VisitInterrupt`` to halt traversal. On failure, it returns an ``Error``.
  * The ``visitor`` parameter is the active traversal context used to recursively

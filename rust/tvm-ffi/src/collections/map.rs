@@ -87,7 +87,7 @@ fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
 #[type_key = "ffi.Map"]
 #[type_index(TypeIndex::kTVMFFIMap)]
 pub struct MapObj {
-    pub object: Object,
+    pub(crate) object: Object,
     /// Pointer to the (opaque) key/value storage region (`MapBaseObj::data_`).
     pub data: *mut core::ffi::c_void,
     /// Number of entries (`MapBaseObj::size_`).

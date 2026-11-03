@@ -27,12 +27,41 @@ mod object_macros;
 mod rs_class;
 mod utils;
 
-/// Generate `walk`, `map`, `visit`, or `mutate` dispatch from an inherent impl.
+/// Generate source-ordered runtime type dispatch from `prefix_*` handlers.
 ///
-/// `#[dispatch(visit, policy = expr)]` and `#[dispatch(mutate, policy = expr)]`
-/// use a `ContextPolicy<Self>` or `MutationContextPolicy<Self>` for default recursion.
-/// The expression runs at each default descent and may read `self` for configuration;
-/// mutable traversal state stays on `self`. Policy tuples compose as usual.
+/// `#[dispatch(prefix)]` implements `Dispatcher<(AnyView<'_>, ...), Option<R>>`
+/// for the receiver reference (`&T` or `&mut T`). `#[dispatch(prefix, AnyView)]`
+/// selects that carrier explicitly; `#[dispatch(prefix, MutationView)]` selects
+/// a consuming mutation view. The inherent `.dispatch(value, ...)` method owns
+/// matching; the trait's `.dispatch_tuple((value, ...))` unpacks and forwards to it.
+/// Both methods always inline. The result is `Option<R>`, preserving the complete handler outcome. Only
+/// the outer `None` means no match; matched errors and inner `None` are final.
+/// The receiver reference is consumed, allowing results to borrow it safely.
+///
+/// Handlers match an owned FFI value, a borrowed object node, or an optional
+/// by-value `AnyView` catch-all, which must be last.
+/// The longest handler determines trailing arguments and output;
+/// other handlers may consume a compatible prefix without cloning. Method
+/// generics must be constrained by the receiver, argument tuple or return type.
+///
+/// Handlers share a common return type, with any normalization written explicitly
+/// in their bodies. Handler-level `cfg`/`cfg_attr` attributes are unsupported;
+/// configure the whole impl instead.
+/// A consuming `MutationView` retains mutation permission; its typed misses
+/// recover the same handle, and `AnyView` cannot grant it.
+///
+/// Matching invokes the public `match_any!` macro and its exact-final-type
+/// lookup for eligible larger handler sets. Dispatch also matches scalar payloads
+/// and keeps owned argument conversions strict. Parameterized containers and
+/// other non-exact matchers retain ordered, fully checked conversion.
+///
+/// The macro operates on inherent impls only. Traversal engines explicitly
+/// call the dispatcher and configure their own default recursion;
+/// no method prefix has a reserved traversal meaning.
+///
+/// Generate one dispatcher per type. Method generics can select different
+/// argument and return types; use an expected result or explicit type arguments
+/// when inference is ambiguous.
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {

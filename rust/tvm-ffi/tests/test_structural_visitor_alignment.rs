@@ -27,8 +27,8 @@
 //! definition region, the rest inherit the surrounding state.
 
 use tvm_ffi::{
-    structural_visit, AnyView, Array, DefRegionKind, Result, String as FfiString,
-    StructuralVisitor, VisitInterrupt,
+    dispatch, structural_visit, AnyView, Array, DefRegionKind, Result, String as FfiString,
+    StructuralVisitorView, VisitInterrupt,
 };
 
 /// C++: class TestVisitorObj : public StructuralVisitorObj
@@ -42,16 +42,18 @@ struct RecordingVisitor {
     interrupt_on: Option<i64>,
 }
 
-impl StructuralVisitor for RecordingVisitor {
+#[dispatch(visit)]
+impl RecordingVisitor {
     /// C++ analog: `TestVisitorObj::VisitImpl` — record every value together
     /// with the active def-region state, optionally interrupt with a payload,
     /// otherwise delegate recursion explicitly. The array arm mirrors
     /// `TFuncObj::StructuralVisit`.
-    fn visit(
+    fn visit_any(
         &mut self,
         value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
+        visitor: &mut StructuralVisitorView<'_, Self>,
     ) -> Result<Option<VisitInterrupt>> {
+        let def_region_kind = visitor.def_region_kind();
         let integer = value.try_as::<i64>();
         let label = match integer {
             Some(integer) => integer.to_string(),
@@ -76,16 +78,23 @@ impl StructuralVisitor for RecordingVisitor {
             // C++: visitor->WithDefRegionKind(kTVMFFIDefRegionKindPattern,
             //          [&] { return visitor->VisitExpected(self->params); })
             let params = array.get(0).unwrap();
-            if let Some(interrupt) = self.visit_child(&params, DefRegionKind::Pattern)? {
+            if let Some(interrupt) = visitor
+                .with_def_region_kind(DefRegionKind::Pattern, |visitor| {
+                    visitor.visit(self, &params)
+                })?
+            {
                 return Ok(Some(interrupt));
             }
             // C++: visitor->VisitExpected(self->body)  (inherits the state)
             let body = array.get(1).unwrap();
-            return self.visit_child(&body, def_region_kind);
+            return visitor
+                .with_def_region_kind(def_region_kind, |visitor| visitor.visit(self, &body));
         }
 
         // C++: return DefaultVisitExpected(value);
-        self.default_visit_children(value, def_region_kind)
+        visitor.with_def_region_kind(def_region_kind, |visitor| {
+            visitor.default_visit(self, &value)
+        })
     }
 }
 

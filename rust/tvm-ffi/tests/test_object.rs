@@ -44,6 +44,10 @@ impl TestIntObj {
 
 impl Drop for TestIntObj {
     fn drop(&mut self) {
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _: AnyView<'_> = (&self.object).into();
+        }))
+        .is_err());
         self.delete_counter.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -71,8 +75,15 @@ unsafe impl ObjectCoreWithExtraItems for TestIntObj {
 
 #[test]
 fn test_object_arc() {
+    assert!(std::panic::catch_unwind(|| {
+        let _: AnyView<'_> = (&Object::new()).into();
+    })
+    .is_err());
     let delete_counter = Arc::new(AtomicU32::new(0));
     let obj_arc = ObjectArc::new(TestIntObj::new(11, delete_counter.clone(), 0));
+    let view: AnyView<'_> = (&obj_arc.object).into();
+    assert_eq!(view.type_index(), Object::type_index());
+    assert_eq!(view.debug_strong_count(), Some(1));
     assert_eq!(obj_arc.value, 11);
     assert_eq!(ObjectArc::strong_count(&obj_arc), 1);
     assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
@@ -110,13 +121,14 @@ fn test_object_arc_with_extra_items() {
     assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     unsafe {
+        let raw = ObjectArc::as_raw_mut(&mut obj_arc);
         // layout check of extra items
         assert_eq!(TestIntObj::extra_items_count(&obj_arc), 10);
         assert_eq!(TestIntObj::extra_items(&obj_arc).len(), 10);
-        assert_eq!(TestIntObj::extra_items_mut(&mut obj_arc).len(), 10);
+        assert_eq!(TestIntObj::extra_items_mut(&mut *raw).len(), 10);
         assert_eq!(
-            TestIntObj::extra_items_mut(&mut obj_arc).as_ptr() as *mut u8,
-            (ObjectArc::as_raw_mut(&mut obj_arc) as *mut u8).add(std::mem::size_of::<TestIntObj>())
+            TestIntObj::extra_items_mut(&mut *raw).as_ptr() as *mut u8,
+            (raw as *mut u8).add(std::mem::size_of::<TestIntObj>())
         );
     }
     drop(obj_arc);
