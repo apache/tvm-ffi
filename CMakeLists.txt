@@ -129,6 +129,7 @@ endif ()
 
 tvm_ffi_add_msvc_flags(tvm_ffi_objs)
 tvm_ffi_add_target_from_obj(tvm_ffi tvm_ffi_objs)
+target_compile_definitions(tvm_ffi_static INTERFACE TVM_FFI_EXPORTS)
 
 if (TVM_FFI_USE_THREADS)
   find_package(Threads REQUIRED)
