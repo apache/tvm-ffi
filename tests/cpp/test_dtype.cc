@@ -56,6 +56,8 @@ TEST(DType, StringConversionAllDLPackTypes) {
       {DLDataType{kDLInt, 16, 1}, "int16"},
       {DLDataType{kDLUInt, 16, 1}, "uint16"},
       {DLDataType{kDLBfloat, 16, 1}, "bfloat16"},
+      {DLDataType{kDLBcomplex, 32, 1}, "bcomplex32"},
+      {DLDataType{kDLBcomplex, 32, 4}, "bcomplex32x4"},
       {DLDataType{kDLFloat8_e3m4, 8, 1}, "float8_e3m4"},
       {DLDataType{kDLFloat8_e4m3, 8, 1}, "float8_e4m3"},
       {DLDataType{kDLFloat8_e4m3b11fnuz, 8, 1}, "float8_e4m3b11fnuz"},
@@ -72,6 +74,12 @@ TEST(DType, StringConversionAllDLPackTypes) {
   for (const auto& [dtype, str] : test_cases) {
     EXPECT_EQ(DLDataTypeToString(dtype), str);
     EXPECT_EQ(StringToDLDataType(str), dtype);
+  }
+}
+
+TEST(DType, BcomplexAbbrev) {
+  for (const char* str : {"bcomplex32", "bcomplex32x4", "bcomplex32xvscalex4"}) {
+    EXPECT_EQ(DTypeAbbrev(StringToDLDataType(str)), str);
   }
 }
 

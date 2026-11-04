@@ -596,6 +596,12 @@ const char* DeviceTypeName(int device_type) {
       return "maia";
     case kDLTrn:
       return "trn";
+    case kDLTPU:
+      return "tpu";
+    case kDLTPUHost:
+      return "tpu_host";
+    case kDLAscend:
+      return "ascend";
     default:
       return "unknown";
   }

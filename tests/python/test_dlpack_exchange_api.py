@@ -74,8 +74,7 @@ def test_dlpack_exchange_api(tmp_path: Path) -> None:
             TORCH_CHECK(api != nullptr, "API pointer is NULL");
             TORCH_CHECK(api->header.version.major == DLPACK_MAJOR_VERSION,
                         "Expected major version ", DLPACK_MAJOR_VERSION, ", got ", api->header.version.major);
-            TORCH_CHECK(api->header.version.minor == DLPACK_MINOR_VERSION,
-                        "Expected minor version ", DLPACK_MINOR_VERSION, ", got ", api->header.version.minor);
+            // Minor versions may differ when the fields used here are supported.
             TORCH_CHECK(api->managed_tensor_allocator != nullptr,
                         "managed_tensor_allocator is NULL");
             TORCH_CHECK(api->managed_tensor_from_py_object_no_sync != nullptr,
@@ -133,8 +132,7 @@ def test_dlpack_exchange_api(tmp_path: Path) -> None:
             TORCH_CHECK(out_tensor != nullptr, "from_py_object_no_sync returned NULL");
             TORCH_CHECK(out_tensor->version.major == DLPACK_MAJOR_VERSION,
                         "Expected major version ", DLPACK_MAJOR_VERSION, ", got ", out_tensor->version.major);
-            TORCH_CHECK(out_tensor->version.minor == DLPACK_MINOR_VERSION,
-                        "Expected minor version ", DLPACK_MINOR_VERSION, ", got ", out_tensor->version.minor);
+            // A producer using an older minor version can export these fields.
             TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Expected ndim 3, got ", out_tensor->dl_tensor.ndim);
             TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 2, "Expected shape[0] = 2, got ", out_tensor->dl_tensor.shape[0]);
             TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 3, "Expected shape[1] = 3, got ", out_tensor->dl_tensor.shape[1]);

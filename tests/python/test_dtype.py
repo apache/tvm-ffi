@@ -226,6 +226,23 @@ def test_ml_dtypes_dtype_conversion() -> None:
     _check_dtype(np.dtype(ml_dtypes.float4_e2m1fn), 17, 4, 1)
 
 
+@pytest.mark.parametrize("lanes", [1, 4])
+def test_bcomplex_dtype_roundtrip(lanes: int) -> None:
+    dtype = tvm_ffi.dtype.from_dlpack_data_type((18, 32, lanes))
+    assert str(dtype) == "bcomplex32" + (f"x{lanes}" if lanes != 1 else "")
+    assert dtype.itemsize == 4 * lanes
+    _check_dtype(dtype, 18, 32, lanes)
+    _check_dtype(tvm_ffi.dtype(str(dtype)), 18, 32, lanes)
+
+
+def test_ml_dtypes_bcomplex_conversion() -> None:
+    ml_dtypes = pytest.importorskip("ml_dtypes")
+    if not hasattr(ml_dtypes, "bcomplex32"):
+        pytest.skip("ml_dtypes does not expose bcomplex32")
+    _check_dtype(np.dtype(ml_dtypes.bcomplex32), 18, 32, 1)
+    assert np.dtype(tvm_ffi.bcomplex32) == np.dtype(ml_dtypes.bcomplex32)
+
+
 def test_builtin_dtype_conversion() -> None:
     _check_dtype(tvm_ffi.bool, 6, 8, 1)
     _check_dtype(tvm_ffi.int8, 0, 8, 1)
@@ -240,6 +257,7 @@ def test_builtin_dtype_conversion() -> None:
     _check_dtype(tvm_ffi.float32, 2, 32, 1)
     _check_dtype(tvm_ffi.float64, 2, 64, 1)
     _check_dtype(tvm_ffi.bfloat16, 4, 16, 1)
+    _check_dtype(tvm_ffi.bcomplex32, 18, 32, 1)
     _check_dtype(tvm_ffi.float8_e3m4, 7, 8, 1)
     _check_dtype(tvm_ffi.float8_e4m3, 8, 8, 1)
     _check_dtype(tvm_ffi.float8_e4m3b11fnuz, 9, 8, 1)

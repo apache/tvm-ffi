@@ -52,6 +52,9 @@ TVM_FFI_INLINE static std::optional<DLDeviceType> TryParseDLDeviceType(std::stri
   if (name == "wgpu" || name == "webgpu") return kDLWebGPU;
   if (name == "maia") return kDLMAIA;
   if (name == "trn") return kDLTrn;
+  if (name == "tpu") return kDLTPU;
+  if (name == "tpu_host") return kDLTPUHost;
+  if (name == "ascend") return kDLAscend;
   return std::nullopt;
 }
 

@@ -39,10 +39,13 @@ TEST(Device, AnyConversionWithString) {
     DLDeviceType device_type;
   };
   const TestCase test_cases[] = {
-      {"cpu", kDLCPU},        {"cuda", kDLCUDA},       {"opencl", kDLOpenCL}, {"vulkan", kDLVulkan},
-      {"metal", kDLMetal},    {"mps", kDLMetal},       {"vpi", kDLVPI},       {"rocm", kDLROCM},
-      {"ext_dev", kDLExtDev}, {"hexagon", kDLHexagon}, {"wgpu", kDLWebGPU},   {"webgpu", kDLWebGPU},
-      {"maia", kDLMAIA},      {"trn", kDLTrn},         {"oneapi", kDLOneAPI}, {"xpu", kDLOneAPI},
+      {"cpu", kDLCPU},          {"cuda", kDLCUDA},     {"opencl", kDLOpenCL},
+      {"vulkan", kDLVulkan},    {"metal", kDLMetal},   {"mps", kDLMetal},
+      {"vpi", kDLVPI},          {"rocm", kDLROCM},     {"ext_dev", kDLExtDev},
+      {"hexagon", kDLHexagon},  {"wgpu", kDLWebGPU},   {"webgpu", kDLWebGPU},
+      {"maia", kDLMAIA},        {"trn", kDLTrn},       {"tpu", kDLTPU},
+      {"tpu_host", kDLTPUHost}, {"ascend", kDLAscend}, {"oneapi", kDLOneAPI},
+      {"xpu", kDLOneAPI},
   };
   for (const TestCase& test_case : test_cases) {
     SCOPED_TRACE(test_case.name);

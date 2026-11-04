@@ -46,6 +46,7 @@ class DataTypeCode(IntEnum):
     Float6E2M3FN = 15
     Float6E3M2FN = 16
     Float4E2M1FN = 17
+    BCOMPLEX = 18
 
 
 class dtype(str):
@@ -386,6 +387,8 @@ try:
     dtype._NUMPY_DTYPE_TO_STR[np.dtype(ml_dtypes.bfloat16)] = "bfloat16"
     dtype._NUMPY_DTYPE_TO_STR[np.dtype(ml_dtypes.float8_e4m3fn)] = "float8_e4m3fn"
     dtype._NUMPY_DTYPE_TO_STR[np.dtype(ml_dtypes.float8_e5m2)] = "float8_e5m2"
+    if hasattr(ml_dtypes, "bcomplex32"):  # ml_dtypes >= 0.6.0
+        dtype._NUMPY_DTYPE_TO_STR[np.dtype(ml_dtypes.bcomplex32)] = "bcomplex32"
     if hasattr(ml_dtypes, "float4_e2m1fn"):  # ml_dtypes >= 0.5.0
         dtype._NUMPY_DTYPE_TO_STR[np.dtype(ml_dtypes.float4_e2m1fn)] = "float4_e2m1fn"
 except ImportError:
@@ -410,6 +413,7 @@ float64 = dtype("float64")
 float32 = dtype("float32")
 float16 = dtype("float16")
 bfloat16 = dtype("bfloat16")
+bcomplex32 = dtype("bcomplex32")
 # float8 dtypes
 float8_e3m4 = dtype("float8_e3m4")
 float8_e4m3 = dtype("float8_e4m3")
