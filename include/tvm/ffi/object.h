@@ -260,7 +260,8 @@ class Object {
   /*! \brief increase strong reference count, the caller must already hold a strong reference */
   TVM_FFI_INLINE void IncRef() {
 #ifdef _MSC_VER
-    _InterlockedIncrement64(
+    // Use the Windows SDK wrapper, which also supports 32-bit x86.
+    InterlockedIncrement64(
         reinterpret_cast<volatile __int64*>(&header_.combined_ref_count));  // NOLINT(*)
 #else
     __atomic_fetch_add(&(header_.combined_ref_count), 1, __ATOMIC_RELAXED);
@@ -317,7 +318,7 @@ class Object {
 #ifdef _MSC_VER
     // use simpler impl in windows to ensure correctness
     uint64_t count_before_sub =
-        _InterlockedDecrement64(                                              //
+        InterlockedDecrement64(                                               //
             reinterpret_cast<volatile __int64*>(&header_.combined_ref_count)  // NOLINT(*)
             ) +
         1;
