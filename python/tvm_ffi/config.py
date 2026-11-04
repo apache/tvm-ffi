@@ -78,7 +78,7 @@ def __main__() -> None:  # noqa: PLR0912
     if args.cxxflags:
         include_dir = libinfo.find_include_path()
         dlpack_include_dir = libinfo.find_dlpack_include_path()
-        print(f"-I{include_dir} -I{dlpack_include_dir} -std=c++17")
+        print(f"-I{include_dir} -I{dlpack_include_dir} -std=c++20")
     if args.cflags:
         include_dir = libinfo.find_include_path()
         dlpack_include_dir = libinfo.find_dlpack_include_path()

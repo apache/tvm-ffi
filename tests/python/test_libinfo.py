@@ -89,7 +89,7 @@ def test_libs_reports_link_target() -> None:
 def test_cxxflags_include_paths_and_standard() -> None:
     include_dir = libinfo.find_include_path()
     dlpack_dir = libinfo.find_dlpack_include_path()
-    assert _stdout_for("--cxxflags") == f"-I{include_dir} -I{dlpack_dir} -std=c++17"
+    assert _stdout_for("--cxxflags") == f"-I{include_dir} -I{dlpack_dir} -std=c++20"
 
 
 def test_cflags_include_paths() -> None:

@@ -43,12 +43,12 @@ execute_process(
 message(STATUS "Finding libfiles ${tvm_ffi_LIB_FILES}")
 
 add_library(tvm_ffi::header INTERFACE IMPORTED)
-target_compile_features(tvm_ffi::header INTERFACE cxx_std_17)
+target_compile_features(tvm_ffi::header INTERFACE cxx_std_20)
 target_include_directories(tvm_ffi::header INTERFACE "${tvm_ffi_INCLUDE_DIR}")
 target_include_directories(tvm_ffi::header INTERFACE "${tvm_ffi_DLPACK_INCLUDE_DIR}")
 
 add_library(tvm_ffi::shared SHARED IMPORTED)
-target_compile_features(tvm_ffi::shared INTERFACE cxx_std_17)
+target_compile_features(tvm_ffi::shared INTERFACE cxx_std_20)
 
 if (WIN32)
   set_target_properties(tvm_ffi::shared PROPERTIES IMPORTED_IMPLIB "${tvm_ffi_LIB_FILES}")

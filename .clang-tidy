@@ -1,4 +1,5 @@
 # -clang-analyzer-unix.Malloc is disabled due to false positives
+# C++20 constraints and integer comparison rewrites remain optional.
 Checks: >
   clang-diagnostic-*,
   clang-analyzer-*,
@@ -11,6 +12,8 @@ Checks: >
   -modernize-concat-nested-namespaces,
   -modernize-use-auto,
   -modernize-use-nodiscard,
+  -modernize-use-constraints,
+  -modernize-use-integer-sign-comparison,
   -modernize-return-braced-init-list,
   -modernize-avoid-c-arrays,
   -bugprone-easily-swappable-parameters,

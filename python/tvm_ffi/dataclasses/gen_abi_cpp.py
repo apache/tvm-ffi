@@ -697,7 +697,7 @@ def gen_abi_cpp(type_keys: str | Sequence[str]) -> str:
     Returns
     -------
     str
-        Deterministic C++17 header source.  The source performs lookup only;
+        Deterministic C++20 header source.  The source performs lookup only;
         it does not register, compile, load, or allocate any type.
 
     """

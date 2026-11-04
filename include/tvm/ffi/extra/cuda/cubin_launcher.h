@@ -88,7 +88,7 @@ namespace ffi {
  * nvcc --cubin -arch=sm_75 kernel.cu -o kernel.cubin
  *
  * # Step 2: Compile C++ source to object file
- * g++ -c -fPIC -std=c++17 -I/path/to/tvm-ffi/include mycode.cc -o mycode.o
+ * g++ -c -fPIC -std=c++20 -I/path/to/tvm-ffi/include mycode.cc -o mycode.o
  *
  * # Step 3: Embed CUBIN using Python utility
  * python -m tvm_ffi.utils.embed_cubin \

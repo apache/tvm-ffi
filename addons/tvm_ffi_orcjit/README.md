@@ -69,7 +69,7 @@ pip install apache-tvm-ffi apache-tvm_ffi_orcjit
 
 #### Prerequisites
 
-- Python 3.10+, CMake 3.24+, C++17 compiler
+- Python 3.10+, CMake 3.24+, C++20 compiler
 
 The build automatically installs [mlc-llvm-static](https://pypi.org/project/mlc-llvm-static/)
 from PyPI. It supplies LLVM 23.1.1, static zlib/zstd, and the Linux ORC runtime.
@@ -172,7 +172,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add, [](int a, int b) {
 });
 ```
 
-Compile: `clang++ -std=c++17 -fPIC -O2 -c -o example.o example.cc`
+Compile: `clang++ -std=c++20 -fPIC -O2 -c -o example.o example.cc`
 
 ### Pure C (all platforms including Windows)
 

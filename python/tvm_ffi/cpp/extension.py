@@ -462,7 +462,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     tvm_ffi_lib_name = tvm_ffi_lib.stem
     if IS_WINDOWS:
         default_cflags = ["/O2", "/MD"]
-        default_cxxflags = ["/std:c++17", "/O2", "/MD", "/EHsc"]
+        default_cxxflags = ["/std:c++20", "/O2", "/MD", "/EHsc"]
         _win_warnings = [
             "/wd4819",
             "/wd4251",
@@ -479,7 +479,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
         default_cxxflags += _win_warnings
         # nvcc forwards its own -std and -O to cl for the host pass, as it does to gcc.
         # /MD matches the C++ objects: cl's default /MT fails a mixed link (LNK2038).
-        default_cuda_cflags = ["-Xcompiler", "/MD", "-std=c++17", "-O2"]
+        default_cuda_cflags = ["-Xcompiler", "/MD", "-std=c++20", "-O2"]
         default_ldflags = [
             "/DLL",
             _windows_argument(f"/LIBPATH:{tvm_ffi_lib_path}"),
@@ -493,8 +493,8 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
             ]
     else:
         default_cflags = ["-fPIC", "-O2"]
-        default_cxxflags = ["-std=c++17", "-fPIC", "-O2"]
-        default_cuda_cflags = ["-std=c++17", "-O2"]
+        default_cxxflags = ["-std=c++20", "-fPIC", "-O2"]
+        default_cuda_cflags = ["-std=c++20", "-O2"]
         default_ldflags = ["-shared", f"-L{tvm_ffi_lib_path}", "-ltvm_ffi"]
 
         if with_hip:
@@ -949,8 +949,8 @@ def build_inline(  # noqa: PLR0913
         The extra compiler flags for C++ compilation.
         The default flags are:
 
-        - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
-        - On Windows: ['/std:c++17', '/O2']
+        - On Linux/macOS: ['-std=c++20', '-fPIC', '-O2']
+        - On Windows: ['/std:c++20', '/O2']
 
     extra_cuda_cflags
         The extra compiler flags for CUDA compilation.
@@ -1179,8 +1179,8 @@ def load_inline(  # noqa: PLR0913
         The extra compiler flags for C++ compilation.
         The default flags are:
 
-        - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
-        - On Windows: ['/std:c++17', '/O2']
+        - On Linux/macOS: ['-std=c++20', '-fPIC', '-O2']
+        - On Windows: ['/std:c++20', '/O2']
 
     extra_cuda_cflags
         The extra compiler flags for CUDA compilation.
@@ -1347,17 +1347,17 @@ def build(  # noqa: PLR0913
         Extra compiler flags applied to both C and C++ compilation.
         The C++ default flags are:
 
-        - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
-        - On Windows: ['/std:c++17', '/MD', '/O2']
+        - On Linux/macOS: ['-std=c++20', '-fPIC', '-O2']
+        - On Windows: ['/std:c++20', '/MD', '/O2']
 
-        The C default flags omit ``-std=c++17`` and ``/EHsc``.
+        The C default flags omit ``-std=c++20`` and ``/EHsc``.
 
     extra_cuda_cflags
         The extra compiler flags for CUDA compilation.
         The default flags are:
 
-        - ['-Xcompiler', '-fPIC', '-std=c++17', '-O2'] (Linux/macOS)
-        - ['-Xcompiler', '/MD', '-std=c++17', '-O2'] (Windows)
+        - ['-Xcompiler', '-fPIC', '-std=c++20', '-O2'] (Linux/macOS)
+        - ['-Xcompiler', '/MD', '-std=c++20', '-O2'] (Windows)
 
     extra_ldflags
         The extra linker flags.
@@ -1505,15 +1505,15 @@ def load(  # noqa: PLR0913
         The extra compiler flags for C++ compilation.
         The default flags are:
 
-        - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
-        - On Windows: ['/std:c++17', '/MD', '/O2']
+        - On Linux/macOS: ['-std=c++20', '-fPIC', '-O2']
+        - On Windows: ['/std:c++20', '/MD', '/O2']
 
     extra_cuda_cflags
         The extra compiler flags for CUDA compilation.
         The default flags are:
 
-        - ['-Xcompiler', '-fPIC', '-std=c++17', '-O2'] (Linux/macOS)
-        - ['-Xcompiler', '/MD', '-std=c++17', '-O2'] (Windows)
+        - ['-Xcompiler', '-fPIC', '-std=c++20', '-O2'] (Linux/macOS)
+        - ['-Xcompiler', '/MD', '-std=c++20', '-O2'] (Windows)
 
     extra_ldflags
         The extra linker flags.

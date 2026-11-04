@@ -36,7 +36,7 @@ We can build a single shared library that works across:
    :name: prerequisite
 
    - Python: 3.9 or newer
-   - Compiler: C++17-capable toolchain (GCC/Clang/MSVC)
+   - Compiler: C++20-capable toolchain (GCC/Clang/MSVC)
    - Optional ML frameworks for testing: NumPy, PyTorch, JAX, CuPy, PaddlePaddle
    - CUDA: Any modern version (if you want to try the CUDA part)
    - TVM-FFI installed via:

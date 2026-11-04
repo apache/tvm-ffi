@@ -28,9 +28,9 @@ This guide covers two common workflows:
    :class: tip
 
    - Python: 3.9 or newer
-   - Compiler: C++17-capable toolchain
+   - Compiler: C++20-capable toolchain
 
-     - Linux: GCC or Clang with C++17 support
+     - Linux: GCC or Clang with C++20 support
      - macOS: Apple Clang (via Xcode Command Line Tools)
      - Windows: MSVC (Visual Studio 2019 or 2022, x64)
 
