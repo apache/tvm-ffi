@@ -56,8 +56,8 @@ pub use crate::extra::dispatch::Dispatcher;
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_map::{structural_map, IntoMapper, MapChainLink};
 pub use crate::extra::structural_mutate::{
-    structural_mutate, InplaceMode, IntoMutator, MutationView, StructuralMutatorObj,
-    StructuralMutatorView, StructuralVarRemap,
+    structural_mutate, InplaceMode, IntoMutator, MutationView, StructuralMutateEngine,
+    StructuralMutatorBase, StructuralMutatorObj, StructuralMutatorView, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
     structural_visit, DefRegionKind, IntoVisitor, StructuralVisitEngine, StructuralVisitorBase,

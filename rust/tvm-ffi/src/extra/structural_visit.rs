@@ -151,22 +151,6 @@ const _: () = {
 // Scoped runtime prefixes are not independently allocatable ObjectCore values.
 impl StructuralVisitorObj {
     const TYPE_KEY: &'static str = "ffi.StructuralVisitor";
-
-    fn native_type_index() -> i32 {
-        static TYPE_INDEX: ColdInitLazyLock<i32> = ColdInitLazyLock::new(|| unsafe {
-            let key = TVMFFIByteArray::from_str(StructuralVisitorObj::TYPE_KEY);
-            let mut type_index = 0;
-            let return_code = TVMFFITypeKeyToIndex(&key, &mut type_index);
-            if return_code != 0 {
-                panic!(
-                    "ffi.StructuralVisitor is not registered: {}",
-                    Error::from_raised()
-                );
-            }
-            type_index
-        });
-        *TYPE_INDEX
-    }
 }
 
 /// Native state and default traversal for [`StructuralVisitEngine`].
@@ -211,7 +195,19 @@ unsafe impl StructuralVisitorBase for StructuralVisitorObj {
     }
 
     fn type_index() -> i32 {
-        Self::native_type_index()
+        static TYPE_INDEX: ColdInitLazyLock<i32> = ColdInitLazyLock::new(|| unsafe {
+            let key = TVMFFIByteArray::from_str(StructuralVisitorObj::TYPE_KEY);
+            let mut type_index = 0;
+            let return_code = TVMFFITypeKeyToIndex(&key, &mut type_index);
+            if return_code != 0 {
+                panic!(
+                    "ffi.StructuralVisitor is not registered: {}",
+                    Error::from_raised()
+                );
+            }
+            type_index
+        });
+        *TYPE_INDEX
     }
 
     #[inline(always)]
