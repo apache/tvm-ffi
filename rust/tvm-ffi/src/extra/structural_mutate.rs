@@ -1202,14 +1202,10 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         var: AnyView<'static>,
         replacement: AnyView<'static>,
     ) -> TVMFFIAny {
-        let value = match raw_tvm_ffi_any_to_owned_any(*replacement.as_raw_ffi_any()) {
-            Ok(value) => value,
-            Err(error) => return result_into_raw_tvm_ffi_any(Err(error)),
-        };
-        result_into_raw_tvm_ffi_any(
-            Self::runtime_var_remap_set(runtime, *var.as_raw_ffi_any(), &value)
-                .map(|()| Any::new()),
-        )
+        // Finish replacement cleanup before constructing the ABI result.
+        let result = raw_tvm_ffi_any_to_owned_any(*replacement.as_raw_ffi_any())
+            .and_then(|value| Self::runtime_var_remap_set(runtime, *var.as_raw_ffi_any(), &value));
+        result_into_raw_tvm_ffi_any(result.map(|()| Any::new()))
     }
 
     /// Run the public mutate/map adapter with owned `root` and borrowed `dispatch`.
