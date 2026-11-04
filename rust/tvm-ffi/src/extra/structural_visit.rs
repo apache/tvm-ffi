@@ -695,7 +695,7 @@ impl StructuralVisitorObj {
     /// owner survives descent. Hooks may not retain the runtime or input borrow.
     #[inline(always)]
     unsafe fn visit_children_raw(runtime: StructuralVisitorHandle, value: TVMFFIAny) -> TVMFFIAny {
-        if let Some(attr) = structural_visit_column().get_raw(value.type_index) {
+        if let Some(attr) = structural_visit_column().get_raw_ffi_any(value.type_index) {
             if attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32 {
                 return Self::call_structural_visit_hook_raw(runtime, value, attr);
             }

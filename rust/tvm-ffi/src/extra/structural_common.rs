@@ -235,7 +235,7 @@ pub(crate) use impl_callback_chain_tuple_arities;
 /// Object-backed values compare pointer identity. Both carriers must contain
 /// initialized payload bits; no pointee is accessed or ownership transferred.
 #[inline(always)]
-pub(crate) fn raw_tvm_ffi_any_same_as(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
+pub(crate) fn raw_ffi_any_same_as(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
     lhs.type_index == rhs.type_index
         && lhs.small_str_len == rhs.small_str_len
         && unsafe { lhs.data_union.v_uint64 == rhs.data_union.v_uint64 }
@@ -248,7 +248,7 @@ pub(crate) fn raw_tvm_ffi_any_same_as(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
 /// Error objects as ordinary values must keep a separate result channel.
 /// No payload is cloned, normalized, or released by this transfer.
 #[inline(always)]
-pub(crate) fn result_into_raw_tvm_ffi_any(result: Result<Any>) -> TVMFFIAny {
+pub(crate) fn result_into_raw_ffi_any(result: Result<Any>) -> TVMFFIAny {
     unsafe {
         match result {
             Ok(value) => Any::into_raw_ffi_any(value),
@@ -266,7 +266,7 @@ pub(crate) fn result_into_raw_tvm_ffi_any(result: Result<Any>) -> TVMFFIAny {
 /// if it was encoded from `Ok`; all other tags become an owning success.
 /// Borrowed views and rvalue slots must be normalized before this transfer.
 #[inline(always)]
-pub(crate) unsafe fn raw_tvm_ffi_any_into_result(raw: TVMFFIAny) -> Result<Any> {
+pub(crate) unsafe fn raw_ffi_any_into_result(raw: TVMFFIAny) -> Result<Any> {
     if raw.type_index != TVMFFITypeIndex::kTVMFFIError as i32 {
         return Ok(Any::from_raw_ffi_any(raw));
     }
