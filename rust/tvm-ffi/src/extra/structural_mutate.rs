@@ -130,20 +130,6 @@ const _: () = {
 // Scoped runtime prefixes are not independently allocatable ObjectCore values.
 impl StructuralMutatorObj {
     const TYPE_KEY: &'static str = "ffi.StructuralMutator";
-    fn native_type_index() -> i32 {
-        static TYPE_INDEX: ColdInitLazyLock<i32> = ColdInitLazyLock::new(|| unsafe {
-            let key = TVMFFIByteArray::from_str(StructuralMutatorObj::TYPE_KEY);
-            let mut type_index = 0;
-            if TVMFFITypeKeyToIndex(&key, &mut type_index) != 0 {
-                panic!(
-                    "ffi.StructuralMutator is not registered: {}",
-                    Error::from_raised()
-                );
-            }
-            type_index
-        });
-        *TYPE_INDEX
-    }
 }
 
 /// Native state and default mutation for [`StructuralMutateEngine`].
@@ -190,7 +176,18 @@ unsafe impl StructuralMutatorBase for StructuralMutatorObj {
     }
 
     fn type_index() -> i32 {
-        Self::native_type_index()
+        static TYPE_INDEX: ColdInitLazyLock<i32> = ColdInitLazyLock::new(|| unsafe {
+            let key = TVMFFIByteArray::from_str(StructuralMutatorObj::TYPE_KEY);
+            let mut type_index = 0;
+            if TVMFFITypeKeyToIndex(&key, &mut type_index) != 0 {
+                panic!(
+                    "ffi.StructuralMutator is not registered: {}",
+                    Error::from_raised()
+                );
+            }
+            type_index
+        });
+        *TYPE_INDEX
     }
 
     #[inline(always)]
