@@ -23,6 +23,11 @@ on:
       tag:
         description: "Tag to publish (manual run)"
         required: true
+      dry_run:
+        description: "Build and verify wheels without publishing to PyPI"
+        required: true
+        type: boolean
+        default: true
 
 jobs:
   build_wheels:
@@ -70,7 +75,7 @@ jobs:
     permissions:
       id-token: write
       attestations: write
-    if: github.event_name == 'workflow_dispatch'   # <-- publish only on manual trigger
+    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
     steps:
       - uses: actions/download-artifact@v4
         with:
