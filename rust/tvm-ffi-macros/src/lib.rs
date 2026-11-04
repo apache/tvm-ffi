@@ -260,7 +260,7 @@ pub fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Attributes and visibility before the name go on the struct. `crate = path`
 /// after the object type is where the generated code finds tvm-ffi, as for
-/// [`rs_object`].
+/// [`rs_object`](macro@rs_object).
 #[proc_macro_error]
 #[proc_macro]
 pub fn def_object_ref(input: TokenStream) -> TokenStream {
