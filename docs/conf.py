@@ -58,7 +58,6 @@ release = __version__
 
 extensions = [
     "breathe",
-    "myst_parser",
     "nbsphinx",
     "autodocsumm",
     "sphinx_design",
@@ -139,21 +138,6 @@ nbsphinx_execute = "never"
 
 autosectionlabel_prefix_document = True
 nbsphinx_allow_directives = True
-
-myst_enable_extensions = [
-    "dollarmath",
-    "amsmath",
-    "deflist",
-    "colon_fence",
-    "html_image",
-    "linkify",
-    "attrs_block",
-    "substitution",
-]
-
-myst_heading_anchors = 3
-myst_ref_domains = ["std", "py"]
-myst_all_links_external = False
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3.12", None),
@@ -389,7 +373,7 @@ templates_path = []
 
 redirects = {}
 
-source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
+source_suffix = {".rst": "restructuredtext"}
 
 language = "en"
 

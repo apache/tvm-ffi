@@ -50,11 +50,11 @@ Table of Contents
    guides/export_func_cls.rst
    guides/dataclass_reflection.rst
    guides/kernel_library_guide.rst
-   guides/compiler_integration.md
+   guides/compiler_integration.rst
    guides/cubin_launcher.rst
-   guides/python_lang_guide.md
-   guides/cpp_lang_guide.md
-   guides/rust_lang_guide.md
+   guides/python_lang_guide.rst
+   guides/cpp_lang_guide.rst
+   guides/rust_lang_guide.rst
 
 .. toctree::
    :maxdepth: 1
