@@ -24,9 +24,9 @@ use tvm_ffi::tvm_ffi_sys::{
     TVMFFITypeMetadata, TVMFFITypeRegisterMetadata,
 };
 use tvm_ffi::{
-    dispatch, get_type_attr, structural_visit, Any, AnyView, Array, DefRegionKind, Dispatcher,
-    Error, Function, IntoVisitor, Result, StructuralVisitEngine, StructuralVisitorBase,
-    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt, RUNTIME_ERROR,
+    Any, AnyView, Array, DefRegionKind, Dispatcher, Error, Function, IntoDispatcher, RUNTIME_ERROR,
+    Result, StructuralVisitEngine, StructuralVisitorBase, StructuralVisitorObj,
+    StructuralVisitorView, VisitInterrupt, dispatch, get_type_attr, structural_visit,
 };
 
 thread_local! {
@@ -96,7 +96,7 @@ unsafe impl StructuralVisitorBase for CountingBase {
         *INDEX
     }
 
-    unsafe fn default_visit(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny {
+    unsafe fn default_visit_raw(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny {
         assert_eq!(
             (*runtime.cast::<TVMFFIObject>()).type_index,
             Self::type_index()
@@ -130,11 +130,28 @@ unsafe impl StructuralVisitorBase for CountingBase {
 
 type View<'a, D> = StructuralVisitorView<'a, D, CountingBase>;
 
-fn visit<'a, M>(
-    root: impl Into<AnyView<'a>>,
-    visitor: impl IntoVisitor<M, CountingBase>,
-) -> Result<Option<VisitInterrupt>> {
-    visitor.visit_root(root.into())
+fn visit<'a, H, M, D, O>(root: impl Into<AnyView<'a>>, visitor: H) -> Result<Option<VisitInterrupt>>
+where
+    O: std::borrow::BorrowMut<D>,
+    for<'v, 'c, 'r> H: IntoDispatcher<
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, CountingBase>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
+    for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, CountingBase>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
+{
+    StructuralVisitEngine::<CountingBase>::visit_root(root, visitor)
 }
 
 #[derive(Default)]
@@ -217,12 +234,16 @@ fn unmatched_scalar_uses_selected_default_and_owned_dispatcher() {
     DROPPED.with_borrow_mut(Vec::clear);
     assert!(visit(&10_i64, Empty).unwrap().is_none());
     DROPPED.with_borrow(|drops| assert_eq!(*drops, [3]));
-    assert!(structural_visit(&Array::new(vec![1_i64]), Empty)
-        .unwrap()
-        .is_none());
-    assert!(structural_visit(&Array::new(vec![1_i64]), &mut Empty)
-        .unwrap()
-        .is_none());
+    assert!(
+        structural_visit(&Array::new(vec![1_i64]), Empty)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        structural_visit(&Array::new(vec![1_i64]), &mut Empty)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -276,11 +297,13 @@ fn base_failure_and_owned_results_release_exactly_once() {
     }
     DROPPED.with_borrow_mut(Vec::clear);
     FAIL_INIT.set(true);
-    assert!(visit(&1_i64, Unmatched)
-        .err()
-        .unwrap()
-        .to_string()
-        .contains("initialization failed"));
+    assert!(
+        visit(&1_i64, Unmatched)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("initialization failed")
+    );
     FAIL_INIT.set(false);
     DROPPED.with_borrow(|drops| assert!(drops.is_empty()));
 
@@ -358,12 +381,14 @@ fn callback_outcomes_preserve_reborrows_and_owners_through_specialized_defaults(
         assert_eq!(visitor.seen, [10, 11, 99]);
         DROPPED.with_borrow(|drops| assert_eq!(*drops, [2]));
         if fail {
-            assert!(result
-                .as_ref()
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("callback failed"));
+            assert!(
+                result
+                    .as_ref()
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("callback failed")
+            );
         } else {
             assert_eq!(payload.debug_strong_count(), Some(2));
         }

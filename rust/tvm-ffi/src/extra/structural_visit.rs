@@ -70,7 +70,8 @@
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 
-use super::marker::{Borrowed, Owned};
+use super::dispatch::IntoDispatcher;
+use std::borrow::BorrowMut;
 use std::ops::ControlFlow;
 use std::os::raw::c_void;
 use std::rc::Rc;
@@ -167,7 +168,7 @@ impl StructuralVisitorObj {
 /// to retain the runtime. Hooks may access the runtime and borrowed traversal
 /// state only synchronously, on the calling thread.
 ///
-/// `default_visit` returns one owning ABI None/Error/VisitInterrupt and recurses only
+/// `default_visit_raw` returns one owning ABI None/Error/VisitInterrupt and recurses only
 /// through the installed vtable, without a whole-base mutable reference spanning
 /// recursion. Failures use that result carrier; panics must not cross native callbacks.
 pub unsafe trait StructuralVisitorBase: Sized {
@@ -178,12 +179,15 @@ pub unsafe trait StructuralVisitorBase: Sized {
     fn type_index() -> i32;
 
     /// Descend from a borrowed value without dispatching that value again.
+    /// Return one owning ABI None, Error, or VisitInterrupt value.
+    /// Children reenter the installed vtable. The ordinary implementation accesses
+    /// only the visitor prefix, so specialized bases may reuse it.
     ///
     /// # Safety
     /// `runtime` is this live initialized base with a matching installed vtable.
     /// The input and runtime remain borrowed for this synchronous call. The
     /// caller has published the current exclusive dispatcher reborrow.
-    unsafe fn default_visit(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny;
+    unsafe fn default_visit_raw(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny;
 }
 
 // SAFETY: this prefix exactly matches the ordinary native visitor. Its mutable
@@ -211,30 +215,20 @@ unsafe impl StructuralVisitorBase for StructuralVisitorObj {
     }
 
     #[inline(always)]
-    unsafe fn default_visit(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny {
-        Self::default_visit_raw(runtime, value)
+    unsafe fn default_visit_raw(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny {
+        Self::visit_children_raw(runtime, *value.as_raw_ffi_any())
     }
 }
 
 /// Scoped Rust visitor runtime with a statically selected native base.
 ///
-/// Enter through [`IntoVisitor::visit_root`]. The engine owns the complete base
+/// Enter through [`StructuralVisitEngine::visit_root`]. The engine owns the complete base
 /// and the dispatcher reborrow handle, while the dispatcher stays in the outer
 /// call. Engines and their owning handles are never exposed to callbacks.
 ///
-/// A downstream layer selects its base in a thin entry point; its handlers use
-/// `StructuralVisitorView<'_, D, Base>` for recursion and base-state inspection:
-///
-/// ```
-/// use tvm_ffi::{AnyView, IntoVisitor, Result, StructuralVisitorBase, VisitInterrupt};
-///
-/// fn visit_with_base<'a, Base: StructuralVisitorBase, Marker>(
-///     root: impl Into<AnyView<'a>>,
-///     visitor: impl IntoVisitor<Marker, Base>,
-/// ) -> Result<Option<VisitInterrupt>> {
-///     visitor.visit_root(root.into())
-/// }
-/// ```
+/// Select a custom base with `StructuralVisitEngine::<Base>::visit_root(root, input)`.
+/// Handlers use `StructuralVisitorView<'_, Target, Base>` for recursion and
+/// base-state inspection; normalization preserves the actual target's identity.
 #[repr(C)]
 pub struct StructuralVisitEngine<Base = StructuralVisitorObj> {
     base: Base,
@@ -411,45 +405,48 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
     }
 }
 
-/// Conversion into a dispatcher-driven visitor. Closures belong to structural_walk.
-pub trait IntoVisitor<Marker, Base = StructuralVisitorObj> {
-    #[doc(hidden)]
-    fn visit_root(self, root: AnyView<'_>) -> Result<Option<VisitInterrupt>>;
-}
-
-impl<D, Base: StructuralVisitorBase> IntoVisitor<Owned, Base> for D
-where
-    for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-        (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-        Option<Result<Option<VisitInterrupt>>>,
-    >,
-{
+impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
+    /// Normalize the input once and traverse using this engine's native base.
+    /// Named dispatchers keep their actual recursive view type. Callback and
+    /// tuple targets are their aggregate adapters; closures taking their own
+    /// recursive view type remain unsupported.
     #[inline(always)]
-    fn visit_root(mut self, root: AnyView<'_>) -> Result<Option<VisitInterrupt>> {
+    pub fn visit_root<'input, R, H, M, D, O>(
+        root: R,
+        dispatcher: H,
+    ) -> Result<Option<VisitInterrupt>>
+    where
+        R: Into<AnyView<'input>>,
+        O: BorrowMut<D>,
+        for<'v, 'c, 'r> H: IntoDispatcher<
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+                M,
+                Target = D,
+                Output = O,
+            >,
+        for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
+    {
+        let mut storage = dispatcher.into_dispatcher();
+        let root = root.into();
         visit_result_from_any(unsafe {
-            Any::from_raw_ffi_any(StructuralVisitEngine::<Base>::run_visitor_raw::<D>(
+            Any::from_raw_ffi_any(Self::run_visitor_raw::<D>(
                 *root.as_raw_ffi_any(),
-                &mut self,
+                storage.borrow_mut(),
             ))
         })
     }
 }
 
-impl<D, Base: StructuralVisitorBase> IntoVisitor<Borrowed, Base> for &mut D
-where
-    for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-        (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-        Option<Result<Option<VisitInterrupt>>>,
-    >,
+impl super::dispatch::CallbackResult<Result<Option<VisitInterrupt>>>
+    for Result<Option<VisitInterrupt>>
 {
     #[inline(always)]
-    fn visit_root(self, root: AnyView<'_>) -> Result<Option<VisitInterrupt>> {
-        visit_result_from_any(unsafe {
-            Any::from_raw_ffi_any(StructuralVisitEngine::<Base>::run_visitor_raw::<D>(
-                *root.as_raw_ffi_any(),
-                self,
-            ))
-        })
+    fn callback_result(self) -> Result<Option<VisitInterrupt>> {
+        self
     }
 }
 
@@ -659,20 +656,6 @@ unsafe fn visit_field_level<B>(
 // value. Forward it exactly once or import it into Any before any operation
 // that can unwind or discard it, including destruction of an observer.
 impl StructuralVisitorObj {
-    /// Ordinary registered-hook or reflected-field descent through a visitor prefix.
-    /// Children reenter the installed vtable, including a specialized base's vtable.
-    /// Returns one owning None, Error or VisitInterrupt ABI value.
-    ///
-    /// # Safety
-    /// The prefix and input must remain valid for synchronous descent. The caller
-    /// must publish the current dispatcher reborrow and uphold the native-hook
-    /// lifetime, layout and ownership contract of [`StructuralVisitorBase`]. This
-    /// function accesses only the prefix, never a Rust engine's dispatcher slot.
-    #[inline(always)]
-    pub unsafe fn default_visit_raw(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny {
-        Self::visit_children_raw(runtime, *value.as_raw_ffi_any())
-    }
-
     /// Consume owning `result` from descent, adding borrowed `value` context on Error.
     /// Internal callers supply valid tokens and keep the input live during annotation;
     /// nonerrors transfer unchanged, and Error ownership is guarded through formatting.
@@ -1010,9 +993,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     fn vtable<D>() -> &'static StructuralVisitorVTable
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
     {
         &StructuralVisitorVTable {
             visit: Self::rust_vtable_visit_raw::<D>,
@@ -1032,9 +1015,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     ) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
     {
         let context = (*Self::from_handle(runtime)).dispatcher;
         let raw = *value.as_raw_ffi_any();
@@ -1091,7 +1074,7 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
         // the handle-only scanner never creates or uses a competing D reference.
         (*Self::from_handle(runtime)).dispatcher = context;
         StructuralVisitorObj::with_visit_context_raw(
-            Base::default_visit(runtime.cast(), AnyView::from_raw_ffi_any(raw)),
+            Base::default_visit_raw(runtime.cast(), AnyView::from_raw_ffi_any(raw)),
             raw,
         )
     }
@@ -1103,9 +1086,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     pub(super) fn run_visitor_raw<D>(root: TVMFFIAny, dispatch: &mut D) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
     {
         let base = match Base::new() {
             Ok(base) => base,
@@ -1156,7 +1139,7 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
 /// # Arguments
 ///
 /// * `root` - Value borrowed for traversal, convertible into an [`AnyView`].
-/// * `visitor` - Owned or mutably borrowed dispatcher implementing [`IntoVisitor`].
+/// * `dispatcher` - Owned or mutably borrowed dispatcher implementing [`IntoDispatcher`].
 ///   Matching handlers control recursion through [`StructuralVisitorView`];
 ///   unmatched values use default child traversal.
 ///
@@ -1192,14 +1175,32 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
 /// # Ok(())
 /// # }
 /// ```
-pub fn structural_visit<'input, R, M>(
+pub fn structural_visit<'input, R, H, M, D, O>(
     root: R,
-    visitor: impl IntoVisitor<M>,
+    dispatcher: H,
 ) -> Result<Option<VisitInterrupt>>
 where
     R: Into<AnyView<'input>>,
+    O: BorrowMut<D>,
+    for<'v, 'c, 'r> H: IntoDispatcher<
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
+    for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
 {
-    visitor.visit_root(root.into())
+    StructuralVisitEngine::visit_root(root, dispatcher)
 }
 
 #[inline(always)]

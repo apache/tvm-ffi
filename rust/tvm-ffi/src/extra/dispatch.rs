@@ -65,3 +65,288 @@ impl<'source, 'value> DispatchRecovery<crate::match_any_internal::ViewSource<'so
 {
     type Recovery = ();
 }
+
+use super::structural_common::impl_callback_chain_tuple_arities;
+use std::{borrow::BorrowMut, marker::PhantomData};
+
+/// Inferred selectors for dispatcher normalization.
+///
+/// Entry points infer one marker from the input. Callback markers select argument
+/// matching and a leading argument count; tuple markers contain each link's marker.
+/// Normalization stores the input once, before traversal, without cloning it.
+pub mod marker {
+    use std::marker::PhantomData;
+    /// Store an owned dispatcher with the exact target argument and result types.
+    pub enum FromOwned {}
+    /// Store a mutable borrow of an exact-signature dispatcher.
+    pub enum FromBorrowed {}
+    /// Match a callback's first argument using `Shape`, then pass its first `N`
+    /// arguments. `N` ranges from one through four, including the matched value.
+    pub struct FromCallback<const N: usize, Shape>(PhantomData<fn() -> Shape>);
+    /// Try tuple links in order. `Markers` is their marker tuple, including nested
+    /// tuples; `Args` selects how arguments are reborrowed between links.
+    pub struct FromTuple<Markers, Args = CopyArgs>(PhantomData<fn() -> (Markers, Args)>);
+    /// Replay copyable observer arguments; this does not copy dispatcher storage.
+    pub enum CopyArgs {}
+    /// Sequentially reborrow a mutable second argument for each tuple link.
+    pub enum MutArg {}
+    /// Match and convert the first `AnyView` to the FFI value type `T`.
+    pub struct Value<T>(PhantomData<fn() -> T>);
+    /// Match a borrowed object node `&T` without retaining it, unlike the
+    /// by-value conversion selected by [`Value<T>`].
+    pub struct BorrowedObject<T>(PhantomData<fn() -> T>);
+    /// Pass the first `AnyView` without a runtime type filter.
+    pub enum AnyView {}
+    /// Match a mutation capability for `T`, retaining its scoped permission.
+    pub struct Mutation<T = crate::Any>(PhantomData<fn() -> T>);
+}
+
+/// Convert an input to a reusable [`Dispatcher`].
+///
+/// `Args` is the complete target argument tuple, `Ret` its complete result, and
+/// `M` the inferred input-form marker. `Target` is the actual dispatcher type;
+/// `Output` owns or borrows it and provides `BorrowMut<Target>`. Owned `D` and
+/// borrowed `&mut D` inputs both preserve target `D`; callbacks and tuples use an
+/// adapter as their target. This keeps recursive view types tied to the dispatcher.
+///
+/// Inputs may be owned dispatchers, mutable dispatcher borrows, callbacks, or
+/// nested tuples mixing these forms. Dispatchers require the exact argument and
+/// result signature. Callbacks may accept a leading prefix of one to four
+/// arguments; structural callbacks match an FFI value, an object-node borrow, or
+/// `AnyView`; mutation callbacks match a typed `MutationView`. Callable values
+/// and their shared or mutable borrows are stored as supplied, subject to their `FnMut` implementation. Only an outer `None` tries
+/// the next tuple link; a matched error or inner `None` stops the chain.
+///
+/// Supply the target argument and result types when calling the conversion directly;
+/// the input-form marker remains inferred.
+///
+/// ```
+/// use tvm_ffi::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
+/// let callbacks = (|value: i64| Any::from(value + 1), |_value: AnyView<'_>| Any::new());
+/// let mut dispatcher = IntoDispatcher::<(AnyView<'_>,), Option<Result<Any>>, _>::into_dispatcher(callbacks);
+/// let result = dispatcher.dispatch_tuple((AnyView::from(&41_i64),)).unwrap()?;
+/// assert_eq!(result.try_as::<i64>(), Some(42));
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+pub trait IntoDispatcher<Args, Ret, M> {
+    /// Actual dispatcher type, independent of its owned or borrowed storage.
+    type Target;
+    /// Storage normalized once at entry, retaining the target's identity.
+    type Output: BorrowMut<Self::Target>;
+    fn into_dispatcher(self) -> Self::Output;
+}
+
+/// Normalized callback or tuple storage; direct dispatchers retain their own type.
+#[doc(hidden)]
+pub struct DispatchAdapter<F, M> {
+    input: F,
+    marker: PhantomData<fn() -> M>,
+}
+
+impl<D, Args, Ret> IntoDispatcher<Args, Ret, marker::FromOwned> for D
+where
+    for<'s> &'s mut D: Dispatcher<Args, Ret>,
+{
+    type Target = D;
+    type Output = D;
+    #[inline(always)]
+    fn into_dispatcher(self) -> Self::Output {
+        self
+    }
+}
+
+impl<'d, D, Args, Ret> IntoDispatcher<Args, Ret, marker::FromBorrowed> for &'d mut D
+where
+    for<'s> &'s mut D: Dispatcher<Args, Ret>,
+{
+    type Target = D;
+    type Output = &'d mut D;
+    #[inline(always)]
+    fn into_dispatcher(self) -> Self::Output {
+        self
+    }
+}
+
+impl<F, Args, Ret, const N: usize, Shape> IntoDispatcher<Args, Ret, marker::FromCallback<N, Shape>>
+    for F
+where
+    F: DispatchLink<Args, Ret, marker::FromCallback<N, Shape>>,
+{
+    type Target = DispatchAdapter<F, marker::FromCallback<N, Shape>>;
+    type Output = Self::Target;
+    #[inline(always)]
+    fn into_dispatcher(self) -> Self::Output {
+        DispatchAdapter {
+            input: self,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<F, Args, Ret, Markers, Reborrow>
+    IntoDispatcher<Args, Ret, marker::FromTuple<Markers, Reborrow>> for F
+where
+    F: DispatchLink<Args, Ret, marker::FromTuple<Markers, Reborrow>>,
+{
+    type Target = DispatchAdapter<F, marker::FromTuple<Markers, Reborrow>>;
+    type Output = Self::Target;
+    #[inline(always)]
+    fn into_dispatcher(self) -> Self::Output {
+        DispatchAdapter {
+            input: self,
+            marker: PhantomData,
+        }
+    }
+}
+
+/// Implementation boundary shared by callback and tuple adapters.
+#[doc(hidden)]
+pub trait DispatchLink<Args, Ret, M> {
+    fn dispatch_link(&mut self, args: Args) -> Ret;
+}
+
+impl<F, Args, Ret, M> Dispatcher<Args, Ret> for &mut DispatchAdapter<F, M>
+where
+    F: DispatchLink<Args, Ret, M>,
+{
+    #[inline(always)]
+    fn dispatch_tuple(self, args: Args) -> Ret {
+        self.input.dispatch_link(args)
+    }
+}
+
+impl<D, Args, Ret> DispatchLink<Args, Ret, marker::FromOwned> for D
+where
+    for<'s> &'s mut D: Dispatcher<Args, Ret>,
+{
+    #[inline(always)]
+    fn dispatch_link(&mut self, args: Args) -> Ret {
+        self.dispatch_tuple(args)
+    }
+}
+impl<D, Args, Ret> DispatchLink<Args, Ret, marker::FromBorrowed> for &mut D
+where
+    for<'s> &'s mut D: Dispatcher<Args, Ret>,
+{
+    #[inline(always)]
+    fn dispatch_link(&mut self, args: Args) -> Ret {
+        (&mut **self).dispatch_tuple(args)
+    }
+}
+
+/// Operation-specific callback result conversion; matching and chaining are shared.
+#[doc(hidden)]
+pub trait CallbackResult<R> {
+    fn callback_result(self) -> R;
+}
+
+macro_rules! callback_prefix {
+    ($n:literal; ($($A:ident:$a:ident),*); ($($B:ident:$b:ident),*)) => {
+        impl<'v, F, T, O, R, $($A,)*>
+            DispatchLink<(AnyView<'v>, $($A,)*), Option<R>, marker::FromCallback<$n, marker::Value<T>>> for F
+        where F: FnMut(T, $($B,)*) -> O, T: crate::type_traits::AnyCompatible,
+              O: CallbackResult<R>,
+        {
+            #[inline(always)]
+            fn dispatch_link(&mut self, (value, $($a,)*): (AnyView<'v>, $($A,)*)) -> Option<R> {
+                $(let _ = &$a;)*
+                value.try_as::<T>().map(|typed| self(typed, $($b,)*).callback_result())
+            }
+        }
+        impl<'v, F, T, O, R, $($A,)*>
+            DispatchLink<(AnyView<'v>, $($A,)*), Option<R>, marker::FromCallback<$n, marker::BorrowedObject<T>>> for F
+        where F: for<'node> FnMut(&'node T, $($B,)*) -> O, T: crate::ObjectCore,
+              O: CallbackResult<R>,
+        {
+            #[inline(always)]
+            fn dispatch_link(&mut self, (value, $($a,)*): (AnyView<'v>, $($A,)*)) -> Option<R> {
+                $(let _ = &$a;)*
+                value.downcast_ref::<T>().map(|node| self(node, $($b,)*).callback_result())
+            }
+        }
+        impl<'v, F, O, R, $($A,)*>
+            DispatchLink<(AnyView<'v>, $($A,)*), Option<R>, marker::FromCallback<$n, marker::AnyView>> for F
+        where F: FnMut(AnyView<'v>, $($B,)*) -> O, O: CallbackResult<R>,
+        {
+            #[inline(always)]
+            fn dispatch_link(&mut self, (value, $($a,)*): (AnyView<'v>, $($A,)*)) -> Option<R> {
+                $(let _ = &$a;)*
+                Some(self(value, $($b,)*).callback_result())
+            }
+        }
+    };
+}
+callback_prefix!(1; (); ());
+callback_prefix!(1; (A1:a1); ());
+callback_prefix!(2; (A1:a1); (A1:a1));
+callback_prefix!(1; (A1:a1, A2:a2); ());
+callback_prefix!(2; (A1:a1, A2:a2); (A1:a1));
+callback_prefix!(3; (A1:a1, A2:a2); (A1:a1, A2:a2));
+callback_prefix!(1; (A1:a1, A2:a2, A3:a3); ());
+callback_prefix!(2; (A1:a1, A2:a2, A3:a3); (A1:a1));
+callback_prefix!(3; (A1:a1, A2:a2, A3:a3); (A1:a1, A2:a2));
+callback_prefix!(4; (A1:a1, A2:a2, A3:a3); (A1:a1, A2:a2, A3:a3));
+
+macro_rules! mutation_callback_prefix {
+    ($n:literal; ($($A:ident:$a:ident),*); ($($B:ident:$b:ident),*)) => {
+        impl<'v, F, T, O, R, $($A,)*>
+            DispatchLink<(crate::MutationView<'v>, $($A,)*), Option<R>, marker::FromCallback<$n, marker::Mutation<T>>> for F
+        where F: FnMut(crate::MutationView<'v, T>, $($B,)*) -> O,
+              T: crate::type_traits::ContainerElement, O: CallbackResult<R>,
+        {
+            #[inline(always)]
+            fn dispatch_link(&mut self, (value, $($a,)*): (crate::MutationView<'v>, $($A,)*)) -> Option<R> {
+                $(let _ = &$a;)*
+                value.try_cast::<T>().ok().map(|typed| self(typed, $($b,)*).callback_result())
+            }
+        }
+    };
+}
+mutation_callback_prefix!(1; (); ());
+mutation_callback_prefix!(1; (A1:a1); ());
+mutation_callback_prefix!(2; (A1:a1); (A1:a1));
+mutation_callback_prefix!(1; (A1:a1, A2:a2); ());
+mutation_callback_prefix!(2; (A1:a1, A2:a2); (A1:a1));
+mutation_callback_prefix!(3; (A1:a1, A2:a2); (A1:a1, A2:a2));
+mutation_callback_prefix!(1; (A1:a1, A2:a2, A3:a3); ());
+mutation_callback_prefix!(2; (A1:a1, A2:a2, A3:a3); (A1:a1));
+mutation_callback_prefix!(3; (A1:a1, A2:a2, A3:a3); (A1:a1, A2:a2));
+mutation_callback_prefix!(4; (A1:a1, A2:a2, A3:a3); (A1:a1, A2:a2, A3:a3));
+
+// Concrete tuple storage bounds keep trait inference from recursively inventing
+// unknown adapter receiver layers. Tuple arity is independent of callback arity.
+macro_rules! dispatch_tuple_links {
+    ($(($F:ident, $M:ident, $idx:tt)),+) => {
+        impl<Args: Copy, R, $($F, $M,)+>
+            DispatchLink<Args, Option<R>, marker::FromTuple<($($M,)+)>> for ($($F,)+)
+        where $($F: DispatchLink<Args, Option<R>, $M>,)+
+        {
+            #[inline(always)]
+            fn dispatch_link(&mut self, args: Args) -> Option<R> {
+                $(if let Some(result) = self.$idx.dispatch_link(args) { return Some(result); })+
+                None
+            }
+        }
+        impl<'v, 'c, C, R, $($F, $M,)+>
+            DispatchLink<(AnyView<'v>, &'c mut C), Option<R>, marker::FromTuple<($($M,)+), marker::MutArg>> for ($($F,)+)
+        where $(for<'borrow> $F: DispatchLink<(AnyView<'v>, &'borrow mut C), Option<R>, $M>,)+
+        {
+            #[inline(always)]
+            fn dispatch_link(&mut self, (value, context): (AnyView<'v>, &'c mut C)) -> Option<R> {
+                $(if let Some(result) = self.$idx.dispatch_link((value, &mut *context)) { return Some(result); })+
+                None
+            }
+        }
+        impl<'v, 'c, C, R, $($F, $M,)+>
+            DispatchLink<(crate::MutationView<'v>, &'c mut C), Option<R>, marker::FromTuple<($($M,)+), marker::MutArg>> for ($($F,)+)
+        where $(for<'value, 'borrow> $F: DispatchLink<(crate::MutationView<'value>, &'borrow mut C), Option<R>, $M>,)+
+        {
+            #[inline(always)]
+            fn dispatch_link(&mut self, (mut value, context): (crate::MutationView<'v>, &'c mut C)) -> Option<R> {
+                $(if let Some(result) = self.$idx.dispatch_link((value.reborrow(), &mut *context)) { return Some(result); })+
+                None
+            }
+        }
+    };
+}
+impl_callback_chain_tuple_arities!(dispatch_tuple_links);

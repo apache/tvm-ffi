@@ -1125,7 +1125,7 @@ fn visitor_interrupt_propagates_through_default_children() {
     }
 
     let root = Array::new(vec![1i64, 2, 3]);
-    let outcome = structural_visit::<&Array<i64>, _>(&root, &mut InterruptingVisitor).unwrap();
+    let outcome = structural_visit::<&Array<i64>, _, _, _, _>(&root, &mut InterruptingVisitor).unwrap();
     let Some(interrupt) = outcome else {
         panic!("visitor traversal unexpectedly completed");
     };

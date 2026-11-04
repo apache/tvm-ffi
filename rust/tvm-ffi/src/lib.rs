@@ -47,25 +47,23 @@ pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor, TensorView};
 pub use crate::device::{current_stream, with_stream};
 pub use crate::dtype::DLDataTypeExt;
-pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
     TYPE_ERROR, VALUE_ERROR, ZERO_DIVISION_ERROR,
 };
-pub use crate::extra::dispatch::Dispatcher;
+pub use crate::error::{Error, ErrorKind, Result};
+pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
-pub use crate::extra::structural_map::{structural_map, IntoMapper, MapChainLink};
+pub use crate::extra::structural_map::structural_map;
 pub use crate::extra::structural_mutate::{
-    structural_mutate, InplaceMode, IntoMutator, MutationView, StructuralMutateEngine,
-    StructuralMutatorBase, StructuralMutatorObj, StructuralMutatorView, StructuralVarRemap,
+    InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase, StructuralMutatorObj,
+    StructuralMutatorView, StructuralVarRemap, structural_mutate,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, DefRegionKind, IntoVisitor, StructuralVisitEngine, StructuralVisitorBase,
-    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt, VisitInterruptObj,
+    DefRegionKind, StructuralVisitEngine, StructuralVisitorBase, StructuralVisitorObj,
+    StructuralVisitorView, VisitInterrupt, VisitInterruptObj, structural_visit,
 };
-pub use crate::extra::structural_walk::{
-    structural_walk, IntoWalkResult, IntoWalker, WalkChainLink, WalkOrder, WalkResult,
-};
+pub use crate::extra::structural_walk::{IntoWalkResult, WalkOrder, WalkResult, structural_walk};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
@@ -74,8 +72,8 @@ pub use crate::object::{
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{
-    get_type_attr, FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn,
-    UnsafeInit,
+    FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn, UnsafeInit,
+    get_type_attr,
 };
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::static_init::run_static_init_blocks;

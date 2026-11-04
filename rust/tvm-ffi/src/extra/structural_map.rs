@@ -19,405 +19,25 @@
 
 //! Ordered replacement callbacks and adapters for structural mapping.
 
-use super::structural_common::{impl_callback_chain_tuple_arities, raw_tvm_ffi_any_same_as};
+use super::structural_common::raw_tvm_ffi_any_same_as;
 use super::structural_mutate::{
-    with_mutation_error_context, IntoMutateResult, MutationView, StructuralMutateEngine,
-    StructuralMutatorView,
+    IntoMutateResult, MutationView, StructuralMutateEngine, StructuralMutatorView,
+    with_mutation_error_context,
 };
 use super::structural_visit::DefRegionKind;
 use super::structural_walk::WalkOrder;
 use super::unchanged::is_unchanged;
-use crate::{Any, AnyView, Dispatcher, ObjectCore, Result};
-use std::marker::PhantomData;
+use crate::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
+use std::borrow::BorrowMut;
 
 // -----------------------------------------------------------------------------
 // Map adapter to Dispatcher.
 // -----------------------------------------------------------------------------
 
-/// Conversion into the mapper consumed by [`structural_map`].
-#[diagnostic::on_unimplemented(
-    message = "unsupported structural-map callback shape",
-    label = "this value cannot be used as a structural mapper",
-    note = "pass `&mut` a matching `Dispatcher`, a supported closure or callback tuple"
-)]
-pub trait IntoMapper<Marker> {
-    type Mapper;
-    fn into_mapper(self) -> Self::Mapper;
-    #[doc(hidden)]
-    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any>;
-}
-
-#[doc(hidden)]
-pub enum ByMapDispatch {}
-
-impl<'a, V> IntoMapper<ByMapDispatch> for &'a mut V
-where
-    for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
-{
-    type Mapper = &'a mut V;
-
+impl<O: IntoMutateResult> super::dispatch::CallbackResult<Result<Any>> for O {
     #[inline(always)]
-    fn into_mapper(self) -> Self::Mapper {
-        self
-    }
-
-    #[inline(always)]
-    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_mapper::<V>(root, self, order)
-    }
-}
-
-/// One typed callback in a structural-map tuple.
-///
-/// Links use first-match order and may receive an owned FFI value, borrowed
-/// object node, or `AnyView<'_>`, optionally followed by [`DefRegionKind`].
-pub trait MapChainLink<Marker>: sealed_map::SealedMapLink<Marker> {
-    #[doc(hidden)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>>;
-}
-
-mod sealed_map {
-    use super::{Any, AnyView, DefRegionKind, Dispatcher, IntoMutateResult, ObjectCore, Result};
-
-    pub trait SealedMapLink<Marker> {}
-
-    impl<F, T, O> SealedMapLink<super::ByMapOwned<T>> for F
-    where
-        F: FnMut(T) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, T, O> SealedMapLink<super::ByMapOwnedKind<T>> for F
-    where
-        F: FnMut(T, DefRegionKind) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, N: ObjectCore, O> SealedMapLink<super::ByMapNode<N>> for F
-    where
-        F: for<'a> FnMut(&'a N) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, N: ObjectCore, O> SealedMapLink<super::ByMapNodeKind<N>> for F
-    where
-        F: for<'a> FnMut(&'a N, DefRegionKind) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, O> SealedMapLink<super::ByMapCatchAll> for F
-    where
-        F: for<'a> FnMut(AnyView<'a>) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<F, O> SealedMapLink<super::ByMapCatchAllKind> for F
-    where
-        F: for<'a> FnMut(AnyView<'a>, DefRegionKind) -> O,
-        O: IntoMutateResult,
-    {
-    }
-
-    impl<V> SealedMapLink<super::ByMapDispatchLink> for &mut V where
-        for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>
-    {
-    }
-}
-
-#[doc(hidden)]
-pub struct ByMapOwned<T>(PhantomData<T>);
-
-impl<F, T, O> MapChainLink<ByMapOwned<T>> for F
-where
-    F: FnMut(T) -> O,
-    T: crate::type_traits::AnyCompatible,
-    O: IntoMutateResult,
-{
-    #[inline(always)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        _def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        value
-            .try_as::<T>()
-            .map(|typed| self(typed).into_mutate_result())
-    }
-}
-
-#[doc(hidden)]
-pub struct ByMapOwnedKind<T>(PhantomData<T>);
-
-impl<F, T, O> MapChainLink<ByMapOwnedKind<T>> for F
-where
-    F: FnMut(T, DefRegionKind) -> O,
-    T: crate::type_traits::AnyCompatible,
-    O: IntoMutateResult,
-{
-    #[inline(always)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        value
-            .try_as::<T>()
-            .map(|typed| self(typed, def_region_kind).into_mutate_result())
-    }
-}
-
-#[doc(hidden)]
-pub struct ByMapNode<N>(PhantomData<N>);
-
-impl<F, N, O> MapChainLink<ByMapNode<N>> for F
-where
-    F: for<'a> FnMut(&'a N) -> O,
-    N: ObjectCore,
-    O: IntoMutateResult,
-{
-    #[inline(always)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        _def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        value
-            .downcast_ref::<N>()
-            .map(|node| self(node).into_mutate_result())
-    }
-}
-
-#[doc(hidden)]
-pub struct ByMapNodeKind<N>(PhantomData<N>);
-
-impl<F, N, O> MapChainLink<ByMapNodeKind<N>> for F
-where
-    F: for<'a> FnMut(&'a N, DefRegionKind) -> O,
-    N: ObjectCore,
-    O: IntoMutateResult,
-{
-    #[inline(always)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        value
-            .downcast_ref::<N>()
-            .map(|node| self(node, def_region_kind).into_mutate_result())
-    }
-}
-
-#[doc(hidden)]
-pub enum ByMapCatchAll {}
-
-impl<F, O> MapChainLink<ByMapCatchAll> for F
-where
-    F: for<'a> FnMut(AnyView<'a>) -> O,
-    O: IntoMutateResult,
-{
-    #[inline(always)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        _def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        Some(self(value).into_mutate_result())
-    }
-}
-
-#[doc(hidden)]
-pub enum ByMapCatchAllKind {}
-
-impl<F, O> MapChainLink<ByMapCatchAllKind> for F
-where
-    F: for<'a> FnMut(AnyView<'a>, DefRegionKind) -> O,
-    O: IntoMutateResult,
-{
-    #[inline(always)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        Some(self(value, def_region_kind).into_mutate_result())
-    }
-}
-
-#[doc(hidden)]
-pub struct ByMapChainLink<Markers>(PhantomData<fn(Markers)>);
-
-#[doc(hidden)]
-pub enum ByMapDispatchLink {}
-
-impl<V> MapChainLink<ByMapDispatchLink> for &mut V
-where
-    for<'s, 'v> &'s mut V: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
-{
-    #[inline(always)]
-    fn try_map(
-        &mut self,
-        value: AnyView<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        self.dispatch_tuple((value, def_region_kind))
-    }
-}
-
-/// Adapter from a [`MapChainLink`] to [`Dispatcher`].
-#[doc(hidden)]
-pub struct MapChain<Link, Marker> {
-    link: Link,
-    marker: PhantomData<fn(Marker)>,
-}
-
-impl<Link, Marker> MapChain<Link, Marker> {
-    #[inline(always)]
-    fn new(link: Link) -> Self {
-        MapChain {
-            link,
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<'receiver, 'value, Link, Marker>
-    Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Any>>>
-    for &'receiver mut MapChain<Link, Marker>
-where
-    Link: MapChainLink<Marker>,
-{
-    #[inline(always)]
-    fn dispatch_tuple(
-        self,
-        (value, def_region_kind): (AnyView<'value>, DefRegionKind),
-    ) -> Option<Result<Any>> {
-        self.link.try_map(value, def_region_kind)
-    }
-}
-
-macro_rules! impl_map_chain_link {
-    ($(($F:ident, $M:ident, $idx:tt)),+) => {
-        impl<$($F, $M,)+> sealed_map::SealedMapLink<ByMapChainLink<($($M,)+)>> for ($($F,)+)
-        where
-            $($F: MapChainLink<$M>,)+
-        {
-        }
-
-        impl<$($F, $M,)+> MapChainLink<ByMapChainLink<($($M,)+)>> for ($($F,)+)
-        where
-            $($F: MapChainLink<$M>,)+
-        {
-            #[inline(always)]
-            fn try_map(
-                &mut self,
-                value: AnyView<'_>,
-                def_region_kind: DefRegionKind,
-            ) -> Option<Result<Any>> {
-                $(
-                    if let Some(result) = self.$idx.try_map(value, def_region_kind) {
-                        return Some(result);
-                    }
-                )+
-                None
-            }
-        }
-
-        impl<$($F, $M,)+> IntoMapper<($($M,)+)> for ($($F,)+)
-        where
-            $($F: MapChainLink<$M>,)+
-        {
-            type Mapper = MapChain<($($F,)+), ByMapChainLink<($($M,)+)>>;
-
-            #[inline(always)]
-            fn into_mapper(self) -> Self::Mapper {
-                MapChain::new(self)
-            }
-
-            #[inline(always)]
-            fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-                run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
-            }
-        }
-    };
-}
-
-impl_callback_chain_tuple_arities!(impl_map_chain_link);
-
-macro_rules! impl_bare_map_link {
-    ($(($marker:ident, $($fn_args:ty),+)),+ $(,)?) => {
-        $(
-            impl<F, T, O> IntoMapper<$marker<T>> for F
-            where
-                F: FnMut($($fn_args),+) -> O,
-                Self: MapChainLink<$marker<T>>,
-                O: IntoMutateResult,
-            {
-                type Mapper = MapChain<F, $marker<T>>;
-
-                #[inline(always)]
-                fn into_mapper(self) -> Self::Mapper {
-                    MapChain::new(self)
-                }
-
-                #[inline(always)]
-                fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-                    run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
-                }
-            }
-        )+
-    };
-}
-
-impl_bare_map_link!(
-    (ByMapOwned, T),
-    (ByMapOwnedKind, T, DefRegionKind),
-    (ByMapNode, &T),
-    (ByMapNodeKind, &T, DefRegionKind),
-);
-
-impl<F, O> IntoMapper<ByMapCatchAll> for F
-where
-    F: for<'a> FnMut(AnyView<'a>) -> O,
-    O: IntoMutateResult,
-{
-    type Mapper = MapChain<F, ByMapCatchAll>;
-
-    #[inline(always)]
-    fn into_mapper(self) -> Self::Mapper {
-        MapChain::new(self)
-    }
-
-    #[inline(always)]
-    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
-    }
-}
-
-impl<F, O> IntoMapper<ByMapCatchAllKind> for F
-where
-    F: for<'a> FnMut(AnyView<'a>, DefRegionKind) -> O,
-    O: IntoMutateResult,
-{
-    type Mapper = MapChain<F, ByMapCatchAllKind>;
-
-    #[inline(always)]
-    fn into_mapper(self) -> Self::Mapper {
-        MapChain::new(self)
-    }
-
-    #[inline(always)]
-    fn map_root(self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_mapper::<Self::Mapper>(root, &mut self.into_mapper(), order)
+    fn callback_result(self) -> Result<Any> {
+        self.into_mutate_result()
     }
 }
 
@@ -547,7 +167,7 @@ where
 /// * `root` - Owned value to transform, convertible into an [`Any`]. Clone it
 ///   first to preserve the original through copy-on-write behavior.
 /// * `mapper` - Mutable dispatcher, closure, or first-match callback tuple
-///   implementing [`IntoMapper`]. Callbacks return replacements; unmatched
+///   implementing [`IntoDispatcher`]. Callbacks return replacements; unmatched
 ///   values retain their value while default traversal maps their children.
 /// * `order` - [`WalkOrder::PreOrder`] applies the callback before traversing the
 ///   replacement's children; [`WalkOrder::PostOrder`] maps children before
@@ -567,10 +187,12 @@ where
 /// assert_eq!(root.iter().collect::<Vec<_>>(), vec![1, 2, 3]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
-pub fn structural_map<R, M, H>(root: R, mapper: H, order: WalkOrder) -> Result<Any>
+pub fn structural_map<R, M, H, D, O>(root: R, mapper: H, order: WalkOrder) -> Result<Any>
 where
     R: Into<Any>,
-    H: IntoMapper<M>,
+    O: BorrowMut<D>,
+    for<'v> H: IntoDispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>, M, Target = D, Output = O>,
+    for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
 {
-    mapper.map_root(root.into(), order)
+    run_mapper(root.into(), mapper.into_dispatcher().borrow_mut(), order)
 }

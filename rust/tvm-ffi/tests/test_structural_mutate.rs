@@ -24,7 +24,7 @@ use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
-    Array, DefRegionKind, Dispatcher, Error, FieldGetter, Function, InplaceMode, IntoMapper, Map,
+    Array, DefRegionKind, Dispatcher, Error, FieldGetter, Function, InplaceMode, IntoDispatcher, Map,
     MutationView, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
     StructuralMutatorView, StructuralVarRemap, StructuralVisitorView, TypeIndex, Unchanged,
     UnchangedOr, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
@@ -307,7 +307,7 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
 fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
     let unique = Array::new(vec![1i64, 2]);
     let unique_pointer = array_pointer(&unique);
-    let mutated = structural_mutate::<Array<i64>, _>(unique, ManualIncrement::default())
+    let mutated = structural_mutate::<Array<i64>, _, _, _, _>(unique, ManualIncrement::default())
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(array_pointer(&mutated), unique_pointer);
@@ -1553,7 +1553,7 @@ fn pre_order_mapping_preserves_inplace_permission() {
         let alias = (case == "shared").then(|| root.clone());
         let mut retained = None;
         let mut pointer = std::ptr::null();
-        let mut mapper = (|value: AnyView<'_>| {
+        let callback = |value: AnyView<'_>| {
             if let Some(integer) = value.try_as::<i64>() {
                 return Any::from(integer + 1);
             }
@@ -1565,8 +1565,12 @@ fn pre_order_mapping_preserves_inplace_permission() {
             };
             pointer = any_object_pointer(&mapped);
             mapped
-        })
-        .into_mapper();
+        };
+        let mut mapper = IntoDispatcher::<
+            (AnyView<'_>, DefRegionKind),
+            Option<Result<Any>>,
+            _,
+        >::into_dispatcher(callback);
         let output = structural_map(root, &mut mapper, WalkOrder::PreOrder).unwrap();
         let reuse = case == "unique";
         assert_eq!(any_object_pointer(&output) == pointer, reuse, "{case}");
@@ -1750,7 +1754,11 @@ fn post_order_unchanged_preserves_descendant_rewrites() {
                 },
             );
             let mapped = if borrowed {
-                let mut mapper = callbacks.into_mapper();
+                let mut mapper = IntoDispatcher::<
+                    (AnyView<'_>, DefRegionKind),
+                    Option<Result<Any>>,
+                    _,
+                >::into_dispatcher(callbacks);
                 structural_map(root, &mut mapper, WalkOrder::PostOrder)
             } else {
                 structural_map(root, callbacks, WalkOrder::PostOrder)
