@@ -77,9 +77,7 @@ docs = [
   # 5.0.0 breaks C++ template specializations and constexpr constructors.
   "breathe!=5.0.0",
   "exhale",
-  "linkify-it-py",
   "matplotlib",
-  "myst-parser",
   "nbconvert",
   "nbsphinx",
   "nbstripout",
