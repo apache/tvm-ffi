@@ -41,6 +41,9 @@ pub enum DLDeviceType {
     kDLHexagon = 16,
     kDLMAIA = 17,
     kDLTrn = 18,
+    kDLTPU = 19,
+    kDLTPUHost = 20,
+    kDLAscend = 21,
 }
 
 #[repr(C)]
@@ -72,6 +75,7 @@ pub enum DLDataTypeCode {
     kDLFloat6_e2m3fn = 15,
     kDLFloat6_e3m2fn = 16,
     kDLFloat4_e2m1fn = 17,
+    kDLBcomplex = 18,
 }
 
 /// DLPack data type struct

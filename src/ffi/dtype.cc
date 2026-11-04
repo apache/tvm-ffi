@@ -97,6 +97,10 @@ inline void PrintDLDataTypeCodeAsStr(std::ostream& os, DLDataTypeCode type_code)
       os << "bfloat";
       break;
     }
+    case kDLBcomplex: {
+      os << "bcomplex";
+      break;
+    }
     case kDLFloat8_e3m4: {
       os << "float8_e3m4";
       break;
@@ -178,7 +182,8 @@ inline std::string DLDataTypeToString_(DLDataType dtype) {  // NOLINT(*)
   }
   if (dtype.code == kDLOpaqueHandle) return os.str();
   int16_t lanes = static_cast<int16_t>(dtype.lanes);
-  if ((dtype.code < kDLFloat8_e3m4 || dtype.code >= kDLExtCustomBegin) &&
+  if ((dtype.code < kDLFloat8_e3m4 || dtype.code == kDLBcomplex ||
+       dtype.code >= kDLExtCustomBegin) &&
       (dtype.code != kDLBool || dtype.bits != 8)) {
     os << static_cast<int>(dtype.bits);
   }
@@ -399,6 +404,9 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     dtype.code = kDLOpaqueHandle;
     dtype.bits = 64;  // handle uses 64 bit by default.
     scan = str.data() + 6;
+  } else if (str.compare(0, 8, "bcomplex") == 0) {
+    dtype.code = kDLBcomplex;
+    scan = str.data() + 8;
   } else if (str.compare(0, 6, "bfloat") == 0) {
     dtype.code = kDLBfloat;
     dtype.bits = 16;

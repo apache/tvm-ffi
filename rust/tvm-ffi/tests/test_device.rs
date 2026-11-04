@@ -65,10 +65,17 @@ fn test_device_stream_restored_after_panic() {
 
 #[test]
 fn test_device_any_conversion() {
-    let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
-    let any_device: Any = device.into();
-    assert_eq!(any_device.type_index(), TypeIndex::kTVMFFIDevice as i32);
-    let converted_device: DLDevice = any_device.try_into().unwrap();
-    assert_eq!(converted_device.device_type, device.device_type);
-    assert_eq!(converted_device.device_id, device.device_id);
+    for device_type in [
+        DLDeviceType::kDLCPU,
+        DLDeviceType::kDLTPU,
+        DLDeviceType::kDLTPUHost,
+        DLDeviceType::kDLAscend,
+    ] {
+        let device = DLDevice::new(device_type, 3);
+        let any_device: Any = device.into();
+        assert_eq!(any_device.type_index(), TypeIndex::kTVMFFIDevice as i32);
+        let converted_device: DLDevice = any_device.try_into().unwrap();
+        assert_eq!(converted_device.device_type, device.device_type);
+        assert_eq!(converted_device.device_id, device.device_id);
+    }
 }

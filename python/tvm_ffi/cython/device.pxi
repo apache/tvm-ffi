@@ -63,6 +63,9 @@ class DLDeviceType(IntEnum):
     kDLHexagon = 16
     kDLMAIA = 17
     kDLTrn = 18
+    kDLTPU = 19
+    kDLTPUHost = 20
+    kDLAscend = 21
 
 
 cdef class Device:
@@ -112,6 +115,9 @@ cdef class Device:
       DLDeviceType.kDLHexagon: "hexagon",
       DLDeviceType.kDLMAIA: "maia",
       DLDeviceType.kDLTrn: "trn",
+      DLDeviceType.kDLTPU: "tpu",
+      DLDeviceType.kDLTPUHost: "tpu_host",
+      DLDeviceType.kDLAscend: "ascend",
     }
 
     _DEVICE_NAME_TO_TYPE = {
@@ -131,6 +137,9 @@ cdef class Device:
         "webgpu": DLDeviceType.kDLWebGPU,
         "maia": DLDeviceType.kDLMAIA,
         "trn": DLDeviceType.kDLTrn,
+        "tpu": DLDeviceType.kDLTPU,
+        "tpu_host": DLDeviceType.kDLTPUHost,
+        "ascend": DLDeviceType.kDLAscend,
     }
 
     def __init__(self, device_type: str | int, index: Optional[Integral] = None) -> None:

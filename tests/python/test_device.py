@@ -54,6 +54,9 @@ def test_device_from_str() -> None:
         ("oneapi:1", DLDeviceType.kDLOneAPI, 1),
         ("xpu", DLDeviceType.kDLOneAPI, 0),
         ("xpu:2", DLDeviceType.kDLOneAPI, 2),
+        ("tpu:1", DLDeviceType.kDLTPU, 1),
+        ("tpu_host:2", DLDeviceType.kDLTPUHost, 2),
+        ("ascend:3", DLDeviceType.kDLAscend, 3),
     ],
 )
 def test_device_dlpack_device_type(
@@ -62,6 +65,8 @@ def test_device_dlpack_device_type(
     expect_device_id: int,
 ) -> None:
     dev = tvm_ffi.device(dev_str)
+    expected_name = "oneapi" if dev_str.startswith("xpu") else dev_str.split(":")[0]
+    assert str(dev) == f"{expected_name}:{expect_device_id}"
     assert dev.dlpack_device_type() == expected_device_type
     assert dev.index == expect_device_id
 

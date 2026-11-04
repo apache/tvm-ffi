@@ -115,6 +115,7 @@ if TYPE_CHECKING or not _is_config_mode():
         float64,
         float32,
         float16,
+        bcomplex32,
         bfloat16,
         float8_e3m4,
         float8_e4m3,

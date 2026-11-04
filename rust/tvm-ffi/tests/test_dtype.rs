@@ -23,6 +23,14 @@ fn test_dl_datatype_from_string() {
     // Test valid dtype strings
     let test_cases = vec![
         (
+            "bcomplex32",
+            DLDataType::new(DLDataTypeCode::kDLBcomplex, 32, 1),
+        ),
+        (
+            "bcomplex32x4",
+            DLDataType::new(DLDataTypeCode::kDLBcomplex, 32, 4),
+        ),
+        (
             "int32",
             DLDataType {
                 code: DLDataTypeCode::kDLInt as u8,
@@ -67,6 +75,7 @@ fn test_dl_datatype_from_string() {
     for item in test_cases {
         let dtype = DLDataType::try_from_str(item.0).unwrap();
         assert_eq!(dtype, item.1);
+        assert_eq!(dtype.to_string(), item.0);
     }
 }
 

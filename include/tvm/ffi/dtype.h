@@ -66,6 +66,9 @@ inline const char* DLDataTypeCodeAsCStr(DLDataTypeCode type_code) {  // NOLINT(*
     case kDLBfloat: {
       return "bfloat";
     }
+    case kDLBcomplex: {
+      return "bcomplex";
+    }
     case kDLBool: {
       return "bool";
     }
@@ -214,6 +217,10 @@ inline std::string DTypeAbbrev(DLDataType dtype) {
       result = "bf";
       break;
     }
+    case kDLBcomplex: {
+      result = "bcomplex";
+      break;
+    }
     case kDLBool: {
       result = "bool";
       break;
@@ -273,7 +280,8 @@ inline std::string DTypeAbbrev(DLDataType dtype) {
   }
 
   int16_t lanes = static_cast<int16_t>(dtype.lanes);
-  if (dtype.code < kDLFloat8_e3m4 && (dtype.code != kDLBool || dtype.bits != 8)) {
+  if ((dtype.code < kDLFloat8_e3m4 || dtype.code == kDLBcomplex) &&
+      (dtype.code != kDLBool || dtype.bits != 8)) {
     result += std::to_string(static_cast<int>(dtype.bits));
   }
   if (lanes > 1) {
