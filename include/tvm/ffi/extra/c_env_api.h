@@ -37,6 +37,11 @@ extern "C" {
 // ----------------------------------------------------------------------------
 /*!
  * \brief The type of the stream handle.
+ *
+ * The meaning of the handle depends on the device type:
+ * - kDLCUDA: cudaStream_t
+ * - kDLROCM: hipStream_t
+ * - kDLOneAPI: non-owning sycl::queue*, valid for the duration of the call
  */
 typedef void* TVMFFIStreamHandle;
 

@@ -15,6 +15,7 @@ __pycache__/
 *.so
 
 build/
+build_test/
 
 *.ll
 .npm

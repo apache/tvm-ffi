@@ -159,3 +159,36 @@ def test_torch_graph() -> None:
             x = x + 1
 
     run_with_gpu_lock(run_and_check)
+
+
+@pytest.mark.skipif(torch is None or not torch.xpu.is_available(), reason="Requires torch and XPU")
+def test_torch_xpu_stream() -> None:
+    assert torch is not None
+    mod = tvm_ffi.cpp.load_inline(
+        name="check_xpu_stream",
+        cpp_sources="""
+        uint64_t get_tensor_stream(tvm::ffi::TensorView x) {
+            return reinterpret_cast<uint64_t>(
+                TVMFFIEnvGetStream(x.device().device_type, x.device().device_id));
+        }
+    """,
+        functions=["get_tensor_stream"],
+    )
+
+    def run_and_check() -> None:
+        assert torch is not None
+        device_id = torch.xpu.current_device()
+        x = torch.empty(4, device=f"xpu:{device_id}")
+        stream_1 = torch.xpu.Stream(device_id)
+        stream_2 = torch.xpu.Stream(device_id)
+        # torch.xpu tensors carry the current torch stream via the DLPack exchange API
+        assert mod.get_tensor_stream(x) == torch.xpu.current_stream().sycl_queue
+        with torch.xpu.stream(stream_1):
+            assert mod.get_tensor_stream(x) == stream_1.sycl_queue
+        # use_torch_stream sets the FFI stream of the current torch stream
+        with tvm_ffi.use_torch_stream(torch.xpu.stream(stream_2)):
+            assert torch.xpu.current_stream() == stream_2
+            assert mod.get_tensor_stream(x) == stream_2.sycl_queue
+            assert tvm_ffi.get_raw_stream(tvm_ffi.from_dlpack(x).device) == stream_2.sycl_queue
+
+    run_with_gpu_lock(run_and_check)

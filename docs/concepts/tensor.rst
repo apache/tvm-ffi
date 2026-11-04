@@ -235,7 +235,8 @@ This is equivalent to the following PyTorch C++ code:
 **Auto-Update Stream Context.** When converting framework tensors via :py:func:`tvm_ffi.from_dlpack`,
 TVM-FFI automatically updates the stream context to match the device of the converted tensor.
 For example, when converting a PyTorch tensor on ``torch.device('cuda:3')``, TVM-FFI automatically
-captures the stream from :py:func:`torch.cuda.current_stream(device='cuda:3')`.
+captures the stream from :py:func:`torch.cuda.current_stream(device='cuda:3')`. For ``torch.xpu`` tensors,
+the ``sycl::queue*`` of :py:func:`torch.xpu.current_stream` is captured the same way.
 
 **Set Stream Context.** Use :py:func:`tvm_ffi.use_torch_stream` or :py:func:`tvm_ffi.use_raw_stream`
 to manually set the stream context when automatic detection is insufficient.

@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import functools
 from ctypes import c_void_p
 from typing import Any
 
@@ -68,6 +69,20 @@ class StreamContext:
         )
 
 
+@functools.cache
+def _xpu_dlpack_device_from_torch_device_index(torch_index: int) -> core.Device:
+    """Return the FFI device of torch ``xpu:<torch_index>``.
+
+    The kDLOneAPI device_id is the global SYCL index that torch's DLPack exporter reports,
+    which may differ from the torch XPU index, so the mapping comes from torch.
+    """
+    # TODO(tvm-ffi-team): remove this mapping once the DLPack, PyTorch, SYCL and Level Zero
+    # device indices are aligned, and use device(str(current_stream.device)) like CUDA.
+    import torch  # noqa: PLC0415
+
+    return device(*torch._C._torchDeviceToDLDevice(torch.device("xpu", torch_index)))
+
+
 try:
     import torch
 
@@ -82,10 +97,17 @@ try:
             """Enter both Torch and FFI stream contexts."""
             if self.torch_context:
                 self.torch_context.__enter__()
-            current_stream = torch.cuda.current_stream()
-            self.ffi_context = StreamContext(
-                device(str(current_stream.device)), current_stream.cuda_stream
-            )
+            current_stream = torch.get_device_module().current_stream()
+            if hasattr(current_stream, "cuda_stream"):
+                self.ffi_context = StreamContext(
+                    device(str(current_stream.device)), current_stream.cuda_stream
+                )
+            else:
+                # XPU
+                self.ffi_context = StreamContext(
+                    _xpu_dlpack_device_from_torch_device_index(current_stream.device.index),
+                    current_stream.sycl_queue,
+                )
             self.ffi_context.__enter__()
             return self
 
@@ -103,7 +125,8 @@ try:
         Parameters
         ----------
         context
-            The wrapped torch stream or cuda graph.
+            The wrapped torch stream (``torch.cuda.stream`` / ``torch.xpu.stream``)
+            or cuda graph.
 
         Returns
         -------
@@ -120,6 +143,10 @@ try:
 
             g = torch.cuda.CUDAGraph()
             with tvm_ffi.use_torch_stream(torch.cuda.graph(g)):
+                ...
+
+            s = torch.xpu.Stream()
+            with tvm_ffi.use_torch_stream(torch.xpu.stream(s)):
                 ...
 
         Note
