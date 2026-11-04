@@ -145,13 +145,15 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         # addon -> crashes or wrong tensor data instead of a clean rebuild.
         abi_id = f"{torch.__version__}|cxx11abi={int(torch.compiled_with_cxx11_abi())}"
         abi_tag = hashlib.sha256(abi_id.encode()).hexdigest()[:8]
-        libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}-{abi_tag}{suffix}"
+        build_script_path = Path(__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
+        # Rebuild when the generator changes, even if the Torch build is unchanged.
+        source_tag = hashlib.sha256(build_script_path.read_bytes()).hexdigest()[:8]
+        libname = (
+            f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}-{abi_tag}-{source_tag}{suffix}"
+        )
         lib_path = addon_output_dir / libname
         if not lib_path.exists():
             logger.debug("JIT-compiling torch-c-dlpack-ext to cache...")
-            build_script_path = (
-                Path(__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
-            )
             args = [
                 sys.executable,
                 str(build_script_path),
