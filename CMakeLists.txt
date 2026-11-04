@@ -39,7 +39,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/Utils/Library.cmake)
 # linking
 add_library(tvm_ffi_header INTERFACE)
 add_library(tvm_ffi::header ALIAS tvm_ffi_header)
-target_compile_features(tvm_ffi_header INTERFACE cxx_std_17)
+target_compile_features(tvm_ffi_header INTERFACE cxx_std_20)
 
 if (CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")
   target_compile_definitions(tvm_ffi_header INTERFACE TVM_FFI_CMAKE_LITTLE_ENDIAN=0)
@@ -96,7 +96,7 @@ if (TVM_FFI_USE_EXTRA_CXX_API)
 endif ()
 
 add_library(tvm_ffi_objs OBJECT ${_tvm_ffi_objs_sources})
-target_compile_features(tvm_ffi_objs PRIVATE cxx_std_17)
+target_compile_features(tvm_ffi_objs PRIVATE cxx_std_20)
 
 set_target_properties(
   tvm_ffi_objs
@@ -171,7 +171,7 @@ tvm_ffi_hide_static_linked_lib_symbols(tvm_ffi_shared)
 # only for testing purposes
 target_sources(tvm_ffi_testing PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/testing/testing.cc")
 target_compile_definitions(tvm_ffi_testing PRIVATE TVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1)
-target_compile_features(tvm_ffi_testing PRIVATE cxx_std_17)
+target_compile_features(tvm_ffi_testing PRIVATE cxx_std_20)
 set_target_properties(
   tvm_ffi_testing
   PROPERTIES CXX_EXTENSIONS OFF
@@ -315,7 +315,7 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
   target_include_directories(
     tvm_ffi_cython PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython
   )
-  target_compile_features(tvm_ffi_cython PRIVATE cxx_std_17)
+  target_compile_features(tvm_ffi_cython PRIVATE cxx_std_20)
   target_link_libraries(tvm_ffi_cython PRIVATE tvm_ffi_header)
   target_link_libraries(tvm_ffi_cython PRIVATE tvm_ffi_shared)
   # link against testing to ensure right unloading order (cython first then testing)

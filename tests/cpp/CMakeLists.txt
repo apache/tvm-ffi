@@ -6,7 +6,7 @@ if (TVM_FFI_USE_EXTRA_CXX_API)
 endif ()
 
 add_executable(tvm_ffi_tests ${_test_sources})
-target_compile_features(tvm_ffi_tests PRIVATE cxx_std_17)
+target_compile_features(tvm_ffi_tests PRIVATE cxx_std_20)
 
 set_target_properties(
   tvm_ffi_tests

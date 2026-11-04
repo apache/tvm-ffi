@@ -249,7 +249,7 @@ For more advanced use cases or non-CMake build systems, you can use the Python c
 .. code-block:: bash
 
    # Step 1: Compile C++ source to object file
-   g++ -c -fPIC -std=c++17 -I/path/to/tvm-ffi/include mycode.cc -o mycode.o
+   g++ -c -fPIC -std=c++20 -I/path/to/tvm-ffi/include mycode.cc -o mycode.o
 
    # Step 2: Embed CUBIN into the object file
    python -m tvm_ffi.utils.embed_cubin \

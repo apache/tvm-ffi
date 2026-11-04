@@ -20,7 +20,7 @@
 ## What is this project?
 
 TVM FFI is an open ABI and FFI (Foreign Function Interface) for machine learning
-systems. It provides a stable C ABI, C++17 API, Python bindings (via Cython),
+systems. It provides a stable C ABI, C++20 API, Python bindings (via Cython),
 and Rust bindings. The core abstractions are type-erased values (`Any`/`AnyView`),
 reference-counted objects (`Object`/`ObjectRef`), and packed functions (`Function`).
 
@@ -75,7 +75,7 @@ cmake --build build_cpp --parallel --config RelWithDebInfo --target tvm_ffi_shar
 
 ### Prerequisites
 
-- Python 3.9+, C++17 compiler, CMake 3.26+, Ninja
+- Python 3.9+, C++20 compiler, CMake 3.26+, Ninja
 - Submodules: `git submodule update --init --recursive`
 
 ## Testing

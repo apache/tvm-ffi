@@ -136,7 +136,8 @@ class FunctionObj : public Object, public TVMFFIFunctionCell {
 
  protected:
   /*! \brief Make default constructor protected. */
-  FunctionObj() {}
+  // Keep value-initialization from zero-initializing the function cell.
+  FunctionObj() {}  // NOLINT(modernize-use-equals-default)
   friend class Function;
 
  private:

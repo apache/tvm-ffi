@@ -26,7 +26,7 @@ see :doc:`../get_started/quickstart`.
 .. admonition:: Prerequisite
    :class: hint
 
-   - Compiler: C++17-capable toolchain (GCC/Clang/MSVC)
+   - Compiler: C++20-capable toolchain (GCC/Clang/MSVC)
    - CMake: 3.18 or newer
    - TVM-FFI installed via
 

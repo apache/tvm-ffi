@@ -144,7 +144,7 @@ TEST(JSONParser, String) {
   // test unicode code point
   EXPECT_EQ(json::Parse("\"\\u0041\"").cast<String>(), "A");
   // test unicode surrogate pair
-  EXPECT_EQ(json::Parse("\"\\uD83D\\uDE04hello\"").cast<String>(), u8"\U0001F604hello");
+  EXPECT_EQ(json::Parse("\"\\uD83D\\uDE04hello\"").cast<String>(), "\xF0\x9F\x98\x84hello");
 }
 
 TEST(JSONParser, WrongString) {
@@ -281,13 +281,13 @@ TEST(JSONParser, WrongEmptyAndMinimalInputs) {
 TEST(JSONParser, UnicodeEdgeCases) {
   // Test various unicode characters
   EXPECT_EQ(json::Parse("\"\\u0000\"").cast<String>(), std::string("\0", 1));
-  // replace using \U to avoid encoding issues
-  EXPECT_EQ(json::Parse("\"\\u00FF\"").cast<String>(), u8"\U000000FF");
-  EXPECT_EQ(json::Parse("\"\\u4E2D\\u6587\"").cast<String>(), u8"\U00004E2D\U00006587");
+  // Use explicit UTF-8 bytes: C++20 u8 literals have char8_t elements, while String uses char.
+  EXPECT_EQ(json::Parse("\"\\u00FF\"").cast<String>(), "\xC3\xBF");
+  EXPECT_EQ(json::Parse("\"\\u4E2D\\u6587\"").cast<String>(), "\xE4\xB8\xAD\xE6\x96\x87");
 
   // Test multiple surrogate pairs
   EXPECT_EQ(json::Parse("\"\\uD83D\\uDE00\\uD83D\\uDE01\"").cast<String>(),
-            u8"\U0001F600\U0001F601");
+            "\xF0\x9F\x98\x80\xF0\x9F\x98\x81");
 }
 
 TEST(JSONParser, RawUTF8Bytes) {
@@ -357,10 +357,10 @@ TEST(JSONParser, MixedDataTypes) {
       {"boolean_false", false},
       {"integer", 42},
       {"negative_integer", -42},
-      {"float", 3.14159},
+      {"float", 3.14159},  // NOLINT(modernize-use-std-numbers): match the JSON decimal exactly.
       {"scientific", 1.23e-4},
       {"string", "hello world"},
-      {"unicode_string", u8"Hello \U00004E16\U0000754C \U0001F30D"},
+      {"unicode_string", "Hello \xE4\xB8\x96\xE7\x95\x8C \xF0\x9F\x8C\x8D"},
       {"empty_string", ""},
       {"empty_array", json::Array{}},
       {"empty_object", json::Object{}},
