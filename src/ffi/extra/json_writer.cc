@@ -154,7 +154,7 @@ class JSONWriter {
     // the biggest possible string representation of -INT64_MIN
     char buffer[sizeof("-9223372036854775808") + 1];
     auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
-    WriteLiteral(buffer, static_cast<int>(result.ptr - buffer));
+    result_.append(buffer, static_cast<size_t>(result.ptr - buffer));
   }
 
   static int WriteFloatToBuffer(char* buffer, size_t size, double value, bool fixed) {
@@ -195,12 +195,12 @@ class JSONWriter {
         // this helps us to distinguish between integer and float, which is not necessary
         // but helps to ensure roundtrip property of the parser/printer in terms of int/float types
         int size = WriteFloatToBuffer(buffer, sizeof(buffer), int_part, true);
-        WriteLiteral(buffer, size);
+        result_.append(buffer, size);
       } else {
         // Save 17 decimal digits to avoid loss during loading JSON
         // this is the maximum precision that can be represented in a double
         int size = WriteFloatToBuffer(buffer, sizeof(buffer), value, false);
-        WriteLiteral(buffer, size);
+        result_.append(buffer, size);
       }
     }
   }
