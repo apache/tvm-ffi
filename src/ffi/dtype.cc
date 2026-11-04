@@ -178,7 +178,8 @@ inline std::string DLDataTypeToString_(DLDataType dtype) {  // NOLINT(*)
   }
   if (dtype.code == kDLOpaqueHandle) return os.str();
   int16_t lanes = static_cast<int16_t>(dtype.lanes);
-  if (dtype.code < kDLFloat8_e3m4 && (dtype.code != kDLBool || dtype.bits != 8)) {
+  if ((dtype.code < kDLFloat8_e3m4 || dtype.code >= kDLExtCustomBegin) &&
+      (dtype.code != kDLBool || dtype.bits != 8)) {
     os << static_cast<int>(dtype.bits);
   }
   if (lanes > 1) {
