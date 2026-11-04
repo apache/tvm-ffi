@@ -1,5 +1,6 @@
 # -clang-analyzer-unix.Malloc is disabled due to false positives
-# C++20 constraints and integer comparison rewrites remain optional.
+# C++20 syntax rewrites (constraints, integer comparisons, designated
+# initializers, ranges, starts_with/ends_with, std::numbers) remain optional.
 Checks: >
   clang-diagnostic-*,
   clang-analyzer-*,
@@ -14,6 +15,10 @@ Checks: >
   -modernize-use-nodiscard,
   -modernize-use-constraints,
   -modernize-use-integer-sign-comparison,
+  -modernize-use-designated-initializers,
+  -modernize-use-ranges,
+  -modernize-use-starts-ends-with,
+  -modernize-use-std-numbers,
   -modernize-return-braced-init-list,
   -modernize-avoid-c-arrays,
   -bugprone-easily-swappable-parameters,
@@ -26,6 +31,8 @@ HeaderFilterRegex: '.*(include/tvm/ffi|src/ffi)/.*\.h$'
 HeaderFileExtensions: ['h']
 ImplementationFileExtensions: ['cc']
 CheckOptions:
+  - key: modernize-loop-convert.UseCxx20ReverseRanges
+    value: 'false'
   - key: misc-include-cleaner.UnusedIncludes
     value: 'true'
   - key: misc-include-cleaner.MissingIncludes
