@@ -333,12 +333,12 @@ struct MutateCount {
   int maybe_inplace_expected = 0;
 };
 
-class StructuralMapWithMutateCount : public StructuralMapEngineBase {
+class StructuralMapWithMutateCount : public StructuralMutatorObj {
  public:
   using StateTupleType = std::tuple<const MutateCount&, const int&>;
 
   explicit StructuralMapWithMutateCount(const StructuralMutatorVTable* vtable)
-      : StructuralMapEngineBase(vtable) {}
+      : StructuralMutatorObj(vtable) {}
 
   const MutateCount& count() const { return count_; }
 
@@ -350,7 +350,7 @@ class StructuralMapWithMutateCount : public StructuralMapEngineBase {
     } else {
       ++count_.mutate_expected;
     }
-    return StructuralMapEngineBase::DefaultMutateExpected(value, inplace_mode);
+    return StructuralMutatorObj::DefaultMutateExpected(value, inplace_mode);
   }
 
  protected:
@@ -361,15 +361,64 @@ class StructuralMapWithMutateCount : public StructuralMapEngineBase {
   int marker_ = 17;
 };
 
-class StructuralMutateLayer : public StructuralMapEngineBase {
+class StructuralMutateLayer : public StructuralMutatorObj {
  public:
   using MutatorObjType = StructuralMutateLayer;
 
   explicit StructuralMutateLayer(const StructuralMutatorVTable* vtable)
-      : StructuralMapEngineBase(vtable) {}
+      : StructuralMutatorObj(vtable) {}
 
-  int callback_tag() const { return 23; }
+  int callback_tag() const { return callback_tag_; }
+
+ private:
+  int callback_tag_ = 23;
 };
+
+TEST(StructuralMutate, EngineOwnsRemapAboveParentState) {
+  auto check = [](auto make_engine) {
+    TVar key("key");
+    TVar first("first");
+    TVar second("second");
+    {
+      auto engine = make_engine();
+      auto* mutator = static_cast<StructuralMutatorObj*>(engine.get());
+      EXPECT_EQ(mutator->VarRemapGetExpected(key).value(), nullptr);
+      mutator->VarRemapSetExpected(key, first).value();
+      EXPECT_EQ(key.use_count(), 2);
+      EXPECT_EQ(first.use_count(), 2);
+      EXPECT_TRUE(mutator->VarRemapGetExpected(key).value().same_as(first));
+      mutator->VarRemapSetExpected(key, second).value();
+      EXPECT_EQ(key.use_count(), 2);
+      EXPECT_EQ(first.use_count(), 1);
+      EXPECT_EQ(second.use_count(), 2);
+      EXPECT_TRUE(mutator->VarRemapGetExpected(key).value().same_as(second));
+      EXPECT_EQ(mutator->VarRemapSetExpected(1, second).error().kind(), "TypeError");
+    }
+    EXPECT_EQ(key.use_count(), 1);
+    EXPECT_EQ(first.use_count(), 1);
+    EXPECT_EQ(second.use_count(), 1);
+  };
+  check([] {
+    auto callback = [](int64_t, StructuralMutatorObj*) -> Expected<Any> { return Unchanged(); };
+    return make_object<StructuralMutateEngine<StructuralMapEngineBase, decltype(callback)>>(
+        callback);
+  });
+  check([] {
+    auto callback = [](int64_t, StructuralMutateLayer*) -> Expected<Any> { return Unchanged(); };
+    return make_object<StructuralMutateEngine<StructuralMutateLayer, decltype(callback)>>(callback);
+  });
+  check([] {
+    auto callback = [](int64_t, const MutateCount&, const int&) -> Expected<Any> {
+      return Unchanged();
+    };
+    return make_object<StructuralMapEngine<StructuralMapWithMutateCount, WalkOrder::kPostOrder,
+                                           decltype(callback)>>(callback);
+  });
+  check([] {
+    return make_object<StructuralMapDynEngine<StructuralMapWithMutateCount, WalkOrder::kPreOrder>>(
+        Array<Tuple<int32_t, Function>>(), Array<Tuple<int32_t, Function>>());
+  });
+}
 
 TEST(StructuralMap, ParentLayerOwnsBothDescentsAndProvidesState) {
   std::vector<int> callback_counts;

@@ -55,11 +55,11 @@ Expected<Any> StructuralMapExpected(
     const Array<Tuple<int32_t, Function>>& callbacks_with_def_region_kind, int order) noexcept {
   Expected<UnchangedOr<Any>> result = [&]() -> Expected<UnchangedOr<Any>> {
     if (order == static_cast<int>(WalkOrder::kPreOrder)) {
-      using Mutator = StructuralMapDynEngine<StructuralMapEngineBase, WalkOrder::kPreOrder>;
+      using Mutator = StructuralMapDynEngine<StructuralMutatorObj, WalkOrder::kPreOrder>;
       StructuralMutator mutator(make_object<Mutator>(callbacks, callbacks_with_def_region_kind));
       return mutator->MutateExpected(root, InplaceMode::kAllow);
     }
-    using Mutator = StructuralMapDynEngine<StructuralMapEngineBase, WalkOrder::kPostOrder>;
+    using Mutator = StructuralMapDynEngine<StructuralMutatorObj, WalkOrder::kPostOrder>;
     StructuralMutator mutator(make_object<Mutator>(callbacks, callbacks_with_def_region_kind));
     return mutator->MutateExpected(root, InplaceMode::kAllow);
   }();
@@ -77,10 +77,12 @@ Expected<Any> StructuralMapExpected(
 
 /*! \brief Runtime counterpart of the typed callback-owned mutate engine. */
 template <typename Parent>
-class StructuralMutateDynEngine : public Parent {
+class StructuralMutateDynEngine : public StructuralMutatorEngineParent<Parent> {
+  using EngineBase = StructuralMutatorEngineParent<Parent>;
+
  public:
   explicit StructuralMutateDynEngine(Array<Tuple<int32_t, Function, bool>> callbacks)
-      : Parent(VTable()), callbacks_(std::move(callbacks)) {}
+      : EngineBase(VTable()), callbacks_(std::move(callbacks)) {}
 
  private:
   static const StructuralMutatorVTable* VTable() {
@@ -153,7 +155,7 @@ class StructuralMutateDynEngine : public Parent {
 Expected<Any> StructuralMutateExpected(
     Any root,  // NOLINT(performance-unnecessary-value-param)
     const Array<Tuple<int32_t, Function, bool>>& callbacks) noexcept {
-  using Mutator = StructuralMutateDynEngine<StructuralMapEngineBase>;
+  using Mutator = StructuralMutateDynEngine<StructuralMutatorObj>;
   StructuralMutator mutator(make_object<Mutator>(callbacks));
   auto result = mutator->MutateExpected(root, InplaceMode::kAllow);
   if (TVM_FFI_PREDICT_FALSE(result.is_err())) {

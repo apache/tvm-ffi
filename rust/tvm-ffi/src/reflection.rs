@@ -61,16 +61,26 @@ impl TypeAttrColumn {
 
     /// Return an owning copy of this attribute for `type_index`.
     pub fn get(self, type_index: i32) -> Option<Any> {
-        let raw = self.get_raw(type_index)?;
+        let raw = self.get_raw_ffi_any(type_index)?;
         if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
             return None;
         }
         Some(Any::from(unsafe { AnyView::from_raw_ffi_any(raw) }))
     }
 
-    /// Copy one borrowed cell without taking ownership.
+    /// Copy the borrowed raw carrier for this attribute and `type_index`.
+    ///
+    /// This does not retain the value or transfer ownership. The registry-owned
+    /// value must remain valid while the returned carrier is used, and registration
+    /// must not race with reads. Passing the carrier to unsafe APIs still requires
+    /// satisfying their lifetime and ownership contracts. Use [`Self::get`] for an
+    /// owning [`Any`].
+    ///
+    /// Returns `None` when the index is outside the column or the column has no data.
+    /// An in-range cell with the `kTVMFFINone` tag is returned as `Some`, unlike
+    /// [`Self::get`], which filters it out.
     #[inline(always)]
-    pub(crate) fn get_raw(self, type_index: i32) -> Option<TVMFFIAny> {
+    pub fn get_raw_ffi_any(self, type_index: i32) -> Option<TVMFFIAny> {
         unsafe {
             let column = self.0.as_ref();
             let index = type_index - column.begin_index;

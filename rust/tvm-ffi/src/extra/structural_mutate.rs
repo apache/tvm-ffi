@@ -74,8 +74,8 @@ use crate::tvm_ffi_sys::{
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
-    missing_field_getter_error, raw_tvm_ffi_any_into_result, raw_tvm_ffi_any_same_as,
-    result_into_raw_tvm_ffi_any, runtime_error, type_key_of, with_structural_error_context,
+    missing_field_getter_error, raw_ffi_any_into_result, raw_ffi_any_same_as,
+    result_into_raw_ffi_any, runtime_error, type_key_of, with_structural_error_context,
     with_structural_field_error_context, with_visit_error_context,
 };
 use super::structural_visit::{
@@ -685,7 +685,7 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         unsafe {
             let context =
                 StructuralMutateEngine::<Base>::checked_dispatcher(self.runtime, dispatch);
-            raw_tvm_ffi_any_into_result(StructuralMutateEngine::<Base>::default_mutate_raw(
+            raw_ffi_any_into_result(StructuralMutateEngine::<Base>::default_mutate_raw(
                 self.runtime,
                 context,
                 value.value,
@@ -855,7 +855,7 @@ pub(super) fn with_mutation_error_context(error: Error, raw: TVMFFIAny) -> Error
 // -----------------------------------------------------------------------------
 
 fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {
-    let Some(attr) = SHALLOW_COPY_COLUMN.get_raw(raw.type_index) else {
+    let Some(attr) = SHALLOW_COPY_COLUMN.get_raw_ffi_any(raw.type_index) else {
         return Err(missing_shallow_copy_error(
             raw.type_index,
             SHALLOW_COPY_ATTR,
@@ -963,7 +963,7 @@ fn object_is_unique(raw: TVMFFIAny) -> bool {
 /// uniquely own each writable rvalue slot, converting it at most once. A null
 /// object pointer or failed runtime conversion returns an error; successful Error
 /// objects remain ordinary values rather than entering the error channel.
-fn raw_tvm_ffi_any_to_owned_any(raw: TVMFFIAny) -> Result<Any> {
+fn raw_ffi_any_to_owned_any(raw: TVMFFIAny) -> Result<Any> {
     if is_plain_inline(raw.type_index) {
         return Ok(unsafe { Any::from_raw_ffi_any(raw) });
     }
@@ -1115,7 +1115,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         ) {
             // Map adapters attribute errors to their possibly replaced value;
             // direct mutation attributes callback failures to this input.
-            Some(result) => result_into_raw_tvm_ffi_any(if CALLBACK_CONTEXT {
+            Some(result) => result_into_raw_ffi_any(if CALLBACK_CONTEXT {
                 result.map_err(|error| with_mutation_error_context(error, raw))
             } else {
                 result
@@ -1194,7 +1194,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         match Self::runtime_var_remap_get(runtime, *var.as_raw_ffi_any()) {
             Ok(Some(value)) => Any::into_raw_ffi_any(value),
             Ok(None) => TVMFFIAny::new(),
-            Err(error) => result_into_raw_tvm_ffi_any(Err(error)),
+            Err(error) => result_into_raw_ffi_any(Err(error)),
         }
     }
 
@@ -1209,9 +1209,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         replacement: AnyView<'static>,
     ) -> TVMFFIAny {
         // Finish replacement cleanup before constructing the ABI result.
-        let result = raw_tvm_ffi_any_to_owned_any(*replacement.as_raw_ffi_any())
+        let result = raw_ffi_any_to_owned_any(*replacement.as_raw_ffi_any())
             .and_then(|value| Self::runtime_var_remap_set(runtime, *var.as_raw_ffi_any(), &value));
-        result_into_raw_tvm_ffi_any(result.map(|()| Any::new()))
+        result_into_raw_ffi_any(result.map(|()| Any::new()))
     }
 
     /// Run the public mutate/map adapter with owned `root` and borrowed `dispatch`.
@@ -1311,8 +1311,8 @@ impl StructuralMutatorObj {
             small_str_len,
             data_union,
         };
-        result_into_raw_tvm_ffi_any(
-            raw_tvm_ffi_any_into_result(result)
+        result_into_raw_ffi_any(
+            raw_ffi_any_into_result(result)
                 .map_err(|error| with_mutation_error_context(error, raw)),
         )
     }
@@ -1426,7 +1426,7 @@ impl StructuralMutatorObj {
             Self::call_mutator(runtime, child_raw, InplaceMode::Disallow)
         })
         .map_err(|error| with_structural_field_error_context(error, "map", field.name.as_str()))?;
-        if is_unchanged(&mapped) || raw_tvm_ffi_any_same_as(child_raw, *mapped.as_raw_ffi_any()) {
+        if is_unchanged(&mapped) || raw_ffi_any_same_as(child_raw, *mapped.as_raw_ffi_any()) {
             return Ok(());
         }
 
@@ -1456,7 +1456,7 @@ impl StructuralMutatorObj {
         };
         unsafe {
             let view = AnyView::from_raw_ffi_any(raw);
-            raw_tvm_ffi_any_into_result(callback(mutator, view))
+            raw_ffi_any_into_result(callback(mutator, view))
         }
     }
 
@@ -1467,7 +1467,7 @@ impl StructuralMutatorObj {
     fn structural_mutate_hook(raw: TVMFFIAny, mode: InplaceMode) -> Option<TVMFFIAny> {
         let use_inplace = mode == InplaceMode::Allow && object_is_unique(raw);
         if use_inplace {
-            if let Some(attr) = structural_mutate_column::<true>().get_raw(raw.type_index) {
+            if let Some(attr) = structural_mutate_column::<true>().get_raw_ffi_any(raw.type_index) {
                 if attr.type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32
                     || attr.type_index == TVMFFITypeIndex::kTVMFFIFunction as i32
                 {
@@ -1475,7 +1475,7 @@ impl StructuralMutatorObj {
                 }
             }
         }
-        let attr = structural_mutate_column::<false>().get_raw(raw.type_index)?;
+        let attr = structural_mutate_column::<false>().get_raw_ffi_any(raw.type_index)?;
         (attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32).then_some(attr)
     }
 
@@ -1558,7 +1558,7 @@ impl StructuralMutatorObj {
             Err(invalid_mutation_hook_error())
         };
         // Preserve successful Error-valued returns until the public conversion.
-        result_into_raw_tvm_ffi_any(result.map_err(|error| with_mutation_error_context(error, raw)))
+        result_into_raw_ffi_any(result.map_err(|error| with_mutation_error_context(error, raw)))
     }
 
     /// Borrow a live runtime mutator as an object-valued ABI argument.
@@ -1709,7 +1709,7 @@ impl StructuralMutatorObj {
             small_str_len,
             data_union,
         };
-        result_into_raw_tvm_ffi_any(
+        result_into_raw_ffi_any(
             Self::mutate_without_hook::<ORDINARY_ENGINE>(runtime, raw, def_region_kind)
                 .map_err(|error| with_mutation_error_context(error, raw)),
         )
@@ -1723,7 +1723,7 @@ impl StructuralMutatorObj {
         raw: TVMFFIAny,
     ) -> Result<Option<Any>> {
         let callback = (*(*runtime).vtable).var_remap_get;
-        let value = raw_tvm_ffi_any_into_result(callback(runtime, AnyView::from_raw_ffi_any(raw)))?;
+        let value = raw_ffi_any_into_result(callback(runtime, AnyView::from_raw_ffi_any(raw)))?;
         Ok((value.type_index() != TVMFFITypeIndex::kTVMFFINone as i32).then_some(value))
     }
 
@@ -1736,7 +1736,7 @@ impl StructuralMutatorObj {
         value: &Any,
     ) -> Result<()> {
         let callback = (*(*runtime).vtable).var_remap_set;
-        raw_tvm_ffi_any_into_result(callback(
+        raw_ffi_any_into_result(callback(
             runtime,
             AnyView::from_raw_ffi_any(raw),
             AnyView::from_raw_ffi_any(*value.as_raw_ffi_any()),
@@ -1755,7 +1755,7 @@ impl StructuralMutatorObj {
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-            return raw_tvm_ffi_any_to_owned_any(raw);
+            return raw_ffi_any_to_owned_any(raw);
         }
 
         let type_info = checked_type_info(raw.type_index)?;

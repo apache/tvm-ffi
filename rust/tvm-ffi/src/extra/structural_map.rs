@@ -19,7 +19,7 @@
 
 //! Ordered replacement callbacks and adapters for structural mapping.
 
-use super::structural_common::raw_tvm_ffi_any_same_as;
+use super::structural_common::raw_ffi_any_same_as;
 use super::structural_mutate::{
     IntoMutateResult, MutationView, StructuralMutateEngine, StructuralMutatorView,
     with_mutation_error_context,
@@ -115,7 +115,7 @@ where
             };
             let mapped =
                 callback_result.map_err(|error| with_mutation_error_context(error, raw))?;
-            if is_unchanged(&mapped) || raw_tvm_ffi_any_same_as(raw, *mapped.as_raw_ffi_any()) {
+            if is_unchanged(&mapped) || raw_ffi_any_same_as(raw, *mapped.as_raw_ffi_any()) {
                 // Drop temporary ownership before default descent checks uniqueness.
                 drop(mapped);
                 mutator.default_mutate(self, value).map(Into::into)
