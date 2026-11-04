@@ -49,12 +49,13 @@ macro_rules! function_name {
 #[macro_export]
 macro_rules! cached_global_func {
     ($name:literal) => {{
-        static FUNC: std::sync::LazyLock<$crate::function::Function> =
-            std::sync::LazyLock::new(|| {
-                $crate::function::Function::get_global($name).unwrap_or_else(|_| {
-                    panic!(concat!("global function `", $name, "` is not registered"))
-                })
-            });
+        static FUNC: $crate::extra::cold_init_lazy_lock::ColdInitLazyLock<
+            $crate::function::Function,
+        > = $crate::extra::cold_init_lazy_lock::ColdInitLazyLock::new(|| {
+            $crate::function::Function::get_global($name).unwrap_or_else(|_| {
+                panic!(concat!("global function `", $name, "` is not registered"))
+            })
+        });
         &*FUNC
     }};
 }

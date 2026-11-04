@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+pub mod cold_init_lazy_lock;
 pub mod dispatch;
 pub mod marker;
 pub mod module;

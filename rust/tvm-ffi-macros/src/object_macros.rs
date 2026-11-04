@@ -136,7 +136,7 @@ pub(crate) fn expand_object(
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
-                    static TYPE_INDEX: std::sync::LazyLock<i32> = std::sync::LazyLock::new(||
+                    static TYPE_INDEX: #tvm_ffi_crate::extra::cold_init_lazy_lock::ColdInitLazyLock<i32> = #tvm_ffi_crate::extra::cold_init_lazy_lock::ColdInitLazyLock::new(||
                         unsafe {
                             // The parent first, since registering it takes the
                             // same lock.
@@ -165,18 +165,7 @@ pub(crate) fn expand_object(
                             tindex
                         }
                     );
-                    // Keep Once's initialization descriptors in the cold helper,
-                    // rather than in every inlined runtime type-index caller.
-                    #[cold]
-                    #[inline(never)]
-                    fn initialize_type_index() -> i32 {
-                        *std::sync::LazyLock::force(&TYPE_INDEX)
-                    }
-                    if let Some(index) = std::sync::LazyLock::get(&TYPE_INDEX) {
-                        *index
-                    } else {
-                        initialize_type_index()
-                    }
+                    *TYPE_INDEX
                 }
             }
         }
@@ -184,7 +173,7 @@ pub(crate) fn expand_object(
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
-                    static TYPE_INDEX: std::sync::LazyLock<i32> = std::sync::LazyLock::new(||
+                    static TYPE_INDEX: #tvm_ffi_crate::extra::cold_init_lazy_lock::ColdInitLazyLock<i32> = #tvm_ffi_crate::extra::cold_init_lazy_lock::ColdInitLazyLock::new(||
                         unsafe {
                             let type_key_arg =
                                  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
@@ -202,18 +191,7 @@ pub(crate) fn expand_object(
                             tindex
                         }
                     );
-                    // Keep Once's initialization descriptors in the cold helper,
-                    // rather than in every inlined runtime type-index caller.
-                    #[cold]
-                    #[inline(never)]
-                    fn initialize_type_index() -> i32 {
-                        *std::sync::LazyLock::force(&TYPE_INDEX)
-                    }
-                    if let Some(index) = std::sync::LazyLock::get(&TYPE_INDEX) {
-                        *index
-                    } else {
-                        initialize_type_index()
-                    }
+                    *TYPE_INDEX
                 }
             }
         }

@@ -18,7 +18,7 @@
  */
 
 use crate::any::{Any, AnyView};
-use crate::error::Error;
+use crate::error::{Error, Result, RUNTIME_ERROR};
 use crate::function::Function;
 use crate::object::{self, ObjectRefCore};
 use crate::reflection::FieldGetter;
@@ -27,11 +27,43 @@ use crate::tvm_ffi_sys::{
     TVMFFITypeKeyToIndex,
 };
 
+// -----------------------------------------------------------------------------
+// Shared outlined errors
+// -----------------------------------------------------------------------------
+// Perf note: Keep construction, formatting and checked-conversion scratch inside
+// these cold outline boundaries, not in successful traversal callers' frames.
+
+#[cold]
+#[inline(never)]
+pub(super) fn runtime_error(message: &str) -> Error {
+    Error::new(RUNTIME_ERROR, message, "")
+}
+
+#[cold]
+#[inline(never)]
+pub(super) fn missing_field_getter_error(operation: &str, name: &str) -> Error {
+    runtime_error(&format!(
+        "native {operation}: reflected field `{name}` has no getter"
+    ))
+}
+
+#[cold]
+#[inline(never)]
+pub(super) fn with_structural_field_error_context(
+    error: Error,
+    operation: &str,
+    name: &str,
+) -> Error {
+    with_structural_error_context(error, operation, &format!("field `{name}`"))
+}
+
 /// Consume an owning error carrier while keeping checked-conversion scratch
 /// inside the cold path instead of successful recursive traversal frames.
 ///
 /// # Safety
 /// The fields must describe one owning TVMFFIAny that has not been consumed.
+// Perf note: Construct the addressable Any and perform checked Error conversion
+// inside this outline boundary, not in the successful recursive caller's frame.
 #[cold]
 #[inline(never)]
 pub(super) unsafe fn structural_error_from_raw(
@@ -67,6 +99,9 @@ pub(crate) fn type_key_of(type_index: i32) -> String {
     }
 }
 
+// Perf note: cold marks these error-composition paths as uncommon; inlining
+// within error paths is compiler-selected. Use explicit inline(never) at boundaries
+// where scratch must stay outside recursive callers.
 /// Add one structural traversal frame to an error's backtrace.
 #[cold]
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
@@ -87,7 +122,9 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
             ))
             .ok()?;
         }
-        let node = unsafe { borrowed_view(&raw) }.try_as::<object::ObjectRef>()?;
+        // SAFETY: the traversal input remains live during annotation. Conversion
+        // acquires ownership before the temporary view ends; raw is an object tag.
+        let node = unsafe { AnyView::from_raw_ffi_any(raw) }.try_as::<object::ObjectRef>()?;
         let mut previous = error.extra_context();
         let mut nodes = Vec::new();
         if let Some(prior) = previous.as_ref() {
@@ -189,48 +226,54 @@ macro_rules! impl_callback_chain_tuple_arities {
 
 pub(crate) use impl_callback_chain_tuple_arities;
 
-/// Copy a borrowed FFI value when its owning representation is unchanged.
+// -----------------------------------------------------------------------------
+// Raw carrier utilities
+// -----------------------------------------------------------------------------
+
+/// Compare tags, inline metadata and payload bits without deep equality.
 ///
-/// Raw string/byte views and `ObjectRValueRef` return `None` because they need
-/// the runtime's normalization or move logic. A null object pointer also
-/// returns `None` instead of constructing an invalid owning value.
+/// Object-backed values compare pointer identity. Both carriers must contain
+/// initialized payload bits; no pointee is accessed or ownership transferred.
 #[inline(always)]
-pub(crate) fn try_to_owned_without_normalization(raw: TVMFFIAny) -> Option<Any> {
-    if is_plain_inline(raw.type_index) {
-        return Some(unsafe { Any::from_raw_ffi_any(raw) });
-    }
-    if raw.type_index >= TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-        let object = unsafe { raw.data_union.v_obj };
-        if object.is_null() {
-            return None;
-        }
-        unsafe { object::unsafe_::inc_ref(object) };
-        return Some(unsafe { Any::from_raw_ffi_any(raw) });
-    }
-    None
-}
-
-pub(crate) use crate::any::is_plain_inline;
-
-#[inline(always)]
-pub(crate) fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
+pub(crate) fn raw_tvm_ffi_any_same_as(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
     lhs.type_index == rhs.type_index
         && lhs.small_str_len == rhs.small_str_len
         && unsafe { lhs.data_union.v_uint64 == rhs.data_union.v_uint64 }
 }
 
-/// Borrow a traversal ABI cell for no longer than the cell's scope.
+/// Transfer an owning success or Error into exactly one raw result token.
 ///
-/// # Safety
-/// The cell must satisfy `AnyView::from_raw_ffi_any`'s requirements, including
-/// its unique, at-most-once conversion rule for rvalue slots. The traversal
-/// driver must keep the owning root, field, or replacement alive for the borrow.
+/// This is the structural hook protocol: an Error tag represents failure, so
+/// decoding `Ok(Any::from(error))` also yields `Err(error)`. Callers that carry
+/// Error objects as ordinary values must keep a separate result channel.
+/// No payload is cloned, normalized, or released by this transfer.
 #[inline(always)]
-pub(crate) unsafe fn borrowed_view(raw: &TVMFFIAny) -> AnyView<'_> {
-    AnyView::from_raw_ffi_any(*raw)
+pub(crate) fn result_into_raw_tvm_ffi_any(result: Result<Any>) -> TVMFFIAny {
+    unsafe {
+        match result {
+            Ok(value) => Any::into_raw_ffi_any(value),
+            Err(error) => Any::into_raw_ffi_any(Any::from(error)),
+        }
+    }
 }
 
+/// Take ownership of one value returned by a structural traversal ABI hook.
+///
+/// # Safety
+///
+/// `raw` must contain one owning TVMFFIAny result that has not already been
+/// consumed. An Error object is converted into the Rust error channel, even
+/// if it was encoded from `Ok`; all other tags become an owning success.
+/// Borrowed views and rvalue slots must be normalized before this transfer.
 #[inline(always)]
-pub(crate) fn raw_of(value: AnyView<'_>) -> TVMFFIAny {
-    *value.as_raw_ffi_any()
+pub(crate) unsafe fn raw_tvm_ffi_any_into_result(raw: TVMFFIAny) -> Result<Any> {
+    if raw.type_index != TVMFFITypeIndex::kTVMFFIError as i32 {
+        return Ok(Any::from_raw_ffi_any(raw));
+    }
+    core::hint::cold_path();
+    Err(structural_error_from_raw(
+        raw.type_index,
+        raw.small_str_len,
+        raw.data_union,
+    ))
 }

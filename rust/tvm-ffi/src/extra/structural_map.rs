@@ -19,9 +19,7 @@
 
 //! Ordered replacement callbacks and adapters for structural mapping.
 
-use super::structural_common::{
-    borrowed_view, impl_callback_chain_tuple_arities, raw_of, same_shallow,
-};
+use super::structural_common::{impl_callback_chain_tuple_arities, raw_tvm_ffi_any_same_as};
 use super::structural_mutate::{
     with_mutation_error_context, IntoMutateResult, MutationView, StructuralMutateEngine,
     StructuralMutatorView,
@@ -483,19 +481,21 @@ where
         mutator: &mut StructuralMutatorView<'_, Self>,
     ) -> Result<Any> {
         let mode = value.inplace_mode();
-        let raw = raw_of(value.as_any_view());
+        let raw = *value.as_any_view().as_raw_ffi_any();
         let kind = mutator.def_region_kind();
         if PRE_ORDER {
             // Snapshot permission before a callback can retain or release ownership.
+            // SAFETY: the input owner remains live through this synchronous callback;
+            // its higher-ranked view cannot escape into the owning result.
             let Some(callback_result) = self
                 .dispatch
-                .dispatch_tuple((unsafe { borrowed_view(&raw) }, kind))
+                .dispatch_tuple((unsafe { AnyView::from_raw_ffi_any(raw) }, kind))
             else {
                 return mutator.default_mutate(self, value).map(Into::into);
             };
             let mapped =
                 callback_result.map_err(|error| with_mutation_error_context(error, raw))?;
-            if is_unchanged(&mapped) || same_shallow(raw, *mapped.as_raw_ffi_any()) {
+            if is_unchanged(&mapped) || raw_tvm_ffi_any_same_as(raw, *mapped.as_raw_ffi_any()) {
                 // Drop temporary ownership before default descent checks uniqueness.
                 drop(mapped);
                 mutator.default_mutate(self, value).map(Into::into)
@@ -511,15 +511,16 @@ where
         } else {
             let mapped: Any = mutator.default_mutate(self, value)?.into();
             let current = if is_unchanged(&mapped) {
-                unsafe { borrowed_view(&raw) }
+                // SAFETY: Unchanged leaves the original input owner in place. Borrow
+                // it only through the callback; the other branch borrows mapped.
+                unsafe { AnyView::from_raw_ffi_any(raw) }
             } else {
                 AnyView::from(&mapped)
             };
             match self.dispatch.dispatch_tuple((current, kind)) {
                 Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
-                Some(result) => {
-                    result.map_err(|error| with_mutation_error_context(error, raw_of(current)))
-                }
+                Some(result) => result
+                    .map_err(|error| with_mutation_error_context(error, *current.as_raw_ffi_any())),
                 None => Ok(mapped),
             }
         }
