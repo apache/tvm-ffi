@@ -255,12 +255,10 @@ static Device getATenDeviceForDLPackv1(DLDeviceType type, c10::DeviceIndex index
 
 ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
   ScalarType stype = ScalarType::Undefined;
-#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
   if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
     TORCH_CHECK(dtype.lanes == 1, "ATen does not support lanes != 1 for dtype code",
                 std::to_string(dtype.code));
   }
-#endif
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
@@ -547,7 +545,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       at::IntArrayRef shape(prototype->shape, prototype->shape + prototype->ndim);
       at::TensorOptions options =
           at::TensorOptions()
-              .dtype(at::toScalarType(prototype->dtype))
+              .dtype(at::toScalarTypeForDLPackv1(prototype->dtype))
               .device(at::getATenDeviceForDLPackv1(prototype->device.device_type,
                                                    prototype->device.device_id));
       at::Tensor tensor = at::empty(shape, options);
