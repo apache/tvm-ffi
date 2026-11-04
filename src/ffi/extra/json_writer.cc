@@ -34,6 +34,9 @@
 #include <cinttypes>
 #include <cmath>
 #include <cstdint>
+#include <iomanip>
+#include <locale>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -155,9 +158,6 @@ class JSONWriter {
   }
 
   void WriteFloat(double value) {
-    // largest possible string representation of a double is around 24 chars plus
-    // one null terminator keep 32 to be safe
-    char buffer[32];
     if (FastMathSafeIsNaN(value)) {
       WriteLiteral("NaN", 3);
     } else if (FastMathSafeIsInf(value)) {
@@ -167,20 +167,22 @@ class JSONWriter {
         WriteLiteral("Infinity", 8);
       }
     } else {
+      // Use the JSON decimal point even when the process uses another locale.
+      std::ostringstream stream;
+      stream.imbue(std::locale::classic());
       double int_part;
       // if the value can be represented as integer
       if (std::fabs(value) < (1ULL << 53) && std::modf(value, &int_part) == 0) {
         // always print an extra .0 for integer so integer numbers are printed as floats
         // this helps us to distinguish between integer and float, which is not necessary
         // but helps to ensure roundtrip property of the parser/printer in terms of int/float types
-        int size = TVM_FFI_SNPRINTF(buffer, sizeof(buffer), "%.1f", int_part);
-        WriteLiteral(buffer, size);
+        stream << std::fixed << std::setprecision(1) << int_part;
       } else {
         // Save 17 decimal digits to avoid loss during loading JSON
         // this is the maximum precision that can be represented in a double
-        int size = TVM_FFI_SNPRINTF(buffer, sizeof(buffer), "%.17g", value);
-        WriteLiteral(buffer, size);
+        stream << std::setprecision(17) << value;
       }
+      result_ += stream.str();
     }
   }
 

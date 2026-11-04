@@ -22,7 +22,9 @@
 #include <tvm/ffi/extra/json.h>
 #include <tvm/ffi/extra/structural_equal.h>
 
+#include <clocale>
 #include <cmath>
+#include <string>
 
 namespace {
 
@@ -57,6 +59,38 @@ inline bool FastMathSafeIsInf(double x) {
 #else
   return std::isinf(x);
 #endif
+}
+
+class JSONNumericLocaleTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    const char* previous = std::setlocale(LC_NUMERIC, nullptr);
+    ASSERT_NE(previous, nullptr);
+    previous_ = previous;
+  }
+  void TearDown() override { std::setlocale(LC_NUMERIC, previous_.c_str()); }
+
+ private:
+  std::string previous_;
+};
+
+TEST_F(JSONNumericLocaleTest, DecimalPoint) {
+  bool found = false;
+  for (const char* name : {"uk_UA.UTF-8", "de_DE.UTF-8", "fr_FR.UTF-8", "German_Germany.1252"}) {
+    if (std::setlocale(LC_NUMERIC, name) != nullptr &&
+        std::string(std::localeconv()->decimal_point) == ",") {
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    GTEST_SKIP() << "No comma-decimal numeric locale is installed";
+  }
+  const std::string current = std::setlocale(LC_NUMERIC, nullptr);
+  EXPECT_EQ(json::Parse("1.5").cast<double>(), 1.5);
+  EXPECT_EQ(json::Parse("[1.5,2.75]").cast<json::Array>()[1].cast<double>(), 2.75);
+  EXPECT_EQ(json::Stringify(json::Array{1.5, 2.75}), "[1.5,2.75]");
+  EXPECT_EQ(std::string(std::setlocale(LC_NUMERIC, nullptr)), current);
 }
 
 TEST(JSONParser, BoolNull) {

@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 import json
+import locale
+import math
+from decimal import Decimal, localcontext
 from typing import Any, Callable
 
 import pytest
@@ -571,3 +574,88 @@ class TestErrors:
         """JSON without nodes raises an error."""
         with pytest.raises(Exception):
             from_json_graph_str('{"root_index": 0}')
+
+
+class TestNumericLocale:
+    """JSON interchange must not depend on the process numeric locale."""
+
+    @pytest.fixture(params=["C", "comma"])
+    def numeric_locale(self, request: Any) -> Any:
+        previous = locale.setlocale(locale.LC_NUMERIC)
+        try:
+            if request.param == "C":
+                locale.setlocale(locale.LC_NUMERIC, "C")
+            else:
+                for name in (
+                    "uk_UA.UTF-8",
+                    "de_DE.UTF-8",
+                    "fr_FR.UTF-8",
+                    "German_Germany.1252",
+                ):
+                    try:
+                        locale.setlocale(locale.LC_NUMERIC, name)
+                    except locale.Error:
+                        continue
+                    if locale.localeconv()["decimal_point"] == ",":
+                        break
+                else:
+                    pytest.skip("No comma-decimal numeric locale is installed")
+            yield locale.setlocale(locale.LC_NUMERIC)
+        finally:
+            locale.setlocale(locale.LC_NUMERIC, previous)
+
+    @pytest.mark.parametrize(
+        "value", [1.5, -2.75, -0.0, 17.0, 1.0000000000000002, 1.25e-120, 1.25e120]
+    )
+    def test_float_graph_roundtrip(self, numeric_locale: str, value: float) -> None:
+        graph = json.loads(to_json_graph_str(value))
+        assert graph["nodes"][graph["root_index"]]["data"] == value
+        # Read independently produced JSON, rather than only the writer's output.
+        expected_graph = {"root_index": 0, "nodes": [{"type": "float", "data": value}]}
+        result = from_json_graph_str(json.dumps(expected_graph))
+        assert result == value
+        assert math.copysign(1.0, result) == math.copysign(1.0, value)
+        assert locale.setlocale(locale.LC_NUMERIC) == numeric_locale
+
+    def test_nested_graph_roundtrip(self, numeric_locale: str) -> None:
+        value = tvm_ffi.convert({"values": [1.5, -2.75], "count": 42, "enabled": True})
+        result = from_json_graph_str(to_json_graph_str(value))
+        assert list(result["values"]) == [1.5, -2.75]
+        assert result["count"] == 42
+        assert result["enabled"] is True
+        assert locale.setlocale(locale.LC_NUMERIC) == numeric_locale
+
+    def test_metadata_array_values(self, numeric_locale: str) -> None:
+        # Decimal commas in arrays can silently become JSON element separators.
+        metadata = {"weights": [1.5, 2.75, -0.125]}
+        graph = json.loads(to_json_graph_str(None, metadata=metadata))
+        assert graph["metadata"]["weights"] == metadata["weights"]
+        assert locale.setlocale(locale.LC_NUMERIC) == numeric_locale
+
+    def test_nonfinite_float_controls(self, numeric_locale: str) -> None:
+        parse = tvm_ffi.get_global_func("ffi.json.Parse")
+        stringify = tvm_ffi.get_global_func("ffi.json.Stringify")
+        for value in (float("inf"), float("-inf"), float("nan")):
+            result = parse(stringify(value, None))
+            assert (math.isnan(value) and math.isnan(result)) or result == value
+        assert locale.setlocale(locale.LC_NUMERIC) == numeric_locale
+
+    @pytest.mark.parametrize(
+        "token", ["1e400", "-1e400", "1e-400", "-1e-400", "1.0e", "1e+", "1.2.3", "1+2"]
+    )
+    def test_float_error_controls(self, numeric_locale: str, token: str) -> None:
+        parse = tvm_ffi.get_global_func("ffi.json.Parse")
+        with pytest.raises(ValueError):
+            parse(token)
+        assert locale.setlocale(locale.LC_NUMERIC) == numeric_locale
+
+    def test_exact_subnormal_token(self, numeric_locale: str) -> None:
+        # The exact decimal is accepted by libc even when nearby inexact
+        # subnormal decimals signal underflow. Do not reject all subnormals.
+        with localcontext() as context:
+            context.prec = 1200
+            token = format(Decimal(2) ** -1074, "f")
+        parse = tvm_ffi.get_global_func("ffi.json.Parse")
+        result = parse(token)
+        assert result == float.fromhex("0x0.0000000000001p-1022")
+        assert locale.setlocale(locale.LC_NUMERIC) == numeric_locale

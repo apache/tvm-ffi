@@ -21,6 +21,7 @@
  *
  * \brief A minimalistic JSON parser based on ffi values.
  */
+#include <locale.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
@@ -31,11 +32,21 @@
 
 #include <cinttypes>
 #include <limits>
+#include <memory>
+#include <type_traits>
 #include <utility>
 
 namespace tvm {
 namespace ffi {
 namespace json {
+
+namespace {
+#if defined(_WIN32)
+using NumericCLocale = std::unique_ptr<std::remove_pointer_t<_locale_t>, decltype(&_free_locale)>;
+#else
+using NumericCLocale = std::unique_ptr<std::remove_pointer_t<locale_t>, decltype(&freelocale)>;
+#endif
+}  // namespace
 
 /*!
  * \brief Helper class to parse a JSON string.
@@ -229,10 +240,26 @@ class JSONParserContext {
       }
     }
     {
-      // now try to parse number as double
+      // Use the C numeric locale without changing the process locale. Keep libc's
+      // end-pointer and errno behavior, including its handling of underflow.
+      static const NumericCLocale numeric_locale = []() {
+#if defined(_WIN32)
+        NumericCLocale locale(_create_locale(LC_NUMERIC, "C"), &_free_locale);
+#else
+        NumericCLocale locale(newlocale(LC_NUMERIC_MASK, "C", nullptr), &freelocale);
+#endif
+        if (!locale) {
+          TVM_FFI_THROW(RuntimeError) << "Cannot create the C numeric locale for JSON parsing";
+        }
+        return locale;
+      }();
       char* end_ptr;
       errno = 0;
-      double double_val = strtod(temp_buffer.data(), &end_ptr);
+#if defined(_WIN32)
+      double double_val = _strtod_l(temp_buffer.data(), &end_ptr, numeric_locale.get());
+#else
+      double double_val = strtod_l(temp_buffer.data(), &end_ptr, numeric_locale.get());
+#endif
       if (errno == 0 && end_ptr == temp_buffer.data() + temp_buffer.size()) {
         *out = double_val;
         return true;
