@@ -156,9 +156,17 @@ where
     }
 }
 
+/// Reconstruct the owned object's ABI representation.
+///
+/// # Safety
+/// `object` must point to a live managed object with a registered object-range
+/// dynamic type index.
 unsafe fn object_any(object: *mut TVMFFIObject) -> TVMFFIAny {
     let mut raw = TVMFFIAny::new();
     raw.type_index = (*object).type_index;
+    // SAFETY: The caller provides a live object from an owning reference or
+    // a valid object-rvalue slot, so its dynamic type is in the object range.
+    core::hint::assert_unchecked(raw.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
     raw.data_union.v_obj = object;
     raw
 }
