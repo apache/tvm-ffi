@@ -21,6 +21,8 @@
 
 use std::marker::PhantomData;
 
+use super::structural_common::structural_error_from_raw;
+
 use crate::any::{Any, AnyView, TryFromTemp};
 use crate::error::{Error, Result, TYPE_ERROR};
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFITypeIndex};
@@ -163,11 +165,18 @@ impl<T: ContainerElement> UnchangedOr<T> {
 }
 
 impl UnchangedOr<Any> {
-    #[inline]
+    #[inline(always)]
     pub(crate) fn from_carrier(data: Any) -> Result<Self> {
         if data.type_index() == TVMFFITypeIndex::kTVMFFIError as i32 {
-            return match Error::try_from(data) {
-                Ok(error) | Err(error) => Err(error),
+            core::hint::cold_path();
+            // Transfer ownership directly into the checked cold conversion.
+            return unsafe {
+                let raw = Any::into_raw_ffi_any(data);
+                Err(structural_error_from_raw(
+                    raw.type_index,
+                    raw.small_str_len,
+                    raw.data_union,
+                ))
             };
         }
         Ok(Self {

@@ -266,6 +266,10 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     if object_type_index < object_begin || target_type_index < object_begin {
         return false;
     }
+    // Only the root Object type has depth zero.
+    if const { Target::TYPE_DEPTH == 0 } {
+        return true;
+    }
     // Parent indices are always smaller than their descendants.
     if object_type_index < target_type_index {
         return false;

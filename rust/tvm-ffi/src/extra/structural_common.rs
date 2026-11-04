@@ -22,7 +22,50 @@ use crate::error::Error;
 use crate::function::Function;
 use crate::object::{self, ObjectRefCore};
 use crate::reflection::FieldGetter;
-use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeKeyToIndex};
+use crate::tvm_ffi_sys::{
+    TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex,
+    TVMFFITypeKeyToIndex,
+};
+
+/// Consume an owning error carrier while keeping checked-conversion scratch
+/// inside the cold path instead of successful recursive traversal frames.
+///
+/// # Safety
+/// The fields must describe one owning TVMFFIAny that has not been consumed.
+#[cold]
+#[inline(never)]
+pub(super) unsafe fn structural_error_from_raw(
+    type_index: i32,
+    small_str_len: u32,
+    data_union: TVMFFIAnyDataUnion,
+) -> Error {
+    let value = Any::from_raw_ffi_any(TVMFFIAny {
+        type_index,
+        small_str_len,
+        data_union,
+    });
+    match Error::try_from(value) {
+        Ok(error) | Err(error) => error,
+    }
+}
+
+/// Return the registered type key for `type_index`.
+///
+/// When the runtime returns no type information, return `<type_index N>` for diagnostics.
+///
+/// # Arguments
+///
+/// * `type_index` - Runtime type index whose registered type key is requested.
+pub(crate) fn type_key_of(type_index: i32) -> String {
+    unsafe {
+        let info = TVMFFIGetTypeInfo(type_index);
+        if info.is_null() {
+            format!("<type_index {type_index}>")
+        } else {
+            (*info).type_key.as_str().to_string()
+        }
+    }
+}
 
 /// Add one structural traversal frame to an error's backtrace.
 #[cold]
