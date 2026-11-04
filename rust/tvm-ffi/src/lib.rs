@@ -81,7 +81,7 @@ pub use crate::rvalue_ref::RValueRef;
 pub use crate::static_init::run_static_init_blocks;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
-pub use tvm_ffi_macros::{def_object_ref, dispatch, match_any, rs_class};
+pub use tvm_ffi_macros::{def_object_ref, dispatch, match_any, rs_object};
 
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 pub use tvm_ffi_sys::{

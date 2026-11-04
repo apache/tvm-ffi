@@ -26,7 +26,7 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   its own type, the latter a scalar as its own type and anything else as
   ``impl Into``. ``custom-new`` leaves the wrapper's ``new`` to hand-written
   code and names the generated one ``from_fields``. A type that is not final
-  can be the parent of a type defined in Rust (``tvm_ffi::rs_class``): its
+  can be the parent of a type defined in Rust (``tvm_ffi::rs_object``): its
   ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` and
   ``UnsafeInit`` when every ancestor's is generated too (a ``ty-map``'d one is
   hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
@@ -528,7 +528,7 @@ class _ObjectRenderer:
         ``<Leaf>Obj::new`` takes every field as its own type, so the parent's, generated
         or hand-written, takes what it hands on. The wrapper's ``new`` takes a scalar
         field as its own type and any other as ``impl Into`` (:func:`_param_type`), as
-        ``#[rs_class]``'s ``new`` does, and converts it on the way to ``<Leaf>Obj::new``.
+        ``#[rs_object]``'s ``new`` does, and converts it on the way to ``<Leaf>Obj::new``.
         ``custom-new`` names the wrapper's allocator ``from_fields`` instead.
         ``<Leaf>Obj::new`` of a type that is not final is public: a subtype defined in Rust
         builds its parent's object with it.

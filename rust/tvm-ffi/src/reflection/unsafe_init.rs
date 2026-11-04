@@ -45,9 +45,9 @@ use crate::{Error, INTERNAL_ERROR};
 /// An object type whose object can start with every field undefined, for
 /// reflection to set the fields: C++ `UnsafeInit`.
 ///
-/// The creator that `#[rs_class]` registers for its type makes the object with
+/// The creator that `#[rs_object]` registers for its type makes the object with
 /// [`unsafe_init`], which a JSON graph read back, `__ffi_init__` and
-/// `__ffi_new__` then fill. `#[rs_class]` implements it for its object, so the
+/// `__ffi_new__` then fill. `#[rs_object]` implements it for its object, so the
 /// parent's object must implement it too: [`Object`] does, and so does the
 /// object of a non-final C++ type bound by `tvm-ffi-stubgen`.
 ///
@@ -138,7 +138,7 @@ unsafe extern "C" fn unsafe_init_deleter<T: UnsafeInit>(ptr: *mut c_void, flags:
     }
 }
 
-/// The creator of `T` (`TVMFFITypeMetadata::creator`) that `#[rs_class]`
+/// The creator of `T` (`TVMFFITypeMetadata::creator`) that `#[rs_object]`
 /// registers, as C++ `ObjectCreatorUnsafeInit<T>`: the owned handle of an
 /// object that [`unsafe_init`] made.
 ///

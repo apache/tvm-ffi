@@ -22,11 +22,11 @@ use tvm_ffi::reflection::{drop_if_defined, FieldFlags, ObjectDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFITypeInfo};
 
-// Object types defined in Rust by `#[rs_class]`, whose fields the C++
+// Object types defined in Rust by `#[rs_object]`, whose fields the C++
 // structural engines, `repr` and deep copy see.
 
 /// A root type, under `ffi.Object`.
-#[rs_class(
+#[rs_object(
     "testing.rust.RsPoint",
     s_eq_hash_kind = "TreeNode",
     reflection = RsPointObj::reflect_methods
@@ -54,7 +54,7 @@ impl RsPointObj {
 }
 
 /// A subtype of a Rust-defined type, with a private field.
-#[rs_class("testing.rust.RsPoint3", final)]
+#[rs_object("testing.rust.RsPoint3", final)]
 pub struct RsPoint3Obj {
     base: RsPointObj,
     pub z: i64,
@@ -70,7 +70,7 @@ def_object_ref!(
 );
 
 /// A subtype without fields, which still registers its reflection.
-#[rs_class("testing.rust.RsMarker", final)]
+#[rs_object("testing.rust.RsMarker", final)]
 pub struct RsMarkerObj {
     base: RsPointObj,
 }
@@ -78,7 +78,7 @@ pub struct RsMarkerObj {
 def_object_ref!(pub RsMarker, RsPoint, RsMarkerObj);
 
 /// Scalar fields, whose literal arguments to `new` infer as the field types.
-#[rs_class("testing.rust.RsScalars", final)]
+#[rs_object("testing.rust.RsScalars", final)]
 pub struct RsScalarsObj {
     base: Object,
     pub big: i64,
@@ -129,11 +129,11 @@ unsafe impl UnsafeInit for TestCxxClassBaseObj {
     }
 }
 
-// `def_object_ref!` takes any object type, not only an `rs_class` one.
+// `def_object_ref!` takes any object type, not only an `rs_object` one.
 def_object_ref!(pub TestCxxClassBase, ObjectRef, TestCxxClassBaseObj);
 
 /// A subtype of a C++ type.
-#[rs_class("testing.rust.RsCxxChild", final, s_eq_hash_kind = "TreeNode")]
+#[rs_object("testing.rust.RsCxxChild", final, s_eq_hash_kind = "TreeNode")]
 pub struct RsCxxChildObj {
     base: TestCxxClassBaseObj,
     pub name: tvm_ffi::String,
@@ -142,7 +142,7 @@ pub struct RsCxxChildObj {
 def_object_ref!(pub RsCxxChild, TestCxxClassBase, RsCxxChildObj);
 
 /// A type that defines its own `__ffi_init__`, over which C++ generates none.
-#[rs_class("testing.rust.RsOwnInit", final, reflection = RsOwnInitObj::reflect_methods)]
+#[rs_object("testing.rust.RsOwnInit", final, reflection = RsOwnInitObj::reflect_methods)]
 pub struct RsOwnInitObj {
     base: Object,
     pub v: i64,
@@ -161,7 +161,7 @@ impl RsOwnInitObj {
 }
 
 /// `init_off` fields, which `__ffi_init__` leaves all-zero: a value of these types.
-#[rs_class("testing.rust.RsInitOff", final)]
+#[rs_object("testing.rust.RsInitOff", final)]
 pub struct RsInitOffObj {
     base: Object,
     pub v: i64,
@@ -174,7 +174,7 @@ pub struct RsInitOffObj {
 def_object_ref!(pub RsInitOff, ObjectRef, RsInitOffObj);
 
 /// An `init_off` reference, which all-zero bytes leave undefined: its registration fails.
-#[rs_class("testing.rust.RsInitOffReference", final)]
+#[rs_object("testing.rust.RsInitOffReference", final)]
 pub struct RsInitOffReferenceObj {
     base: Object,
     #[reflect(init_off)]
@@ -187,7 +187,7 @@ mod reexported {
     #[allow(dead_code)]
     mod tvm_ffi {}
 
-    #[::tvm_ffi::rs_class("testing.rust.RsReexported", crate = ::tvm_ffi)]
+    #[::tvm_ffi::rs_object("testing.rust.RsReexported", crate = ::tvm_ffi)]
     pub struct ReexportedObj {
         base: ::tvm_ffi::Object,
         pub v: i64,

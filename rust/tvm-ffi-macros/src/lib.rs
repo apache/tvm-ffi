@@ -24,7 +24,7 @@ mod def_object_ref;
 mod dispatch;
 mod match_any;
 mod object_macros;
-mod rs_class;
+mod rs_object;
 mod utils;
 
 /// Generate source-ordered runtime type dispatch from `prefix_*` handlers.
@@ -168,10 +168,10 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 /// Python see the fields.
 ///
 /// ```ignore
-/// use tvm_ffi::{def_object_ref, rs_class};
+/// use tvm_ffi::{def_object_ref, rs_object};
 ///
 /// /// A pair of values under a `Base`.
-/// #[rs_class("my_ext.Pair", final)]
+/// #[rs_object("my_ext.Pair", final)]
 /// pub struct PairObj {
 ///     base: BaseObj,
 ///     pub first: tvm_ffi::String,
@@ -188,7 +188,7 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 ///
 /// The first field, `base`, is the parent's object, as the base class of a C++
 /// object is: `base: Object` for a type under `ffi.Object`. The parent's object
-/// must implement `ShallowCopy` and [`UnsafeInit`], as `rs_class` types and
+/// must implement `ShallowCopy` and [`UnsafeInit`], as `rs_object` types and
 /// non-final C++ types bound by `tvm-ffi-stubgen` do. Every other field is
 /// reflected; `#[reflect(writable, seq_hash_ignore, ...)]` gives a field the
 /// [`FieldFlags`] of those names, and `name` and `doc` as for
@@ -230,8 +230,8 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 /// [`UnsafeInit`]: ../tvm_ffi/reflection/trait.UnsafeInit.html
 #[proc_macro_error]
 #[proc_macro_attribute]
-pub fn rs_class(args: TokenStream, item: TokenStream) -> TokenStream {
-    rs_class::rs_class(args, item)
+pub fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
+    rs_object::rs_object(args, item)
 }
 
 /// Define the reference to an object type, as C++
@@ -260,7 +260,7 @@ pub fn rs_class(args: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Attributes and visibility before the name go on the struct. `crate = path`
 /// after the object type is where the generated code finds tvm-ffi, as for
-/// [`rs_class`].
+/// [`rs_object`].
 #[proc_macro_error]
 #[proc_macro]
 pub fn def_object_ref(input: TokenStream) -> TokenStream {

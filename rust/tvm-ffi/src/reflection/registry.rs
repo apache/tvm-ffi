@@ -23,7 +23,7 @@
 //! and Python `_register_py_class`: the type metadata, one record per field
 //! with C ABI getter and setter, one record per method, and the
 //! `__ffi_shallow_copy__` and `__ffi_type_final__` type attributes; for an
-//! `#[rs_class]` type also the creator, and from it the `__ffi_new__` and
+//! `#[rs_object]` type also the creator, and from it the `__ffi_new__` and
 //! `__ffi_init__` type attributes. Through them the C++ structural equality,
 //! hashing and mutation, `repr`, deep copy, JSON graphs and Python's generated
 //! classes reach the fields and methods of a Rust type, and construct it.
@@ -188,7 +188,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// `kind` of `None` takes the nearest ancestor's kind, as a C++ subclass
     /// inherits `_type_s_eq_hash_kind`. `creator`, as C++ `ObjectDef` takes
     /// the default or `UnsafeInit` constructor, makes an object of `N` for
-    /// reflection to fill (`unsafe_init_creator::<N>` for an `#[rs_class]`).
+    /// reflection to fill (`unsafe_init_creator::<N>` for an `#[rs_object]`).
     ///
     /// # Safety
     ///
