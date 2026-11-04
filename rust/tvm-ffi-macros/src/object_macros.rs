@@ -625,6 +625,12 @@ pub(crate) fn expand_object_ref(
                 let object_ptr =
                     data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
                 data.type_index = (*object_ptr).type_index;
+                // SAFETY: ObjectRefCore guarantees a live allocation whose header
+                // contains its registered object-range dynamic type index.
+                ::core::hint::assert_unchecked(
+                    data.type_index >=
+                        #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
+                );
                 data.small_str_len = 0;
                 data.data_union.v_obj = object_ptr;
             }
@@ -669,6 +675,12 @@ pub(crate) fn expand_object_ref(
                 let object_ptr =
                     data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
                 data.type_index = (*object_ptr).type_index;
+                // SAFETY: ObjectRefCore guarantees a live allocation whose header
+                // contains its registered object-range dynamic type index.
+                ::core::hint::assert_unchecked(
+                    data.type_index >=
+                        #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
+                );
                 data.small_str_len = 0;
                 data.data_union.v_obj = object_ptr;
             }
