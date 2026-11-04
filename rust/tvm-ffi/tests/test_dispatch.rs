@@ -69,15 +69,13 @@ fn into_dispatcher_supports_owned_borrowed_and_callbacks() -> Result<()> {
     let mut tuple =
         IntoDispatcher::<(AnyView<'_>, i64, &str), Outcome, _>::into_dispatcher(callbacks);
     assert_eq!(
-        tuple
-            .dispatch_tuple((AnyView::from(&40_i64), 4, "unused"))
+        Dispatcher::<_, Outcome>::dispatch_tuple(&mut tuple, (AnyView::from(&40_i64), 4, "unused"))
             .unwrap()?
             .try_as::<i64>(),
         Some(44)
     );
     assert_eq!(
-        tuple
-            .dispatch_tuple((AnyView::from(&true), 4, "unused"))
+        Dispatcher::<_, Outcome>::dispatch_tuple(&mut tuple, (AnyView::from(&true), 4, "unused"))
             .unwrap()?
             .try_as::<i64>(),
         Some(-1)

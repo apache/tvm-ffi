@@ -26,7 +26,7 @@ use super::structural_mutate::{
 };
 use super::structural_visit::DefRegionKind;
 use super::structural_walk::WalkOrder;
-use super::unchanged::is_unchanged;
+use super::unchanged::{UnchangedOr, is_unchanged};
 use crate::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
 use std::borrow::BorrowMut;
 
@@ -37,6 +37,13 @@ use std::borrow::BorrowMut;
 impl<O: IntoMutateResult> super::dispatch::CallbackResult<Result<Any>> for O {
     #[inline(always)]
     fn callback_result(self) -> Result<Any> {
+        self.into_mutate_result().map(Any::from)
+    }
+}
+
+impl<O: IntoMutateResult> super::dispatch::CallbackResult<Result<UnchangedOr<Any>>> for O {
+    #[inline(always)]
+    fn callback_result(self) -> Result<UnchangedOr<Any>> {
         self.into_mutate_result()
     }
 }
@@ -51,7 +58,8 @@ struct MapMutator<'a, D, const PRE_ORDER: bool> {
 
 fn run_mapper<D>(root: Any, dispatch: &mut D, order: WalkOrder) -> Result<Any>
 where
-    for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
+    for<'s, 'v> &'s mut D:
+        Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>,
 {
     match order {
         WalkOrder::PreOrder => {
@@ -73,10 +81,11 @@ impl<'v, 'c, 'r, 'a, D, const PRE_ORDER: bool>
             MutationView<'v>,
             &'c mut StructuralMutatorView<'r, MapMutator<'a, D, PRE_ORDER>>,
         ),
-        Option<Result<Any>>,
+        Option<Result<UnchangedOr<Any>>>,
     > for &mut MapMutator<'a, D, PRE_ORDER>
 where
-    for<'s, 'value> &'s mut D: Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Any>>>,
+    for<'s, 'value> &'s mut D:
+        Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>,
 {
     #[inline(always)]
     fn dispatch_tuple(
@@ -85,14 +94,15 @@ where
             MutationView<'v>,
             &'c mut StructuralMutatorView<'r, MapMutator<'a, D, PRE_ORDER>>,
         ),
-    ) -> Option<Result<Any>> {
-        Some(self.map_current(value, mutator))
+    ) -> Option<Result<UnchangedOr<Any>>> {
+        Some(self.map_current(value, mutator).map(UnchangedOr::from_any))
     }
 }
 
 impl<D, const PRE_ORDER: bool> MapMutator<'_, D, PRE_ORDER>
 where
-    for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
+    for<'s, 'v> &'s mut D:
+        Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>,
 {
     #[inline(always)]
     fn map_current(
@@ -113,8 +123,9 @@ where
             else {
                 return mutator.default_mutate(self, value).map(Into::into);
             };
-            let mapped =
-                callback_result.map_err(|error| with_mutation_error_context(error, raw))?;
+            let mapped: Any = callback_result
+                .map_err(|error| with_mutation_error_context(error, raw))?
+                .into();
             if is_unchanged(&mapped) || raw_ffi_any_same_as(raw, *mapped.as_raw_ffi_any()) {
                 // Drop temporary ownership before default descent checks uniqueness.
                 drop(mapped);
@@ -138,8 +149,9 @@ where
                 AnyView::from(&mapped)
             };
             match self.dispatch.dispatch_tuple((current, kind)) {
-                Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
+                Some(Ok(result)) if result.is_unchanged() => Ok(mapped),
                 Some(result) => result
+                    .map(Any::from)
                     .map_err(|error| with_mutation_error_context(error, *current.as_raw_ffi_any())),
                 None => Ok(mapped),
             }
@@ -191,8 +203,15 @@ pub fn structural_map<R, M, H, D, O>(root: R, mapper: H, order: WalkOrder) -> Re
 where
     R: Into<Any>,
     O: BorrowMut<D>,
-    for<'v> H: IntoDispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>, M, Target = D, Output = O>,
-    for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<Any>>>,
+    for<'v> H: IntoDispatcher<
+            (AnyView<'v>, DefRegionKind),
+            Option<Result<UnchangedOr<Any>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
+    for<'s, 'v> &'s mut D:
+        Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>,
 {
     run_mapper(root.into(), mapper.into_dispatcher().borrow_mut(), order)
 }

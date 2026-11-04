@@ -273,7 +273,17 @@ fn expand(item: &ItemImpl, args: &DispatchArgs) -> syn::Result<TokenStream2> {
             quote!(::<#(#type_args),*>)
         };
         let invocation = quote_spanned! {method.span()=> #dispatch_self.#method #type_args (#bound #(, #forwarded)*) };
-        let call = quote_spanned! {method.span()=> ::core::option::Option::Some(::core::convert::Into::<#output>::into(#invocation)) };
+        // `Into` cannot convert between two `Result`s, so a `Result` handler of a
+        // `Result` dispatcher converts its success value instead.
+        let returns_result = matches!(
+            &handler.method.sig.output,
+            syn::ReturnType::Type(_, ty) if is_result(ty)
+        );
+        let call = if returns_result && is_result(&output) {
+            quote_spanned! {method.span()=> ::core::option::Option::Some(::core::result::Result::map(#invocation, ::core::convert::Into::into)) }
+        } else {
+            quote_spanned! {method.span()=> ::core::option::Option::Some(::core::convert::Into::<#output>::into(#invocation)) }
+        };
         let pattern = match &handler.argument {
             Argument::BorrowedNode => {
                 let Type::Reference(reference) = pattern_type else {
@@ -438,6 +448,11 @@ fn parse_handler<'a>(method: &'a ImplItemMethod, args: &DispatchArgs) -> syn::Re
         capability,
         trailing: signature.inputs.len() - 2,
     })
+}
+
+/// Whether `ty` is written as a `Result<..>` path.
+fn is_result(ty: &Type) -> bool {
+    matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|s| s.ident == "Result"))
 }
 
 fn is_capability(ty: &Type) -> bool {

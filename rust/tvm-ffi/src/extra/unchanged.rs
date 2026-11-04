@@ -165,6 +165,15 @@ impl<T: ContainerElement> UnchangedOr<T> {
 }
 
 impl UnchangedOr<Any> {
+    /// Wrap a successful erased carrier, which may hold the unchanged marker.
+    #[inline(always)]
+    pub(crate) fn from_any(data: Any) -> Self {
+        Self {
+            data,
+            _marker: PhantomData,
+        }
+    }
+
     #[inline(always)]
     pub(crate) fn from_carrier(data: Any) -> Result<Self> {
         if data.type_index() == TVMFFITypeIndex::kTVMFFIError as i32 {
@@ -317,3 +326,56 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
         crate::type_traits::type_schema("UnchangedOr", &[T::container_type_schema()])
     }
 }
+
+// -----------------------------------------------------------------------------
+// Conversions into an erased mutation result.
+// -----------------------------------------------------------------------------
+
+/// `Unchanged.into()` keeps the original value.
+impl From<Unchanged> for UnchangedOr<Any> {
+    #[inline]
+    fn from(_: Unchanged) -> Self {
+        Self::unchanged()
+    }
+}
+
+/// A managed reference replaces the original value.
+impl<T: crate::object::ObjectRefCore + AnyCompatible> From<T> for UnchangedOr<Any> {
+    #[inline]
+    fn from(value: T) -> Self {
+        Self::changed(Any::from(value))
+    }
+}
+
+/// A typed result keeps its unchanged marker or replacement.
+impl<T: crate::object::ObjectRefCore + AnyCompatible> From<UnchangedOr<T>> for UnchangedOr<Any> {
+    #[inline]
+    fn from(value: UnchangedOr<T>) -> Self {
+        Self::from_any(Any::from(value))
+    }
+}
+
+macro_rules! impl_unchanged_or_any_from_scalar {
+    ($($ty:ty),*) => {
+        $(
+            /// A scalar replaces the original value.
+            impl From<$ty> for UnchangedOr<Any> {
+                #[inline]
+                fn from(value: $ty) -> Self {
+                    Self::changed(Any::from(value))
+                }
+            }
+
+            /// A typed scalar result keeps its unchanged marker or replacement.
+            impl From<UnchangedOr<$ty>> for UnchangedOr<Any> {
+                #[inline]
+                fn from(value: UnchangedOr<$ty>) -> Self {
+                    Self::from_any(Any::from(value))
+                }
+            }
+        )*
+    };
+}
+impl_unchanged_or_any_from_scalar!(
+    bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64
+);

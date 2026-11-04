@@ -836,8 +836,8 @@ Structural Mapping and Mutation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``structural_map`` is the transforming counterpart to ``structural_walk``. An
-inherent ``#[dispatch(map, (AnyView<'_>, DefRegionKind), Result<Any>)]`` impl groups
-``map_*`` methods returning the engine result ``Result<Any>``. Methods are tested in source order, the
+inherent ``#[dispatch(map, (AnyView<'_>, DefRegionKind), Result<UnchangedOr<Any>>)]`` impl groups
+``map_*`` methods returning the engine result ``Result<UnchangedOr<Any>>``. Methods are tested in source order, the
 first matching argument type wins, and an unmatched value is preserved. A
 method may take an optional trailing ``DefRegionKind``; an ``AnyView<'_>`` method is a
 catch-all and should therefore come last:
@@ -846,6 +846,7 @@ catch-all and should therefore come last:
 
    use tvm_ffi::{
        dispatch, structural_map, Any, Array, DefRegionKind, AnyView, Result, WalkOrder,
+       UnchangedOr, Unchanged,
    };
 
    #[derive(Default)]
@@ -853,15 +854,15 @@ catch-all and should therefore come last:
        integers: usize,
    }
 
-   #[dispatch(map, (tvm_ffi::AnyView<'_>, DefRegionKind), Result<Any>)]
+   #[dispatch(map, (tvm_ffi::AnyView<'_>, DefRegionKind), Result<UnchangedOr<Any>>)]
    impl Increment {
-       fn map_integer(&mut self, value: i64, _kind: DefRegionKind) -> Result<Any> {
+       fn map_integer(&mut self, value: i64, _kind: DefRegionKind) -> Result<UnchangedOr<Any>> {
            self.integers += 1;
-           Ok(Any::from(value + 1))
+           Ok((value + 1).into())
        }
 
-       fn map_other(&mut self, value: AnyView<'_>) -> Result<Any> {
-           Ok(Any::from(value))
+       fn map_other(&mut self, _value: AnyView<'_>) -> Result<UnchangedOr<Any>> {
+           Ok(Unchanged.into())
        }
    }
 
@@ -914,12 +915,16 @@ example, an integer handler can return ``Result<i64>`` to report failures and us
 completed before a later error are not rolled back, and the consumed root is
 not returned on error.
 
-Callbacks can also return ``Unchanged`` or ``UnchangedOr<T>``, optionally wrapped
-in ``Result``. A pre-order map still maps the original value's children when
-a callback returns ``Unchanged``; a post-order map keeps the result of child
-mapping. Use ``mutate`` and ``default_mutate`` to preserve unchanged during recursion.
-They return ``Result<UnchangedOr<Any>>``; owning-value helpers and top-level
-functions resolve the marker to the original value.
+Handlers of a ``#[dispatch]`` struct return ``Result<UnchangedOr<Any>>``, the
+same type that ``mutate`` and ``default_mutate`` return, so a handler can return
+the result of recursion directly. Return ``Unchanged.into()`` to keep the value,
+or ``value.into()`` to replace it with a managed reference or scalar; wrap an
+``Any`` replacement with ``UnchangedOr::changed``. Closures may also return
+``Unchanged``, ``UnchangedOr<T>``, or a replacement value, optionally wrapped in
+``Result``. A pre-order map still maps the original value's children when a
+callback returns ``Unchanged``; a post-order map keeps the result of child
+mapping. Owning-value helpers and top-level functions resolve the marker to the
+original value.
 
 ``structural_mutate`` accepts an owned or borrowed dispatcher. Its handlers keep
 mutable pass state on ``self`` and receive ``StructuralMutatorView<'_, Self>`` for recursion.
@@ -933,6 +938,7 @@ Base implementations delegate to the corresponding ``StructuralVisitorObj`` or
 
    use tvm_ffi::{
        dispatch, structural_mutate, Any, Array, MutationView, StructuralMutatorView, Result,
+       UnchangedOr,
    };
 
    #[derive(Default)]
@@ -940,14 +946,14 @@ Base implementations delegate to the corresponding ``StructuralVisitorObj`` or
        integers: usize,
    }
 
-   #[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+   #[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
    impl Stats {
-       fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+       fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
            self.integers += 1;
-           Ok(Any::from(value + 1))
+           Ok((value + 1).into())
        }
-       fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
-           mutator.default_mutate(self, value).map(Into::into)
+       fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
+           mutator.default_mutate(self, value)
        }
    }
 
@@ -983,7 +989,7 @@ only copy permission. Read permission from ``value.inplace_mode()``; see
 ``MutationView`` for ownership requirements.
 
 An inherent ``#[dispatch]`` impl declares the engine's required mutation tuple
-and ``Result<Any>`` return type. An unmatched value follows default mutation with
+and ``Result<UnchangedOr<Any>>`` return type. An unmatched value follows default mutation with
 its current permission. A handler may omit the context argument even when no
 other handler consumes it:
 
@@ -991,6 +997,7 @@ other handler consumes it:
 
    use tvm_ffi::{
        dispatch, structural_mutate, Any, Array, StructuralMutatorView, Result,
+       UnchangedOr,
    };
 
    #[derive(Default)]
@@ -998,11 +1005,11 @@ other handler consumes it:
        integers: usize,
    }
 
-   #[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+   #[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
    impl Increment {
-       fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+       fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
            self.integers += 1;
-           Ok(Any::from(value + 1))
+           Ok((value + 1).into())
        }
    }
 
@@ -1021,17 +1028,18 @@ while retaining typed scalar replacements:
 
    use tvm_ffi::{
        dispatch, structural_mutate, Any, Array, InplaceMode, MutationView, StructuralMutatorView, Result,
+       UnchangedOr,
    };
 
    struct Increment;
 
-   #[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+   #[dispatch(mutate, (tvm_ffi::MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
    impl Increment {
-       fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
-           Ok(Any::from(value + 1))
+       fn mutate_integer(&mut self, value: i64, _mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
+           Ok((value + 1).into())
        }
-       fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
-           mutator.default_mutate(self, value.with_inplace_mode(InplaceMode::Disallow)).map(Into::into)
+       fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
+           mutator.default_mutate(self, value.with_inplace_mode(InplaceMode::Disallow))
        }
    }
 

@@ -316,28 +316,29 @@ mod callback_result_sealed {
     impl<T: Into<Any>> Sealed for Result<T> {}
 }
 
-/// Convert an infallible or fallible map or mutation callback result into [`Result<Any>`].
+/// Convert an infallible or fallible map or mutation callback result into
+/// [`Result<UnchangedOr<Any>>`].
 ///
-/// A callback may return any value convertible into [`Any`], or wrap it in
-/// [`Result`] to use `?`.
+/// A callback may return any value convertible into [`Any`], including
+/// [`Unchanged`] and [`UnchangedOr`], or wrap it in [`Result`] to use `?`.
 ///
 /// This trait is sealed and is not an extension point.
 #[doc(hidden)]
 pub trait IntoMutateResult: callback_result_sealed::Sealed {
-    fn into_mutate_result(self) -> Result<Any>;
+    fn into_mutate_result(self) -> Result<UnchangedOr<Any>>;
 }
 
 impl<T: Into<Any>> IntoMutateResult for T {
     #[inline(always)]
-    fn into_mutate_result(self) -> Result<Any> {
-        Ok(self.into())
+    fn into_mutate_result(self) -> Result<UnchangedOr<Any>> {
+        Ok(UnchangedOr::from_any(self.into()))
     }
 }
 
 impl<T: Into<Any>> IntoMutateResult for Result<T> {
     #[inline(always)]
-    fn into_mutate_result(self) -> Result<Any> {
-        self.map(Into::into)
+    fn into_mutate_result(self) -> Result<UnchangedOr<Any>> {
+        self.map(|value| UnchangedOr::from_any(value.into()))
     }
 }
 
@@ -395,13 +396,13 @@ impl InplaceMode {
 ///
 /// Moving the handle into a nested callback cannot bypass that borrow:
 /// ```compile_fail,E0505
-/// use tvm_ffi::{dispatch, structural_mutate, Any, MutationView, StructuralMutatorView, Result};
+/// use tvm_ffi::{dispatch, structural_mutate, Any, MutationView, StructuralMutatorView, Result, UnchangedOr};
 /// struct Inner<'a>(Option<MutationView<'a>>);
-/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
 /// impl<'a> Inner<'a> {
-///     fn mutate_bool(&mut self, _: bool, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+///     fn mutate_bool(&mut self, _: bool, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
 ///         let pending = self.0.take().unwrap();
-///         mutator.default_mutate(self, pending).map(Into::into)
+///         mutator.default_mutate(self, pending)
 ///     }
 /// }
 /// fn invalid(value: MutationView<'_>) {
@@ -414,16 +415,16 @@ impl InplaceMode {
 ///
 /// A copied inspection view also cannot survive low-level default mutation:
 /// ```compile_fail,E0505
-/// use tvm_ffi::{dispatch, Any, MutationView, StructuralMutatorView, Result, Unchanged};
+/// use tvm_ffi::{dispatch, Any, MutationView, StructuralMutatorView, Result, Unchanged, UnchangedOr};
 /// struct Pass;
-/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
 /// impl Pass {
-///     fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<Any> {
+///     fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
 ///         let view = value.as_any_view();
 ///         let copy = view;
 ///         mutator.default_mutate(self, value).unwrap();
 ///         println!("{}", copy.type_index());
-///         Ok(Any::from(Unchanged))
+///         Ok(Unchanged.into())
 ///     }
 /// }
 /// ```
@@ -731,14 +732,14 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         O: BorrowMut<D>,
         for<'v, 'c, 'r> H: IntoDispatcher<
                 (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<Any>>,
+                Option<Result<UnchangedOr<Any>>>,
                 M,
                 Target = D,
                 Output = O,
             >,
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
                 (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<Any>>,
+                Option<Result<UnchangedOr<Any>>>,
             >,
     {
         let mut storage = dispatcher.into_dispatcher();
@@ -1066,7 +1067,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
                 (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<Any>>,
+                Option<Result<UnchangedOr<Any>>>,
             >,
     {
         &StructuralMutatorVTable {
@@ -1091,7 +1092,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
                 (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<Any>>,
+                Option<Result<UnchangedOr<Any>>>,
             >,
     {
         let context = (*Self::from_handle(runtime)).dispatcher;
@@ -1115,11 +1116,14 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         ) {
             // Map adapters attribute errors to their possibly replaced value;
             // direct mutation attributes callback failures to this input.
-            Some(result) => result_into_raw_ffi_any(if CALLBACK_CONTEXT {
-                result.map_err(|error| with_mutation_error_context(error, raw))
-            } else {
-                result
-            }),
+            Some(result) => {
+                let result = result.map(Any::from);
+                result_into_raw_ffi_any(if CALLBACK_CONTEXT {
+                    result.map_err(|error| with_mutation_error_context(error, raw))
+                } else {
+                    result
+                })
+            }
             None => {
                 Self::default_mutate_raw(runtime, std::ptr::from_mut(dispatch).cast(), raw, mode)
             }
@@ -1226,7 +1230,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
                 (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<Any>>,
+                Option<Result<UnchangedOr<Any>>>,
             >,
     {
         let mut base = Base::new()?;
@@ -1835,17 +1839,18 @@ impl StructuralMutatorObj {
 /// # fn main() -> tvm_ffi::Result<()> {
 /// use tvm_ffi::{
 ///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
+///     UnchangedOr,
 /// };
 ///
 /// struct Double;
-/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<Any>)]
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
 /// impl Double {
 ///     fn mutate_integer(
 ///         &mut self,
 ///         value: i64,
 ///         _: &mut StructuralMutatorView<'_, Self>,
-///     ) -> Result<Any> {
-///         Ok(Any::from(value * 2))
+///     ) -> Result<UnchangedOr<Any>> {
+///         Ok((value * 2).into())
 ///     }
 /// }
 ///
@@ -1864,7 +1869,7 @@ where
                 MutationView<'v>,
                 &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
             ),
-            Option<Result<Any>>,
+            Option<Result<UnchangedOr<Any>>>,
             M,
             Target = D,
             Output = O,
@@ -1874,7 +1879,7 @@ where
                 MutationView<'v>,
                 &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
             ),
-            Option<Result<Any>>,
+            Option<Result<UnchangedOr<Any>>>,
         >,
 {
     StructuralMutateEngine::mutate_root(root, dispatcher)
