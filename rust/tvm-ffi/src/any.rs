@@ -79,8 +79,10 @@ impl<'a> AnyView<'a> {
         self.data.type_index
     }
 
+    /// Borrow the raw ABI representation.
+    /// Copying it does not retain referenced data or extend its lifetime.
     #[inline(always)]
-    pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
+    pub fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
 
