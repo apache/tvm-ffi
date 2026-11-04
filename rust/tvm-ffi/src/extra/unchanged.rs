@@ -21,7 +21,7 @@
 
 use std::marker::PhantomData;
 
-use super::structural_common::structural_error_from_raw;
+use super::structural_common::{raw_tvm_ffi_any_same_as, structural_error_from_raw};
 
 use crate::any::{Any, AnyView, TryFromTemp};
 use crate::error::{Error, Result, TYPE_ERROR};
@@ -90,7 +90,7 @@ impl<T: ContainerElement> UnchangedOr<T> {
         unsafe {
             T::container_copy_to_any_view(original, &mut raw);
         }
-        super::structural_common::same_shallow(raw, *self.data.as_raw_ffi_any())
+        raw_tvm_ffi_any_same_as(raw, *self.data.as_raw_ffi_any())
     }
 
     /// Move out the replacement, returning None when unchanged.

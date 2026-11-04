@@ -22,7 +22,7 @@
 //! Callbacks report failures with [`Result`] and must not panic. A panic reaching
 //! the non-unwinding native callback boundary aborts the process.
 
-use super::structural_common::{impl_callback_chain_tuple_arities, raw_of};
+use super::structural_common::impl_callback_chain_tuple_arities;
 use super::structural_visit::{
     visit_result_from_any, DefRegionKind, StructuralVisitEngine, StructuralVisitorView,
     VisitInterrupt,
@@ -540,7 +540,7 @@ fn run_walker<D>(root: AnyView<'_>, observer: D, order: WalkOrder) -> Result<Opt
 where
     for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
 {
-    let root = raw_of(root);
+    let root = *root.as_raw_ffi_any();
     // Own the result while dropping the observer: user capture destructors can
     // unwind after the native callback has returned.
     let result = match order {

@@ -22,22 +22,43 @@
 //! [`structural_mutate`] lets a mutator drive recursion, while
 //! [`structural_map`] applies callbacks around engine-owned recursion.
 
+// -----------------------------------------------------------------------------
+// Implementation overview
+// -----------------------------------------------------------------------------
+//
+// This file is organized into:
+// - Data structures and mutation capabilities.
+// - Outlined errors and private utility functions.
+// - Engine implementation and the public entry point.
+//
+// We use narrowly scoped unsafe code for native interoperation and efficient
+// traversal. Safety and ownership contracts are documented at each boundary.
+//
+// The main performance strategies are:
+// - Outline cold work to keep its temporary storage out of recursive frames.
+// - Use _raw helpers and private extern "C-unwind" boundaries for register
+//   transport on AArch64 while preserving Rust unwinding.
+// - Inline small conversions and forwarding code so ownership transfers and
+//   redundant cleanup can optimize away.
+//
+// Local Perf note comments explain individual implementation choices.
+
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
+use super::cold_init_lazy_lock::ColdInitLazyLock;
 use super::marker::{Borrowed, Owned};
 use std::ops::ControlFlow;
 use std::ptr::NonNull;
 use std::rc::Rc;
-use std::sync::LazyLock;
 
 pub use super::structural_map::*;
 
 use super::dispatch::Dispatcher;
-use crate::any::{Any, AnyView};
-use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
+use crate::any::{is_plain_inline, Any, AnyView};
+use crate::error::{Error, Result, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectCore};
 use crate::reflection::TypeAttrColumn;
@@ -52,9 +73,9 @@ use crate::tvm_ffi_sys::{
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
-    borrowed_view, raw_of, same_shallow, structural_error_from_raw,
-    try_to_owned_without_normalization, type_key_of, with_structural_error_context,
-    with_visit_error_context,
+    missing_field_getter_error, raw_tvm_ffi_any_into_result, raw_tvm_ffi_any_same_as,
+    result_into_raw_tvm_ffi_any, runtime_error, type_key_of, with_structural_error_context,
+    with_structural_field_error_context, with_visit_error_context,
 };
 use super::structural_visit::{
     field_def_region, for_each_field_info, free_var_child_region, DefRegionKind,
@@ -110,7 +131,7 @@ const _: () = {
 impl StructuralMutatorObj {
     const TYPE_KEY: &'static str = "ffi.StructuralMutator";
     fn type_index() -> i32 {
-        static TYPE_INDEX: LazyLock<i32> = LazyLock::new(|| unsafe {
+        static TYPE_INDEX: ColdInitLazyLock<i32> = ColdInitLazyLock::new(|| unsafe {
             let key = TVMFFIByteArray::from_str(StructuralMutatorObj::TYPE_KEY);
             let mut type_index = 0;
             if TVMFFITypeKeyToIndex(&key, &mut type_index) != 0 {
@@ -149,6 +170,9 @@ impl Default for StructuralMutatorObj {
 /// address reuse until removal. Values are owning replacements, including
 /// [`Unchanged`] markers. Replacing a value does not acquire another key reference;
 /// lookup clones the replacement, and clearing or dropping releases every owner.
+// Perf note: Store only the replacement Any; raw identity keys avoid a second
+// Any payload, but still own one retained reference per distinct key. Replacing
+// a value does not retain the key again; clear/Drop release each key exactly once.
 #[derive(Default)]
 pub struct StructuralVarRemap {
     entries: HashMap<NonNull<TVMFFIObject>, Any>,
@@ -157,7 +181,7 @@ pub struct StructuralVarRemap {
 impl StructuralVarRemap {
     /// Look up an identity replacement previously stored for `var`.
     pub fn get(&self, var: AnyView<'_>) -> Result<Option<Any>> {
-        let key = object_identity_key(raw_of(var))?;
+        let key = object_identity_key(*var.as_raw_ffi_any())?;
         Ok(self.entries.get(&key).cloned())
     }
 
@@ -166,7 +190,7 @@ impl StructuralVarRemap {
     /// A new key acquires one strong reference; replacing its value preserves
     /// that reference. The replacement is cloned before modifying the table.
     pub fn set(&mut self, var: AnyView<'_>, mutated_value: &Any) -> Result<()> {
-        let key = object_identity_key(raw_of(var))?;
+        let key = object_identity_key(*var.as_raw_ffi_any())?;
         let value = mutated_value.clone();
         match self.entries.entry(key) {
             Entry::Occupied(mut entry) => {
@@ -200,6 +224,8 @@ impl StructuralVarRemap {
     }
 }
 
+// Perf note: Terminal destruction needs no replacement table or reusable capacity.
+// Keep it separate from clear(), which leaves a valid remap ready for later use.
 impl Drop for StructuralVarRemap {
     fn drop(&mut self) {
         // Release keys first: their C ABI deleters cannot unwind. Field Drop
@@ -354,7 +380,7 @@ impl<'a> MutationView<'a> {
     #[inline(always)]
     pub(super) fn new(value: AnyView<'a>, mode: InplaceMode) -> Self {
         Self {
-            value: raw_of(value),
+            value: *value.as_raw_ffi_any(),
             mode,
             _scope: PhantomData,
             _type: PhantomData,
@@ -400,7 +426,7 @@ impl<'a, T> MutationView<'a, T> {
     pub fn as_any_view(&self) -> AnyView<'_> {
         // SAFETY: the input owner keeps this payload live while the capability is
         // borrowed. The returned lifetime is bounded by self, not by 'a.
-        unsafe { borrowed_view(&self.value) }
+        unsafe { AnyView::from_raw_ffi_any(self.value) }
     }
 
     /// Borrow an object or subtype as `U` without changing ownership or permission.
@@ -577,7 +603,7 @@ impl<D> StructuralMutatorView<'_, D> {
         let value = value.into();
         unsafe {
             let context = StructuralMutateEngine::checked_dispatcher(self.runtime, dispatch);
-            result_from_raw(StructuralMutateEngine::default_mutate_raw(
+            raw_tvm_ffi_any_into_result(StructuralMutateEngine::default_mutate_raw(
                 self.runtime,
                 context,
                 value.value,
@@ -591,7 +617,7 @@ impl<D> StructuralMutatorView<'_, D> {
     pub fn var_remap_get(&mut self, dispatch: &mut D, var: AnyView<'_>) -> Result<Option<Any>> {
         unsafe {
             StructuralMutateEngine::checked_dispatcher(self.runtime, dispatch);
-            StructuralMutateEngine::runtime_var_remap_get(self.runtime, raw_of(var))
+            StructuralMutateEngine::runtime_var_remap_get(self.runtime, *var.as_raw_ffi_any())
         }
     }
 
@@ -599,7 +625,11 @@ impl<D> StructuralMutatorView<'_, D> {
     pub fn var_remap_set(&mut self, dispatch: &mut D, var: AnyView<'_>, value: &Any) -> Result<()> {
         unsafe {
             StructuralMutateEngine::checked_dispatcher(self.runtime, dispatch);
-            StructuralMutateEngine::runtime_var_remap_set(self.runtime, raw_of(var), value)
+            StructuralMutateEngine::runtime_var_remap_set(
+                self.runtime,
+                *var.as_raw_ffi_any(),
+                value,
+            )
         }
     }
 }
@@ -633,8 +663,88 @@ where
 }
 
 // -----------------------------------------------------------------------------
-// Private utility functions
+// Outlined errors
 // -----------------------------------------------------------------------------
+// Keep construction and formatting scratch outside successful traversal frames.
+
+#[cold]
+#[inline(never)]
+fn missing_shallow_copy_error(type_index: i32, attribute: &str) -> Error {
+    Error::new(
+        TYPE_ERROR,
+        &format!(
+            "type `{}` cannot use reflected structural mutation because it does not define `{attribute}`",
+            type_key_of(type_index)
+        ),
+        "",
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_shallow_copy_hook_error(attribute: &str) -> Error {
+    Error::new(
+        TYPE_ERROR,
+        &format!("{attribute} must be an ffi.Function"),
+        "",
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_shallow_copy_result_error() -> Error {
+    Error::new(
+        TYPE_ERROR,
+        "shallow copy callback must return a distinct object with the same type as its input",
+        "",
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn missing_field_setter_error(name: &str) -> Error {
+    Error::new(
+        TYPE_ERROR,
+        &format!("cannot structurally mutate field `{name}` because it does not define a setter"),
+        "",
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_field_offset_error(name: &str) -> Error {
+    runtime_error(&format!(
+        "native structural map: reflected field `{name}` has an invalid offset"
+    ))
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_mutation_hook_error() -> Error {
+    Error::new(
+        TYPE_ERROR,
+        "__s_mutate__ must be an opaque function pointer or ffi.Function",
+        "",
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn var_remap_key_error() -> Error {
+    Error::new(
+        TYPE_ERROR,
+        "variable-remap keys must be object-backed values",
+        "",
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn unregistered_type_error(type_index: i32) -> Error {
+    runtime_error(&format!(
+        "native structural map: unregistered type index {type_index}"
+    ))
+}
 
 // Keep panic construction out of the successful dispatcher identity check.
 #[cold]
@@ -643,52 +753,32 @@ fn wrong_mutation_dispatcher() -> ! {
     panic!("mutation context used with a different dispatcher instance")
 }
 
-#[inline(always)]
-fn result_into_raw(result: Result<Any>) -> TVMFFIAny {
-    unsafe {
-        match result {
-            Ok(value) => Any::into_raw_ffi_any(value),
-            Err(error) => Any::into_raw_ffi_any(Any::from(error)),
-        }
+#[cold]
+pub(super) fn with_mutation_error_context(error: Error, raw: TVMFFIAny) -> Error {
+    if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
+        error
+    } else {
+        with_structural_error_context(
+            with_visit_error_context(error, raw),
+            "map",
+            &format!("object `{}`", type_key_of(raw.type_index)),
+        )
     }
 }
 
-/// Take ownership of one value returned by a structural-mutation ABI hook.
-///
-/// # Safety
-///
-/// `raw` must contain one owning TVMFFIAny result that has not already been
-/// consumed. An Error object is converted into the Rust error channel.
-#[inline(always)]
-unsafe fn result_from_raw(raw: TVMFFIAny) -> Result<Any> {
-    if raw.type_index != TVMFFITypeIndex::kTVMFFIError as i32 {
-        return Ok(Any::from_raw_ffi_any(raw));
-    }
-    core::hint::cold_path();
-    Err(structural_error_from_raw(
-        raw.type_index,
-        raw.small_str_len,
-        raw.data_union,
-    ))
-}
+// -----------------------------------------------------------------------------
+// Private utility functions
+// -----------------------------------------------------------------------------
 
 fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {
     let Some(attr) = SHALLOW_COPY_COLUMN.get_raw(raw.type_index) else {
-        return Err(Error::new(
-            TYPE_ERROR,
-            &format!(
-                "type `{}` cannot use reflected structural mutation because it does not define `{SHALLOW_COPY_ATTR}`",
-                type_key_of(raw.type_index)
-            ),
-            "",
+        return Err(missing_shallow_copy_error(
+            raw.type_index,
+            SHALLOW_COPY_ATTR,
         ));
     };
     if attr.type_index != TVMFFITypeIndex::kTVMFFIFunction as i32 {
-        return Err(Error::new(
-            TYPE_ERROR,
-            &format!("{SHALLOW_COPY_ATTR} must be an ffi.Function"),
-            "",
-        ));
+        return Err(invalid_shallow_copy_hook_error(SHALLOW_COPY_ATTR));
     }
     let function = unsafe { attr.data_union.v_obj };
     if function.is_null() {
@@ -709,11 +799,7 @@ fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {
         || result_pointer.is_null()
         || result_pointer == source_pointer
     {
-        return Err(Error::new(
-            TYPE_ERROR,
-            "shallow copy callback must return a distinct object with the same type as its input",
-            "",
-        ));
+        return Err(invalid_shallow_copy_result_error());
     }
     Ok(result)
 }
@@ -724,14 +810,7 @@ fn call_field_setter(
     value: &TVMFFIAny,
 ) -> Result<()> {
     if field.setter.is_null() {
-        return Err(Error::new(
-            TYPE_ERROR,
-            &format!(
-                "cannot structurally mutate field `{}` because it does not define a setter",
-                field.name.as_str()
-            ),
-            "",
-        ));
+        return Err(missing_field_setter_error(field.name.as_str()));
     }
     let return_code = unsafe {
         if field.flags & FLAG_SETTER_IS_FUNCTION == 0 {
@@ -773,15 +852,6 @@ fn object_identity_key(raw: TVMFFIAny) -> Result<NonNull<TVMFFIObject>> {
     })
 }
 
-#[cold]
-fn var_remap_key_error() -> Error {
-    Error::new(
-        TYPE_ERROR,
-        "variable-remap keys must be object-backed values",
-        "",
-    )
-}
-
 #[inline]
 fn checked_type_info(type_index: i32) -> Result<*const crate::tvm_ffi_sys::TVMFFITypeInfo> {
     let info = unsafe { TVMFFIGetTypeInfo(type_index) };
@@ -790,13 +860,6 @@ fn checked_type_info(type_index: i32) -> Result<*const crate::tvm_ffi_sys::TVMFF
     } else {
         Ok(info)
     }
-}
-
-#[cold]
-fn unregistered_type_error(type_index: i32) -> Error {
-    runtime_error(&format!(
-        "native structural map: unregistered type index {type_index}"
-    ))
 }
 
 #[inline(always)]
@@ -808,15 +871,28 @@ fn object_is_unique(raw: TVMFFIAny) -> bool {
     !pointer.is_null() && unsafe { object::unsafe_::strong_count(pointer) == 1 }
 }
 
+/// Acquire an owning value from a valid borrowed carrier.
+///
+/// Inline values are copied and objects are retained once, including Error objects
+/// as ordinary values. String/byte views are normalized by the runtime; an rvalue
+/// slot transfers its reference. Internal callers keep borrowed resources live and
+/// uniquely own each writable rvalue slot, converting it at most once. A null
+/// object pointer or failed runtime conversion returns an error; successful Error
+/// objects remain ordinary values rather than entering the error channel.
 #[inline]
-fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
-    if let Some(owned) = try_to_owned_without_normalization(raw) {
-        return Ok(owned);
+fn raw_tvm_ffi_any_to_owned_any(raw: TVMFFIAny) -> Result<Any> {
+    if is_plain_inline(raw.type_index) {
+        return Ok(unsafe { Any::from_raw_ffi_any(raw) });
     }
     if raw.type_index >= TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-        return Err(runtime_error(
-            "native structural map: object-backed value has a null pointer",
-        ));
+        let object = unsafe { raw.data_union.v_obj };
+        if object.is_null() {
+            return Err(runtime_error(
+                "native structural map: object-backed value has a null pointer",
+            ));
+        }
+        unsafe { object::unsafe_::inc_ref(object) };
+        return Ok(unsafe { Any::from_raw_ffi_any(raw) });
     }
 
     // Raw string/bytes views and ObjectRValueRef require normalization (or a
@@ -831,69 +907,28 @@ fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
     }
 }
 
-#[cold]
-pub(super) fn with_mutation_error_context(error: Error, raw: TVMFFIAny) -> Error {
-    if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-        error
-    } else {
-        with_error_context(
-            with_visit_error_context(error, raw),
-            &format!("object `{}`", type_key_of(raw.type_index)),
-        )
-    }
-}
-
-#[cold]
-fn with_error_context(error: Error, frame: &str) -> Error {
-    with_structural_error_context(error, "map", frame)
-}
-
-// Error allocation is exceptional and does not belong in recursive hot frames.
-#[cold]
-#[inline(never)]
-fn runtime_error(message: &str) -> Error {
-    Error::new(RUNTIME_ERROR, message, "")
-}
-
 // Cache registry columns, not their optional per-type cells. Absent cells retain
 // the normal hook/reflection fallback.
-static STRUCTURAL_MUTATE_COLUMN: LazyLock<TypeAttrColumn> = LazyLock::new(|| {
+static STRUCTURAL_MUTATE_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
     TypeAttrColumn::new(STRUCTURAL_MUTATE_ATTR).expect("missing __s_mutate__ column")
 });
-static STRUCTURAL_MAYBE_INPLACE_MUTATE_COLUMN: LazyLock<TypeAttrColumn> = LazyLock::new(|| {
-    TypeAttrColumn::new(STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR)
-        .expect("missing __s_maybe_inplace_mutate__ column")
-});
+static STRUCTURAL_MAYBE_INPLACE_MUTATE_COLUMN: ColdInitLazyLock<TypeAttrColumn> =
+    ColdInitLazyLock::new(|| {
+        TypeAttrColumn::new(STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR)
+            .expect("missing __s_maybe_inplace_mutate__ column")
+    });
 /// Return the shared column for normal or permitted in-place mutation hooks.
 /// Cache the column, not its per-type cells, so absent hooks still use fallback.
-/// The ready check stays inline; initialization uses the same LazyLock through
-/// an outlined tail to keep Once descriptors out of recursive caller frames.
 #[inline(always)]
 fn structural_mutate_column<const INPLACE: bool>() -> TypeAttrColumn {
-    let column = if INPLACE {
-        &STRUCTURAL_MAYBE_INPLACE_MUTATE_COLUMN
-    } else {
-        &STRUCTURAL_MUTATE_COLUMN
-    };
-    if let Some(column) = LazyLock::get(column) {
-        *column
-    } else {
-        initialize_structural_mutate_column::<INPLACE>()
-    }
-}
-
-// LazyLock owns blocking/poison semantics; outline its first-use Once scratch.
-#[cold]
-#[inline(never)]
-fn initialize_structural_mutate_column<const INPLACE: bool>() -> TypeAttrColumn {
     if INPLACE {
-        *LazyLock::force(&STRUCTURAL_MAYBE_INPLACE_MUTATE_COLUMN)
+        *STRUCTURAL_MAYBE_INPLACE_MUTATE_COLUMN
     } else {
-        *LazyLock::force(&STRUCTURAL_MUTATE_COLUMN)
+        *STRUCTURAL_MUTATE_COLUMN
     }
 }
 
-static SHALLOW_COPY_COLUMN: LazyLock<TypeAttrColumn> = LazyLock::new(|| {
+static SHALLOW_COPY_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
     TypeAttrColumn::new(SHALLOW_COPY_ATTR).expect("missing __ffi_shallow_copy__ column")
 });
 
@@ -901,6 +936,12 @@ static SHALLOW_COPY_COLUMN: LazyLock<TypeAttrColumn> = LazyLock::new(|| {
 // StructuralMutateEngine implementation
 // -----------------------------------------------------------------------------
 
+// Perf note: Raw carriers avoid materializing an owning Any on the success path.
+// Private C-unwind boundaries return this 16-byte carrier in x0/x1 on AArch64,
+// avoiding the hidden result slot observed with the Rust ABI while allowing
+// Rust cleanup to unwind. Native vtables remain extern "C".
+// Raw bits provide no ownership guard: import an owning result into Any before
+// fallible work or destruction of an observer; borrowed inputs must stay live.
 impl StructuralMutateEngine {
     /// Recover the engine prefix for internal runtime projections.
     ///
@@ -971,7 +1012,7 @@ impl StructuralMutateEngine {
         >,
     {
         let context = (*Self::from_handle(runtime)).dispatcher;
-        let raw = raw_of(value);
+        let raw = *value.as_raw_ffi_any();
         let mode = if INPLACE {
             InplaceMode::Allow
         } else {
@@ -991,7 +1032,7 @@ impl StructuralMutateEngine {
         ) {
             // Map adapters attribute errors to their possibly replaced value;
             // direct mutation attributes callback failures to this input.
-            Some(result) => result_into_raw(if CALLBACK_CONTEXT {
+            Some(result) => result_into_raw_tvm_ffi_any(if CALLBACK_CONTEXT {
                 result.map_err(|error| with_mutation_error_context(error, raw))
             } else {
                 result
@@ -1074,8 +1115,9 @@ impl StructuralMutateEngine {
             small_str_len,
             data_union,
         };
-        result_into_raw(
-            result_from_raw(result).map_err(|error| with_mutation_error_context(error, raw)),
+        result_into_raw_tvm_ffi_any(
+            raw_tvm_ffi_any_into_result(result)
+                .map_err(|error| with_mutation_error_context(error, raw)),
         )
     }
 
@@ -1092,7 +1134,7 @@ impl StructuralMutateEngine {
         (*Self::from_handle(runtime))
             .remap
             .borrow()
-            .get(borrowed_view(&raw))
+            .get(AnyView::from_raw_ffi_any(raw))
     }
 
     /// Record borrowed identity `raw` and clone `value` into the invocation remap.
@@ -1109,7 +1151,7 @@ impl StructuralMutateEngine {
         (*Self::from_handle(runtime))
             .remap
             .borrow_mut()
-            .set(borrowed_view(&raw), value)
+            .set(AnyView::from_raw_ffi_any(raw), value)
     }
 
     /// Native remap lookup: borrow `var`, return an owning value, None, or Error.
@@ -1121,10 +1163,10 @@ impl StructuralMutateEngine {
         runtime: StructuralMutatorHandle,
         var: AnyView<'static>,
     ) -> TVMFFIAny {
-        match Self::runtime_var_remap_get(runtime, raw_of(var)) {
+        match Self::runtime_var_remap_get(runtime, *var.as_raw_ffi_any()) {
             Ok(Some(value)) => Any::into_raw_ffi_any(value),
             Ok(None) => TVMFFIAny::new(),
-            Err(error) => result_into_raw(Err(error)),
+            Err(error) => result_into_raw_tvm_ffi_any(Err(error)),
         }
     }
 
@@ -1138,9 +1180,12 @@ impl StructuralMutateEngine {
         var: AnyView<'static>,
         replacement: AnyView<'static>,
     ) -> TVMFFIAny {
-        result_into_raw(owned_from_raw(raw_of(replacement)).and_then(|value| {
-            Self::runtime_var_remap_set(runtime, raw_of(var), &value).map(|()| Any::new())
-        }))
+        result_into_raw_tvm_ffi_any(
+            raw_tvm_ffi_any_to_owned_any(*replacement.as_raw_ffi_any()).and_then(|value| {
+                Self::runtime_var_remap_set(runtime, *var.as_raw_ffi_any(), &value)
+                    .map(|()| Any::new())
+            }),
+        )
     }
 
     /// Run the public mutate/map adapter with owned `root` and borrowed `dispatch`.
@@ -1257,19 +1302,15 @@ impl StructuralMutateEngine {
         field_changed: &mut bool,
     ) -> Result<()> {
         let Some(getter) = field.getter else {
-            return Err(runtime_error(&format!(
-                "native structural map: reflected field `{}` has no getter",
-                field.name.as_str()
-            )));
+            return Err(missing_field_getter_error(
+                "structural map",
+                field.name.as_str(),
+            ));
         };
         // Read every field from the copy so earlier setters' side effects are
         // visible to later field mappings, exactly as in the C++ fallback.
-        let field_offset = usize::try_from(field.offset).map_err(|_| {
-            runtime_error(&format!(
-                "native structural map: reflected field `{}` has an invalid offset",
-                field.name.as_str()
-            ))
-        })?;
+        let field_offset = usize::try_from(field.offset)
+            .map_err(|_| invalid_field_offset_error(field.name.as_str()))?;
         // SAFETY: registered reflection metadata guarantees that the field
         // offset lies within this object's allocation. The checked conversion
         // above also prevents truncation on 32-bit targets.
@@ -1278,9 +1319,10 @@ impl StructuralMutateEngine {
         // populate an owning result and still report an error.
         let mut child = Any::new();
         if getter(source_address, Any::as_data_ptr(&mut child)) != 0 {
-            return Err(with_error_context(
+            return Err(with_structural_field_error_context(
                 Error::from_raised(),
-                &format!("field `{}`", field.name.as_str()),
+                "map",
+                field.name.as_str(),
             ));
         }
         // Reflection getters return owning values. Keep the child alive for
@@ -1290,13 +1332,13 @@ impl StructuralMutateEngine {
         let mapped = Self::with_mutator_def_region(runtime, child_region, |_| {
             Self::call_mutator(runtime, child_raw, InplaceMode::Disallow)
         })
-        .map_err(|error| with_error_context(error, &format!("field `{}`", field.name.as_str())))?;
-        if is_unchanged(&mapped) || same_shallow(child_raw, *mapped.as_raw_ffi_any()) {
+        .map_err(|error| with_structural_field_error_context(error, "map", field.name.as_str()))?;
+        if is_unchanged(&mapped) || raw_tvm_ffi_any_same_as(child_raw, *mapped.as_raw_ffi_any()) {
             return Ok(());
         }
 
         call_field_setter(field, source_address, mapped.as_raw_ffi_any()).map_err(|error| {
-            with_error_context(error, &format!("field `{}`", field.name.as_str()))
+            with_structural_field_error_context(error, "map", field.name.as_str())
         })?;
         *field_changed = true;
         Ok(())
@@ -1321,7 +1363,7 @@ impl StructuralMutateEngine {
         };
         unsafe {
             let view = AnyView::from_raw_ffi_any(raw);
-            result_from_raw(callback(mutator, view))
+            raw_tvm_ffi_any_into_result(callback(mutator, view))
         }
     }
 
@@ -1414,14 +1456,10 @@ impl StructuralMutateEngine {
                 ])
             })
         } else {
-            Err(Error::new(
-                TYPE_ERROR,
-                "__s_mutate__ must be an opaque function pointer or ffi.Function",
-                "",
-            ))
+            Err(invalid_mutation_hook_error())
         };
         // Preserve successful Error-valued returns until the public conversion.
-        result_into_raw(result.map_err(|error| with_mutation_error_context(error, raw)))
+        result_into_raw_tvm_ffi_any(result.map_err(|error| with_mutation_error_context(error, raw)))
     }
 
     /// Borrow a live runtime mutator as an object-valued ABI argument.
@@ -1507,7 +1545,8 @@ impl StructuralMutateEngine {
     /// # Safety
     /// `runtime` must be this live engine and the input fields a valid borrowed value.
     /// The input owner must survive reflection, remap updates, and error annotation.
-    // Outline reflection scratch without marking this normal fallback cold.
+    // Perf note: Keep reflection scratch outside recursive frames. This fallback
+    // can be frequent, so inline(never) is intentional without cold.
     // The AArch64 C ABI keeps raw results in registers; C-unwind preserves
     // Rust unwinding inside this private helper.
     #[inline(never)]
@@ -1517,13 +1556,15 @@ impl StructuralMutateEngine {
         small_str_len: u32,
         data_union: TVMFFIAnyDataUnion,
     ) -> TVMFFIAny {
+        // Perf note: Read region state here, before fallback semantics need it,
+        // rather than loading it on the native-hook path that does not use it.
         let def_region_kind = std::mem::transmute::<i32, DefRegionKind>((*runtime).def_region_mode);
         let raw = TVMFFIAny {
             type_index,
             small_str_len,
             data_union,
         };
-        result_into_raw(
+        result_into_raw_tvm_ffi_any(
             Self::mutate_without_hook(runtime, raw, def_region_kind)
                 .map_err(|error| with_mutation_error_context(error, raw)),
         )
@@ -1539,7 +1580,7 @@ impl StructuralMutateEngine {
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-            return owned_from_raw(raw);
+            return raw_tvm_ffi_any_to_owned_any(raw);
         }
 
         let type_info = checked_type_info(raw.type_index)?;
