@@ -170,7 +170,6 @@ fn matches_concrete_object_containers_in_source_order() {
     for (stored, expected) in [
         (-0.0, Some(0x8000_0000)),
         (f64::INFINITY, Some(f32::INFINITY.to_bits())),
-        (f32::from_bits(0xffc0_0001) as f64, Some(0xffc0_0001)),
         (f64::from_bits(0x7ff8_0000_0000_0001), None),
         (16_777_217.0, None),
         (1e40, None),
@@ -183,6 +182,15 @@ fn matches_concrete_object_containers_in_source_order() {
             }),
             expected
         );
+    }
+    // Rust permits float casts to change a NaN's sign and payload. A matched
+    // f32 must remain NaN; a fallback f64 must retain the original stored bits.
+    for bits in [0x7ff8_0000_0000_0000, 0xfff8_0000_2000_0000] {
+        match_any!(Any::from(f64::from_bits(bits)) {
+            f32(n) => assert!(n.is_nan()),
+            f64(n) => assert_eq!(n.to_bits(), bits),
+            _ => unreachable!(),
+        });
     }
     assert_eq!(
         match_any!(Any::from(257_i64) { Option<u8>(n) => n, _ => None }),
