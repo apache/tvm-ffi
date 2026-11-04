@@ -31,12 +31,15 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
-#include <cinttypes>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <unordered_set>
 #include <utility>
+
+#include "json_number.h"
 
 namespace tvm {
 namespace ffi {
@@ -150,8 +153,26 @@ class JSONWriter {
   void WriteInt(int64_t value) {
     // the biggest possible string representation of -INT64_MIN
     char buffer[sizeof("-9223372036854775808") + 1];
-    int size = TVM_FFI_SNPRINTF(buffer, sizeof(buffer), "%" PRId64, value);
-    WriteLiteral(buffer, size);
+    auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    WriteLiteral(buffer, static_cast<int>(result.ptr - buffer));
+  }
+
+  static int WriteFloatToBuffer(char* buffer, size_t size, double value, bool fixed) {
+#if TVM_FFI_USE_FLOAT_TO_CHARS
+    auto result = std::to_chars(buffer, buffer + size, value,
+                                fixed ? std::chars_format::fixed : std::chars_format::general,
+                                fixed ? 1 : 17);
+    return static_cast<int>(result.ptr - buffer);
+#elif defined(_WIN32)
+    return _snprintf_l(buffer, size, fixed ? "%.1f" : "%.17g", GetJSONNumberLocale(), value);
+#elif defined(__APPLE__)
+    return snprintf_l(buffer, size, GetJSONNumberLocale(), fixed ? "%.1f" : "%.17g", value);
+#else
+    locale_t previous_locale = uselocale(GetJSONNumberLocale());
+    int count = snprintf(buffer, size, fixed ? "%.1f" : "%.17g", value);
+    uselocale(previous_locale);
+    return count;
+#endif
   }
 
   void WriteFloat(double value) {
@@ -173,12 +194,12 @@ class JSONWriter {
         // always print an extra .0 for integer so integer numbers are printed as floats
         // this helps us to distinguish between integer and float, which is not necessary
         // but helps to ensure roundtrip property of the parser/printer in terms of int/float types
-        int size = TVM_FFI_SNPRINTF(buffer, sizeof(buffer), "%.1f", int_part);
+        int size = WriteFloatToBuffer(buffer, sizeof(buffer), int_part, true);
         WriteLiteral(buffer, size);
       } else {
         // Save 17 decimal digits to avoid loss during loading JSON
         // this is the maximum precision that can be represented in a double
-        int size = TVM_FFI_SNPRINTF(buffer, sizeof(buffer), "%.17g", value);
+        int size = WriteFloatToBuffer(buffer, sizeof(buffer), value, false);
         WriteLiteral(buffer, size);
       }
     }
