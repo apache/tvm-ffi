@@ -44,12 +44,13 @@
 // Local Perf note comments explain individual implementation choices.
 
 use std::cell::{RefCell, UnsafeCell};
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
 use super::cold_init_lazy_lock::ColdInitLazyLock;
-use super::marker::{Borrowed, Owned};
+use super::dispatch::IntoDispatcher;
+use std::borrow::BorrowMut;
 use std::ops::ControlFlow;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -57,7 +58,7 @@ use std::rc::Rc;
 pub use super::structural_map::*;
 
 use super::dispatch::Dispatcher;
-use crate::any::{is_plain_inline, Any, AnyView};
+use crate::any::{Any, AnyView, is_plain_inline};
 use crate::error::{Error, Result, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectCore};
@@ -78,7 +79,7 @@ use super::structural_common::{
     with_structural_field_error_context, with_visit_error_context,
 };
 use super::structural_visit::{
-    field_def_region, for_each_field_info, free_var_child_region, DefRegionKind,
+    DefRegionKind, field_def_region, for_each_field_info, free_var_child_region,
 };
 use super::unchanged::is_unchanged;
 pub use super::unchanged::{Unchanged, UnchangedOr};
@@ -146,7 +147,7 @@ impl StructuralMutatorObj {
 /// to retain the runtime. Hooks may access the runtime and borrowed mutation
 /// state only synchronously, on the calling thread.
 ///
-/// `default_mutate` returns one owning ABI replacement/Unchanged/Error and recurses
+/// `default_mutate_raw` returns one owning ABI replacement/Unchanged/Error and recurses
 /// only through the installed vtable, preserving the input's mutation permission.
 /// No whole-base mutable reference may span recursion. Failures use the result
 /// carrier; panics must not cross native callbacks.
@@ -164,7 +165,7 @@ pub unsafe trait StructuralMutatorBase: Sized {
     /// matching installed vtable.
     /// The input and runtime remain borrowed for this synchronous call. The
     /// caller has published the current exclusive dispatcher reborrow.
-    unsafe fn default_mutate(runtime: *mut Self, value: MutationView<'_>) -> TVMFFIAny;
+    unsafe fn default_mutate_raw(runtime: *mut Self, value: MutationView<'_>) -> TVMFFIAny;
 }
 
 // SAFETY: this prefix exactly matches the ordinary native mutator. Its mutable
@@ -191,7 +192,7 @@ unsafe impl StructuralMutatorBase for StructuralMutatorObj {
     }
 
     #[inline(always)]
-    unsafe fn default_mutate(runtime: *mut Self, value: MutationView<'_>) -> TVMFFIAny {
+    unsafe fn default_mutate_raw(runtime: *mut Self, value: MutationView<'_>) -> TVMFFIAny {
         // This implementation is entered only by the ordinary Rust engine, so
         // reflection can access its remap directly. Prefix-only callers use
         // `default_mutate_raw`, which dispatches remaps through the native vtable.
@@ -201,7 +202,7 @@ unsafe impl StructuralMutatorBase for StructuralMutatorObj {
 
 /// Scoped Rust mutator runtime with a statically selected native base.
 ///
-/// Enter through [`IntoMutator::mutate_root`]. The engine owns the complete base,
+/// Enter through [`StructuralMutateEngine::mutate_root`]. The engine owns the complete base,
 /// dispatcher reborrow handle and identity remaps. The dispatcher stays in the
 /// outer call; callbacks receive only a scoped [`StructuralMutatorView`].
 #[repr(C)]
@@ -463,6 +464,19 @@ impl<'a> From<&'a mut Any> for MutationView<'a> {
 }
 
 impl<'a, T> MutationView<'a, T> {
+    // A chain may lend its capability to one link at a time. The shorter lifetime
+    // prevents a matched link from retaining a borrow across the next link.
+    #[inline(always)]
+    pub(crate) fn reborrow(&mut self) -> MutationView<'_, T> {
+        MutationView {
+            value: self.value,
+            mode: self.mode,
+            _scope: PhantomData,
+            _type: PhantomData,
+            _not_send_sync: PhantomData,
+        }
+    }
+
     /// Permission carried independently of temporary owning aliases.
     #[inline(always)]
     pub fn inplace_mode(&self) -> InplaceMode {
@@ -705,35 +719,30 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
     }
 }
 
-/// Conversion into a dispatcher-driven mutation. Closures belong to structural_map.
-pub trait IntoMutator<Marker, Base = StructuralMutatorObj> {
-    #[doc(hidden)]
-    fn mutate_root(self, root: Any) -> Result<Any>;
-}
-
-impl<D, Base: StructuralMutatorBase> IntoMutator<Owned, Base> for D
-where
-    for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-        (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-        Option<Result<Any>>,
-    >,
-{
+impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
+    /// Normalize the input once and traverse using this engine's native base.
+    /// Named dispatchers keep their actual recursive view type. Callback and
+    /// tuple targets are their aggregate adapters; closures taking their own
+    /// recursive view type remain unsupported.
     #[inline(always)]
-    fn mutate_root(mut self, root: Any) -> Result<Any> {
-        StructuralMutateEngine::<Base>::run_mutator::<D, true>(root, &mut self)
-    }
-}
-
-impl<D, Base: StructuralMutatorBase> IntoMutator<Borrowed, Base> for &mut D
-where
-    for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-        (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-        Option<Result<Any>>,
-    >,
-{
-    #[inline(always)]
-    fn mutate_root(self, root: Any) -> Result<Any> {
-        StructuralMutateEngine::<Base>::run_mutator::<D, true>(root, self)
+    pub fn mutate_root<R, H, M, D, O>(root: R, dispatcher: H) -> Result<Any>
+    where
+        R: Into<Any>,
+        O: BorrowMut<D>,
+        for<'v, 'c, 'r> H: IntoDispatcher<
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<Any>>,
+                M,
+                Target = D,
+                Output = O,
+            >,
+        for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<Any>>,
+            >,
+    {
+        let mut storage = dispatcher.into_dispatcher();
+        Self::run_mutator::<D, true>(root.into(), storage.borrow_mut())
     }
 }
 
@@ -1056,9 +1065,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     fn vtable<D, const CALLBACK_CONTEXT: bool>() -> &'static StructuralMutatorVTable
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<Any>>,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<Any>>,
+            >,
     {
         &StructuralMutatorVTable {
             mutate: Self::rust_vtable_mutate::<D, false, CALLBACK_CONTEXT>,
@@ -1081,9 +1090,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     ) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<Any>>,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<Any>>,
+            >,
     {
         let context = (*Self::from_handle(runtime)).dispatcher;
         let raw = *value.as_raw_ffi_any();
@@ -1134,7 +1143,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         mode: InplaceMode,
     ) -> TVMFFIAny {
         (*Self::from_handle(runtime)).dispatcher = context;
-        Base::default_mutate(
+        <Base as StructuralMutatorBase>::default_mutate_raw(
             runtime.cast(),
             MutationView::new(AnyView::from_raw_ffi_any(raw), mode),
         )
@@ -1216,9 +1225,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     ) -> Result<Any>
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<Any>>,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<Any>>,
+            >,
     {
         let mut base = Base::new()?;
         let type_index = Base::type_index();
@@ -1812,7 +1821,7 @@ impl StructuralMutatorObj {
 ///
 /// * `root` - Owned value to mutate, convertible into an [`Any`]. A uniquely
 ///   owned container may be reused in place; clone first to preserve the original.
-/// * `mutator` - Owned or mutably borrowed dispatcher implementing [`IntoMutator`].
+/// * `dispatcher` - Owned or mutably borrowed dispatcher implementing [`IntoDispatcher`].
 ///   Matching handlers return replacements and control recursion through
 ///   [`StructuralMutatorView`]; unmatched values use default mutation. For closure
 ///   callbacks with automatic recursion, use [`structural_map`].
@@ -1846,9 +1855,27 @@ impl StructuralMutatorObj {
 /// # Ok(())
 /// # }
 /// ```
-pub fn structural_mutate<R, M>(root: R, mutator: impl IntoMutator<M>) -> Result<Any>
+pub fn structural_mutate<R, H, M, D, O>(root: R, dispatcher: H) -> Result<Any>
 where
     R: Into<Any>,
+    O: BorrowMut<D>,
+    for<'v, 'c, 'r> H: IntoDispatcher<
+            (
+                MutationView<'v>,
+                &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
+            ),
+            Option<Result<Any>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
+    for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
+            (
+                MutationView<'v>,
+                &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
+            ),
+            Option<Result<Any>>,
+        >,
 {
-    mutator.mutate_root(root.into())
+    StructuralMutateEngine::mutate_root(root, dispatcher)
 }
