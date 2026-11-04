@@ -124,7 +124,8 @@ pub mod marker {
 /// use tvm_ffi::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
 /// let callbacks = (|value: i64| Any::from(value + 1), |_value: AnyView<'_>| Any::new());
 /// let mut dispatcher = IntoDispatcher::<(AnyView<'_>,), Option<Result<Any>>, _>::into_dispatcher(callbacks);
-/// let result = dispatcher.dispatch_tuple((AnyView::from(&41_i64),)).unwrap()?;
+/// let result: Option<Result<Any>> = dispatcher.dispatch_tuple((AnyView::from(&41_i64),));
+/// let result = result.unwrap()?;
 /// assert_eq!(result.try_as::<i64>(), Some(42));
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```

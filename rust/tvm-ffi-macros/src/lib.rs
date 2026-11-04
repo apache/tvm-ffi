@@ -36,9 +36,13 @@ mod utils;
 /// receiver reference (`&T` or `&mut T`). The inherent `.dispatch(value, ...)`
 /// method owns matching; `.dispatch_tuple((value, ...))` unpacks and forwards.
 /// Both methods always inline. A matched result is converted with `Into<Ret>`
-/// and wrapped in `Some`. Only the outer `None` means no match; matched errors
-/// and inner `None` are final. Conversion uses ordinary trait implementations,
-/// without recursively converting results or wrapping values in `Ok`.
+/// and wrapped in `Some`. When both the handler's return type and `Ret` are
+/// written as `Result<..>`, the success value is converted with `Into` instead,
+/// so a `Result<UnchangedOr<Expr>>` or `Result<i64>` handler fits a
+/// `Result<UnchangedOr<Any>>` dispatcher. Only the outer `None` means no match;
+/// matched errors and inner `None` are final. Conversion uses ordinary trait
+/// implementations, without recursively converting results or wrapping values
+/// in `Ok`.
 ///
 /// Handlers match an owned FFI value, a borrowed object node, or an optional
 /// by-value `AnyView` catch-all, which must be last. Each handler receives its
