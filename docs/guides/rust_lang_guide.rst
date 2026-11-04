@@ -34,7 +34,9 @@ The Rust support depends on ``libtvm_ffi``. First, install the ``tvm-ffi`` Pytho
 
 .. code-block:: bash
 
-   pip install -v -e .
+   pip install apache-tvm-ffi
+
+From a source checkout, install it in editable mode with ``pip install -v -e .`` instead.
 
 Confirm that ``tvm-ffi-config`` is available:
 
@@ -57,7 +59,7 @@ For published versions:
 .. code-block:: toml
 
    [dependencies]
-   tvm-ffi = "0.1.14"
+   tvm-ffi = "0.1.15"
 
 Environment Setup
 ~~~~~~~~~~~~~~~~~
@@ -74,56 +76,55 @@ Basic Usage
 Any and AnyView
 ~~~~~~~~~~~~~~~
 
-As in C++, ``Any`` owns a dynamically typed value, while ``AnyView<'a>`` borrows a value.
+|rs-any|_ owns a dynamically typed value, while |rs-anyview|_ borrows a value.
 An object stored in ``Any`` carries a strong reference; creating an ``AnyView`` does not
 increment its reference count. Rust tracks the view's lifetime so it cannot outlive
-the value it borrows. A custom pair illustrates owning and borrowed access:
+the value it borrows. A number and a built-in array illustrate owning and borrowed access:
 
 .. code-block:: rust
 
-   use tvm_ffi::{def_object_ref, rs_object, Any, AnyView, Object};
-   use tvm_ffi::object::ObjectRef;
+   use tvm_ffi::collections::array::ArrayObj;
+   use tvm_ffi::{Any, AnyView, Array};
 
-   #[rs_object("my.MyPair")]
-   pub struct MyPairObj {
-       base: Object,
-       pub first: i64,
-       pub second: i64,
-   }
-   def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+   let number = Any::from(3_i64);
+   assert_eq!(number.try_as::<i64>(), Some(3));
 
-   let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
-   let value = Any::from(pair); // Transfer the handle's ownership into Any.
-   assert_eq!(value.downcast_ref::<MyPairObj>().unwrap().second, 4);
-   let view = AnyView::from(&value);
-   assert_eq!(view.downcast_ref::<MyPairObj>().unwrap().first, 3);
+   let value = Any::from(Array::new(vec![1_i64, 2, 3]));
+   let view = AnyView::from(&value); // Borrow the value without a new reference.
+   assert_eq!(view.downcast_ref::<ArrayObj>().unwrap().size, 3);
 
-   let owned_pair = value.try_as::<MyPair>().unwrap(); // Acquire another strong reference.
-   assert_eq!(owned_pair.second, 4);
+   let array = value.try_as::<Array<i64>>().unwrap(); // Acquire another strong reference.
+   assert_eq!(array.len(), 3);
 
 Both ``Any`` and ``AnyView`` provide object-only ``downcast_ref::<T>() -> Option<&T>``,
 with ``T: ObjectCore``. It accepts the runtime type or a compatible base type and
 returns ``None`` for unrelated types and non-object values. The returned reference
 borrows its source without consuming it or incrementing the reference count.
-In contrast, ``try_as::<MyPair>()`` returns an owned managed reference, which retains
+In contrast, ``try_as::<Array<i64>>()`` returns an owned managed reference, which retains
 the object independently of the source ``Any`` or ``AnyView``.
 
 Object and ObjectRef
 ~~~~~~~~~~~~~~~~~~~~
 
-The object representation and its owning handle are separate, as with C++ ``Object``
-and ``ObjectRef``. The ``MyPairObj`` representation above implements ``ObjectCore``;
-``Object`` is the root representation. Its named managed reference ``MyPair`` wraps
-``ObjectArc<MyPairObj>``, which manages shared ownership through reference counting.
-``ObjectRef`` is the erased managed reference. Named references implement ``ObjectRefCore``
-for shared operations and can define their own methods:
+The object representation and its owning handle are separate. |rs-arrayobj|_, the
+representation of an array, implements |rs-objectcore|_; ``Object`` is the root
+representation, and ``ObjectRef`` is the erased managed reference.
+
+**Named managed reference**. A named managed reference follows the newtype pattern around
+|rs-objectarc|_, which manages the underlying object's lifetime through reference counting.
+Define methods and associated functions on the named type, and implement traits to provide
+shared interfaces. The named type can also impose additional constraints on the underlying object.
+For example, |rs-array|_ holds an ``ObjectArc<ArrayObj>`` while constraining the array's
+element type to ``T``. Named reference types implement |rs-objectrefcore|_ for shared reference operations:
 
 .. code-block:: rust
 
-   use tvm_ffi::ObjectRefCore;
+   use tvm_ffi::collections::array::ArrayObj;
+   use tvm_ffi::{Array, ObjectRefCore};
 
-   let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
-   assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);
+   let array = Array::new(vec![1_i64, 2, 3]);
+   assert_eq!(array.downcast_ref::<ArrayObj>().unwrap().size, 3);
+   assert_eq!(array.get(1).unwrap(), 2); // A method of the named type.
 
 Managed references provide ``downcast_ref::<T>()`` with the same inheritance and
 borrowing rules as ``Any`` and ``AnyView``.
@@ -227,10 +228,10 @@ Register and access global functions:
        "Add two integers.",
    )?;
 
-As C++ ``refl::GlobalDef().def`` does, a typed function's metadata records its
-type schema, so ``tvm_ffi.get_global_func_metadata`` and the stub generator see
-its parameter and return types. ``Function::register_global`` records the schema
-of an untyped function, as ``def_packed`` does.
+A typed function's metadata records its type schema, so
+``tvm_ffi.get_global_func_metadata`` and the stub generator see its parameter and
+return types. ``Function::register_global`` also records the schema of an untyped
+function.
 
 Exporting Functions from a Library
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -249,12 +250,11 @@ that ``Module::load_from_file`` and ``tvm_ffi.load_module`` look up:
    tvm_ffi_dll_export_typed_func!(add, add);
    tvm_ffi_dll_export_typed_func_doc!(add, "Add two integers and return the sum.");
 
-With the ``export-metadata`` feature of the ``tvm-ffi`` crate, the counterpart of
-C++ ``TVM_FFI_DLL_EXPORT_INCLUDE_METADATA``, the export also writes the
+With the ``export-metadata`` feature of the ``tvm-ffi`` crate, the export also writes the
 function's type schema as ``__tvm_ffi__metadata_<name>``, and
 ``tvm_ffi_dll_export_typed_func_doc!`` writes its doc string as
 ``__tvm_ffi__doc_<name>``, which ``Module.get_function_metadata`` and
-``Module.get_function_doc`` read. As in C++, it is off by default, and without
+``Module.get_function_doc`` read. The feature is off by default, and without
 it ``tvm_ffi_dll_export_typed_func_doc!`` exports nothing:
 
 .. code-block:: toml
@@ -265,11 +265,10 @@ it ``tvm_ffi_dll_export_typed_func_doc!`` exports nothing:
 Reflected Type Methods
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Libraries that register their API through the C++ reflection registry
-(``refl::ObjectDef<T>().def(...)``) store methods in a per-type method table
+Methods registered on a type through reflection live in a per-type method table
 rather than the global function table. Resolve them by type key (or type
-index) and method name; constructors registered via ``refl::init`` are
-reachable under the reserved name ``__ffi_init__``:
+index) and method name; a registered constructor is reachable under the
+reserved name ``__ffi_init__``:
 
 .. code-block:: rust
 
@@ -291,8 +290,7 @@ Defining Reflected Object Types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An object type defined in Rust registers its type key with ``#[type_register]``
-and its fields with ``#[reflect]``, as C++ ``TVM_FFI_DECLARE_OBJECT_INFO`` and
-``refl::ObjectDef<T>().def_ro(...)`` do. The registration runs on the type's
+and its fields with ``#[reflect]``. The registration runs on the type's
 first ``type_index()``, which allocating an instance calls:
 
 .. code-block:: rust
@@ -330,7 +328,7 @@ first ``type_index()``, which allocating an instance calls:
    }
 
 Each reflected field gets a C ABI getter and setter, its doc string and its
-type schema, so C++ structural equality and hashing, ``ffi.ReprPrint``,
+type schema, so structural equality and hashing, ``ffi.ReprPrint``,
 ``ffi.DeepCopy`` and Python see it. The flags in ``#[reflect(...)]`` name
 ``tvm_ffi::FieldFlags`` constants; ``name = "..."`` registers the field under
 another name, and ``doc = "..."`` sets its doc string, otherwise the field's
@@ -340,8 +338,8 @@ and registers it as ``__ffi_shallow_copy__``, which requires the parent to
 implement ``ShallowCopy`` and the other fields to be ``Clone``.
 
 ``#[type_reflection(path)]`` names a function that registers the type's
-methods with ``def`` (the object is the first parameter) and ``def_static``, as
-C++ ``refl::ObjectDef<T>().def(...)`` does, each with its type schema and doc
+methods with ``def`` (the object is the first parameter) and ``def_static``,
+each with its type schema and doc
 string, where ``Function::from_type_method`` and Python find them. It runs
 while the type registers, so it must not call ``type_index()`` of the type or
 of another Rust type that is not registered yet. Method names, like
@@ -354,8 +352,7 @@ Defining Object Types from Their Fields
 ``py_class``. The first field, ``base``, is the parent's object; every other field
 is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
 ``reflection = path`` after the type key is ``#[type_reflection(path)]``.
-``def_object_ref!(TypeName, ParentType, ObjectName)`` defines the reference, as
-C++ ``TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE`` does:
+``def_object_ref!(TypeName, ParentType, ObjectName)`` defines the reference:
 
 .. code-block:: rust
 
@@ -393,19 +390,17 @@ the object converts into it. The reference also converts into ``ParentType``, th
 reference to its parent (``ObjectRef`` for a type under ``ffi.Object``);
 ``impl_object_upcast!`` converts it into the references to further ancestors.
 
-The type also registers a creator, as C++ ``refl::ObjectDef`` registers one from
-the ``UnsafeInit`` constructor, and from it ``__ffi_new__`` and ``__ffi_init__``
+The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads
 the type back and Python constructs it from its fields. The creator makes the
-object with every field undefined, as C++ ``UnsafeInit`` leaves a reference null,
-and reflection then sets the fields. A Rust reference is never null, so an
+object with every field undefined, and reflection then sets the fields. A Rust reference is never null, so an
 undefined field holds all-zero bytes, which are no value of its type
 (``AnyCompatible::is_undefined``): the field setter overwrites them without
 dropping, the field getter reads them as None and the object's deleter skips
 them. An ``init_off`` field stays all-zero after ``__ffi_init__``, so its type must
 take all-zero bytes as a value, as a scalar or ``Option<T>`` does; a reference or
 a string does not, and fails the type's registration. The parent's object must
-implement ``ShallowCopy`` and ``UnsafeInit``, as ``rs_object`` types and non-final C++
+implement ``ShallowCopy`` and ``UnsafeInit``, as ``rs_object`` types and non-final
 types bound by ``tvm-ffi-stubgen`` do.
 
 Converting Borrowed Values into ``Any``
@@ -413,20 +408,20 @@ Converting Borrowed Values into ``Any``
 
 ``Any::from(value)`` takes ownership of ``value``. Use it when you own the value.
 When you only have a shared reference—for example, a field accessed through
-``&AddObj``—you cannot move the field into an ``Any``. Call
+``&PointObj``—you cannot move the field into an ``Any``. Call
 ``AnyCompatible::to_any()`` instead:
 
 .. code-block:: rust
 
    use tvm_ffi::{Any, AnyCompatible};
 
-   fn first_operand(node: &AddObj) -> Any {
-       node.a.to_any()
+   fn label_of(point: &PointObj) -> Any {
+       point.label.to_any()
    }
 
 ``to_any()`` creates an owned ``Any`` while leaving the borrowed value usable. For
 object-backed values, it retains the object by incrementing its reference
-count. It is equivalent to ``Any::from(node.a.clone())``, without requiring an
+count. It is equivalent to ``Any::from(point.label.clone())``, without requiring an
 explicit clone at the call site.
 
 Type-Erased Functions
@@ -474,30 +469,172 @@ TVM FFI uses standard Rust ``Result`` types:
        Ok(())
    }
 
+Matching and Dispatch
+~~~~~~~~~~~~~~~~~~~~~
+
+Matching Types
+^^^^^^^^^^^^^^
+
+An ``Any`` or ``AnyView`` can hold any type, so code that receives one often
+needs to ask which type it holds. |rs-match_any|_ answers this the way ``match``
+does for an enum. Each *arm* is a pattern followed by ``=>`` and an expression; the first
+arm whose type matches the value runs:
+
+.. code-block:: rust
+
+   use tvm_ffi::{match_any, Any, Array};
+
+   fn kind(value: &Any) -> String {
+       match_any! {
+           value {
+               i64(n) => format!("integer {n}"),
+               tvm_ffi::String(s) => format!("string {}", s.as_str()),
+               Array<Any>(arr) => format!("array of {} items", arr.len()),
+               _ => "something else".to_string(),
+           }
+       }
+   }
+
+   for value in [
+       Any::from(42_i64),
+       Any::from(tvm_ffi::String::from("hi")),
+       Any::from(Array::new(vec![1_i64, 2, 3])),
+       Any::from(1.5_f64),
+   ] {
+       println!("{}", kind(&value));
+   }
+
+The output is:
+
+.. code-block:: text
+
+   integer 42
+   string hi
+   array of 3 items
+   something else
+
+``Type(name)`` binds an owned value. For an object, an arm can instead name the
+object type and borrow it, as in ``ArrayObj(ref arr)``, which reads its fields
+without changing the reference count. The final ``_`` arm is required:
+new types can be registered at any time, so no list of arms is exhaustive.
+
+Dispatching
+^^^^^^^^^^^
+
+A common need is to dispatch over many kinds of values: run different logic
+depending on which type a value has. ``match_any!`` provides the machinery,
+and |rs-dispatch|_ **makes such dispatchers simpler to build**: write one
+method per type, and the attribute generates the match that picks between
+them. Let's describe nested arrays, with a separator between items:
+
+.. code-block:: rust
+
+   use tvm_ffi::{dispatch, Any, AnyView, Array};
+
+   struct Describer;
+
+   #[dispatch(describe, (AnyView<'_>, &str), String)]
+   impl Describer {
+       fn describe_array(&self, arr: Array<Any>, sep: &str) -> String {
+           let items: Vec<String> = arr
+               .iter()
+               .map(|item| {
+                   let item = AnyView::from(&item);
+                   self.dispatch(item, sep).unwrap_or_else(|| "?".into())
+               })
+               .collect();
+           format!("[{}]", items.join(sep))
+       }
+
+       fn describe_int(&self, value: i64) -> String {
+           value.to_string()
+       }
+
+       fn describe_str(&self, value: tvm_ffi::String) -> String {
+           value.to_string()
+       }
+   }
+
+   let value = Any::from(Array::new(vec![
+       Any::from(1_i64),
+       Any::from(tvm_ffi::String::from("a")),
+       Any::from(Array::new(vec![2_i64, 3])),
+   ]));
+   let text = Describer.dispatch(AnyView::from(&value), ", ").unwrap();
+   println!("{text}");
+
+The output is:
+
+.. code-block:: text
+
+   [1, "a", [2, 3]]
+
+The ``#[dispatch(describe, (AnyView<'_>, &str), String)]`` attribute makes the
+``describe_*`` methods handlers and generates
+``dispatch(value, sep) -> Option<String>``. The first element of the tuple is
+the value to match; the rest are passed to the handlers. ``describe_array``
+calls ``self.dispatch`` on each item, so nested arrays recurse, and turns
+``None``, which means no handler matched, into ``"?"``. ``tvm_ffi::String``
+displays with quotes, which keeps strings apart from numbers in the output.
+
+**The attribute is sugar for a match.** Simplified, ``#[dispatch]`` generates
+a ``match_any!`` and a |rs-dispatcher|_ implementation:
+
+.. code-block:: rust
+
+   impl Describer {
+       pub fn dispatch(&self, value: AnyView<'_>, sep: &str) -> Option<String> {
+           match_any! {
+               value {
+                   Array<Any>(arr) => Some(self.describe_array(arr, sep).into()),
+                   i64(value) => Some(self.describe_int(value).into()),
+                   tvm_ffi::String(value) => Some(self.describe_str(value).into()),
+                   _ => None,
+               }
+           }
+       }
+   }
+
+   impl Dispatcher<(AnyView<'_>, &str), Option<String>> for &Describer {
+       fn dispatch_tuple(self, (value, sep): (AnyView<'_>, &str)) -> Option<String> {
+           Describer::dispatch(self, value, sep)
+       }
+   }
+
+Each handler becomes one arm, in source order, and its parameter type selects
+the values it matches; a ``&NodeObj`` parameter becomes a ``NodeObj(ref node)``
+arm. The attribute appends ``_ => None``, so a type without a handler returns
+``None`` instead of failing. The ``Dispatcher`` implementation lets generic
+code call the same match through one trait.
+
+**A handler takes only the arguments it needs.** It receives the matched value
+and a leading prefix of the remaining arguments, in declaration order:
+``describe_array`` takes ``sep``, while ``describe_int`` and ``describe_str``
+omit it.
+
+.. note::
+
+   A handler's result converts into the declared return type with ``Into``. A
+   handler taking ``AnyView<'_>`` matches everything, so it must come last.
+   Handlers taking ``&mut self`` make ``dispatch`` take ``&mut self``, and the
+   ``Dispatcher`` implementation is then for ``&mut Describer``. As in an
+   ordinary method, elided lifetimes in the tuple are independent and an elided
+   lifetime in the return type borrows ``self``; to return a borrow of an
+   input, name the same lifetime in both.
+
+The structural utilities below accept the same kind of dispatcher: walk,
+visit, map and mutate each call it on the values they reach. The prefix only
+names the methods; the utility that calls the dispatcher decides what happens
+to the result.
+
 Structural Walk and Visit
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Rust provides equivalents of the C++ ``StructuralWalk``/``StructuralVisitor``
-APIs. An inherent ``#[dispatch(walk, (AnyView<'_>, DefRegionKind), Result<WalkResult>)]``
-impl groups ``walk_*`` handlers for
-``structural_walk``. The named handlers return the common ``Result<WalkResult>``
-type to advance, skip children, or interrupt traversal.
-The attribute always declares ``#[dispatch(prefix, args_as_tuple, ret)]``:
-``args_as_tuple`` is a nonempty tuple whose first element is the match carrier,
-``AnyView<'_>`` or ``MutationView<'_>``, followed by the arguments passed to handlers.
-Each handler consumes its typed first value and an initial prefix of the
-remaining arguments. The declared signature does not depend on the longest
-handler. ``dispatch`` returns ``Option<ret>``: the first matched handler's result
-converts through standard ``Into<ret>`` and is wrapped in ``Some``; outer ``None``
-means no match. A matched error or inner ``None`` stops dispatch. This conversion
-does not recursively convert results or wrap scalar values in ``Ok``.
-
-Elided input lifetimes are independent and elided output lifetimes borrow
-``self``. Use a shared named lifetime in the tuple and return type for a result
-borrowing an input. Names come from the enclosing impl or common handler generic
-declarations; those declarations and bounds must agree across handlers, except
-for unbounded pattern-only lifetimes. ``Self`` denotes the implementor. Carrier
-and handler type aliases are supported.
+|rs-structural_walk|_ visits every value reachable from a root and accepts a
+dispatcher, as described in Dispatching above:
+``#[dispatch(walk, (AnyView<'_>, DefRegionKind), Result<WalkResult>)]`` groups
+``walk_*`` handlers, which return ``Result<WalkResult>`` to advance, skip
+children, or interrupt traversal.
 
 Walk handlers may take an optional trailing ``DefRegionKind`` argument:
 
@@ -534,8 +671,7 @@ visits container values but does not pass keys to handlers. The map or dict
 object itself is still visited normally.
 
 Lambdas also work — pass a single typed lambda, or a tuple of them tried in
-order with the first matching argument type winning, like the variadic C++
-``StructuralWalk(root, callbacks...)`` chain. A flat tuple holds up to 12
+order with the first matching argument type winning. A flat tuple holds up to 12
 lambdas; a tuple is itself a link, so nest ``(a, b, (c, d, ...))`` to chain
 more — order stays the flattened left-to-right order. Unmatched values
 simply advance; an ``AnyView<'_>`` lambda acts as a catch-all and must come
@@ -762,10 +898,10 @@ objects must provide ``__ffi_shallow_copy__``; the copy is validated before
 fields are mapped and discarded if no structural field changes.
 
 Within one ``structural_map`` call, callbacks run at every occurrence; their
-results are not cached. Default recursion manages identity remapping with
-the same semantics as C++.
+results are not cached. Default recursion manages identity remapping, with
+the same semantics in every language binding.
 
-Default recursion uses the same type attributes as C++: it calls
+Default recursion uses the registered type attributes: it calls
 ``__s_maybe_inplace_mutate__`` for a uniquely owned object when available, or
 falls back to ``__s_mutate__``. Each hook receives the active Rust-backed
 mutator and can recurse through its language-independent vtable. This lets the
@@ -948,3 +1084,28 @@ Related Resources
 - :doc:`Quick Start Guide <../get_started/quickstart>` - General TVM FFI introduction
 - :doc:`C++ Guide <cpp_lang_guide>` - C++ API usage
 - :doc:`Python Guide <python_lang_guide>` - Python API usage
+
+.. Rust API reference links, generated with BUILD_RUST_DOCS=1.
+
+.. |rs-any| replace:: ``Any``
+.. _rs-any: ../reference/rust/generated/tvm_ffi/any/struct.Any.html
+.. |rs-anyview| replace:: ``AnyView<'a>``
+.. _rs-anyview: ../reference/rust/generated/tvm_ffi/any/struct.AnyView.html
+.. |rs-arrayobj| replace:: ``ArrayObj``
+.. _rs-arrayobj: ../reference/rust/generated/tvm_ffi/collections/array/struct.ArrayObj.html
+.. |rs-objectcore| replace:: ``ObjectCore``
+.. _rs-objectcore: ../reference/rust/generated/tvm_ffi/object/trait.ObjectCore.html
+.. |rs-objectarc| replace:: ``ObjectArc<T>``
+.. _rs-objectarc: ../reference/rust/generated/tvm_ffi/object/struct.ObjectArc.html
+.. |rs-array| replace:: ``Array<T>``
+.. _rs-array: ../reference/rust/generated/tvm_ffi/collections/array/struct.Array.html
+.. |rs-objectrefcore| replace:: ``ObjectRefCore``
+.. _rs-objectrefcore: ../reference/rust/generated/tvm_ffi/object/trait.ObjectRefCore.html
+.. |rs-match_any| replace:: ``match_any!``
+.. _rs-match_any: ../reference/rust/generated/tvm_ffi/macro.match_any.html
+.. |rs-dispatch| replace:: ``#[dispatch]``
+.. _rs-dispatch: ../reference/rust/generated/tvm_ffi/attr.dispatch.html
+.. |rs-dispatcher| replace:: ``Dispatcher``
+.. _rs-dispatcher: ../reference/rust/generated/tvm_ffi/extra/dispatch/trait.Dispatcher.html
+.. |rs-structural_walk| replace:: ``structural_walk``
+.. _rs-structural_walk: ../reference/rust/generated/tvm_ffi/extra/structural_walk/fn.structural_walk.html
