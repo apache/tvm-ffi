@@ -33,13 +33,13 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
 /// The `ObjectCore` impl of an object struct, and its `ShallowCopy` when it
 /// registers reflection, naming the tvm-ffi crate `tvm_ffi_crate`.
 ///
-/// `rs_class` registers the reflection of a type without `#[reflect]` fields
+/// `rs_object` registers the reflection of a type without `#[reflect]` fields
 /// or `#[type_s_eq_hash_kind]` too, with the creator of its `UnsafeInit`, as
-/// `#[rs_class]` does.
+/// `#[rs_object]` does.
 pub(crate) fn expand_object(
     derive_input: &DeriveInput,
     tvm_ffi_crate: &TokenStream2,
-    rs_class: bool,
+    rs_object: bool,
 ) -> TokenStream2 {
     let struct_name = derive_input.ident.clone();
 
@@ -103,7 +103,7 @@ pub(crate) fn expand_object(
     }
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
-    let reflection = Reflection::parse(derive_input, rs_class);
+    let reflection = Reflection::parse(derive_input, rs_object);
     assert!(
         reflection.is_none() || (type_register && get_attr(derive_input, "type_index").is_none()),
         "#[reflect], #[type_s_eq_hash_kind] and #[type_reflection] need #[type_register] and no \
@@ -295,7 +295,7 @@ struct Reflection {
     /// The reflected fields.
     reflected: Vec<ReflectedField>,
     /// Whether the type registers the creator of its `UnsafeInit`, as an
-    /// `#[rs_class]` type does.
+    /// `#[rs_object]` type does.
     unsafe_init: bool,
 }
 
@@ -383,8 +383,8 @@ fn doc_comment(attrs: &[syn::Attribute]) -> String {
 
 impl Reflection {
     /// The type's reflection, or `None` when it declares none and is not an
-    /// `rs_class`.
-    fn parse(derive_input: &DeriveInput, rs_class: bool) -> Option<Self> {
+    /// `rs_object`.
+    fn parse(derive_input: &DeriveInput, rs_object: bool) -> Option<Self> {
         let kind = get_attr(derive_input, "type_s_eq_hash_kind").map(|attr| {
             let kind = attr_to_str(attr);
             syn::Ident::new(&kind.value(), kind.span())
@@ -421,7 +421,7 @@ impl Reflection {
                 reflected.push(field);
             }
         }
-        if kind.is_none() && methods.is_none() && reflected.is_empty() && !rs_class {
+        if kind.is_none() && methods.is_none() && reflected.is_empty() && !rs_object {
             return None;
         }
         Some(Self {
@@ -433,7 +433,7 @@ impl Reflection {
                 .expect("First field must be `<base_name>: <ObjectCoreType>`"),
             field_ids,
             reflected,
-            unsafe_init: rs_class,
+            unsafe_init: rs_object,
         })
     }
 

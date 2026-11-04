@@ -73,10 +73,10 @@ increment its reference count. Rust tracks the view's lifetime so it cannot outl
 the value it borrows. A custom pair illustrates owning and borrowed access:
 
 ```rust
-use tvm_ffi::{def_object_ref, rs_class, Any, AnyView, Object};
+use tvm_ffi::{def_object_ref, rs_object, Any, AnyView, Object};
 use tvm_ffi::object::ObjectRef;
 
-#[rs_class("my.MyPair")]
+#[rs_object("my.MyPair")]
 pub struct MyPairObj {
     base: Object,
     pub first: i64,
@@ -333,7 +333,7 @@ reflected field names, must be unique in the type.
 
 ### Defining Object Types from Their Fields
 
-`#[rs_class]` defines such a type from its object struct, like Python's
+`#[rs_object]` defines such a type from its object struct, like Python's
 `py_class`. The first field, `base`, is the parent's object; every other field
 is reflected, and `#[reflect(...)]` sets its flags, name and doc string.
 `reflection = path` after the type key is `#[type_reflection(path)]`.
@@ -342,9 +342,9 @@ C++ `TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE` does:
 
 ```rust
 use tvm_ffi::object::ObjectRef;
-use tvm_ffi::{def_object_ref, rs_class, Object};
+use tvm_ffi::{def_object_ref, rs_object, Object};
 
-#[rs_class("my.Point", s_eq_hash_kind = "TreeNode")]
+#[rs_object("my.Point", s_eq_hash_kind = "TreeNode")]
 pub struct PointObj {
     base: Object,
     pub x: i64,
@@ -354,7 +354,7 @@ pub struct PointObj {
 
 def_object_ref!(pub Point, ObjectRef, PointObj);
 
-#[rs_class("my.Point3", final)]
+#[rs_object("my.Point3", final)]
 pub struct Point3Obj {
     base: PointObj,
     pub z: i64,
@@ -367,7 +367,7 @@ assert_eq!((point3.x, point3.z), (1, 3));
 let point: Point = point3.into();
 ```
 
-`#[rs_class]` adds `#[repr(C)]`, `Deref` to the parent's object and
+`#[rs_object]` adds `#[repr(C)]`, `Deref` to the parent's object and
 `Point3Obj::new`, which takes the parent's object, then the fields: a scalar
 (`bool`, an integer or a float) as its own type, so that a literal infers as it,
 and any other field from anything that converts into it, as the `new` of a type
@@ -388,7 +388,7 @@ dropping, the field getter reads them as None and the object's deleter skips
 them. An `init_off` field stays all-zero after `__ffi_init__`, so its type must
 take all-zero bytes as a value, as a scalar or `Option<T>` does; a reference or
 a string does not, and fails the type's registration. The parent's object must
-implement `ShallowCopy` and `UnsafeInit`, as `rs_class` types and non-final C++
+implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and non-final C++
 types bound by `tvm-ffi-stubgen` do.
 
 ### Converting Borrowed Values into `Any`

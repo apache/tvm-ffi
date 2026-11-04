@@ -26,16 +26,16 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, LitBool, LitInt, LitStr,
 use crate::object_macros::expand_object;
 use crate::utils::get_tvm_ffi_crate;
 
-pub(crate) fn rs_class(args: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(args as RsClassArgs);
+pub(crate) fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args as RsObjectArgs);
     let item = parse_macro_input!(item as DeriveInput);
     expand(&args, &item)
         .unwrap_or_else(|error| error.to_compile_error())
         .into()
 }
 
-/// `#[rs_class("type.key", final, ...)]`.
-struct RsClassArgs {
+/// `#[rs_object("type.key", final, ...)]`.
+struct RsObjectArgs {
     type_key: LitStr,
     type_final: bool,
     s_eq_hash_kind: Option<LitStr>,
@@ -45,15 +45,15 @@ struct RsClassArgs {
     tvm_ffi_crate: Option<Path>,
 }
 
-impl Parse for RsClassArgs {
+impl Parse for RsObjectArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let type_key = input.parse::<LitStr>().map_err(|error| {
             syn::Error::new(
                 error.span(),
-                "expected the type key first, as in `#[rs_class(\"my.Point\")]`",
+                "expected the type key first, as in `#[rs_object(\"my.Point\")]`",
             )
         })?;
-        let mut args = RsClassArgs {
+        let mut args = RsObjectArgs {
             type_key,
             type_final: false,
             s_eq_hash_kind: None,
@@ -110,17 +110,17 @@ impl Parse for RsClassArgs {
 const EXPECTED_BASE: &str =
     "the first field holds the parent's object: `base: Object` at the root, else `base: ParentObj`";
 
-fn expand(args: &RsClassArgs, item: &DeriveInput) -> syn::Result<TokenStream2> {
+fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> {
     if !item.generics.params.is_empty() || item.generics.where_clause.is_some() {
         return Err(syn::Error::new_spanned(
             &item.generics,
-            "an `rs_class` cannot be generic",
+            "an `rs_object` cannot be generic",
         ));
     }
     let Data::Struct(data) = &item.data else {
         return Err(syn::Error::new(
             item.ident.span(),
-            "`rs_class` expects a struct",
+            "`rs_object` expects a struct",
         ));
     };
     let fields: Vec<&syn::Field> = match &data.fields {
@@ -129,7 +129,7 @@ fn expand(args: &RsClassArgs, item: &DeriveInput) -> syn::Result<TokenStream2> {
         Fields::Unnamed(fields) => {
             return Err(syn::Error::new_spanned(
                 fields,
-                "`rs_class` expects named fields",
+                "`rs_object` expects named fields",
             ));
         }
     };

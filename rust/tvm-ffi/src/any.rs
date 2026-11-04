@@ -240,10 +240,10 @@ impl Any {
     /// reference count, and the returned reference cannot outlive `self`.
     ///
     /// ```
-    /// use tvm_ffi::{def_object_ref, rs_class, Any, AnyView, Object, ObjectRefCore};
+    /// use tvm_ffi::{def_object_ref, rs_object, Any, AnyView, Object, ObjectRefCore};
     /// use tvm_ffi::object::ObjectRef;
     ///
-    /// #[rs_class("my.MyPair", crate = tvm_ffi)]
+    /// #[rs_object("my.MyPair", crate = tvm_ffi)]
     /// pub struct MyPairObj {
     ///     base: Object,
     ///     pub first: i64,
