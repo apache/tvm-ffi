@@ -288,16 +288,39 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     }
 }
 
-/// Runtime-checked casting between arbitrary `ObjectRef` types.
+/// Runtime-checked casts between managed reference types, like C++
+/// `ObjectRef::as<T>`.
 ///
-/// The cast uses the target's [`AnyCompatible::check_any_strict`] implementation,
-/// mirroring the semantics of `ObjectRef::as<T>` in C++. This supports both
-/// object hierarchies and parameterized object containers.
-///
-/// This trait is blanket-implemented for every [`ObjectRefCore`] type that is
-/// also [`AnyCompatible`].
+/// Every managed reference implements this trait, so any reference can be
+/// cast to its parent, back to its own type, or to a parameterized container
+/// such as `Array<i64>`.
 pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
-    /// Consume `self` and rewrap the underlying object as `B` without copying.
+    /// Cast `self` to the reference type `B`, without copying the object.
+    ///
+    /// The cast succeeds when the object is an instance of `B`'s object type
+    /// and, for a container such as `Array<i64>`, when every element matches;
+    /// the check is the strict one of [`Any::try_as`](crate::Any::try_as).
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` naming both types when the object is not a `B`.
+    /// `self` is consumed either way; clone it first to keep it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::object::ObjectRef;
+    /// use tvm_ffi::{Array, ObjectRefCast, Shape};
+    ///
+    /// let array = Array::new(vec![1_i64, 2, 3]);
+    /// let object: ObjectRef = array.try_cast()?;
+    /// let array: Array<i64> = object.clone().try_cast()?;
+    /// assert_eq!(array.len(), 3);
+    ///
+    /// assert!(object.clone().try_cast::<Shape>().is_err());
+    /// assert!(object.try_cast::<Array<f64>>().is_err());
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     #[inline(always)]
     fn try_cast<B>(self) -> crate::error::Result<B>
     where

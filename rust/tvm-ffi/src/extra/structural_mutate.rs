@@ -342,10 +342,22 @@ impl<T: Into<Any>> IntoMutateResult for Result<T> {
     }
 }
 
-/// Permission to attempt in-place structural mutation along an owned path.
+/// Whether a [`MutationView`] may reuse its value's storage in place.
 ///
-/// `Allow` still requires unique ownership. A [`MutationView`] from an exclusive
-/// borrow of an owning `Any` may allow reuse; a shared borrow never grants it.
+/// `Allow` is an upper bound: a value is reused in place only when it is also
+/// uniquely owned. A view made from `&mut Any` starts as `Allow`, and a view
+/// from [`MutationView::borrowed`] is always `Disallow`.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{Any, AnyView, InplaceMode, MutationView};
+///
+/// let mut value = Any::from(1_i64);
+/// assert_eq!(MutationView::from(&mut value).inplace_mode(), InplaceMode::Allow);
+/// let view = MutationView::borrowed(AnyView::from(&value));
+/// assert_eq!(view.inplace_mode(), InplaceMode::Disallow);
+/// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum InplaceMode {
     /// Use ordinary mutation, including for uniquely owned values.
@@ -367,20 +379,59 @@ impl InplaceMode {
     }
 }
 
-/// A non-owning, move-only view carrying in-place permission.
+/// A borrowed value that a structural mutation may rewrite in place.
 ///
-/// This view cannot be copied or cloned. Consuming it transfers the same
-/// permission; narrowing its matched type does not acquire ownership.
+/// Mutation handlers receive a `MutationView` instead of an owned value, so
+/// that matching a node does not retain it. Inspect the node through the view,
+/// then pass the view to [`StructuralMutatorView::default_mutate`] to rewrite
+/// its children; when the node is uniquely owned and the view carries
+/// [`InplaceMode::Allow`], its storage is reused instead of copied.
 ///
-/// Unlike an owning typed argument, this handle does not increment the reference
-/// count. Borrow through it to inspect the node, then consume it in
-/// `default_mutate` to continue recursion. A surviving owning alias
-/// still forces copying. Node borrows come from this handle, not from the
-/// callback context, so the handle can safely be passed to another context.
-/// `T` selects the callback's matched FFI type; `Any` matches every value.
-/// The same handle is passed to consuming [`Dispatcher`] handlers. A publicly
-/// shared-borrow handle always disallows reuse. An exclusive `&mut Any` borrow
-/// grants permission to attempt reuse while keeping its owner borrowed.
+/// `T` is the matched type: `MutationView<'_, Array<Any>>` derefs to the
+/// array's node, and the default `MutationView<'_>` matches every value. The
+/// view is move-only: it cannot be copied or cloned, and consuming it passes
+/// on the same permission. Borrows taken through it end when it is consumed,
+/// which the compiler checks. A view made from `&mut Any` may reuse storage;
+/// one made with [`borrowed`](MutationView::borrowed) never does.
+///
+/// # Examples
+///
+/// Rewrite the integers in an array, reusing its storage when possible:
+///
+/// ```
+/// use tvm_ffi::{
+///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
+///     UnchangedOr,
+/// };
+///
+/// struct Negate;
+///
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
+/// impl Negate {
+///     fn mutate_array(
+///         &mut self,
+///         array: MutationView<'_, Array<Any>>,
+///         mutator: &mut StructuralMutatorView<'_, Self>,
+///     ) -> Result<UnchangedOr<Any>> {
+///         // The view derefs to the array node without retaining it.
+///         assert_eq!(array.size, 2);
+///         mutator.default_mutate(self, array)
+///     }
+///
+///     fn mutate_int(
+///         &mut self,
+///         value: i64,
+///         _: &mut StructuralMutatorView<'_, Self>,
+///     ) -> Result<UnchangedOr<Any>> {
+///         Ok((-value).into())
+///     }
+/// }
+///
+/// let result = structural_mutate(Array::new(vec![1_i64, 2]), Negate)?;
+/// let result = Array::<i64>::try_from(result)?;
+/// assert_eq!(result.iter().collect::<Vec<_>>(), vec![-1, -2]);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 ///
 /// A node borrowed through a copied view cannot survive consumption of the handle:
 /// ```compile_fail,E0505
@@ -448,7 +499,21 @@ impl<'a> MutationView<'a> {
         }
     }
 
-    /// Wrap a borrowed value without granting in-place permission.
+    /// Create a view of `value` that never reuses its storage.
+    ///
+    /// Use it to mutate a value that is only borrowed; the result is always a
+    /// new value or [`Unchanged`]. To allow reuse, make the
+    /// view from `&mut Any` instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{AnyView, InplaceMode, MutationView};
+    ///
+    /// let view = MutationView::borrowed(AnyView::from(&3_i64));
+    /// assert_eq!(view.inplace_mode(), InplaceMode::Disallow);
+    /// assert_eq!(view.as_any_view().try_as::<i64>(), Some(3));
+    /// ```
     #[inline(always)]
     pub fn borrowed(value: AnyView<'a>) -> Self {
         Self::new(value, InplaceMode::Disallow)
@@ -456,8 +521,10 @@ impl<'a> MutationView<'a> {
 }
 
 impl<'a> From<&'a mut Any> for MutationView<'a> {
-    /// Borrow an owner exclusively without acquiring a reference count.
-    /// Reuse still requires the runtime's uniqueness and alias checks.
+    /// Create a view of `value` that may reuse its storage, borrowing it
+    /// exclusively without retaining it.
+    ///
+    /// Storage is reused only when it is also uniquely owned.
     #[inline(always)]
     fn from(value: &'a mut Any) -> Self {
         Self::new(AnyView::from(&*value), InplaceMode::Allow)
@@ -478,13 +545,40 @@ impl<'a, T> MutationView<'a, T> {
         }
     }
 
-    /// Permission carried independently of temporary owning aliases.
+    /// Return whether this view may reuse its value's storage.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, InplaceMode, MutationView};
+    ///
+    /// let mut value = Any::from(1_i64);
+    /// let view = MutationView::from(&mut value);
+    /// assert_eq!(view.inplace_mode(), InplaceMode::Allow);
+    /// ```
     #[inline(always)]
     pub fn inplace_mode(&self) -> InplaceMode {
         self.mode
     }
 
-    /// Restrict permission without upgrading a shared-borrow capability.
+    /// Return the view with its permission lowered to `requested`.
+    ///
+    /// `Disallow` turns off reuse. `Allow` keeps the current mode: it never
+    /// grants reuse to a view that does not have it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, AnyView, InplaceMode, MutationView};
+    ///
+    /// let mut value = Any::from(1_i64);
+    /// let view = MutationView::from(&mut value).with_inplace_mode(InplaceMode::Disallow);
+    /// assert_eq!(view.inplace_mode(), InplaceMode::Disallow);
+    ///
+    /// let view = MutationView::borrowed(AnyView::from(&2_i64));
+    /// let view = view.with_inplace_mode(InplaceMode::Allow);
+    /// assert_eq!(view.inplace_mode(), InplaceMode::Disallow);
+    /// ```
     #[inline(always)]
     pub fn with_inplace_mode(mut self, requested: InplaceMode) -> Self {
         if requested == InplaceMode::Disallow {
@@ -493,8 +587,20 @@ impl<'a, T> MutationView<'a, T> {
         self
     }
 
-    /// Borrow the current value. The view and its copies borrow this handle,
-    /// so their last use must precede consuming it for default mutation.
+    /// Borrow the value as an [`AnyView`].
+    ///
+    /// The returned view, and its copies, borrow this `MutationView`, so their
+    /// last use must come before the `MutationView` is consumed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, MutationView};
+    ///
+    /// let mut value = Any::from(7_i64);
+    /// let view = MutationView::from(&mut value);
+    /// assert_eq!(view.as_any_view().try_as::<i64>(), Some(7));
+    /// ```
     #[inline(always)]
     pub fn as_any_view(&self) -> AnyView<'_> {
         // SAFETY: the input owner keeps this payload live while the capability is
@@ -502,8 +608,22 @@ impl<'a, T> MutationView<'a, T> {
         unsafe { AnyView::from_raw_ffi_any(self.value) }
     }
 
-    /// Borrow an object or subtype as `U` without changing ownership or permission.
-    /// The reference borrows this capability and cannot survive its consumption.
+    /// Borrow the object as `U` when its runtime type is `U` or a subtype.
+    ///
+    /// `U` is an object type such as `ArrayObj`. Non-object values and
+    /// unrelated types return `None`. The reference borrows this view and
+    /// ends when it is consumed; ownership and permission do not change.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::collections::array::ArrayObj;
+    /// use tvm_ffi::{Any, Array, MutationView};
+    ///
+    /// let mut value = Any::from(Array::new(vec![1_i64, 2, 3]));
+    /// let view = MutationView::from(&mut value);
+    /// assert_eq!(view.downcast_ref::<ArrayObj>().unwrap().size, 3);
+    /// ```
     #[inline(always)]
     pub fn downcast_ref<U: ObjectCore>(&self) -> Option<&U> {
         if self.value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -516,7 +636,26 @@ impl<'a, T> MutationView<'a, T> {
         Some(unsafe { &*self.value.data_union.v_obj.cast::<U>() })
     }
 
-    /// Narrow the matched type without acquiring an owning reference.
+    /// Narrow the view to the matched type `U`, keeping its permission.
+    ///
+    /// The check is the strict one of [`Any::try_as`]. Nothing is retained.
+    ///
+    /// # Errors
+    ///
+    /// Returns the view unchanged when the value is not a `U`, so another
+    /// type can be tried.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, Array, MutationView, Shape};
+    ///
+    /// let mut value = Any::from(Array::new(vec![1_i64, 2]));
+    /// let view = MutationView::from(&mut value);
+    /// let Err(view) = view.try_cast::<Shape>() else { unreachable!() };
+    /// let Ok(array) = view.try_cast::<Array<i64>>() else { unreachable!() };
+    /// assert_eq!(array.size, 2);
+    /// ```
     #[inline(always)]
     pub fn try_cast<U: crate::type_traits::ContainerElement>(
         self,
@@ -536,7 +675,18 @@ impl<'a, T> MutationView<'a, T> {
         }
     }
 
-    /// Erase the matched type while preserving the carried permission.
+    /// Erase the matched type, keeping the permission.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, Array, InplaceMode, MutationView};
+    ///
+    /// let mut value = Any::from(Array::new(vec![1_i64]));
+    /// let array = MutationView::from(&mut value).try_cast::<Array<i64>>().ok().unwrap();
+    /// let view: MutationView<'_> = array.into_untyped();
+    /// assert_eq!(view.inplace_mode(), InplaceMode::Allow);
+    /// ```
     #[inline(always)]
     pub fn into_untyped(self) -> MutationView<'a> {
         MutationView {
@@ -574,11 +724,37 @@ impl<T: object::ObjectRefCore> std::ops::Deref for MutationView<'_, T> {
 }
 
 impl<T: object::ObjectRefCore> MutationView<'_, T> {
-    /// Borrow a direct owning field while exclusively borrowing this capability.
-    /// Permission also requires the parent to remain unique after selection.
-    /// This does not grant writeback to the parent field.
+    /// Borrow the field of the node that `selector` returns as a view of its
+    /// own.
     ///
-    /// Panics if the selector returns storage outside the parent representation.
+    /// `selector` takes the node and returns a reference to one of its own
+    /// owning fields, an [`Any`] or a managed reference. The field view
+    /// borrows this view exclusively, and it may reuse storage only when this
+    /// view may and the node is uniquely owned. Mutating the field view does
+    /// not write the result back into the node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `selector` returns a reference outside the node.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::object::ObjectRef;
+    /// use tvm_ffi::{def_object_ref, rs_object, Any, Array, MutationView, Object};
+    ///
+    /// #[rs_object("my_ext.Bag", final)]
+    /// pub struct BagObj {
+    ///     base: Object,
+    ///     pub items: Array<i64>,
+    /// }
+    /// def_object_ref!(pub Bag, ObjectRef, BagObj);
+    ///
+    /// let mut value = Any::from(Bag::from(BagObj::new(Object::new(), Array::new(vec![1_i64, 2]))));
+    /// let mut bag = MutationView::from(&mut value).try_cast::<Bag>().ok().unwrap();
+    /// let items = bag.field(|node| &node.items);
+    /// assert_eq!(items.size, 2);
+    /// ```
     #[inline(always)]
     pub fn field<U: MutationField>(
         &mut self,
