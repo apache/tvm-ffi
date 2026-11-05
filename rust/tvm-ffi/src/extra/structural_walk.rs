@@ -45,14 +45,6 @@ pub enum WalkResult {
     InterruptWith(Any),
 }
 
-impl WalkResult {
-    /// Halt traversal with an FFI-compatible payload.
-    #[inline(always)]
-    pub fn interrupt_with<T: Into<Any>>(payload: T) -> Self {
-        Self::InterruptWith(payload.into())
-    }
-}
-
 /// Convert either an infallible or fallible typed handler result.
 ///
 /// This keeps simple handlers terse while allowing a handler to return
