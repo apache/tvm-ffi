@@ -192,7 +192,8 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes
-/// ownership with `.into()`, which clones only a borrowed reference.
+/// ownership with [`into_owned`](Self::into_owned), which clones only a
+/// borrowed reference.
 ///
 /// # Examples
 ///
@@ -216,7 +217,13 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 /// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, 2));
 /// let base: ObjectRef = pair.clone().into();
 /// assert!(same(&pair, &base)); // borrowed as `&ObjectRef`, no new reference
-/// assert!(same(pair, &base)); // moved into an `ObjectRef`
+/// assert!(same(pair.clone(), &base)); // moved into an `ObjectRef`
+///
+/// // A function that keeps the value takes ownership.
+/// fn keep(value: impl IntoObjectRef<ObjectRef>) -> ObjectRef {
+///     value.into_owned()
+/// }
+/// assert!(keep(&pair).same_as(&base));
 /// ```
 pub trait IntoObjectRef<T> {
     /// `T` for an owned value, or `&T` for a borrowed one.
@@ -228,6 +235,20 @@ pub trait IntoObjectRef<T> {
     ///
     /// The owned or borrowed reference.
     fn into_object_ref(self) -> Self::Output;
+
+    /// Convert into an owned `T`, as [`Cow::into_owned`](std::borrow::Cow::into_owned)
+    /// does: an owned value moves, and only a borrowed reference is cloned.
+    ///
+    /// # Returns
+    ///
+    /// The owned reference.
+    #[inline(always)]
+    fn into_owned(self) -> T
+    where
+        Self: Sized,
+    {
+        self.into_object_ref().into()
+    }
 }
 
 /// An owning, hashable identity key for an FFI object.
