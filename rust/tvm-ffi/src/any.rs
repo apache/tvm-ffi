@@ -22,7 +22,25 @@ use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyViewToOwnedAny};
 
-/// Unmanaged Any that can hold reference to values
+/// A borrowed, type-erased FFI value.
+///
+/// `AnyView` holds any FFI value, such as an integer, a string or an object,
+/// without owning it: it does not retain objects, and its lifetime `'a` keeps
+/// it from outliving the value it borrows. It is `Copy` and is the argument
+/// type of FFI calls. Convert it into an [`Any`] to own the value.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{Any, AnyView, Array};
+///
+/// let array = Array::new(vec![1_i64, 2, 3]);
+/// let view = AnyView::from(&array);
+/// assert_eq!(view.try_as::<Array<i64>>().unwrap().len(), 3);
+///
+/// let owned = Any::from(view);
+/// assert_eq!(owned.try_as::<Array<i64>>().unwrap().len(), 3);
+/// ```
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct AnyView<'a> {
@@ -31,7 +49,26 @@ pub struct AnyView<'a> {
     _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-/// Managed Any that can hold reference to values
+/// An owned, type-erased FFI value.
+///
+/// `Any` holds any FFI value, such as an integer, a string or an object, and
+/// owns it: cloning an `Any` that holds an object retains the object, and
+/// dropping it releases the object. Any [`AnyCompatible`] value converts into
+/// it with `From`; [`try_as`](Self::try_as) and [`match_any!`](crate::match_any)
+/// read it back. Borrow it as an [`AnyView`] to pass it without retaining.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::Any;
+///
+/// let value = Any::from(42_i64);
+/// assert_eq!(value.try_as::<i64>(), Some(42));
+/// assert_eq!(value.try_as::<tvm_ffi::String>(), None);
+///
+/// let text = Any::from(tvm_ffi::String::from("hello"));
+/// assert_eq!(text.try_as::<tvm_ffi::String>().unwrap().as_str(), "hello");
+/// ```
 #[repr(C)]
 pub struct Any {
     data: TVMFFIAny,
@@ -41,6 +78,17 @@ pub struct Any {
 // AnyView
 //---------------------
 impl<'a> AnyView<'a> {
+    /// Create a view of `None`, the empty FFI value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{AnyView, TypeIndex};
+    ///
+    /// let view = AnyView::new();
+    /// assert_eq!(view.type_index(), TypeIndex::kTVMFFINone as i32);
+    /// assert_eq!(view.try_as::<i64>(), None);
+    /// ```
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny::new(),
@@ -74,6 +122,19 @@ impl<'a> AnyView<'a> {
         unsafe { Self::from_raw_ffi_any(data) }
     }
 
+    /// Return the runtime type index of the viewed value.
+    ///
+    /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
+    /// non-object types; the others are object types.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{AnyView, TypeIndex};
+    ///
+    /// assert_eq!(AnyView::from(&1_i64).type_index(), TypeIndex::kTVMFFIInt as i32);
+    /// assert_eq!(AnyView::from(&1.5_f64).type_index(), TypeIndex::kTVMFFIFloat as i32);
+    /// ```
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
@@ -124,14 +185,27 @@ impl<'a> AnyView<'a> {
         Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
     }
 
-    /// More strict version than try_from/try_into
+    /// Return the viewed value as a `T` when it is stored as exactly `T`.
     ///
-    /// This function will not try to cast the type
-    /// and ensures invariance that the return value is only Some(T)
-    /// Any::from(T) contains exactly the same value value
+    /// The check is strict and never converts: a stored integer is not
+    /// returned as `f64`, and an object is returned only as a reference type
+    /// it is an instance of. On success, `Any::from` of the result holds the
+    /// same value. A returned object reference is retained; use
+    /// [`downcast_ref`](Self::downcast_ref) to borrow the object instead.
     ///
-    /// will return Some(T) if the type is exactly compatible with T
-    /// will return None if the type is not compatible with T
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{AnyView, Shape};
+    ///
+    /// let shape = Shape::from([2_i64, 3]);
+    /// let view = AnyView::from(&shape);
+    /// assert_eq!(view.try_as::<Shape>().unwrap().len(), 2);
+    /// assert_eq!(view.try_as::<i64>(), None);
+    ///
+    /// assert_eq!(AnyView::from(&7_i64).try_as::<i64>(), Some(7));
+    /// assert_eq!(AnyView::from(&7_i64).try_as::<f64>(), None);
+    /// ```
     #[inline(always)]
     pub fn try_as<T>(&self) -> Option<T>
     where
@@ -220,16 +294,42 @@ impl<T> TryFromTemp<T> {
 // Any
 //---------------------
 impl Any {
+    /// Create an `Any` holding `None`, the empty FFI value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, TypeIndex};
+    ///
+    /// let value = Any::new();
+    /// assert_eq!(value.type_index(), TypeIndex::kTVMFFINone as i32);
+    /// ```
     #[inline(always)]
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny::new(),
         }
     }
+
+    /// Return the runtime type index of the stored value.
+    ///
+    /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
+    /// non-object types; the others are object types.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, TypeIndex};
+    ///
+    /// assert_eq!(Any::from(true).type_index(), TypeIndex::kTVMFFIBool as i32);
+    /// let text = Any::from(tvm_ffi::String::from("hi"));
+    /// assert!(text.type_index() != TypeIndex::kTVMFFIInt as i32);
+    /// ```
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
     }
+
     #[inline(always)]
     pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
@@ -272,18 +372,30 @@ impl Any {
         Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
     }
 
-    /// Try to query if stored typed in Any exactly matches the type T
+    /// Return the stored value as a `T` when it is stored as exactly `T`.
     ///
-    /// This function is fast in the case of failure and can be used to check
-    /// if the type is compatible with T
+    /// The check is strict and never converts: a stored integer is not
+    /// returned as `f64`, and an object is returned only as a reference type
+    /// it is an instance of. On success, `Any::from` of the result holds the
+    /// same value. A failed check is cheap, so `try_as` also serves as a type
+    /// test. A returned object reference is retained; use
+    /// [`downcast_ref`](Self::downcast_ref) to borrow the object instead, or
+    /// [`match_any!`](crate::match_any) to test several types in turn.
     ///
-    /// This function will not try to cast the type
-    /// and ensures invariance that the return value is only Some(T)
-    /// `Any::from(T)` contains exactly the same value value
-    /// `Any::try_as<T>()` contains exactly the same value value
+    /// # Examples
     ///
-    /// will return Some(T) if the type is exactly compatible with T
-    /// will return None if the type is not compatible with T
+    /// ```
+    /// use tvm_ffi::{Any, Array};
+    ///
+    /// let value = Any::from(7_i64);
+    /// assert_eq!(value.try_as::<i64>(), Some(7));
+    /// assert_eq!(value.try_as::<f64>(), None);
+    /// assert_eq!(value.try_as::<bool>(), None);
+    ///
+    /// let array = Any::from(Array::new(vec![1_i64, 2]));
+    /// assert_eq!(array.try_as::<Array<i64>>().unwrap().len(), 2);
+    /// assert!(array.try_as::<tvm_ffi::String>().is_none());
+    /// ```
     #[inline]
     pub fn try_as<T>(&self) -> Option<T>
     where

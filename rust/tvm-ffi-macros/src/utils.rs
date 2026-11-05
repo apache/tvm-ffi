@@ -18,15 +18,13 @@
  */
 use proc_macro2::TokenStream;
 use quote::quote;
-use std::env;
 
 /// Return the path used to reference the `tvm-ffi` crate in generated code.
+///
+/// tvm-ffi declares `extern crate self as tvm_ffi`, so the same path works in
+/// the crate itself, in its doctests and in dependent crates.
 pub(crate) fn get_tvm_ffi_crate() -> TokenStream {
-    if env::var("CARGO_CRATE_NAME").as_deref() == Ok("tvm_ffi") {
-        quote!(crate)
-    } else {
-        quote!(::tvm_ffi)
-    }
+    quote!(::tvm_ffi)
 }
 
 /// Get an attribute by name from a derive input
