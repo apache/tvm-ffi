@@ -184,6 +184,73 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     }
 }
 
+/// A value that converts into the object reference `T`, owned or borrowed.
+///
+/// An owned reference converts into an owned `T`, and a borrowed one borrows
+/// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
+/// `Vec` but borrows from a `&Vec`. [`impl_object_upcast!`](crate::impl_object_upcast)
+/// implements it for each derived reference and its reference into the base,
+/// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
+/// the value borrows the output with `.borrow()`; one that keeps it takes
+/// ownership with [`into_owned_object_ref`](Self::into_owned_object_ref), which clones only a
+/// borrowed reference.
+///
+/// # Examples
+///
+/// ```
+/// use std::borrow::Borrow;
+/// use tvm_ffi::object::{IntoObjectRef, ObjectRef, ObjectRefCore};
+/// use tvm_ffi::{def_object_ref, rs_object, Object};
+///
+/// #[rs_object("my_ext.MyPair", final)]
+/// pub struct MyPairObj {
+///     base: Object,
+///     pub first: i64,
+///     pub second: i64,
+/// }
+/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+///
+/// fn same(a: impl IntoObjectRef<ObjectRef>, b: &ObjectRef) -> bool {
+///     a.into_object_ref().borrow().same_as(b)
+/// }
+///
+/// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, 2));
+/// let base: ObjectRef = pair.clone().into();
+/// assert!(same(&pair, &base)); // borrowed as `&ObjectRef`, no new reference
+/// assert!(same(pair.clone(), &base)); // moved into an `ObjectRef`
+///
+/// // A function that keeps the value takes ownership.
+/// fn keep(value: impl IntoObjectRef<ObjectRef>) -> ObjectRef {
+///     value.into_owned_object_ref()
+/// }
+/// assert!(keep(&pair).same_as(&base));
+/// ```
+pub trait IntoObjectRef<T> {
+    /// `T` for an owned value, or `&T` for a borrowed one.
+    type Output: std::borrow::Borrow<T> + Into<T>;
+
+    /// Convert into the reference `T`.
+    ///
+    /// # Returns
+    ///
+    /// The owned or borrowed reference.
+    fn into_object_ref(self) -> Self::Output;
+
+    /// Convert into an owned `T`, as [`Cow::into_owned`](std::borrow::Cow::into_owned)
+    /// does: an owned value moves, and only a borrowed reference is cloned.
+    ///
+    /// # Returns
+    ///
+    /// The owned reference.
+    #[inline(always)]
+    fn into_owned_object_ref(self) -> T
+    where
+        Self: Sized,
+    {
+        self.into_object_ref().into()
+    }
+}
+
 /// An owning, hashable identity key for an FFI object.
 ///
 /// The retained strong reference prevents the allocation address from being

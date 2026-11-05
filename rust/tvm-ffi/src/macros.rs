@@ -62,8 +62,9 @@ macro_rules! cached_global_func {
 
 /// Implement zero-copy conversions from a derived object reference to one of
 /// its base object-reference types: `From<Source>` and `From<&Source>` into
-/// `Target`, and `AsRef<Target>`, which borrows a `&Source` as `&Target`
-/// without touching the reference count.
+/// `Target`, `AsRef<Target>`, which borrows a `&Source` as `&Target`
+/// without touching the reference count, and
+/// [`IntoObjectRef<Target>`](crate::object::IntoObjectRef) for `Source` and `&Source`.
 ///
 /// # Safety
 ///
@@ -100,6 +101,22 @@ macro_rules! impl_object_upcast {
                 #[inline]
                 fn from(value: &$source) -> Self {
                     value.clone().into()
+                }
+            }
+
+            impl $crate::object::IntoObjectRef<$target> for $source {
+                type Output = $target;
+                #[inline(always)]
+                fn into_object_ref(self) -> $target {
+                    ::core::convert::Into::into(self)
+                }
+            }
+
+            impl<'a> $crate::object::IntoObjectRef<$target> for &'a $source {
+                type Output = &'a $target;
+                #[inline(always)]
+                fn into_object_ref(self) -> &'a $target {
+                    ::core::convert::AsRef::<$target>::as_ref(self)
                 }
             }
 

@@ -601,6 +601,22 @@ pub(crate) fn expand_object_ref(
             }
         }
 
+        impl #tvm_ffi_crate::object::IntoObjectRef<#struct_name> for #struct_name {
+            type Output = Self;
+            #[inline(always)]
+            fn into_object_ref(self) -> Self {
+                self
+            }
+        }
+
+        impl<'a> #tvm_ffi_crate::object::IntoObjectRef<#struct_name> for &'a #struct_name {
+            type Output = &'a #struct_name;
+            #[inline(always)]
+            fn into_object_ref(self) -> &'a #struct_name {
+                self
+            }
+        }
+
         impl ::std::convert::From<&#struct_name> for #struct_name {
             #[inline]
             fn from(value: &#struct_name) -> Self {
