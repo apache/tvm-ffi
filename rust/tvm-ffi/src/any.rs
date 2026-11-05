@@ -22,7 +22,25 @@ use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyViewToOwnedAny};
 
-/// Unmanaged Any that can hold reference to values
+/// A borrowed, type-erased FFI value.
+///
+/// `AnyView` holds any FFI value, such as an integer, a string or an object,
+/// without owning it: it does not retain objects, and its lifetime `'a` keeps
+/// it from outliving the value it borrows. It is `Copy` and is the argument
+/// type of FFI calls. Convert it into an [`Any`] to own the value.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{Any, AnyView, Array};
+///
+/// let array = Array::new(vec![1_i64, 2, 3]);
+/// let view = AnyView::from(&array);
+/// assert_eq!(view.try_as::<Array<i64>>().unwrap().len(), 3);
+///
+/// let owned = Any::from(view);
+/// assert_eq!(owned.try_as::<Array<i64>>().unwrap().len(), 3);
+/// ```
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct AnyView<'a> {
@@ -31,7 +49,26 @@ pub struct AnyView<'a> {
     _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-/// Managed Any that can hold reference to values
+/// An owned, type-erased FFI value.
+///
+/// `Any` holds any FFI value, such as an integer, a string or an object, and
+/// owns it: cloning an `Any` that holds an object retains the object, and
+/// dropping it releases the object. Any [`AnyCompatible`] value converts into
+/// it with `From`; [`try_as`](Self::try_as) and [`match_any!`](crate::match_any)
+/// read it back. Borrow it as an [`AnyView`] to pass it without retaining.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::Any;
+///
+/// let value = Any::from(42_i64);
+/// assert_eq!(value.try_as::<i64>(), Some(42));
+/// assert_eq!(value.try_as::<tvm_ffi::String>(), None);
+///
+/// let text = Any::from(tvm_ffi::String::from("hello"));
+/// assert_eq!(text.try_as::<tvm_ffi::String>().unwrap().as_str(), "hello");
+/// ```
 #[repr(C)]
 pub struct Any {
     data: TVMFFIAny,
@@ -41,6 +78,11 @@ pub struct Any {
 // AnyView
 //---------------------
 impl<'a> AnyView<'a> {
+    /// Create a view of `None`, the empty FFI value.
+    ///
+    /// # Returns
+    ///
+    /// A view holding `None`.
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny::new(),
@@ -74,6 +116,14 @@ impl<'a> AnyView<'a> {
         unsafe { Self::from_raw_ffi_any(data) }
     }
 
+    /// Return the runtime type index of the viewed value.
+    ///
+    /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
+    /// non-object types; the others are object types.
+    ///
+    /// # Returns
+    ///
+    /// The type index.
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
@@ -108,10 +158,16 @@ impl<'a> AnyView<'a> {
 
     /// Borrow the viewed object as `T` when its runtime type is `T` or a subtype.
     ///
-    /// `T` is an object representation type such as `MyPairObj`. Non-object
-    /// values and unrelated object types return `None`. This does not change
-    /// the object's reference count; the borrow cannot outlive this view or
-    /// the owner it borrows. See [`Any::downcast_ref`] for an example.
+    /// `T` is an object representation type such as `ArrayObj`. Non-object values
+    /// and unrelated object types return `None`. This does not change the object's
+    /// reference count; the borrow cannot outlive this view or the owner it
+    /// borrows.
+    ///
+    /// # Returns
+    ///
+    /// The borrowed object, or `None`.
+    ///
+    /// See also [`Any::downcast_ref`].
     #[inline(always)]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
         if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -124,14 +180,23 @@ impl<'a> AnyView<'a> {
         Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
     }
 
-    /// More strict version than try_from/try_into
+    /// Return the viewed value as a `T` when it is stored as exactly `T`.
     ///
-    /// This function will not try to cast the type
-    /// and ensures invariance that the return value is only Some(T)
-    /// Any::from(T) contains exactly the same value value
+    /// The check is strict and never converts: a stored integer is not returned as
+    /// `f64`, and an object is returned only as a reference type it is an instance
+    /// of. On success, `Any::from` of the result holds the same value.
     ///
-    /// will return Some(T) if the type is exactly compatible with T
-    /// will return None if the type is not compatible with T
+    /// # Returns
+    ///
+    /// The value, or `None` when it is not stored as `T`.
+    ///
+    /// ```
+    /// use tvm_ffi::AnyView;
+    /// assert_eq!(AnyView::from(&7_i64).try_as::<i64>(), Some(7));
+    /// assert_eq!(AnyView::from(&7_i64).try_as::<f64>(), None);
+    /// ```
+    ///
+    /// See also [`Any::try_as`].
     #[inline(always)]
     pub fn try_as<T>(&self) -> Option<T>
     where
@@ -220,46 +285,53 @@ impl<T> TryFromTemp<T> {
 // Any
 //---------------------
 impl Any {
+    /// Create an `Any` holding `None`, the empty FFI value.
+    ///
+    /// # Returns
+    ///
+    /// An `Any` holding `None`.
     #[inline(always)]
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny::new(),
         }
     }
+
+    /// Return the runtime type index of the stored value.
+    ///
+    /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
+    /// non-object types; the others are object types.
+    ///
+    /// # Returns
+    ///
+    /// The type index.
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
     }
+
     #[inline(always)]
     pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
     /// Borrow the stored object as `T` when its runtime type is `T` or a subtype.
     ///
-    /// `T` is an object representation type such as `FooObj`, rather than its
-    /// managed reference `Foo`. Non-object values and unrelated object types
+    /// `T` is an object representation type such as `ArrayObj`, rather than its
+    /// managed reference `Array`. Non-object values and unrelated object types
     /// return `None`. This neither consumes `self` nor changes the object's
     /// reference count, and the returned reference cannot outlive `self`.
     ///
-    /// ```
-    /// use tvm_ffi::{def_object_ref, rs_object, Any, AnyView, Object, ObjectRefCore};
-    /// use tvm_ffi::object::ObjectRef;
+    /// # Returns
     ///
-    /// #[rs_object("my.MyPair", crate = tvm_ffi)]
-    /// pub struct MyPairObj {
-    ///     base: Object,
-    ///     pub first: i64,
-    ///     pub second: i64,
-    /// }
-    /// def_object_ref!(pub MyPair, ObjectRef, MyPairObj, crate = tvm_ffi);
+    /// The borrowed object, or `None`.
     ///
-    /// let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
-    /// assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);
-    /// let value = Any::from(pair);
-    /// assert_eq!(value.downcast_ref::<MyPairObj>().unwrap().second, 4);
-    /// let view = AnyView::from(&value);
-    /// assert_eq!(view.downcast_ref::<MyPairObj>().unwrap().first, 3);
     /// ```
+    /// use tvm_ffi::{collections::array::ArrayObj, Any, Array};
+    /// let value = Any::from(Array::new(vec![1_i64, 2]));
+    /// assert_eq!(value.downcast_ref::<ArrayObj>().unwrap().size, 2);
+    /// ```
+    ///
+    /// See also [`try_as`](Self::try_as).
     #[inline]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
         if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -272,18 +344,27 @@ impl Any {
         Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
     }
 
-    /// Try to query if stored typed in Any exactly matches the type T
+    /// Return the stored value as a `T` when it is stored as exactly `T`.
     ///
-    /// This function is fast in the case of failure and can be used to check
-    /// if the type is compatible with T
+    /// The check is strict and never converts: a stored integer is not returned as
+    /// `f64`, and an object is returned only as a reference type it is an instance
+    /// of. On success, `Any::from` of the result holds the same value. A failed
+    /// check is cheap, so `try_as` also serves as a type test. A returned object
+    /// reference is retained; use [`downcast_ref`](Self::downcast_ref) to borrow the
+    /// object instead.
     ///
-    /// This function will not try to cast the type
-    /// and ensures invariance that the return value is only Some(T)
-    /// `Any::from(T)` contains exactly the same value value
-    /// `Any::try_as<T>()` contains exactly the same value value
+    /// # Returns
     ///
-    /// will return Some(T) if the type is exactly compatible with T
-    /// will return None if the type is not compatible with T
+    /// The value, or `None` when it is not stored as `T`.
+    ///
+    /// ```
+    /// use tvm_ffi::Any;
+    /// let value = Any::from(7_i64);
+    /// assert_eq!(value.try_as::<i64>(), Some(7));
+    /// assert_eq!(value.try_as::<f64>(), None);
+    /// ```
+    ///
+    /// See also [`match_any!`](crate::match_any).
     #[inline]
     pub fn try_as<T>(&self) -> Option<T>
     where

@@ -287,7 +287,16 @@ crate::def_object_ref! {
 }
 
 impl VisitInterrupt {
-    /// Interrupt carrying an FFI-compatible payload.
+    /// Create an interrupt carrying an FFI-compatible payload back to the caller of
+    /// the visit.
+    ///
+    /// # Arguments
+    ///
+    /// * `payload` - The payload, such as the value that was found.
+    ///
+    /// # Returns
+    ///
+    /// The interrupt.
     #[inline(always)]
     pub fn with<T: Into<Any>>(payload: T) -> Self {
         VisitInterruptObj {
@@ -306,9 +315,16 @@ impl VisitInterrupt {
 // continue; VisitInterrupt (including None/Error payloads) and Error stop descent.
 // Each ABI ingress/import and egress/export transfers ownership exactly once.
 // Recursive drivers move this carrier unchanged; typed public APIs decode it.
-/// Recursive visiting and default child descent for a dispatcher.
+/// The running structural visit, passed to each handler.
 ///
-/// Pass the handler's `self` to visit methods to recurse with the same state.
+/// A handler that matches a node decides which children are visited: call
+/// [`default_visit`](Self::default_visit) to visit every child,
+/// [`visit`](Self::visit) to visit one value, or neither to skip the children.
+/// Pass the handler's own `self` as `dispatch` to every method. A handler
+/// returns `Ok(None)` to continue, or `Ok(Some(interrupt))` to stop the whole
+/// visit with a [`VisitInterrupt`].
+///
+/// See also [`structural_visit`].
 pub struct StructuralVisitorView<'a, D, Base = StructuralVisitorObj> {
     runtime: StructuralVisitorHandle,
     _scope: PhantomData<(&'a mut (), fn(&mut D) -> Base, Rc<()>)>,
@@ -318,6 +334,10 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
     /// Inspect the base state without retaining the scoped visitor runtime.
     ///
     /// The reference cannot outlive its view:
+    ///
+    /// # Returns
+    ///
+    /// The base state, borrowed for the lifetime of this view.
     ///
     /// ```compile_fail
     /// use tvm_ffi::{StructuralVisitorObj, StructuralVisitorView};
@@ -341,14 +361,33 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
         unsafe { &*self.runtime.cast::<Base>() }
     }
 
+    /// Return the definition region the current value is in.
+    ///
+    /// Reflected fields marked as definitions set it while their values are
+    /// visited; it is [`DefRegionKind::None`] elsewhere.
+    ///
+    /// # Returns
+    ///
+    /// The current definition region.
     #[inline(always)]
     pub fn def_region_kind(&self) -> DefRegionKind {
         // SAFETY: engine scopes and trusted ABI hooks store valid enum values.
         unsafe { std::mem::transmute(*(*self.runtime).def_region_mode.get()) }
     }
 
-    /// Run operations under a scoped definition region.
-    /// An enclosing Pattern wins; the previous region is restored on all exits.
+    /// Run `callback` under a scoped definition region.
+    ///
+    /// An enclosing [`DefRegionKind::Pattern`] region keeps precedence; the
+    /// previous region is restored on all exits.
+    ///
+    /// # Arguments
+    ///
+    /// * `kind` - The definition region to enter.
+    /// * `callback` - Runs inside the region, with this view.
+    ///
+    /// # Returns
+    ///
+    /// The result of `callback`.
     #[inline(always)]
     pub fn with_def_region_kind<R>(
         &mut self,
@@ -358,7 +397,20 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
         StructuralVisitorObj::with_def_region_kind(self.runtime, kind, || callback(self))
     }
 
-    /// Visit a value through the dispatcher.
+    /// Visit `value` through the dispatcher, as if the traversal had reached it.
+    ///
+    /// # Arguments
+    ///
+    /// * `dispatch` - The handler's own `self`.
+    /// * `value` - The value to visit.
+    ///
+    /// # Returns
+    ///
+    /// `None` to continue, or the interrupt that stopped the visit.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the handler that `value` reaches.
     #[inline(always)]
     pub fn visit<'input, T>(&mut self, dispatch: &mut D, value: T) -> Result<Option<VisitInterrupt>>
     where
@@ -378,8 +430,24 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
         }
     }
 
-    /// Run default descent through registered hooks or reflected fields.
-    /// Children re-enter the dispatcher; the current value does not.
+    /// Visit the children of `value` through the dispatcher, without dispatching
+    /// `value` itself again.
+    ///
+    /// Children are found by the type's registered visit hook or its reflected
+    /// fields. The visit stops at the first child that returns an interrupt.
+    ///
+    /// # Arguments
+    ///
+    /// * `dispatch` - The handler's own `self`.
+    /// * `value` - The value whose children to visit.
+    ///
+    /// # Returns
+    ///
+    /// `None` to continue, or the interrupt that stopped the visit.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error of a child's handler.
     #[inline(always)]
     pub fn default_visit<'input, T>(
         &self,
@@ -1148,7 +1216,6 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
 /// Sum integer leaves while default traversal descends into the array:
 ///
 /// ```
-/// # pub use tvm_ffi::{extra, match_any, match_any_internal, Dispatcher};
 /// # fn main() -> tvm_ffi::Result<()> {
 /// use tvm_ffi::{
 ///     dispatch, structural_visit, AnyView, Array, Result, StructuralVisitorView,

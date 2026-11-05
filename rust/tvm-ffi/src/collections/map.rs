@@ -96,8 +96,24 @@ pub struct MapObj {
     pub slots: u64,
 }
 
-/// Immutable, reference-counted map from `K` to `V`, sharing its underlying
-/// `MapObj` with C++. Cloning is cheap (it bumps the refcount).
+/// An immutable, reference-counted map from `K` to `V`, shared with C++ and
+/// Python as `ffi.Map`.
+///
+/// Cloning a `Map` is cheap: it shares the same entries.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{Map, String};
+///
+/// let map: Map<String, i64> = [(String::from("a"), 1), (String::from("b"), 2)]
+///     .into_iter()
+///     .collect();
+/// assert_eq!(map.len(), 2);
+/// assert_eq!(map.get(&String::from("b"))?, Some(2));
+/// assert_eq!(map.get(&String::from("c"))?, None);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 #[repr(C)]
 pub struct Map<K, V> {
     data: ObjectArc<MapObj>,

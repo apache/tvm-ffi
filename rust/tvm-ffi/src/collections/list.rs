@@ -120,9 +120,24 @@ fn type_error<T: ContainerElement>(index: usize) -> Result<T> {
     )
 }
 
-/// Mutable, reference-counted sequence of `T`, sharing its underlying
-/// `ListObj` with C++. Cloning is cheap (it bumps the refcount) and yields a
-/// handle to the same list.
+/// A mutable, reference-counted sequence of `T`, shared with C++ and Python
+/// as `ffi.List`.
+///
+/// Cloning a `List` is cheap and yields a handle to the same list, so a change
+/// through one handle is seen through every other. Methods take `&self`.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::List;
+///
+/// let list = List::<i64>::new();
+/// list.push(1)?;
+/// list.push(2)?;
+/// assert_eq!(list.get(1)?, 2);
+/// assert_eq!(list.len(), 2);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 #[repr(C)]
 pub struct List<T> {
     data: ObjectArc<ListObj>,

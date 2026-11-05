@@ -87,7 +87,20 @@ pub struct TensorObj {
     dltensor: DLTensor,
 }
 
-/// ABI stable owned Shape for ffi
+/// A reference-counted n-dimensional array, shared with C++ and Python and
+/// exchanged with other frameworks through DLPack.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::Tensor;
+///
+/// let tensor = Tensor::from_slice(&[1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3])?;
+/// assert_eq!(tensor.shape(), &[2, 3]);
+/// assert_eq!(tensor.numel(), 6);
+/// assert_eq!(tensor.data_as_slice::<f32>()?[4], 5.0);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
 pub struct Tensor {

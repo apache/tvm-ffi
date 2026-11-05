@@ -29,7 +29,17 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIByteArray, TVMFFIObject};
 //-----------------------------------------------------
 // Bytes
 //-----------------------------------------------------
-/// ABI stable Bytes container for ffi
+/// An immutable byte string, shared with C++ as `ffi.Bytes` and with Python
+/// as `bytes`.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::Bytes;
+///
+/// let bytes = Bytes::from(&b"abc"[..]);
+/// assert_eq!(bytes.as_slice(), b"abc");
+/// ```
 #[repr(C)]
 pub struct Bytes {
     data: TVMFFIAny,
@@ -224,7 +234,22 @@ impl Debug for Bytes {
 // String
 //-----------------------------------------------------
 
-/// ABI stable String container for ffi
+/// An immutable UTF-8 string, shared with C++ as `ffi.String` and with
+/// Python as `str`.
+///
+/// Short strings are stored inline in an [`Any`](crate::Any) without an
+/// allocation.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::String;
+///
+/// let text = String::from("hello");
+/// assert_eq!(text.as_str(), "hello");
+/// assert_eq!(text.len(), 5);
+/// assert_eq!(text, "hello");
+/// ```
 #[repr(C)]
 pub struct String {
     data: TVMFFIAny,

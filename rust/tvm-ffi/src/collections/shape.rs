@@ -36,7 +36,18 @@ pub struct ShapeObj {
     data: TVMFFIShapeCell,
 }
 
-/// ABI stable owned Shape for ffi
+/// An immutable sequence of `i64` dimensions, shared with C++ as
+/// `ffi.Shape`.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::Shape;
+///
+/// let shape = Shape::from([2_i64, 3]);
+/// assert_eq!(shape.as_slice(), &[2, 3]);
+/// assert_eq!(shape.len(), 2);
+/// ```
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
 pub struct Shape {

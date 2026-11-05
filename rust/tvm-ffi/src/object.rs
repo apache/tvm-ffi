@@ -288,16 +288,28 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     }
 }
 
-/// Runtime-checked casting between arbitrary `ObjectRef` types.
+/// Runtime-checked casts between managed reference types, like C++
+/// `ObjectRef::as<T>`.
 ///
-/// The cast uses the target's [`AnyCompatible::check_any_strict`] implementation,
-/// mirroring the semantics of `ObjectRef::as<T>` in C++. This supports both
-/// object hierarchies and parameterized object containers.
-///
-/// This trait is blanket-implemented for every [`ObjectRefCore`] type that is
-/// also [`AnyCompatible`].
+/// Every managed reference implements this trait, so any reference can be
+/// cast to its parent, back to its own type, or to a parameterized container
+/// such as `Array<i64>`.
 pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
-    /// Consume `self` and rewrap the underlying object as `B` without copying.
+    /// Cast `self` to the reference type `B`, without copying the object.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` when the object is not a `B`.
+    ///
+    /// ```
+    /// use tvm_ffi::{object::ObjectRef, Array, ObjectRefCast};
+    /// let object: ObjectRef = Array::new(vec![1_i64]).try_cast()?;
+    /// let array: Array<i64> = object.try_cast()?;
+    /// assert_eq!(array.len(), 1);
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    ///
+    /// See also [`Any::try_as`](crate::Any::try_as).
     #[inline(always)]
     fn try_cast<B>(self) -> crate::error::Result<B>
     where
