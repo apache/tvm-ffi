@@ -25,11 +25,16 @@ use tvm_ffi_sys::{
     TVMFFIErrorMoveFromRaised, TVMFFIErrorSetRaised, TVMFFIObjectHandle, TVMFFITypeIndex,
 };
 
-/// Error kind, wraps in a struct to be explicit
+/// The kind of an [`Error`], such as `ValueError`, matching the exception
+/// type that Python raises.
+///
+/// Use the constants such as [`VALUE_ERROR`] and [`TYPE_ERROR`], or
+/// `ErrorKind("MyError")` for a custom kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorKind<'a>(&'a str);
 
 impl<'a> ErrorKind<'a> {
+    /// Return the kind's name, such as `"ValueError"`.
     pub fn as_str(&self) -> &str {
         self.0
     }
@@ -61,21 +66,49 @@ pub struct ErrorObj {
     cell: TVMFFIErrorCell,
 }
 
-/// Error reference class
+/// An error that crosses the FFI boundary, with a kind, a message and a
+/// backtrace.
+///
+/// An `Error` raised in C++ or Python arrives in Rust as an `Err`, and one
+/// returned from a Rust [`Function`](crate::Function) is raised in the caller's
+/// language. Create one with [`bail!`](crate::bail) or
+/// [`ensure!`](crate::ensure), which also record the source location.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{bail, Result, VALUE_ERROR};
+///
+/// fn parse_digit(c: char) -> Result<u32> {
+///     match c.to_digit(10) {
+///         Some(digit) => Ok(digit),
+///         None => bail!(VALUE_ERROR, "not a digit: {:?}", c),
+///     }
+/// }
+///
+/// let error = parse_digit('x').unwrap_err();
+/// assert_eq!(error.kind(), VALUE_ERROR);
+/// assert_eq!(error.message(), "not a digit: 'x'");
+/// ```
 #[derive(Clone, ObjectRef)]
 pub struct Error {
     data: ObjectArc<ErrorObj>,
 }
 
-/// Default result that uses Error as the error type
+/// A `Result` whose error type defaults to [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl Error {
+    /// Create an error of the kind `kind` with `message` and the backtrace
+    /// `traceback`, which may be empty.
+    ///
+    /// Prefer [`bail!`](crate::bail), which fills in the source location.
     pub fn new(kind: ErrorKind<'_>, message: &str, traceback: &str) -> Self {
         Self::new_with_cause_and_extra_context(kind, message, traceback, None, None)
     }
 
-    /// Create an error retaining its cause and any application-specific context.
+    /// Create an error as [`new`](Self::new) does, with the error that caused
+    /// it and an object of application-specific context.
     pub fn new_with_cause_and_extra_context(
         kind: ErrorKind<'_>,
         message: &str,
@@ -106,10 +139,11 @@ impl Error {
         }
     }
 
-    /// Create a new error by moving from raised error
+    /// Take the error that the last failed FFI call raised on this thread.
     ///
-    /// # Returns
-    /// The error from the raised error
+    /// # Panics
+    ///
+    /// Panics if no error was raised.
     pub fn from_raised() -> Self {
         unsafe {
             let mut error_handle: TVMFFIObjectHandle = std::ptr::null_mut();
@@ -123,36 +157,24 @@ impl Error {
         }
     }
 
-    /// Set the error as raised
-    ///
-    /// # Arguments
-    /// * `error` - The error to set as raised
+    /// Raise `error` on this thread, for the caller of an FFI function to take.
     pub fn set_raised(error: &Self) {
         unsafe {
             TVMFFIErrorSetRaised(ObjectArc::as_raw(&error.data) as TVMFFIObjectHandle);
         }
     }
 
-    /// Get the kind of the error
-    ///
-    /// # Returns
-    /// The kind of the error
+    /// Return the kind of the error.
     pub fn kind(&self) -> ErrorKind<'_> {
         ErrorKind(&self.data.cell.kind.as_str())
     }
 
-    /// Get the message of the error
-    ///
-    /// # Returns
-    /// The message of the error
+    /// Return the message of the error.
     pub fn message(&self) -> &str {
         self.data.cell.message.as_str()
     }
 
-    /// Get the backtrace of the error
-    ///
-    /// # Returns
-    /// The backtrace of the error
+    /// Return the backtrace of the error, most recent call first.
     pub fn backtrace(&self) -> &str {
         self.data.cell.backtrace.as_str()
     }
@@ -186,10 +208,8 @@ impl Error {
         }
     }
 
-    /// Get the traceback of the error in the order of most recent call last
-    ///
-    /// # Returns
-    /// The traceback of the error
+    /// Return the backtrace of the error, most recent call last, as Python
+    /// prints it.
     pub fn traceback_most_recent_call_last(&self) -> String {
         let backtrace = self.backtrace();
         let backtrace_lines = backtrace.split('\n');
@@ -201,14 +221,10 @@ impl Error {
         traceback
     }
 
-    /// Append the backtrace to the error
+    /// Return `this` with `backtrace` appended to its backtrace.
     ///
-    /// # Arguments
-    /// * `this` - The error to append the backtrace to
-    /// * `backtrace` - The backtrace to append
-    ///
-    /// # Returns
-    /// The error with the appended backtrace
+    /// [`attach_context!`](crate::attach_context) appends the current source
+    /// location this way.
     pub fn with_appended_backtrace(this: Self, backtrace: &str) -> Self {
         if ObjectArc::strong_count(&this.data) == 1 {
             // this is the only reference to the error

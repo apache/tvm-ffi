@@ -38,7 +38,24 @@ pub struct FunctionObj {
     cell: TVMFFIFunctionCell,
 }
 
-/// Error reference class
+/// A type-erased callable that works across languages.
+///
+/// A `Function` takes [`AnyView`] arguments and returns an [`Any`]. Make one
+/// from a Rust closure with [`from_typed`](Self::from_typed), look one up by
+/// name with [`get_global`](Self::get_global), and call it with
+/// [`call_tuple`](Self::call_tuple) or [`call_packed`](Self::call_packed).
+/// [`into_typed_fn!`](crate::into_typed_fn) turns it back into a typed closure.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{Function, Result};
+///
+/// let add = Function::from_typed(|x: i64, y: i64| -> Result<i64> { Ok(x + y) });
+/// let sum = i64::try_from(add.call_tuple((1_i64, 2_i64))?)?;
+/// assert_eq!(sum, 3);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 #[derive(Clone, ObjectRef)]
 pub struct Function {
     data: ObjectArc<FunctionObj>,
@@ -112,7 +129,17 @@ unsafe impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> ObjectCore for CallbackF
 }
 
 impl Function {
-    /// Call the function in packed format.
+    /// Call the function with the arguments `packed_args`.
+    ///
+    /// ```
+    /// use tvm_ffi::{AnyView, Function, Result};
+    /// let add = Function::from_typed(|x: i64, y: i64| -> Result<i64> { Ok(x + y) });
+    /// let result = add.call_packed(&[AnyView::from(&1_i64), AnyView::from(&2_i64)])?;
+    /// assert_eq!(result.try_as::<i64>(), Some(3));
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    ///
+    /// See also [`Function`].
     pub fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any> {
         unsafe {
             let packed_args_ptr = packed_args.as_ptr() as *const TVMFFIAny;
@@ -131,6 +158,18 @@ impl Function {
         }
     }
 
+    /// Call the function with the arguments in the tuple `tuple_args`; a reference
+    /// passes an object without retaining it.
+    ///
+    /// ```
+    /// use tvm_ffi::{Function, Result};
+    /// let add = Function::from_typed(|x: i64, y: i64| -> Result<i64> { Ok(x + y) });
+    /// let result = add.call_tuple((1_i64, 2_i64))?;
+    /// assert_eq!(result.try_as::<i64>(), Some(3));
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    ///
+    /// See also [`Function`].
     pub fn call_tuple<TupleType>(&self, tuple_args: TupleType) -> Result<Any>
     where
         TupleType: TupleAsPackedArgs,
@@ -161,15 +200,9 @@ impl Function {
         (&tuple_args).fill_any_view(packed_args);
         self.call_packed(packed_args)
     }
-    /// Call function with compile-time known argument count
-    /// This is an optimized version of call_tuple for when the argument count
-    /// is known at compile time, avoiding the small vector optimization overhead.
-    ///
-    /// # Arguments
-    /// * `tuple_args` - The tuple arguments
-    ///
-    /// # Returns
-    /// * `Any` - The result
+    /// Call the function with the `LEN` arguments in `tuple_args`, as
+    /// [`call_tuple`](Self::call_tuple) does, without its small-vector
+    /// overhead.
     pub fn call_tuple_with_len<const LEN: usize, TupleType>(
         &self,
         tuple_args: TupleType,
@@ -181,14 +214,21 @@ impl Function {
         (&tuple_args).fill_any_view(&mut packed_args);
         self.call_packed(&packed_args)
     }
-    /// Get global function by name
-    /// This function will throw an error if the function is not found.
+    /// Look up the global function registered as `name`.
     ///
-    /// # Arguments
-    /// * `name` - The name of the function
+    /// # Errors
     ///
-    /// # Returns
-    /// * `Function` - The global function
+    /// Returns an error if no function is registered as `name`.
+    ///
+    /// ```
+    /// use tvm_ffi::Function;
+    /// Function::register_global_typed("my_ext.double", |x: i64| -> tvm_ffi::Result<i64> { Ok(x * 2) }, "")?;
+    /// let double = Function::get_global("my_ext.double")?;
+    /// assert_eq!(double.call_tuple((21_i64,))?.try_as::<i64>(), Some(42));
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    ///
+    /// See also [`register_global_typed`](Self::register_global_typed).
     pub fn get_global(name: &str) -> Result<Function> {
         unsafe {
             let name_arg = TVMFFIByteArray::from_str(name);
@@ -203,24 +243,16 @@ impl Function {
         }
     }
 
-    /// Look up a reflected method of a type by type index and method name
+    /// Look up the reflected method `method_name` of the type `type_index`.
     ///
-    /// Methods registered through the C++ reflection registry
-    /// (`refl::ObjectDef<T>().def(...)`) live in the per-type method table
-    /// rather than the global function table. Constructors registered via
-    /// `refl::init` are reachable under the reserved name `__ffi_init__`.
-    /// For instance methods, the first packed argument is the object itself.
+    /// Reflected methods live in each type's method table, not the global
+    /// table; an instance method takes the object as its first argument, and
+    /// the constructor is named `__ffi_init__`. `type_index` must be
+    /// registered: the C API treats an unregistered index as a fatal error.
     ///
-    /// `type_index` must be a registered type index (e.g. obtained from a
-    /// live object via `Any::type_index` or from a type key); the underlying
-    /// C API treats an unregistered index as a fatal error.
+    /// # Errors
     ///
-    /// # Arguments
-    /// * `type_index` - The type index of the type that owns the method
-    /// * `method_name` - The name of the method
-    ///
-    /// # Returns
-    /// * `Function` - The reflected method
+    /// Returns an error if the type has no method `method_name`.
     pub fn from_type_method(type_index: i32, method_name: &str) -> Result<Function> {
         unsafe {
             let type_info = TVMFFIGetTypeInfo(type_index);
@@ -260,9 +292,14 @@ impl Function {
         }
     }
 
-    /// Look up a function-valued attribute for a concrete runtime type.
+    /// Look up the function-valued type attribute `attr_name` of the type
+    /// `type_index`.
     ///
     /// Type attributes are not inherited from base types.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the type has no such attribute.
     pub fn from_type_attr(type_index: i32, attr_name: &str) -> Result<Function> {
         let value = crate::reflection::get_type_attr(type_index, attr_name).ok_or_else(|| {
             crate::error::Error::new(
@@ -277,17 +314,12 @@ impl Function {
         Function::try_from(value)
     }
 
-    /// Look up a reflected method of a type by type key and method name
+    /// Look up the reflected method `method_name` of the type named
+    /// `type_key`, as [`from_type_method`](Self::from_type_method) does.
     ///
-    /// Same as [`Function::from_type_method`], but resolves `type_key` to a
-    /// type index first.
+    /// # Errors
     ///
-    /// # Arguments
-    /// * `type_key` - The type key of the type that owns the method
-    /// * `method_name` - The name of the method
-    ///
-    /// # Returns
-    /// * `Function` - The reflected method
+    /// Returns an error if the type or the method does not exist.
     pub fn from_type_key_method(type_key: &str, method_name: &str) -> Result<Function> {
         unsafe {
             let type_key_arg = TVMFFIByteArray::from_str(type_key);
@@ -297,37 +329,27 @@ impl Function {
         }
     }
 
-    /// Register a function as a global function
+    /// Register `func` as the global function `name`, with an untyped schema.
     ///
-    /// The function's metadata records the type schema of an untyped
-    /// function, as C++ `refl::GlobalDef().def_packed` does. Use
-    /// [`Function::register_global_typed`] to record the parameter and return
-    /// types of a typed function, and a doc string.
-    ///
-    /// # Arguments
-    /// * `name` - The name of the function
-    /// * `func` - The function to register
-    ///
-    /// # Returns
-    /// * `Result<()>` - The result of the registration
+    /// See also [`register_global_typed`](Self::register_global_typed).
     pub fn register_global(name: &str, func: Function) -> Result<()> {
         let type_schema = crate::type_traits::type_schema(FunctionObj::TYPE_KEY, &[]);
         Self::register_global_with_info(name, &func, &type_schema, "")
     }
 
-    /// Register a typed function as a global function, with a doc string
+    /// Register the typed closure `func` as the global function `name`, which
+    /// every language can then look up, with the doc string `doc`.
     ///
-    /// As C++ `refl::GlobalDef().def` does, the function's metadata records
-    /// its type schema, which `tvm_ffi.get_global_func_metadata` and the stub
-    /// generator read. An empty `doc` records no doc string.
+    /// The metadata records the parameter and return types, as C++
+    /// `refl::GlobalDef().def` does.
     ///
-    /// # Arguments
-    /// * `name` - The name of the function
-    /// * `func` - The typed function to register, as for [`Function::from_typed`]
-    /// * `doc` - The doc string of the function
+    /// ```
+    /// use tvm_ffi::{Function, Result};
+    /// Function::register_global_typed("my_ext.add", |x: i64, y: i64| -> Result<i64> { Ok(x + y) }, "Add two integers.")?;
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     ///
-    /// # Returns
-    /// * `Result<()>` - The result of the registration
+    /// See also [`get_global`](Self::get_global).
     pub fn register_global_typed<F, I, O>(name: &str, func: F, doc: &str) -> Result<()>
     where
         F: AsPackedCallable<I, O> + 'static,
@@ -357,15 +379,17 @@ impl Function {
             crate::check_safe_call!(TVMFFIFunctionSetGlobalFromMethodInfo(&info, can_override))
         }
     }
-    /// Construct a function from a packed function
-    /// # Arguments
-    /// * `func` - The packed function in signature of `Fn(&[AnyView]) -> Result<Any>`
+    /// Make a function from the closure `func`, which takes the arguments as a
+    /// slice, for a variable number of arguments.
     ///
-    /// # Returns
-    /// * `Function` - The function
+    /// ```
+    /// use tvm_ffi::{Any, AnyView, Function, Result};
+    /// let count = Function::from_packed(|args: &[AnyView]| -> Result<Any> { Ok(Any::from(args.len() as i64)) });
+    /// assert_eq!(count.call_tuple((1_i64, true))?.try_as::<i64>(), Some(2));
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     ///
-    /// Report errors by returning them. A panic in `func` is caught and raised
-    /// to the caller as an `InternalError`, but panicking is discouraged.
+    /// See also [`Function`].
     pub fn from_packed<F>(func: F) -> Self
     where
         F: Fn(&[AnyView]) -> Result<Any> + 'static,
@@ -379,15 +403,18 @@ impl Function {
         }
     }
 
-    /// Construct a function from a typed function
-    /// # Arguments
-    /// * `func` - The typed function with function signature of `F(T0, T1, ...) -> Result<O>`
+    /// Make a function from the typed closure `func`, of the form
+    /// `Fn(T0, T1, ...) -> Result<O>`; each argument is converted to its parameter
+    /// type.
     ///
-    /// # Returns
-    /// * `Function` - The function
+    /// ```
+    /// use tvm_ffi::{Function, Result};
+    /// let scale = Function::from_typed(|x: f64, factor: f64| -> Result<f64> { Ok(x * factor) });
+    /// assert_eq!(scale.call_tuple((2.0_f64, 1.5_f64))?.try_as::<f64>(), Some(3.0));
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     ///
-    /// Report errors by returning them. A panic in `func` is caught and raised
-    /// to the caller as an `InternalError`, but panicking is discouraged.
+    /// See also [`Function`].
     pub fn from_typed<F, I, O>(func: F) -> Self
     where
         F: AsPackedCallable<I, O> + 'static,

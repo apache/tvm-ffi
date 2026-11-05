@@ -50,6 +50,28 @@ unsafe impl ObjectCoreWithExtraItems for ArrayObj {
     }
 }
 
+/// An immutable, reference-counted sequence of `T`, shared with C++ and
+/// Python as `ffi.Array`.
+///
+/// Cloning an `Array` is cheap: it shares the same elements. Use [`List`]
+/// for a sequence that changes in place.
+///
+/// [`List`]: crate::List
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::Array;
+///
+/// let array = Array::new(vec![1_i64, 2, 3]);
+/// assert_eq!(array.len(), 3);
+/// assert_eq!(array.get(1)?, 2);
+/// assert!(array.get(3).is_err());
+///
+/// let doubled: Array<i64> = array.iter().map(|x| x * 2).collect();
+/// assert_eq!(doubled.iter().collect::<Vec<_>>(), vec![2, 4, 6]);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 #[repr(C)]
 #[derive(Clone)]
 pub struct Array<T: ContainerElement + Clone> {
@@ -91,7 +113,7 @@ unsafe impl<T: ContainerElement + Clone> ObjectRefCore for Array<T> {
 }
 
 impl<T: ContainerElement + Clone> Array<T> {
-    /// Creates a new Array from a vector of items.
+    /// Create an array holding `items`.
     pub fn new(items: Vec<T>) -> Self {
         let capacity = items.len();
         Self::new_with_capacity(items, capacity)
@@ -127,15 +149,22 @@ impl<T: ContainerElement + Clone> Array<T> {
         unsafe { Self::from_data(arc) }
     }
 
+    /// Return the number of elements.
     pub fn len(&self) -> usize {
         self.data.size as usize
     }
 
+    /// Return `true` if the array has no elements.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Retrieves an item at the given index.
+    /// Return the element at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `IndexError` if `index` is out of bounds, or a `TypeError`
+    /// if the element is not a `T`.
     pub fn get(&self, index: usize) -> Result<T, crate::Error> {
         if index >= self.len() {
             crate::bail!(crate::error::INDEX_ERROR, "Array get index out of bound");
@@ -157,6 +186,7 @@ impl<T: ContainerElement + Clone> Array<T> {
         }
     }
 
+    /// Return an iterator over the elements.
     pub fn iter(&'_ self) -> ArrayIterator<'_, T> {
         ArrayIterator {
             array: self,

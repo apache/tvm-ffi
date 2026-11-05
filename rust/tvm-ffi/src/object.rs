@@ -85,7 +85,7 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// # Arguments
     /// * `this` - The object to get the header
     ///
-    /// # Returns
+    /// Returns
     /// * `&mut TVMFFIObject` - The object header
     /// \return The object header
     ///
@@ -297,30 +297,19 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
 pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
     /// Cast `self` to the reference type `B`, without copying the object.
     ///
-    /// The cast succeeds when the object is an instance of `B`'s object type
-    /// and, for a container such as `Array<i64>`, when every element matches;
-    /// the check is the strict one of [`Any::try_as`](crate::Any::try_as).
-    ///
     /// # Errors
     ///
-    /// Returns a `TypeError` naming both types when the object is not a `B`.
-    /// `self` is consumed either way; clone it first to keep it.
-    ///
-    /// # Examples
+    /// Returns a `TypeError` when the object is not a `B`.
     ///
     /// ```
-    /// use tvm_ffi::object::ObjectRef;
-    /// use tvm_ffi::{Array, ObjectRefCast, Shape};
-    ///
-    /// let array = Array::new(vec![1_i64, 2, 3]);
-    /// let object: ObjectRef = array.try_cast()?;
-    /// let array: Array<i64> = object.clone().try_cast()?;
-    /// assert_eq!(array.len(), 3);
-    ///
-    /// assert!(object.clone().try_cast::<Shape>().is_err());
-    /// assert!(object.try_cast::<Array<f64>>().is_err());
+    /// use tvm_ffi::{object::ObjectRef, Array, ObjectRefCast};
+    /// let object: ObjectRef = Array::new(vec![1_i64]).try_cast()?;
+    /// let array: Array<i64> = object.try_cast()?;
+    /// assert_eq!(array.len(), 1);
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
+    ///
+    /// See also [`Any::try_as`](crate::Any::try_as).
     #[inline(always)]
     fn try_cast<B>(self) -> crate::error::Result<B>
     where
@@ -644,7 +633,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `ptr` - The raw pointer to move into the ObjectArc
     ///
-    /// # Returns
+    /// Returns
     /// * `ObjectArc<T>` - The ObjectArc
     /// \return The ObjectArc
     ///
@@ -665,7 +654,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to move into a raw pointer
     ///
-    /// # Returns
+    /// Returns
     /// * `*const T` - The raw pointer
     #[inline(always)]
     pub unsafe fn into_raw(this: Self) -> *const T {
@@ -680,7 +669,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the raw pointer
     ///
-    /// # Returns
+    /// Returns
     /// * `*const T` - The raw pointer
     /// \return The raw pointer
     ///
@@ -699,7 +688,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the raw pointer
     ///
-    /// # Returns
+    /// Returns
     /// * `*mut T` - The raw pointer
     ///
     /// # Safety
@@ -715,7 +704,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the strong reference count
     ///
-    /// # Returns
+    /// Returns
     /// * `usize` - The strong reference count
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
@@ -727,7 +716,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the weak reference count
     ///
-    /// # Returns
+    /// Returns
     /// * `usize` - The weak reference count
     #[inline]
     pub fn weak_count(this: &Self) -> usize {

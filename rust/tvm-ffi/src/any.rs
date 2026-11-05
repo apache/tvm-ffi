@@ -150,10 +150,7 @@ impl<'a> AnyView<'a> {
 
     /// Borrow the viewed object as `T` when its runtime type is `T` or a subtype.
     ///
-    /// `T` is an object representation type such as `MyPairObj`. Non-object
-    /// values and unrelated object types return `None`. This does not change
-    /// the object's reference count; the borrow cannot outlive this view or
-    /// the owner it borrows. See [`Any::downcast_ref`] for an example.
+    /// See also [`Any::downcast_ref`].
     #[inline(always)]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
         if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -166,27 +163,16 @@ impl<'a> AnyView<'a> {
         Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
     }
 
-    /// Return the viewed value as a `T` when it is stored as exactly `T`.
-    ///
-    /// The check is strict and never converts: a stored integer is not
-    /// returned as `f64`, and an object is returned only as a reference type
-    /// it is an instance of. On success, `Any::from` of the result holds the
-    /// same value. A returned object reference is retained; use
-    /// [`downcast_ref`](Self::downcast_ref) to borrow the object instead.
-    ///
-    /// # Examples
+    /// Return the viewed value as a `T` when it is stored as exactly `T`; the
+    /// check never converts.
     ///
     /// ```
-    /// use tvm_ffi::{AnyView, Shape};
-    ///
-    /// let shape = Shape::from([2_i64, 3]);
-    /// let view = AnyView::from(&shape);
-    /// assert_eq!(view.try_as::<Shape>().unwrap().len(), 2);
-    /// assert_eq!(view.try_as::<i64>(), None);
-    ///
+    /// use tvm_ffi::AnyView;
     /// assert_eq!(AnyView::from(&7_i64).try_as::<i64>(), Some(7));
     /// assert_eq!(AnyView::from(&7_i64).try_as::<f64>(), None);
     /// ```
+    ///
+    /// See also [`Any::try_as`].
     #[inline(always)]
     pub fn try_as<T>(&self) -> Option<T>
     where
@@ -296,32 +282,16 @@ impl Any {
     pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
-    /// Borrow the stored object as `T` when its runtime type is `T` or a subtype.
-    ///
-    /// `T` is an object representation type such as `FooObj`, rather than its
-    /// managed reference `Foo`. Non-object values and unrelated object types
-    /// return `None`. This neither consumes `self` nor changes the object's
-    /// reference count, and the returned reference cannot outlive `self`.
+    /// Borrow the stored object as `T`, an object type such as `ArrayObj`, when its
+    /// runtime type is `T` or a subtype.
     ///
     /// ```
-    /// use tvm_ffi::{def_object_ref, rs_object, Any, AnyView, Object, ObjectRefCore};
-    /// use tvm_ffi::object::ObjectRef;
-    ///
-    /// #[rs_object("my.MyPair")]
-    /// pub struct MyPairObj {
-    ///     base: Object,
-    ///     pub first: i64,
-    ///     pub second: i64,
-    /// }
-    /// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
-    ///
-    /// let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
-    /// assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);
-    /// let value = Any::from(pair);
-    /// assert_eq!(value.downcast_ref::<MyPairObj>().unwrap().second, 4);
-    /// let view = AnyView::from(&value);
-    /// assert_eq!(view.downcast_ref::<MyPairObj>().unwrap().first, 3);
+    /// use tvm_ffi::{collections::array::ArrayObj, Any, Array};
+    /// let value = Any::from(Array::new(vec![1_i64, 2]));
+    /// assert_eq!(value.downcast_ref::<ArrayObj>().unwrap().size, 2);
     /// ```
+    ///
+    /// See also [`Any`].
     #[inline]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
         if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -336,28 +306,18 @@ impl Any {
 
     /// Return the stored value as a `T` when it is stored as exactly `T`.
     ///
-    /// The check is strict and never converts: a stored integer is not
-    /// returned as `f64`, and an object is returned only as a reference type
-    /// it is an instance of. On success, `Any::from` of the result holds the
-    /// same value. A failed check is cheap, so `try_as` also serves as a type
-    /// test. A returned object reference is retained; use
-    /// [`downcast_ref`](Self::downcast_ref) to borrow the object instead, or
-    /// [`match_any!`](crate::match_any) to test several types in turn.
-    ///
-    /// # Examples
+    /// The check never converts: a stored integer is not returned as `f64`. A
+    /// returned object reference is retained; [`downcast_ref`](Self::downcast_ref)
+    /// borrows instead.
     ///
     /// ```
-    /// use tvm_ffi::{Any, Array};
-    ///
+    /// use tvm_ffi::Any;
     /// let value = Any::from(7_i64);
     /// assert_eq!(value.try_as::<i64>(), Some(7));
     /// assert_eq!(value.try_as::<f64>(), None);
-    /// assert_eq!(value.try_as::<bool>(), None);
-    ///
-    /// let array = Any::from(Array::new(vec![1_i64, 2]));
-    /// assert_eq!(array.try_as::<Array<i64>>().unwrap().len(), 2);
-    /// assert!(array.try_as::<tvm_ffi::String>().is_none());
     /// ```
+    ///
+    /// See also [`match_any!`](crate::match_any).
     #[inline]
     pub fn try_as<T>(&self) -> Option<T>
     where

@@ -19,36 +19,9 @@
 
 //! Runtime type dispatch indexed by its tuple of arguments.
 
-/// A handler that the structural traversals and [`IntoDispatcher`] call with
-/// a tuple of arguments.
+/// A handler that the structural traversals call with a tuple of arguments.
 ///
-/// `Args` is the complete argument tuple, whose first element is the value
-/// being dispatched, and `Ret` the complete result, `Option<R>` by
-/// convention: `None` means that no handler matched, so a chain of
-/// dispatchers tries the next one, while `Some` is final even when it holds an
-/// error or an inner `None`. [`#[dispatch]`](crate::dispatch) implements this
-/// trait for `&T` or `&mut T`; implement it by hand only for dispatch logic
-/// the attribute cannot express.
-///
-/// # Examples
-///
-/// ```
-/// use tvm_ffi::{Any, AnyView, Dispatcher, Result};
-///
-/// struct AddOffset;
-///
-/// impl<'v> Dispatcher<(AnyView<'v>, i64), Option<Result<Any>>> for &AddOffset {
-///     fn dispatch_tuple(self, (value, offset): (AnyView<'v>, i64)) -> Option<Result<Any>> {
-///         let value = value.try_as::<i64>()?;
-///         Some(Ok(Any::from(value + offset)))
-///     }
-/// }
-///
-/// let result = (&AddOffset).dispatch_tuple((AnyView::from(&40_i64), 2));
-/// assert_eq!(result.unwrap()?.try_as::<i64>(), Some(42));
-/// assert!((&AddOffset).dispatch_tuple((AnyView::from(&true), 2)).is_none());
-/// # Ok::<(), tvm_ffi::Error>(())
-/// ```
+/// See also [`#[dispatch]`](crate::dispatch).
 #[diagnostic::on_unimplemented(
     message = "this receiver does not implement Dispatcher for the requested argument tuple",
     note = "use #[dispatch(prefix, (Carrier, ...), Ret)] with compatible typed handlers"

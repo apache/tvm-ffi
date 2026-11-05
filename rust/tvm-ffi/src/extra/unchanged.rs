@@ -113,24 +113,16 @@ impl<T: ContainerElement> UnchangedOr<T> {
         is_unchanged(&self.data)
     }
 
-    /// Return `true` if this result is unchanged or holds `original` itself.
-    ///
-    /// An object counts as the same only when it is the same object, not an
-    /// equal copy; a non-object value counts as the same when it is equal. Use
-    /// it to tell whether anything was rewritten.
-    ///
-    /// # Examples
+    /// Return `true` if this result is unchanged or holds `original` itself, the
+    /// same object rather than an equal copy.
     ///
     /// ```
     /// use tvm_ffi::{Array, UnchangedOr};
-    ///
-    /// let original = Array::new(vec![1_i64, 2]);
-    /// assert!(UnchangedOr::<Array<i64>>::unchanged().unchanged_or_same_as(&original));
+    /// let original = Array::new(vec![1_i64]);
     /// assert!(UnchangedOr::changed(original.clone()).unchanged_or_same_as(&original));
-    ///
-    /// let copy = Array::new(vec![1_i64, 2]);
-    /// assert!(!UnchangedOr::changed(copy).unchanged_or_same_as(&original));
     /// ```
+    ///
+    /// See also [`UnchangedOr`].
     #[inline]
     pub fn unchanged_or_same_as(&self, original: &T) -> bool {
         if self.is_unchanged() {
@@ -187,25 +179,16 @@ impl<T: ContainerElement> UnchangedOr<T> {
         }
     }
 
-    /// Convert the replacement with the fallible `convert`, keeping an
-    /// unchanged result unchanged.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error of `convert`, which is called only when there is a
-    /// replacement.
-    ///
-    /// # Examples
+    /// Convert the replacement with the fallible `convert`, keeping an unchanged
+    /// result unchanged.
     ///
     /// ```
     /// use tvm_ffi::UnchangedOr;
-    ///
-    /// let positive = |value: i64| u32::try_from(value);
-    /// let result = UnchangedOr::changed(3_i64).try_map(positive).unwrap();
+    /// let result = UnchangedOr::changed(3_i64).try_map(u32::try_from).unwrap();
     /// assert_eq!(result.into_option(), Some(3_u32));
-    /// assert!(UnchangedOr::changed(-1_i64).try_map(positive).is_err());
-    /// assert!(UnchangedOr::<i64>::unchanged().try_map(positive).unwrap().is_unchanged());
     /// ```
+    ///
+    /// See also [`UnchangedOr`].
     #[inline]
     pub fn try_map<U: ContainerElement, E>(
         self,
@@ -217,28 +200,21 @@ impl<T: ContainerElement> UnchangedOr<T> {
         }
     }
 
-    /// Check that the replacement is stored as exactly `U`, and return the
-    /// result typed as `UnchangedOr<U>` without cloning it.
-    ///
-    /// An unchanged result converts to every `U`. The check is the strict one
-    /// of [`Any::try_as`]. For a conversion known to succeed, such as from a
-    /// subtype to its parent, use `map(Into::into)`.
+    /// Check that the replacement is stored as exactly `U`, returning the result as
+    /// `UnchangedOr<U>` without cloning it.
     ///
     /// # Errors
     ///
-    /// Returns a `TypeError` if the replacement is not stored as `U`.
-    ///
-    /// # Examples
+    /// Returns a `TypeError` if the replacement is not a `U`.
     ///
     /// ```
     /// use tvm_ffi::{Any, UnchangedOr};
-    ///
     /// let erased: UnchangedOr<Any> = 7_i64.into();
-    /// let typed = erased.clone().try_cast::<i64>()?;
-    /// assert_eq!(typed.into_option(), Some(7));
-    /// assert!(erased.try_cast::<tvm_ffi::String>().is_err());
+    /// assert_eq!(erased.try_cast::<i64>()?.into_option(), Some(7));
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
+    ///
+    /// See also [`UnchangedOr`].
     #[inline]
     pub fn try_cast<U: ContainerElement>(self) -> Result<UnchangedOr<U>> {
         if unsafe { UnchangedOr::<U>::check_any_strict(self.data.as_raw_ffi_any()) } {

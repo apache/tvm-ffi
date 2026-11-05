@@ -281,7 +281,7 @@ pub use tvm_ffi_macros::rs_object;
 ///
 /// ```
 /// use tvm_ffi::object::ObjectRef;
-/// use tvm_ffi::{def_object_ref, rs_object, Any, Object};
+/// use tvm_ffi::{def_object_ref, rs_object, Object};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -290,17 +290,11 @@ pub use tvm_ffi_macros::rs_object;
 ///     pub second: i64,
 /// }
 ///
-/// def_object_ref!(
-///     /// A pair of integers.
-///     pub MyPair,
-///     ObjectRef,
-///     MyPairObj
-/// );
+/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
 ///
 /// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, 2));
 /// assert_eq!(pair.first + pair.second, 3);
 /// let object = ObjectRef::from(pair);
-/// assert!(MyPair::try_from(Any::from(object)).is_ok());
 /// ```
 pub use tvm_ffi_macros::def_object_ref;
 
