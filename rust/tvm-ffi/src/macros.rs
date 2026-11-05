@@ -61,7 +61,9 @@ macro_rules! cached_global_func {
 }
 
 /// Implement zero-copy conversions from a derived object reference to one of
-/// its base object-reference types.
+/// its base object-reference types: `From<Source>` and `From<&Source>` into
+/// `Target`, and `AsRef<Target>`, which borrows a `&Source` as `&Target`
+/// without touching the reference count.
 ///
 /// # Safety
 ///
@@ -98,6 +100,22 @@ macro_rules! impl_object_upcast {
                 #[inline]
                 fn from(value: &$source) -> Self {
                     value.clone().into()
+                }
+            }
+
+            impl ::core::convert::AsRef<$target> for $source {
+                #[inline(always)]
+                fn as_ref(&self) -> &$target {
+                    const _: () = assert!(
+                        ::core::mem::size_of::<$source>() == ::core::mem::size_of::<$target>()
+                            && ::core::mem::align_of::<$source>()
+                                == ::core::mem::align_of::<$target>(),
+                        "an object reference upcast must keep the reference's layout"
+                    );
+                    // SAFETY: both references are exactly one object pointer, and the
+                    // macro declaration promises that every `source` object is a valid
+                    // `target`, so a `&source` is a valid `&target`.
+                    unsafe { &*(self as *const $source as *const $target) }
                 }
             }
 
