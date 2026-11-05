@@ -260,7 +260,8 @@ macro_rules! callback_prefix {
         }
         impl<'v, F, T, O, R, $($A,)*>
             DispatchLink<(AnyView<'v>, $($A,)*), Option<R>, marker::FromCallback<$n, marker::BorrowedObject<T>>> for F
-        where F: for<'node> FnMut(&'node T, $($B,)*) -> O, T: crate::ObjectCore,
+        where F: for<'node> FnMut(&'node T, $($B,)*) -> O,
+              T: crate::type_traits::DowncastRefFromAny + 'static,
               O: CallbackResult<R>,
         {
             #[inline(always)]

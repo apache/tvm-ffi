@@ -18,7 +18,7 @@
  */
 use crate::any::{Any, AnyView};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo};
+use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
 
 //-----------------------------------------------------
 // AnyCompatible
@@ -224,54 +224,184 @@ impl ContainerElement for Any {}
 /// # Safety
 ///
 /// For a cell that passes `container_check_any_strict` for `Self`,
-/// `ref_from_any` must return a reference into that cell that is a valid
+/// `ref_from_any_unchecked` must return a reference into that cell that is a valid
 /// `Self` for as long as the cell is borrowed.
 #[doc(hidden)]
-pub unsafe trait RefFromAny: ContainerElement {
+pub unsafe trait RefFromAnyUnchecked: ContainerElement {
     /// Borrow the value stored in `cell`.
     ///
     /// # Safety
     ///
     /// `cell` must hold a `Self`.
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self;
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self;
 }
 
 // The whole cell is the value.
-unsafe impl RefFromAny for Any {
+unsafe impl RefFromAnyUnchecked for Any {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &*(cell as *const TVMFFIAny as *const Any)
     }
 }
 
-unsafe impl RefFromAny for crate::String {
+unsafe impl RefFromAnyUnchecked for crate::String {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &*(cell as *const TVMFFIAny as *const crate::String)
     }
 }
 
-unsafe impl RefFromAny for crate::string::Bytes {
+unsafe impl RefFromAnyUnchecked for crate::string::Bytes {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &*(cell as *const TVMFFIAny as *const crate::string::Bytes)
     }
 }
 
 // The payload word holds the value in its own representation.
-unsafe impl RefFromAny for i64 {
+unsafe impl RefFromAnyUnchecked for i64 {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &cell.data_union.v_int64
     }
 }
 
-unsafe impl RefFromAny for f64 {
+unsafe impl RefFromAnyUnchecked for f64 {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &cell.data_union.v_float64
     }
 }
+
+/// Types that [`crate::Any::downcast_ref`] and [`crate::AnyView::downcast_ref`]
+/// can borrow from an FFI cell in place: object types (`ArrayObj`), and the
+/// [`RefFromAnyUnchecked`] types (managed references such as `Array<T>`, `String`,
+/// `i64`).
+///
+/// # Safety
+///
+/// `downcast_ref_from_any` must return `Some` only when `cell` holds a `Self`, with
+/// a reference that stays valid while `cell` is borrowed.
+#[doc(hidden)]
+pub unsafe trait DowncastRefFromAny {
+    /// Borrow `cell` as `Self` when it holds one.
+    ///
+    /// # Safety
+    ///
+    /// `cell` must be a valid FFI cell.
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self>;
+}
+
+// An object type borrows the object the cell points to.
+unsafe impl<T: crate::object::ObjectCore> DowncastRefFromAny for T {
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        if cell.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
+            || !crate::object::is_instance_of::<T>(cell.type_index)
+        {
+            return None;
+        }
+        // SAFETY: the type check establishes T's layout, and the cell keeps the
+        // object alive while it is borrowed.
+        Some(&*cell.data_union.v_obj.cast::<T>())
+    }
+}
+
+/// Borrow `cell` as a [`RefFromAnyUnchecked`] type when it strictly holds one.
+///
+/// # Safety
+///
+/// `cell` must be a valid FFI cell.
+#[doc(hidden)]
+#[inline(always)]
+pub unsafe fn downcast_ref_from_any_in_place<T: RefFromAnyUnchecked>(
+    cell: &TVMFFIAny,
+) -> Option<&T> {
+    if T::container_check_any_strict(cell) {
+        Some(T::ref_from_any_unchecked(cell))
+    } else {
+        None
+    }
+}
+
+/// Types that an object reference's [`ObjectRefCore::downcast_ref`] can borrow
+/// from the reference's object pointer: object types (`ArrayObj`), and managed
+/// references that are exactly one object pointer (`Array<T>`, every
+/// `#[derive(ObjectRef)]` type).
+///
+/// [`ObjectRefCore::downcast_ref`]: crate::object::ObjectRefCore::downcast_ref
+///
+/// # Safety
+///
+/// `downcast_ref_from_object` must return `Some` only when the object at
+/// `*place` is a `Self`, with a reference that stays valid while `place` is
+/// borrowed.
+#[doc(hidden)]
+pub unsafe trait DowncastRefFromObject {
+    /// Borrow the object at `*place` as `Self` when it is one.
+    ///
+    /// # Safety
+    ///
+    /// `place` must hold a pointer to a live object.
+    unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self>;
+}
+
+// An object type borrows the object itself.
+unsafe impl<T: crate::object::ObjectCore> DowncastRefFromObject for T {
+    #[inline(always)]
+    unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
+        let object = *place;
+        if !crate::object::is_instance_of::<T>((*object).type_index) {
+            return None;
+        }
+        // SAFETY: the type check establishes T's layout.
+        Some(&*object.cast::<T>())
+    }
+}
+
+/// Borrow the object pointer at `place` as the one-pointer reference type `T`
+/// when the object strictly is a `T`.
+///
+/// # Safety
+///
+/// `place` must hold a pointer to a live object, and `T` must be exactly one
+/// object pointer.
+#[doc(hidden)]
+#[inline(always)]
+pub unsafe fn downcast_ref_from_object_in_place<T: RefFromAnyUnchecked>(
+    place: &*mut TVMFFIObject,
+) -> Option<&T> {
+    const {
+        assert!(
+            std::mem::size_of::<T>() == std::mem::size_of::<*mut TVMFFIObject>(),
+            "a reference downcast target must be exactly one object pointer"
+        )
+    };
+    let object = *place;
+    let mut cell = TVMFFIAny::new();
+    cell.type_index = (*object).type_index;
+    cell.data_union.v_obj = object;
+    if T::container_check_any_strict(&cell) {
+        // SAFETY: `T` is exactly one object pointer, and the check shows the
+        // object satisfies `T`.
+        Some(&*(place as *const *mut TVMFFIObject as *const T))
+    } else {
+        None
+    }
+}
+
+macro_rules! impl_downcast_ref_from_any {
+    ($($t:ty),* $(,)?) => {
+        $(unsafe impl DowncastRefFromAny for $t {
+            #[inline(always)]
+            unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+                downcast_ref_from_any_in_place::<Self>(cell)
+            }
+        })*
+    };
+}
+
+impl_downcast_ref_from_any!(Any, crate::String, crate::string::Bytes, i64, f64);
 
 mod container_element_ops {
     use super::{Any, AnyCompatible, AnyView, TVMFFIAny};

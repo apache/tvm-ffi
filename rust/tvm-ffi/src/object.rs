@@ -164,24 +164,23 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
         }
     }
 
-    /// Borrow the underlying object as `T` when its runtime type is `T` or a subtype.
+    /// Borrow the underlying object as `T` when it is one.
     ///
-    /// `T` is an object representation type such as `FooObj`, rather than its
-    /// managed reference `Foo`. Unrelated object types return `None`.
-    /// Unlike [`ObjectRefCast::try_cast`], this method neither consumes the
-    /// reference nor changes the object's reference count. The returned borrow
-    /// cannot outlive `self`.
+    /// `T` is an object type such as `FooObj`, or a managed reference such as
+    /// `Foo`: `&Expr` borrows as `&Add` when the expression is an `Add`.
+    /// Unrelated types return `None`. Unlike [`ObjectRefCast::try_cast`], this
+    /// method neither consumes the reference nor changes the object's reference
+    /// count. The returned borrow cannot outlive `self`.
     /// See [`crate::Any::downcast_ref`] for an example.
     #[inline(always)]
-    fn downcast_ref<T: ObjectCore>(&self) -> Option<&T> {
-        let object = unsafe { ObjectArc::as_raw(Self::data(self)) };
-        let type_index = unsafe { (*object.cast::<TVMFFIObject>()).type_index };
-        if !is_instance_of::<T>(type_index) {
-            return None;
+    fn downcast_ref<T: crate::type_traits::DowncastRefFromObject>(&self) -> Option<&T> {
+        // SAFETY: `ObjectArc` is exactly one non-null object pointer, and
+        // ObjectRefCore guarantees a live object allocation.
+        unsafe {
+            let place = &*(Self::data(self) as *const ObjectArc<Self::ContainerType>
+                as *const *mut TVMFFIObject);
+            T::downcast_ref_from_object(place)
         }
-        // SAFETY: ObjectRefCore guarantees a live object allocation, the type
-        // check establishes T's layout, and the borrow cannot outlive self.
-        Some(unsafe { &*object.cast::<T>() })
     }
 }
 

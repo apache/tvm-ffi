@@ -441,6 +441,14 @@ pub struct MutationView<'a, T = Any> {
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
+impl<T> MutationView<'_, T> {
+    /// The viewed cell, borrowed in place by `match_any!` reference patterns.
+    #[inline(always)]
+    pub(crate) fn cell(&self) -> &TVMFFIAny {
+        &self.value
+    }
+}
+
 impl<'a> MutationView<'a> {
     #[inline(always)]
     pub(super) fn new(value: AnyView<'a>, mode: InplaceMode) -> Self {

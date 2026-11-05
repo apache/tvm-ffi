@@ -172,6 +172,33 @@ impl<T: OptionalCompatible> Optional<T> {
     }
 }
 
+impl<T: OptionalCompatible + crate::type_traits::RefFromAnyUnchecked> Optional<T> {
+    /// Borrow the value in place, like [`Option::as_ref`].
+    ///
+    /// Available for values the cell stores as themselves, such as `String`,
+    /// `i64` and `f64`; use [`get`](Self::get) for the others.
+    ///
+    /// # Returns
+    ///
+    /// The borrowed value, or `None` when `nullopt`.
+    ///
+    /// ```
+    /// use tvm_ffi::Optional;
+    /// let value = Optional::some(7_i64);
+    /// assert_eq!(value.as_ref(), Some(&7));
+    /// assert_eq!(Optional::<i64>::none().as_ref(), None);
+    /// ```
+    #[inline]
+    pub fn as_ref(&self) -> Option<&T> {
+        if self.is_some() {
+            // SAFETY: an engaged `Optional<T>` cell holds a `T`.
+            Some(unsafe { T::ref_from_any_unchecked(self.data.as_raw_ffi_any()) })
+        } else {
+            None
+        }
+    }
+}
+
 impl Optional<String> {
     /// Borrows the engaged string as `&str`, or `None` when `nullopt`.
     ///

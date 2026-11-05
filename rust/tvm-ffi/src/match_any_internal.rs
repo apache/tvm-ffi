@@ -97,11 +97,17 @@ impl<'a, T> SourceProbe<crate::MutationView<'a, T>> {
 #[doc(hidden)]
 pub trait SourceView {
     fn view(&self) -> AnyView<'_>;
+    /// The source's own cell, which a reference pattern borrows in place.
+    fn cell(&self) -> &crate::tvm_ffi_sys::TVMFFIAny;
 }
 impl SourceView for OwnedSource {
     #[inline(always)]
     fn view(&self) -> AnyView<'_> {
         (&self.0).into()
+    }
+    #[inline(always)]
+    fn cell(&self) -> &crate::tvm_ffi_sys::TVMFFIAny {
+        self.0.as_raw_ffi_any()
     }
 }
 impl SourceView for ViewSource<'_> {
@@ -109,11 +115,19 @@ impl SourceView for ViewSource<'_> {
     fn view(&self) -> AnyView<'_> {
         self.0
     }
+    #[inline(always)]
+    fn cell(&self) -> &crate::tvm_ffi_sys::TVMFFIAny {
+        self.0.as_raw_ffi_any()
+    }
 }
 impl SourceView for CapabilitySource<'_> {
     #[inline(always)]
     fn view(&self) -> AnyView<'_> {
         self.0.as_ref().unwrap().as_any_view()
+    }
+    #[inline(always)]
+    fn cell(&self) -> &crate::tvm_ffi_sys::TVMFFIAny {
+        self.0.as_ref().unwrap().cell()
     }
 }
 
@@ -265,16 +279,17 @@ pub trait RefPatternConversion<'b, S, T> {
         source: &'b mut S,
     ) -> Result<Matched<Self::Holder, Self::Recovery>, ()>;
 }
-impl<'b, T: crate::object::ObjectCore, S: SourceView> RefPatternConversion<'b, S, T>
-    for &&PatternConversionProbe<T>
+impl<'b, T: crate::type_traits::DowncastRefFromAny + 'static, S: SourceView>
+    RefPatternConversion<'b, S, T> for &&PatternConversionProbe<T>
 {
     type Holder = &'b T;
     type Recovery = ();
     #[inline(always)]
     fn try_convert_ref(&self, source: &'b mut S) -> Result<Matched<Self::Holder, ()>, ()> {
-        let view = source.view();
-        let node = view.downcast_ref::<T>().ok_or(())? as *const T;
-        // SAFETY: the checked node is borrowed from source for 'b. No owning
+        // Borrow the source's own cell, which lives for 'b: a reference type
+        // such as `&Add` points into the cell, an object type into the heap.
+        let node = unsafe { T::downcast_ref_from_any(source.cell()) }.ok_or(())? as *const T;
+        // SAFETY: the checked value is borrowed from source for 'b. No owning
         // conversion or capability transfer can occur while this borrow lives.
         Ok(Matched {
             value: unsafe { &*node },
