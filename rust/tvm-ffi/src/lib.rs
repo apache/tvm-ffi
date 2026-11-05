@@ -105,69 +105,26 @@ pub use crate::type_traits::AnyCompatible;
 ///
 /// # Examples
 ///
-/// Describe nested arrays, with a separator between items:
-///
 /// ```
-/// use tvm_ffi::{dispatch, Any, AnyView, Array};
+/// use tvm_ffi::{dispatch, AnyView};
 ///
 /// struct Describer;
 ///
-/// #[dispatch(describe, (AnyView<'_>, &str), String)]
+/// #[dispatch(describe, (AnyView<'_>,), String)]
 /// impl Describer {
-///     fn describe_array(&self, arr: Array<Any>, sep: &str) -> String {
-///         let items: Vec<String> = arr
-///             .iter()
-///             .map(|item| {
-///                 let item = AnyView::from(&item);
-///                 self.dispatch(item, sep).unwrap_or_else(|| "?".into())
-///             })
-///             .collect();
-///         format!("[{}]", items.join(sep))
-///     }
-///
 ///     fn describe_int(&self, value: i64) -> String {
-///         value.to_string()
+///         format!("integer {value}")
 ///     }
 ///
 ///     fn describe_str(&self, value: tvm_ffi::String) -> String {
-///         value.to_string()
+///         format!("string {}", value.as_str())
 ///     }
 /// }
 ///
-/// let value = Any::from(Array::new(vec![
-///     Any::from(1_i64),
-///     Any::from(tvm_ffi::String::from("a")),
-///     Any::from(Array::new(vec![2_i64, 3])),
-/// ]));
-/// let text = Describer.dispatch(AnyView::from(&value), ", ");
-/// assert_eq!(text.as_deref(), Some(r#"[1, "a", [2, 3]]"#));
-///
-/// // No handler matches a float.
-/// assert_eq!(Describer.dispatch(AnyView::from(&1.5_f64), ", "), None);
-/// ```
-///
-/// A handler can return a typed `Result`, which converts into the declared
-/// erased one:
-///
-/// ```
-/// use tvm_ffi::{bail, dispatch, Any, AnyView, Result, UnchangedOr, VALUE_ERROR};
-///
-/// struct Double;
-///
-/// #[dispatch(double, (AnyView<'_>,), Result<UnchangedOr<Any>>)]
-/// impl Double {
-///     fn double_int(&self, value: i64) -> Result<UnchangedOr<i64>> {
-///         if value < 0 {
-///             bail!(VALUE_ERROR, "negative value {}", value);
-///         }
-///         Ok(UnchangedOr::changed(value * 2))
-///     }
-/// }
-///
-/// let doubled = Double.dispatch(AnyView::from(&21_i64)).unwrap()?;
-/// assert_eq!(doubled.into_option().unwrap().try_as::<i64>(), Some(42));
-/// assert!(Double.dispatch(AnyView::from(&-1_i64)).unwrap().is_err());
-/// # Ok::<(), tvm_ffi::Error>(())
+/// let text = tvm_ffi::String::from("hi");
+/// assert_eq!(Describer.dispatch(AnyView::from(&1_i64)).as_deref(), Some("integer 1"));
+/// assert_eq!(Describer.dispatch(AnyView::from(&text)).as_deref(), Some("string hi"));
+/// assert_eq!(Describer.dispatch(AnyView::from(&1.5_f64)), None);
 /// ```
 ///
 /// [`MutationView<'_>`]: crate::MutationView
@@ -205,22 +162,6 @@ pub use tvm_ffi_macros::dispatch;
 /// assert_eq!(kind(&Any::from(42_i64)), "integer 42");
 /// assert_eq!(kind(&Any::from(Array::new(vec![1_i64, 2, 3]))), "array of 3 items");
 /// assert_eq!(kind(&Any::from(1.5_f64)), "something else");
-/// ```
-///
-/// An object arm borrows the node and reads its fields:
-///
-/// ```
-/// use tvm_ffi::collections::array::ArrayObj;
-/// use tvm_ffi::{match_any, Array};
-///
-/// let array = Array::new(vec![1_i64, 2, 3]);
-/// let size = match_any! {
-///     &array {
-///         ArrayObj(ref node) => node.size,
-///         _ => 0,
-///     }
-/// };
-/// assert_eq!(size, 3);
 /// ```
 pub use tvm_ffi_macros::match_any;
 

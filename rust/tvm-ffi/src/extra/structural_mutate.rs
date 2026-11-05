@@ -573,8 +573,23 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// Return a view of the field that `selector` picks from the node, to rewrite
     /// with [`StructuralMutatorView::mutate`]; the result is not written back.
     ///
-    /// ```ignore
+    /// ```
+    /// # use tvm_ffi::object::ObjectRef;
+    /// # use tvm_ffi::*;
+    /// # #[rs_object("my_ext.MyPair", final)]
+    /// # pub struct MyPairObj { base: Object, pub first: Array<i64>, pub second: Array<i64> }
+    /// # def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+    /// # struct Pass;
+    /// # #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
+    /// # impl Pass {
+    /// #     fn mutate_pair(&mut self, mut pair: MutationView<'_, MyPair>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
     /// let second = mutator.mutate(self, pair.field(|pair| &pair.second))?;
+    /// #         Ok(second)
+    /// #     }
+    /// # }
+    /// # let pair = MyPairObj::new(Object::new(), Array::new(vec![1_i64]), Array::new(vec![2_i64]));
+    /// # structural_mutate(MyPair::from(pair), Pass)?;
+    /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     ///
     /// # Panics
@@ -1842,43 +1857,19 @@ impl StructuralMutatorObj {
 ///
 /// # Examples
 ///
-/// Double the integers in the `second` field of a `MyPair`. Default mutation
-/// descends into the array; [`MutationView::field`] and
-/// [`StructuralMutatorView::mutate`] rewrite one field, and the handler
-/// rebuilds the pair only if it changed:
+/// Double the integers in nested arrays; default mutation descends into the
+/// arrays:
 ///
 /// ```
-/// use tvm_ffi::object::ObjectRef;
 /// use tvm_ffi::{
-///     def_object_ref, dispatch, rs_object, structural_mutate, Any, Array, MutationView,
-///     Object, Result, StructuralMutatorView, Unchanged, UnchangedOr,
+///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
+///     UnchangedOr,
 /// };
 ///
-/// #[rs_object("my_ext.MyPair", final)]
-/// pub struct MyPairObj {
-///     base: Object,
-///     pub first: Array<i64>,
-///     pub second: Array<i64>,
-/// }
-/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
-///
-/// struct DoubleSecond;
+/// struct Double;
 ///
 /// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
-/// impl DoubleSecond {
-///     fn mutate_pair(
-///         &mut self,
-///         mut pair: MutationView<'_, MyPair>,
-///         mutator: &mut StructuralMutatorView<'_, Self>,
-///     ) -> Result<UnchangedOr<Any>> {
-///         let second = mutator.mutate(self, pair.field(|pair| &pair.second))?;
-///         let Some(second) = second.into_option() else {
-///             return Ok(Unchanged.into());
-///         };
-///         let second = Array::<i64>::try_from(second)?;
-///         Ok(MyPair::from(MyPairObj::new(Object::new(), pair.first.clone(), second)).into())
-///     }
-///
+/// impl Double {
 ///     fn mutate_int(
 ///         &mut self,
 ///         value: i64,
@@ -1888,10 +1879,9 @@ impl StructuralMutatorObj {
 ///     }
 /// }
 ///
-/// let pair = MyPairObj::new(Object::new(), Array::new(vec![1_i64]), Array::new(vec![5_i64, 6]));
-/// let result = MyPair::try_from(structural_mutate(MyPair::from(pair), DoubleSecond)?)?;
-/// assert_eq!(result.first.iter().collect::<Vec<_>>(), vec![1]);
-/// assert_eq!(result.second.iter().collect::<Vec<_>>(), vec![10, 12]);
+/// let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3_i64])]);
+/// let result = Array::<Array<i64>>::try_from(structural_mutate(root, Double)?)?;
+/// assert_eq!(result.get(0)?.iter().collect::<Vec<_>>(), vec![2, 4]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 pub fn structural_mutate<R, H, M, D, O>(root: R, dispatcher: H) -> Result<Any>

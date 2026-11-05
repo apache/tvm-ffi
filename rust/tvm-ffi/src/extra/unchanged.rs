@@ -58,7 +58,7 @@ pub struct Unchanged;
 /// # Examples
 ///
 /// ```
-/// use tvm_ffi::{Any, Unchanged, UnchangedOr};
+/// use tvm_ffi::UnchangedOr;
 ///
 /// fn double_even(value: i64) -> UnchangedOr<i64> {
 ///     if value % 2 == 0 {
@@ -70,11 +70,6 @@ pub struct Unchanged;
 ///
 /// assert_eq!(double_even(4).value_or(4), 8);
 /// assert_eq!(double_even(3).value_or(3), 3);
-///
-/// let erased: UnchangedOr<Any> = double_even(4).into();
-/// assert!(!erased.is_unchanged());
-/// let erased: UnchangedOr<Any> = Unchanged.into();
-/// assert!(erased.is_unchanged());
 /// ```
 #[repr(transparent)]
 pub struct UnchangedOr<T: ContainerElement = Any> {

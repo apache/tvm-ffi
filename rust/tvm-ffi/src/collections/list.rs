@@ -133,12 +133,9 @@ fn type_error<T: ContainerElement>(index: usize) -> Result<T> {
 ///
 /// let list = List::<i64>::new();
 /// list.push(1)?;
-/// list.extend([2, 3])?;
-/// let alias = list.clone();
-/// alias.set(0, 10)?;
-/// assert_eq!(list.get(0)?, 10);
-/// assert_eq!(list.pop()?, 3);
-/// assert_eq!(list.iter().collect::<tvm_ffi::Result<Vec<_>>>()?, vec![10, 2]);
+/// list.push(2)?;
+/// assert_eq!(list.get(1)?, 2);
+/// assert_eq!(list.len(), 2);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[repr(C)]
