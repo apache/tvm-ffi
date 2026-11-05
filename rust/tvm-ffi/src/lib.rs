@@ -273,7 +273,8 @@ pub use tvm_ffi_macros::rs_object;
 ///   before it go on the struct.
 /// * `ParentType` - The reference to the parent's object, `ObjectRef` for a
 ///   type under `ffi.Object`. `TypeName` converts into it by
-///   `impl_object_upcast!`; a conversion into a further ancestor takes its own
+///   `impl_object_upcast!`, and `&TypeName` borrows as `&ParentType` through
+///   `AsRef`; a conversion into a further ancestor takes its own
 ///   `impl_object_upcast!`.
 /// * `ObjectName` - The object type.
 /// * `crate = path` - Optional, after `ObjectName`: where the generated code
@@ -296,6 +297,7 @@ pub use tvm_ffi_macros::rs_object;
 ///
 /// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, 2));
 /// assert_eq!(pair.first + pair.second, 3);
+/// let _borrowed: &ObjectRef = pair.as_ref();
 /// let _parent: ObjectRef = pair.into();
 /// ```
 pub use tvm_ffi_macros::def_object_ref;

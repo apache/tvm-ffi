@@ -574,6 +574,15 @@ pub(crate) fn expand_object_ref(
             }
         }
 
+        // As `str`, `Path` and `[T]` do, so `impl AsRef<Base>` bounds accept the
+        // base itself; upcasts add `AsRef` to each base.
+        impl ::core::convert::AsRef<#struct_name> for #struct_name {
+            #[inline(always)]
+            fn as_ref(&self) -> &Self {
+                self
+            }
+        }
+
         impl ::std::convert::From<&#struct_name> for #struct_name {
             #[inline]
             fn from(value: &#struct_name) -> Self {
