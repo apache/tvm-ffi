@@ -83,7 +83,6 @@ the value it borrows. A number and a built-in array illustrate owning and borrow
 
 .. code-block:: rust
 
-   use tvm_ffi::collections::array::ArrayObj;
    use tvm_ffi::{Any, AnyView, Array};
 
    let number = Any::from(3_i64);
@@ -91,15 +90,18 @@ the value it borrows. A number and a built-in array illustrate owning and borrow
 
    let value = Any::from(Array::from_vec(vec![1_i64, 2, 3]));
    let view = AnyView::from(&value); // Borrow the value without a new reference.
-   assert_eq!(view.downcast_ref::<ArrayObj>().unwrap().size, 3);
+   let borrowed: &Array<i64> = view.downcast_ref::<Array<i64>>().unwrap();
+   assert_eq!(borrowed.len(), 3);
 
    let array = value.try_as::<Array<i64>>().unwrap(); // Acquire another strong reference.
    assert_eq!(array.len(), 3);
 
-Both ``Any`` and ``AnyView`` provide object-only ``downcast_ref::<T>() -> Option<&T>``,
-with ``T: ObjectCore``. It accepts the runtime type or a compatible base type and
-returns ``None`` for unrelated types and non-object values. The returned reference
-borrows its source without consuming it or incrementing the reference count.
+Both ``Any`` and ``AnyView`` provide ``downcast_ref::<T>() -> Option<&T>``, which borrows
+the value in place as a managed reference such as ``Array<i64>``, a value such as
+``tvm_ffi::String`` or ``i64``, or an object type such as ``ArrayObj``. The check is
+strict, as in ``try_as``, and never converts; it returns ``None`` for other types. The
+returned reference borrows its source without consuming it or incrementing the
+reference count.
 In contrast, ``try_as::<Array<i64>>()`` returns an owned managed reference, which retains
 the object independently of the source ``Any`` or ``AnyView``.
 
@@ -408,14 +410,14 @@ Converting Borrowed Values into ``Any``
 
 ``Any::from(value)`` takes ownership of ``value``. Use it when you own the value.
 When you only have a shared reference—for example, a field accessed through
-``&PointObj``—you cannot move the field into an ``Any``. Call
+``&Point``—you cannot move the field into an ``Any``. Call
 ``AnyCompatible::to_any()`` instead:
 
 .. code-block:: rust
 
    use tvm_ffi::{Any, AnyCompatible};
 
-   fn label_of(point: &PointObj) -> Any {
+   fn label_of(point: &Point) -> Any {
        point.label.to_any()
    }
 
@@ -488,8 +490,8 @@ arm whose type matches the value runs:
        match_any! {
            value {
                i64(n) => format!("integer {n}"),
-               tvm_ffi::String(s) => format!("string {}", s.as_str()),
-               Array<Any>(arr) => format!("array of {} items", arr.len()),
+               tvm_ffi::String(ref s) => format!("string {}", s.as_str()),
+               Array<Any>(ref arr) => format!("array of {} items", arr.len()),
                _ => "something else".to_string(),
            }
        }
@@ -513,9 +515,10 @@ The output is:
    array of 3 items
    something else
 
-``Type(name)`` binds an owned value. For an object, an arm can instead name the
-object type and borrow it, as in ``ArrayObj(ref arr)``, which reads its fields
-without changing the reference count. The final ``_`` arm is required:
+``Type(name)`` binds an owned value. ``Type(ref name)`` instead borrows the value
+in place, as the string and array arms above do, without changing any reference
+count; prefer it when the arm only reads. An arm can also name the object type,
+as in ``ArrayObj(ref node)``, to borrow the object node. The final ``_`` arm is required:
 new types can be registered at any time, so no list of arms is exhaustive.
 
 Dispatching
@@ -535,7 +538,7 @@ them. Let's describe nested arrays, with a separator between items:
 
    #[dispatch(describe, (AnyView<'_>, &str), String)]
    impl Describer {
-       fn describe_array(&self, arr: Array<Any>, sep: &str) -> String {
+       fn describe_array(&self, arr: &Array<Any>, sep: &str) -> String {
            let items: Vec<String> = arr
                .iter()
                .map(|item| {
@@ -550,7 +553,7 @@ them. Let's describe nested arrays, with a separator between items:
            value.to_string()
        }
 
-       fn describe_str(&self, value: tvm_ffi::String) -> String {
+       fn describe_str(&self, value: &tvm_ffi::String) -> String {
            value.to_string()
        }
    }
@@ -586,9 +589,9 @@ a ``match_any!`` and a |rs-dispatcher|_ implementation:
        pub fn dispatch(&self, value: AnyView<'_>, sep: &str) -> Option<String> {
            match_any! {
                value {
-                   Array<Any>(arr) => Some(self.describe_array(arr, sep).into()),
+                   Array<Any>(ref arr) => Some(self.describe_array(arr, sep).into()),
                    i64(value) => Some(self.describe_int(value).into()),
-                   tvm_ffi::String(value) => Some(self.describe_str(value).into()),
+                   tvm_ffi::String(ref value) => Some(self.describe_str(value).into()),
                    _ => None,
                }
            }
@@ -602,8 +605,8 @@ a ``match_any!`` and a |rs-dispatcher|_ implementation:
    }
 
 Each handler becomes one arm, in source order, and its parameter type selects
-the values it matches; a ``&NodeObj`` parameter becomes a ``NodeObj(ref node)``
-arm. The attribute appends ``_ => None``, so a type without a handler returns
+the values it matches; a ``&Type`` parameter becomes a ``Type(ref value)`` arm,
+which borrows the value in place. The attribute appends ``_ => None``, so a type without a handler returns
 ``None`` instead of failing. The ``Dispatcher`` implementation lets generic
 code call the same match through one trait.
 

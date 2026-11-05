@@ -139,7 +139,7 @@ pub use crate::type_traits::AnyCompatible;
 ///         format!("integer {value}")
 ///     }
 ///
-///     fn describe_str(&self, value: tvm_ffi::String) -> String {
+///     fn describe_str(&self, value: &tvm_ffi::String) -> String {
 ///         format!("string {}", value.as_str())
 ///     }
 /// }
