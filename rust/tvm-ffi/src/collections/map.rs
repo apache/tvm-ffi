@@ -575,13 +575,13 @@ where
 }
 
 // The cell's payload word is the single object pointer of the handle.
-unsafe impl<K, V> crate::type_traits::InPlaceElement for Map<K, V>
+unsafe impl<K, V> crate::type_traits::RefFromAny for Map<K, V>
 where
     K: ContainerElement,
     V: ContainerElement,
 {
     #[inline(always)]
-    unsafe fn in_place_ref(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
         &*(core::ptr::addr_of!(cell.data_union) as *const Self)
     }
 }

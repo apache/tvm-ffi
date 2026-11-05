@@ -567,9 +567,9 @@ pub(crate) fn expand_object_ref(
             );
         };
 
-        unsafe impl #tvm_ffi_crate::type_traits::InPlaceElement for #struct_name {
+        unsafe impl #tvm_ffi_crate::type_traits::RefFromAny for #struct_name {
             #[inline(always)]
-            unsafe fn in_place_ref(cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> &Self {
+            unsafe fn ref_from_any(cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> &Self {
                 &*(::core::ptr::addr_of!(cell.data_union) as *const Self)
             }
         }
