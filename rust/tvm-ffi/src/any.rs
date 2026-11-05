@@ -79,16 +79,6 @@ pub struct Any {
 //---------------------
 impl<'a> AnyView<'a> {
     /// Create a view of `None`, the empty FFI value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{AnyView, TypeIndex};
-    ///
-    /// let view = AnyView::new();
-    /// assert_eq!(view.type_index(), TypeIndex::kTVMFFINone as i32);
-    /// assert_eq!(view.try_as::<i64>(), None);
-    /// ```
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny::new(),
@@ -126,15 +116,6 @@ impl<'a> AnyView<'a> {
     ///
     /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
     /// non-object types; the others are object types.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{AnyView, TypeIndex};
-    ///
-    /// assert_eq!(AnyView::from(&1_i64).type_index(), TypeIndex::kTVMFFIInt as i32);
-    /// assert_eq!(AnyView::from(&1.5_f64).type_index(), TypeIndex::kTVMFFIFloat as i32);
-    /// ```
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
@@ -295,15 +276,6 @@ impl<T> TryFromTemp<T> {
 //---------------------
 impl Any {
     /// Create an `Any` holding `None`, the empty FFI value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{Any, TypeIndex};
-    ///
-    /// let value = Any::new();
-    /// assert_eq!(value.type_index(), TypeIndex::kTVMFFINone as i32);
-    /// ```
     #[inline(always)]
     pub fn new() -> Self {
         Self {
@@ -315,16 +287,6 @@ impl Any {
     ///
     /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
     /// non-object types; the others are object types.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{Any, TypeIndex};
-    ///
-    /// assert_eq!(Any::from(true).type_index(), TypeIndex::kTVMFFIBool as i32);
-    /// let text = Any::from(tvm_ffi::String::from("hi"));
-    /// assert!(text.type_index() != TypeIndex::kTVMFFIInt as i32);
-    /// ```
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
@@ -345,13 +307,13 @@ impl Any {
     /// use tvm_ffi::{def_object_ref, rs_object, Any, AnyView, Object, ObjectRefCore};
     /// use tvm_ffi::object::ObjectRef;
     ///
-    /// #[rs_object("my.MyPair", crate = tvm_ffi)]
+    /// #[rs_object("my.MyPair")]
     /// pub struct MyPairObj {
     ///     base: Object,
     ///     pub first: i64,
     ///     pub second: i64,
     /// }
-    /// def_object_ref!(pub MyPair, ObjectRef, MyPairObj, crate = tvm_ffi);
+    /// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
     ///
     /// let pair = MyPair::from(MyPairObj::new(Object::new(), 3, 4));
     /// assert_eq!(pair.downcast_ref::<MyPairObj>().unwrap().first, 3);

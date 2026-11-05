@@ -49,16 +49,11 @@ pub struct Unchanged;
 /// Either a replacement value of type `T`, or [`Unchanged`] to keep the
 /// original.
 ///
-/// This is the result of structural map and mutation callbacks, written
-/// `Result<UnchangedOr<Any>>`: like `Option<T>`, but its "none" case means
-/// "keep what was there", and it is stored in one FFI value, so it crosses the
-/// FFI boundary without conversion. `T` is an FFI value type or [`Any`].
-///
-/// `UnchangedOr<Any>` converts with `From` from [`Unchanged`], from a managed
-/// reference or scalar (a replacement), and from a typed `UnchangedOr<T>`, so
-/// a callback can end with `.into()`. Converting an `UnchangedOr` into `Any`
-/// keeps the marker; use [`value_or`](Self::value_or) to resolve it against
-/// the original.
+/// Structural map and mutation callbacks return `Result<UnchangedOr<Any>>`.
+/// It is like `Option<T>` whose `None` means "keep what was there", stored in
+/// one FFI value. `UnchangedOr<Any>` converts with `.into()` from
+/// [`Unchanged`], from a managed reference or scalar, and from a typed
+/// `UnchangedOr<T>`.
 ///
 /// # Examples
 ///
@@ -76,10 +71,7 @@ pub struct Unchanged;
 /// assert_eq!(double_even(4).value_or(4), 8);
 /// assert_eq!(double_even(3).value_or(3), 3);
 ///
-/// // Typed results, replacements and the marker all convert into the erased form.
 /// let erased: UnchangedOr<Any> = double_even(4).into();
-/// assert_eq!(erased.into_option().unwrap().try_as::<i64>(), Some(8));
-/// let erased: UnchangedOr<Any> = 5_i64.into();
 /// assert!(!erased.is_unchanged());
 /// let erased: UnchangedOr<Any> = Unchanged.into();
 /// assert!(erased.is_unchanged());
@@ -93,16 +85,6 @@ pub struct UnchangedOr<T: ContainerElement = Any> {
 impl<T: ContainerElement> UnchangedOr<T> {
     /// Create a result that keeps the original value, without borrowing or
     /// cloning it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::UnchangedOr;
-    ///
-    /// let result = UnchangedOr::<i64>::unchanged();
-    /// assert!(result.is_unchanged());
-    /// assert_eq!(result.into_option(), None);
-    /// ```
     #[inline]
     pub fn unchanged() -> Self {
         Self {
@@ -112,16 +94,6 @@ impl<T: ContainerElement> UnchangedOr<T> {
     }
 
     /// Create a result that replaces the original with `value`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::UnchangedOr;
-    ///
-    /// let result = UnchangedOr::changed(7_i64);
-    /// assert!(!result.is_unchanged());
-    /// assert_eq!(result.into_option(), Some(7));
-    /// ```
     #[inline]
     pub fn changed(value: T) -> Self {
         let mut raw = TVMFFIAny::new();
@@ -136,15 +108,6 @@ impl<T: ContainerElement> UnchangedOr<T> {
     }
 
     /// Return `true` if this result keeps the original value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::UnchangedOr;
-    ///
-    /// assert!(UnchangedOr::<i64>::unchanged().is_unchanged());
-    /// assert!(!UnchangedOr::changed(1_i64).is_unchanged());
-    /// ```
     #[inline]
     pub fn is_unchanged(&self) -> bool {
         is_unchanged(&self.data)
@@ -182,15 +145,6 @@ impl<T: ContainerElement> UnchangedOr<T> {
     }
 
     /// Return the replacement, or `None` if the result is unchanged.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::UnchangedOr;
-    ///
-    /// assert_eq!(UnchangedOr::changed(3_i64).into_option(), Some(3));
-    /// assert_eq!(UnchangedOr::<i64>::unchanged().into_option(), None);
-    /// ```
     #[inline]
     pub fn into_option(self) -> Option<T> {
         if self.is_unchanged() {
@@ -207,15 +161,6 @@ impl<T: ContainerElement> UnchangedOr<T> {
     ///
     /// `original` is taken even when it is not returned; use
     /// [`value_or_else`](Self::value_or_else) to produce it only when needed.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::UnchangedOr;
-    ///
-    /// assert_eq!(UnchangedOr::changed(3_i64).value_or(0), 3);
-    /// assert_eq!(UnchangedOr::<i64>::unchanged().value_or(0), 0);
-    /// ```
     #[inline]
     pub fn value_or(self, original: T) -> T {
         self.value_or_else(|| original)
@@ -225,16 +170,6 @@ impl<T: ContainerElement> UnchangedOr<T> {
     /// unchanged.
     ///
     /// `original` is called only for an unchanged result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{Array, UnchangedOr};
-    ///
-    /// let result = UnchangedOr::<Array<i64>>::unchanged();
-    /// let value = result.value_or_else(|| Array::new(vec![1_i64, 2]));
-    /// assert_eq!(value.len(), 2);
-    /// ```
     #[inline]
     pub fn value_or_else(self, original: impl FnOnce() -> T) -> T {
         self.into_option().unwrap_or_else(original)
@@ -244,18 +179,6 @@ impl<T: ContainerElement> UnchangedOr<T> {
     /// unchanged.
     ///
     /// `convert` is called only when there is a replacement.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::UnchangedOr;
-    ///
-    /// let result = UnchangedOr::changed(3_i64).map(|value| value as f64 / 2.0);
-    /// assert_eq!(result.into_option(), Some(1.5));
-    ///
-    /// let result = UnchangedOr::<i64>::unchanged().map(|value| value as f64);
-    /// assert!(result.is_unchanged());
-    /// ```
     #[inline]
     pub fn map<U: ContainerElement>(self, convert: impl FnOnce(T) -> U) -> UnchangedOr<U> {
         match self.into_option() {

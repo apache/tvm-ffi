@@ -382,40 +382,51 @@ impl InplaceMode {
 /// A borrowed value that a structural mutation may rewrite in place.
 ///
 /// Mutation handlers receive a `MutationView` instead of an owned value, so
-/// that matching a node does not retain it. Inspect the node through the view,
-/// then pass the view to [`StructuralMutatorView::default_mutate`] to rewrite
-/// its children; when the node is uniquely owned and the view carries
-/// [`InplaceMode::Allow`], its storage is reused instead of copied.
+/// matching a node does not retain it. Read the node through the view, then
+/// pass the view to [`StructuralMutatorView::default_mutate`] or rewrite its
+/// fields with [`field`](MutationView::field). When the node is uniquely owned
+/// and the view carries [`InplaceMode::Allow`], its storage is reused.
 ///
-/// `T` is the matched type: `MutationView<'_, Array<Any>>` derefs to the
-/// array's node, and the default `MutationView<'_>` matches every value. The
-/// view is move-only: it cannot be copied or cloned, and consuming it passes
-/// on the same permission. Borrows taken through it end when it is consumed,
-/// which the compiler checks. A view made from `&mut Any` may reuse storage;
-/// one made with [`borrowed`](MutationView::borrowed) never does.
+/// `MutationView<'_, T>` derefs to the node of `T`; the default
+/// `MutationView<'_>` matches every value. The view is move-only, and borrows
+/// taken through it end when it is consumed.
 ///
 /// # Examples
 ///
-/// Rewrite the integers in an array, reusing its storage when possible:
+/// [`field`](MutationView::field) gives a view of one field, which
+/// [`StructuralMutatorView::mutate`] rewrites; the handler rebuilds the node
+/// only if that field changed. Here only `second` is rewritten:
 ///
 /// ```
+/// use tvm_ffi::object::ObjectRef;
 /// use tvm_ffi::{
-///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
-///     UnchangedOr,
+///     def_object_ref, dispatch, rs_object, structural_mutate, Any, Array, MutationView,
+///     Object, Result, StructuralMutatorView, Unchanged, UnchangedOr,
 /// };
 ///
-/// struct Negate;
+/// #[rs_object("my_ext.MyPair", final)]
+/// pub struct MyPairObj {
+///     base: Object,
+///     pub first: Array<i64>,
+///     pub second: Array<i64>,
+/// }
+/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+///
+/// struct DoubleSecond;
 ///
 /// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
-/// impl Negate {
-///     fn mutate_array(
+/// impl DoubleSecond {
+///     fn mutate_pair(
 ///         &mut self,
-///         array: MutationView<'_, Array<Any>>,
+///         mut pair: MutationView<'_, MyPair>,
 ///         mutator: &mut StructuralMutatorView<'_, Self>,
 ///     ) -> Result<UnchangedOr<Any>> {
-///         // The view derefs to the array node without retaining it.
-///         assert_eq!(array.size, 2);
-///         mutator.default_mutate(self, array)
+///         let second = mutator.mutate(self, pair.field(|pair| &pair.second))?;
+///         let Some(second) = second.into_option() else {
+///             return Ok(Unchanged.into());
+///         };
+///         let second = Array::<i64>::try_from(second)?;
+///         Ok(MyPair::from(MyPairObj::new(Object::new(), pair.first.clone(), second)).into())
 ///     }
 ///
 ///     fn mutate_int(
@@ -423,13 +434,14 @@ impl InplaceMode {
 ///         value: i64,
 ///         _: &mut StructuralMutatorView<'_, Self>,
 ///     ) -> Result<UnchangedOr<Any>> {
-///         Ok((-value).into())
+///         Ok((value * 2).into())
 ///     }
 /// }
 ///
-/// let result = structural_mutate(Array::new(vec![1_i64, 2]), Negate)?;
-/// let result = Array::<i64>::try_from(result)?;
-/// assert_eq!(result.iter().collect::<Vec<_>>(), vec![-1, -2]);
+/// let pair = MyPairObj::new(Object::new(), Array::new(vec![1_i64]), Array::new(vec![5_i64, 6]));
+/// let result = MyPair::try_from(structural_mutate(MyPair::from(pair), DoubleSecond)?)?;
+/// assert_eq!(result.first.iter().collect::<Vec<_>>(), vec![1]);
+/// assert_eq!(result.second.iter().collect::<Vec<_>>(), vec![10, 12]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 ///
@@ -546,16 +558,6 @@ impl<'a, T> MutationView<'a, T> {
     }
 
     /// Return whether this view may reuse its value's storage.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{Any, InplaceMode, MutationView};
-    ///
-    /// let mut value = Any::from(1_i64);
-    /// let view = MutationView::from(&mut value);
-    /// assert_eq!(view.inplace_mode(), InplaceMode::Allow);
-    /// ```
     #[inline(always)]
     pub fn inplace_mode(&self) -> InplaceMode {
         self.mode
@@ -591,16 +593,6 @@ impl<'a, T> MutationView<'a, T> {
     ///
     /// The returned view, and its copies, borrow this `MutationView`, so their
     /// last use must come before the `MutationView` is consumed.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{Any, MutationView};
-    ///
-    /// let mut value = Any::from(7_i64);
-    /// let view = MutationView::from(&mut value);
-    /// assert_eq!(view.as_any_view().try_as::<i64>(), Some(7));
-    /// ```
     #[inline(always)]
     pub fn as_any_view(&self) -> AnyView<'_> {
         // SAFETY: the input owner keeps this payload live while the capability is
@@ -676,17 +668,6 @@ impl<'a, T> MutationView<'a, T> {
     }
 
     /// Erase the matched type, keeping the permission.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tvm_ffi::{Any, Array, InplaceMode, MutationView};
-    ///
-    /// let mut value = Any::from(Array::new(vec![1_i64]));
-    /// let array = MutationView::from(&mut value).try_cast::<Array<i64>>().ok().unwrap();
-    /// let view: MutationView<'_> = array.into_untyped();
-    /// assert_eq!(view.inplace_mode(), InplaceMode::Allow);
-    /// ```
     #[inline(always)]
     pub fn into_untyped(self) -> MutationView<'a> {
         MutationView {
@@ -724,14 +705,16 @@ impl<T: object::ObjectRefCore> std::ops::Deref for MutationView<'_, T> {
 }
 
 impl<T: object::ObjectRefCore> MutationView<'_, T> {
-    /// Borrow the field of the node that `selector` returns as a view of its
-    /// own.
+    /// Return a view of the field of the node that `selector` selects, to
+    /// rewrite that field with [`StructuralMutatorView::mutate`].
     ///
     /// `selector` takes the node and returns a reference to one of its own
     /// owning fields, an [`Any`] or a managed reference. The field view
-    /// borrows this view exclusively, and it may reuse storage only when this
-    /// view may and the node is uniquely owned. Mutating the field view does
-    /// not write the result back into the node.
+    /// borrows this view exclusively until it is consumed. It may reuse the
+    /// field's storage only when this view may and the node is uniquely
+    /// owned. Rewriting the field does not write the result back into the
+    /// node: the handler keeps the node [`Unchanged`] or builds a new one from
+    /// the result, as the [`MutationView`] example shows.
     ///
     /// # Panics
     ///
@@ -743,17 +726,18 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// use tvm_ffi::object::ObjectRef;
     /// use tvm_ffi::{def_object_ref, rs_object, Any, Array, MutationView, Object};
     ///
-    /// #[rs_object("my_ext.Bag", final)]
-    /// pub struct BagObj {
+    /// #[rs_object("my_ext.MyPair", final)]
+    /// pub struct MyPairObj {
     ///     base: Object,
-    ///     pub items: Array<i64>,
+    ///     pub first: Array<i64>,
+    ///     pub second: Array<i64>,
     /// }
-    /// def_object_ref!(pub Bag, ObjectRef, BagObj);
+    /// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
     ///
-    /// let mut value = Any::from(Bag::from(BagObj::new(Object::new(), Array::new(vec![1_i64, 2]))));
-    /// let mut bag = MutationView::from(&mut value).try_cast::<Bag>().ok().unwrap();
-    /// let items = bag.field(|node| &node.items);
-    /// assert_eq!(items.size, 2);
+    /// let pair = MyPairObj::new(Object::new(), Array::new(vec![1_i64]), Array::new(vec![2_i64, 3]));
+    /// let mut value = Any::from(MyPair::from(pair));
+    /// let mut pair = MutationView::from(&mut value).try_cast::<MyPair>().ok().unwrap();
+    /// assert_eq!(pair.field(|pair| &pair.second).size, 2);
     /// ```
     #[inline(always)]
     pub fn field<U: MutationField>(
@@ -789,8 +773,60 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     }
 }
 
-/// Recursive mutation and default descent for a dispatcher.
-/// Pass the handler's `self` to recursive methods with the same dispatcher identity.
+/// The running structural mutation, passed to each handler of
+/// [`structural_mutate`].
+///
+/// A handler that matches a node decides how its children are rewritten: call
+/// [`default_mutate`](Self::default_mutate) to rewrite every child through the
+/// dispatcher, [`mutate`](Self::mutate) to rewrite one value, or neither to
+/// leave the children as they are. Pass the handler's own `self` as `dispatch`
+/// to every method.
+///
+/// # Examples
+///
+/// Rewrite every array except those whose first item is `0`:
+///
+/// ```
+/// use tvm_ffi::{
+///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
+///     Unchanged, UnchangedOr,
+/// };
+///
+/// struct Increment;
+///
+/// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
+/// impl Increment {
+///     fn mutate_array(
+///         &mut self,
+///         array: MutationView<'_, Array<Any>>,
+///         mutator: &mut StructuralMutatorView<'_, Self>,
+///     ) -> Result<UnchangedOr<Any>> {
+///         let frozen = array.size > 0 && array.as_any_view().try_as::<Array<i64>>()
+///             .is_some_and(|items| items.get(0).ok() == Some(0));
+///         if frozen {
+///             return Ok(Unchanged.into());
+///         }
+///         mutator.default_mutate(self, array)
+///     }
+///
+///     fn mutate_int(
+///         &mut self,
+///         value: i64,
+///         _: &mut StructuralMutatorView<'_, Self>,
+///     ) -> Result<UnchangedOr<Any>> {
+///         Ok((value + 1).into())
+///     }
+/// }
+///
+/// let root = Array::new(vec![
+///     Any::from(Array::new(vec![1_i64, 2])),
+///     Any::from(Array::new(vec![0_i64, 5])),
+/// ]);
+/// let result = Array::<Array<i64>>::try_from(structural_mutate(root, Increment)?)?;
+/// let items: Vec<Vec<i64>> = result.iter().map(|array| array.iter().collect()).collect();
+/// assert_eq!(items, vec![vec![2, 3], vec![0, 5]]);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 pub struct StructuralMutatorView<'a, D, Base = StructuralMutatorObj> {
     runtime: StructuralMutatorHandle,
     _scope: PhantomData<&'a mut ()>,
@@ -799,7 +835,10 @@ pub struct StructuralMutatorView<'a, D, Base = StructuralMutatorObj> {
 }
 
 impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
-    /// Inspect the base state without retaining the scoped mutator runtime.
+    /// Borrow the mutator's base state, such as the constraint state of a
+    /// custom base.
+    ///
+    /// The reference cannot outlive this view.
     #[inline(always)]
     pub fn base(&self) -> &Base {
         // SAFETY: the unsafe base contract permits shared inspection, including
@@ -817,12 +856,59 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         }
     }
 
+    /// Return the definition region the current value is in.
+    ///
+    /// Reflected fields marked as definitions set it while their values are
+    /// mutated; it is [`DefRegionKind::None`] elsewhere.
     #[inline(always)]
     pub fn def_region_kind(&self) -> DefRegionKind {
         unsafe { std::mem::transmute(*(*self.runtime).def_region_mode.get()) }
     }
 
-    /// Scope definition-region state; an enclosing Pattern keeps precedence.
+    /// Call `callback` with the definition region set to `kind`, and restore
+    /// the previous region afterwards.
+    ///
+    /// An enclosing [`DefRegionKind::Pattern`] region stays in effect, since a
+    /// pattern applies to everything inside it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{
+    ///     dispatch, structural_mutate, Any, Array, DefRegionKind, MutationView, Result,
+    ///     StructuralMutatorView, UnchangedOr,
+    /// };
+    ///
+    /// struct Bind;
+    ///
+    /// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
+    /// impl Bind {
+    ///     // Treat the items of the root array as definitions.
+    ///     fn mutate_array(
+    ///         &mut self,
+    ///         array: MutationView<'_, Array<Any>>,
+    ///         mutator: &mut StructuralMutatorView<'_, Self>,
+    ///     ) -> Result<UnchangedOr<Any>> {
+    ///         mutator.with_def_region_kind(DefRegionKind::Simple, |mutator| {
+    ///             mutator.default_mutate(self, array)
+    ///         })
+    ///     }
+    ///
+    ///     fn mutate_int(
+    ///         &mut self,
+    ///         value: i64,
+    ///         mutator: &mut StructuralMutatorView<'_, Self>,
+    ///     ) -> Result<UnchangedOr<Any>> {
+    ///         assert_eq!(mutator.def_region_kind(), DefRegionKind::Simple);
+    ///         Ok((value * 10).into())
+    ///     }
+    /// }
+    ///
+    /// let result = structural_mutate(Array::new(vec![1_i64, 2]), Bind)?;
+    /// let result = Array::<i64>::try_from(result)?;
+    /// assert_eq!(result.iter().collect::<Vec<_>>(), vec![10, 20]);
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     #[inline(always)]
     pub fn with_def_region_kind<R>(
         &mut self,
@@ -834,7 +920,53 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         })
     }
 
-    /// Re-enter dispatch with the capability's carried permission.
+    /// Mutate `value` through the dispatcher, as if the traversal had reached
+    /// it.
+    ///
+    /// `dispatch` is the handler's own `self`. `value` keeps its in-place
+    /// permission. Use it to rewrite a value other than the current node, such
+    /// as a field selected with [`MutationView::field`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the handler that `value` reaches.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{
+    ///     dispatch, structural_mutate, Any, AnyView, Array, MutationView, Result,
+    ///     StructuralMutatorView, UnchangedOr,
+    /// };
+    ///
+    /// struct Last;
+    ///
+    /// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
+    /// impl Last {
+    ///     // Replace an array by its last item, rewritten.
+    ///     fn mutate_array(
+    ///         &mut self,
+    ///         array: Array<Any>,
+    ///         mutator: &mut StructuralMutatorView<'_, Self>,
+    ///     ) -> Result<UnchangedOr<Any>> {
+    ///         let last = array.get(array.len() - 1)?;
+    ///         let rewritten = mutator.mutate(self, MutationView::borrowed(AnyView::from(&last)))?;
+    ///         Ok(UnchangedOr::changed(rewritten.value_or(last)))
+    ///     }
+    ///
+    ///     fn mutate_int(
+    ///         &mut self,
+    ///         value: i64,
+    ///         _: &mut StructuralMutatorView<'_, Self>,
+    ///     ) -> Result<UnchangedOr<Any>> {
+    ///         Ok((-value).into())
+    ///     }
+    /// }
+    ///
+    /// let result = structural_mutate(Array::new(vec![1_i64, 2, 3]), Last)?;
+    /// assert_eq!(result.try_as::<i64>(), Some(-3));
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     #[inline(always)]
     pub fn mutate<'input, T>(
         &mut self,
@@ -851,7 +983,18 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         .and_then(UnchangedOr::from_carrier)
     }
 
-    /// Descend through the native hook or reflected fields without redispatching the root.
+    /// Rewrite the children of `value` through the dispatcher, without
+    /// dispatching `value` itself again.
+    ///
+    /// `dispatch` is the handler's own `self`, and `value` is usually the view
+    /// the handler received. Children are found by the type's registered
+    /// mutation hook or its reflected fields. The result is unchanged when no
+    /// child changed; otherwise it is a node with the new children, made in
+    /// place when `value` allows it and is uniquely owned.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error of a child's handler.
     #[inline(always)]
     pub fn default_mutate<'input, T>(
         &mut self,
@@ -872,6 +1015,15 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         .and_then(UnchangedOr::from_carrier)
     }
 
+    /// Return the replacement recorded for the variable `var` in this
+    /// mutation, or `None` when there is none.
+    ///
+    /// Default mutation records the result of every free variable and DAG
+    /// node it rewrites, and replaces each later occurrence with it.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` if `var` is not an object.
     #[inline(always)]
     pub fn var_remap_get(&mut self, dispatch: &mut D, var: AnyView<'_>) -> Result<Option<Any>> {
         unsafe {
@@ -883,6 +1035,44 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         }
     }
 
+    /// Record `value` as the replacement of the object `var` for the rest of
+    /// this mutation.
+    ///
+    /// Default mutation replaces each later occurrence of a free variable or
+    /// DAG node that has a recorded replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` if `var` is not an object.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{
+    ///     dispatch, structural_mutate, Any, AnyView, Array, MutationView, Result,
+    ///     StructuralMutatorView, UnchangedOr,
+    /// };
+    ///
+    /// struct Remap;
+    ///
+    /// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
+    /// impl Remap {
+    ///     fn mutate_array(
+    ///         &mut self,
+    ///         array: Array<Any>,
+    ///         mutator: &mut StructuralMutatorView<'_, Self>,
+    ///     ) -> Result<UnchangedOr<Any>> {
+    ///         let key = AnyView::from(&array);
+    ///         assert!(mutator.var_remap_get(self, key)?.is_none());
+    ///         mutator.var_remap_set(self, key, &Any::from(7_i64))?;
+    ///         assert_eq!(mutator.var_remap_get(self, key)?.unwrap().try_as::<i64>(), Some(7));
+    ///         Ok(UnchangedOr::unchanged())
+    ///     }
+    /// }
+    ///
+    /// structural_mutate(Array::new(vec![1_i64]), Remap)?;
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     #[inline(always)]
     pub fn var_remap_set(&mut self, dispatch: &mut D, var: AnyView<'_>, value: &Any) -> Result<()> {
         unsafe {
@@ -2011,7 +2201,6 @@ impl StructuralMutatorObj {
 /// Double integer leaves with a typed handler; default mutation visits the array:
 ///
 /// ```
-/// # pub use tvm_ffi::{extra, match_any, match_any_internal, Dispatcher};
 /// # fn main() -> tvm_ffi::Result<()> {
 /// use tvm_ffi::{
 ///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,

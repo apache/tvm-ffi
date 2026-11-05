@@ -287,7 +287,8 @@ crate::def_object_ref! {
 }
 
 impl VisitInterrupt {
-    /// Interrupt carrying an FFI-compatible payload.
+    /// Create an interrupt that carries `payload` back to the caller of the
+    /// visit.
     #[inline(always)]
     pub fn with<T: Into<Any>>(payload: T) -> Self {
         VisitInterruptObj {
@@ -306,16 +307,69 @@ impl VisitInterrupt {
 // continue; VisitInterrupt (including None/Error payloads) and Error stop descent.
 // Each ABI ingress/import and egress/export transfers ownership exactly once.
 // Recursive drivers move this carrier unchanged; typed public APIs decode it.
-/// Recursive visiting and default child descent for a dispatcher.
+/// The running structural visit, passed to each handler of
+/// [`structural_visit`].
 ///
-/// Pass the handler's `self` to visit methods to recurse with the same state.
+/// A handler that matches a node decides which children are visited: call
+/// [`default_visit`](Self::default_visit) to visit every child,
+/// [`visit`](Self::visit) to visit one value, or neither to skip the
+/// children. Pass the handler's own `self` as `dispatch` to every method. A
+/// handler returns `Ok(None)` to continue, or `Ok(Some(interrupt))` to stop
+/// the whole visit with a [`VisitInterrupt`].
+///
+/// # Examples
+///
+/// Find the first negative integer, without looking inside skipped arrays:
+///
+/// ```
+/// use tvm_ffi::{
+///     dispatch, structural_visit, Any, AnyView, Array, Result, StructuralVisitorView,
+///     VisitInterrupt,
+/// };
+///
+/// struct FindNegative;
+///
+/// #[dispatch(visit, (AnyView<'_>, &mut StructuralVisitorView<'_, Self>), Result<Option<VisitInterrupt>>)]
+/// impl FindNegative {
+///     fn visit_array(
+///         &mut self,
+///         array: Array<Any>,
+///         visitor: &mut StructuralVisitorView<'_, Self>,
+///     ) -> Result<Option<VisitInterrupt>> {
+///         // Skip arrays that start with the string "skip".
+///         let skip = array.len() > 0
+///             && array.get(0)?.try_as::<tvm_ffi::String>().is_some_and(|s| s.as_str() == "skip");
+///         if skip {
+///             return Ok(None);
+///         }
+///         visitor.default_visit(self, &array)
+///     }
+///
+///     fn visit_int(
+///         &mut self,
+///         value: i64,
+///         _: &mut StructuralVisitorView<'_, Self>,
+///     ) -> Result<Option<VisitInterrupt>> {
+///         Ok((value < 0).then(|| VisitInterrupt::with(value)))
+///     }
+/// }
+///
+/// let root = Array::new(vec![
+///     Any::from(Array::new(vec![Any::from(tvm_ffi::String::from("skip")), Any::from(-1_i64)])),
+///     Any::from(Array::new(vec![3_i64, -2, -5])),
+/// ]);
+/// let interrupt = structural_visit(&root, FindNegative)?.unwrap();
+/// assert_eq!(interrupt.value.try_as::<i64>(), Some(-2));
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 pub struct StructuralVisitorView<'a, D, Base = StructuralVisitorObj> {
     runtime: StructuralVisitorHandle,
     _scope: PhantomData<(&'a mut (), fn(&mut D) -> Base, Rc<()>)>,
 }
 
 impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
-    /// Inspect the base state without retaining the scoped visitor runtime.
+    /// Borrow the visitor's base state, such as the constraint state of a
+    /// custom base.
     ///
     /// The reference cannot outlive its view:
     ///
@@ -341,14 +395,64 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
         unsafe { &*self.runtime.cast::<Base>() }
     }
 
+    /// Return the definition region the current value is in.
+    ///
+    /// Reflected fields marked as definitions set it while their values are
+    /// visited; it is [`DefRegionKind::None`] elsewhere.
     #[inline(always)]
     pub fn def_region_kind(&self) -> DefRegionKind {
         // SAFETY: engine scopes and trusted ABI hooks store valid enum values.
         unsafe { std::mem::transmute(*(*self.runtime).def_region_mode.get()) }
     }
 
-    /// Run operations under a scoped definition region.
-    /// An enclosing Pattern wins; the previous region is restored on all exits.
+    /// Call `callback` with the definition region set to `kind`, and restore
+    /// the previous region afterwards, even on an error.
+    ///
+    /// An enclosing [`DefRegionKind::Pattern`] region stays in effect, since a
+    /// pattern applies to everything inside it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::{
+    ///     dispatch, structural_visit, Any, AnyView, Array, DefRegionKind, Result,
+    ///     StructuralVisitorView, VisitInterrupt,
+    /// };
+    ///
+    /// #[derive(Default)]
+    /// struct Defs(Vec<(i64, DefRegionKind)>);
+    ///
+    /// #[dispatch(visit, (AnyView<'_>, &mut StructuralVisitorView<'_, Self>), Result<Option<VisitInterrupt>>)]
+    /// impl Defs {
+    ///     // The first item is a definition; the rest are uses.
+    ///     fn visit_array(
+    ///         &mut self,
+    ///         array: Array<Any>,
+    ///         visitor: &mut StructuralVisitorView<'_, Self>,
+    ///     ) -> Result<Option<VisitInterrupt>> {
+    ///         let first = array.get(0)?;
+    ///         visitor.with_def_region_kind(DefRegionKind::Simple, |visitor| visitor.visit(self, &first))?;
+    ///         for item in array.iter().skip(1) {
+    ///             visitor.visit(self, &item)?;
+    ///         }
+    ///         Ok(None)
+    ///     }
+    ///
+    ///     fn visit_int(
+    ///         &mut self,
+    ///         value: i64,
+    ///         visitor: &mut StructuralVisitorView<'_, Self>,
+    ///     ) -> Result<Option<VisitInterrupt>> {
+    ///         self.0.push((value, visitor.def_region_kind()));
+    ///         Ok(None)
+    ///     }
+    /// }
+    ///
+    /// let mut defs = Defs::default();
+    /// structural_visit(&Array::new(vec![1_i64, 2]), &mut defs)?;
+    /// assert_eq!(defs.0, vec![(1, DefRegionKind::Simple), (2, DefRegionKind::None)]);
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
     #[inline(always)]
     pub fn with_def_region_kind<R>(
         &mut self,
@@ -358,7 +462,14 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
         StructuralVisitorObj::with_def_region_kind(self.runtime, kind, || callback(self))
     }
 
-    /// Visit a value through the dispatcher.
+    /// Visit `value` through the dispatcher, as if the traversal had reached
+    /// it.
+    ///
+    /// `dispatch` is the handler's own `self`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the handler that `value` reaches.
     #[inline(always)]
     pub fn visit<'input, T>(&mut self, dispatch: &mut D, value: T) -> Result<Option<VisitInterrupt>>
     where
@@ -378,8 +489,16 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
         }
     }
 
-    /// Run default descent through registered hooks or reflected fields.
-    /// Children re-enter the dispatcher; the current value does not.
+    /// Visit the children of `value` through the dispatcher, without
+    /// dispatching `value` itself again.
+    ///
+    /// `dispatch` is the handler's own `self`. Children are found by the
+    /// type's registered visit hook or its reflected fields. The visit stops
+    /// at the first child that returns an interrupt.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error of a child's handler.
     #[inline(always)]
     pub fn default_visit<'input, T>(
         &self,
@@ -1148,7 +1267,6 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
 /// Sum integer leaves while default traversal descends into the array:
 ///
 /// ```
-/// # pub use tvm_ffi::{extra, match_any, match_any_internal, Dispatcher};
 /// # fn main() -> tvm_ffi::Result<()> {
 /// use tvm_ffi::{
 ///     dispatch, structural_visit, AnyView, Array, Result, StructuralVisitorView,
