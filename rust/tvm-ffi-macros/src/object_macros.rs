@@ -567,9 +567,9 @@ pub(crate) fn expand_object_ref(
             );
         };
 
-        unsafe impl #tvm_ffi_crate::type_traits::RefFromAny for #struct_name {
+        unsafe impl #tvm_ffi_crate::type_traits::RefFromAnyUnchecked for #struct_name {
             #[inline(always)]
-            unsafe fn ref_from_any(cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> &Self {
+            unsafe fn ref_from_any_unchecked(cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> &Self {
                 &*(::core::ptr::addr_of!(cell.data_union) as *const Self)
             }
         }
@@ -580,6 +580,24 @@ pub(crate) fn expand_object_ref(
             #[inline(always)]
             fn as_ref(&self) -> &Self {
                 self
+            }
+        }
+
+        unsafe impl #tvm_ffi_crate::type_traits::DowncastRefFromAny for #struct_name {
+            #[inline(always)]
+            unsafe fn downcast_ref_from_any(
+                cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny,
+            ) -> ::core::option::Option<&Self> {
+                #tvm_ffi_crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
+            }
+        }
+
+        unsafe impl #tvm_ffi_crate::type_traits::DowncastRefFromObject for #struct_name {
+            #[inline(always)]
+            unsafe fn downcast_ref_from_object(
+                place: &*mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject,
+            ) -> ::core::option::Option<&Self> {
+                #tvm_ffi_crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
             }
         }
 

@@ -24,7 +24,7 @@ use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
 use crate::object::{Object, ObjectArc};
-use crate::type_traits::{ContainerElement, RefFromAny};
+use crate::type_traits::{ContainerElement, RefFromAnyUnchecked};
 use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -262,7 +262,7 @@ impl<T: ContainerElement + Clone> Array<T> {
 
 /// Lends `&T` from the array's cell in place. Every cell of an `Array<T>`
 /// holds a `T` (checked when the array is built), so only a debug check runs.
-impl<T: ContainerElement + Clone + RefFromAny> std::ops::Index<usize> for Array<T> {
+impl<T: ContainerElement + Clone + RefFromAnyUnchecked> std::ops::Index<usize> for Array<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &T {
@@ -277,7 +277,7 @@ impl<T: ContainerElement + Clone + RefFromAny> std::ops::Index<usize> for Array<
         unsafe {
             let cell = &*(container.data as *const TVMFFIAny).add(index);
             debug_assert!(T::container_check_any_strict(cell));
-            T::ref_from_any(cell)
+            T::ref_from_any_unchecked(cell)
         }
     }
 }
@@ -425,13 +425,33 @@ where
 }
 
 // The cell's payload word is the single object pointer of the handle.
-unsafe impl<T> crate::type_traits::RefFromAny for Array<T>
+unsafe impl<T> crate::type_traits::RefFromAnyUnchecked for Array<T>
 where
     T: ContainerElement + Clone,
 {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &*(core::ptr::addr_of!(cell.data_union) as *const Self)
+    }
+}
+
+unsafe impl<T> crate::type_traits::DowncastRefFromAny for Array<T>
+where
+    T: ContainerElement + Clone,
+{
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
+    }
+}
+
+unsafe impl<T> crate::type_traits::DowncastRefFromObject for Array<T>
+where
+    T: ContainerElement + Clone,
+{
+    #[inline(always)]
+    unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
+        crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
     }
 }
 

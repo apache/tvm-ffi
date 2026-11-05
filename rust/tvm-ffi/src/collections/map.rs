@@ -572,14 +572,36 @@ where
 }
 
 // The cell's payload word is the single object pointer of the handle.
-unsafe impl<K, V> crate::type_traits::RefFromAny for Map<K, V>
+unsafe impl<K, V> crate::type_traits::RefFromAnyUnchecked for Map<K, V>
 where
     K: ContainerElement,
     V: ContainerElement,
 {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &*(core::ptr::addr_of!(cell.data_union) as *const Self)
+    }
+}
+
+unsafe impl<K, V> crate::type_traits::DowncastRefFromAny for Map<K, V>
+where
+    K: ContainerElement,
+    V: ContainerElement,
+{
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
+    }
+}
+
+unsafe impl<K, V> crate::type_traits::DowncastRefFromObject for Map<K, V>
+where
+    K: ContainerElement,
+    V: ContainerElement,
+{
+    #[inline(always)]
+    unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
+        crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
     }
 }
 

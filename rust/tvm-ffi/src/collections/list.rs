@@ -657,13 +657,33 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
 }
 
 // The cell's payload word is the single object pointer of the handle.
-unsafe impl<T> crate::type_traits::RefFromAny for List<T>
+unsafe impl<T> crate::type_traits::RefFromAnyUnchecked for List<T>
 where
     T: ContainerElement,
 {
     #[inline(always)]
-    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         &*(core::ptr::addr_of!(cell.data_union) as *const Self)
+    }
+}
+
+unsafe impl<T> crate::type_traits::DowncastRefFromAny for List<T>
+where
+    T: ContainerElement,
+{
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
+    }
+}
+
+unsafe impl<T> crate::type_traits::DowncastRefFromObject for List<T>
+where
+    T: ContainerElement,
+{
+    #[inline(always)]
+    unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
+        crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
     }
 }
 

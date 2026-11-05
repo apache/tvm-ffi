@@ -156,28 +156,23 @@ impl<'a> AnyView<'a> {
         }
     }
 
-    /// Borrow the viewed object as `T` when its runtime type is `T` or a subtype.
+    /// Borrow the viewed value as `T` when it holds one, without copying it.
     ///
-    /// `T` is an object representation type such as `ArrayObj`. Non-object values
-    /// and unrelated object types return `None`. This does not change the object's
-    /// reference count; the borrow cannot outlive this view or the owner it
-    /// borrows.
+    /// `T` is an object type such as `ArrayObj`, a managed reference such as
+    /// `Array<i64>`, or a value stored in place such as `String` or `i64`. The
+    /// check is strict, as in [`try_as`](Self::try_as), and never converts.
+    /// The borrow does not change any reference count and is tied to this view,
+    /// which holds its own copy of the value's cell.
     ///
     /// # Returns
     ///
-    /// The borrowed object, or `None`.
+    /// The borrowed value, or `None`.
     ///
     /// See also [`Any::downcast_ref`].
     #[inline(always)]
-    pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
-        if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
-            || !object::is_instance_of::<T>(self.data.type_index)
-        {
-            return None;
-        }
-        // SAFETY: the type check establishes T's layout, and AnyView keeps
-        // the allocation borrowed for at least the lifetime of this reference.
-        Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
+    pub fn downcast_ref<T: crate::type_traits::DowncastRefFromAny>(&self) -> Option<&T> {
+        // SAFETY: the view holds a valid cell for as long as it is borrowed.
+        unsafe { T::downcast_ref_from_any(&self.data) }
     }
 
     /// Return the viewed value as a `T` when it is stored as exactly `T`.
@@ -329,19 +324,15 @@ impl Any {
     /// use tvm_ffi::{collections::array::ArrayObj, Any, Array};
     /// let value = Any::from(Array::from_vec(vec![1_i64, 2]));
     /// assert_eq!(value.downcast_ref::<ArrayObj>().unwrap().size, 2);
+    /// assert_eq!(value.downcast_ref::<Array<i64>>().unwrap()[1], 2);
+    /// assert!(value.downcast_ref::<i64>().is_none());
     /// ```
     ///
     /// See also [`try_as`](Self::try_as).
     #[inline]
-    pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
-        if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
-            || !object::is_instance_of::<T>(self.data.type_index)
-        {
-            return None;
-        }
-        // SAFETY: the object tag and runtime type check guarantee a live T
-        // layout, and this borrow is bounded by the owning Any's lifetime.
-        Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
+    pub fn downcast_ref<T: crate::type_traits::DowncastRefFromAny>(&self) -> Option<&T> {
+        // SAFETY: the owned cell stays valid for as long as `self` is borrowed.
+        unsafe { T::downcast_ref_from_any(&self.data) }
     }
 
     /// Return the stored value as a `T` when it is stored as exactly `T`.
