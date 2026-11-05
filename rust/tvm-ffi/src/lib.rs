@@ -71,7 +71,8 @@ pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
 pub use crate::object::{
-    Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity, ObjectRefCore,
+    IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity,
+    ObjectRefCore,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{
