@@ -192,7 +192,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes
-/// ownership with [`into_owned`](Self::into_owned), which clones only a
+/// ownership with [`into_owned_object_ref`](Self::into_owned_object_ref), which clones only a
 /// borrowed reference.
 ///
 /// # Examples
@@ -221,7 +221,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 ///
 /// // A function that keeps the value takes ownership.
 /// fn keep(value: impl IntoObjectRef<ObjectRef>) -> ObjectRef {
-///     value.into_owned()
+///     value.into_owned_object_ref()
 /// }
 /// assert!(keep(&pair).same_as(&base));
 /// ```
@@ -243,7 +243,7 @@ pub trait IntoObjectRef<T> {
     ///
     /// The owned reference.
     #[inline(always)]
-    fn into_owned(self) -> T
+    fn into_owned_object_ref(self) -> T
     where
         Self: Sized,
     {
