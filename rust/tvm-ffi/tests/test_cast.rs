@@ -202,7 +202,7 @@ fn test_generated_borrow_and_upcast_conversions() {
 
 #[test]
 fn test_cast_checks_parameterized_container_type() {
-    assert!(Array::new(vec![1_i64, 2_i64])
+    assert!(Array::from_vec(vec![1_i64, 2_i64])
         .try_cast::<Array<f32>>()
         .is_err());
 }

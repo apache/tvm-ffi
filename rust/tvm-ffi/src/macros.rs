@@ -252,7 +252,9 @@ macro_rules! attach_context {
                     line!(),
                     $crate::function_name!()
                 );
-                Err($crate::error::Error::with_appended_backtrace(error, &context))
+                Err($crate::error::Error::with_appended_backtrace(
+                    error, &context,
+                ))
             }
         }
     }};

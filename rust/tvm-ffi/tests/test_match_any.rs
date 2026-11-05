@@ -66,7 +66,7 @@ fn matches_concrete_object_containers_in_source_order() {
 
     use tvm_ffi::collections::array::ArrayObj;
     use tvm_ffi::{ObjectArc, ObjectRefCore};
-    let source = Array::new(vec![1_i64, 2, 3]);
+    let source = Array::from_vec(vec![1_i64, 2, 3]);
     let count = || ObjectArc::strong_count(<Array<i64> as ObjectRefCore>::data(&source));
     let size = match_any! {
         &source {
@@ -336,16 +336,16 @@ fn parameterized_containers_use_complete_conversion_semantics() {
 
     assert_eq!(selected, "float array");
     use tvm_ffi::{List, MutationView};
-    let values = Array::new(vec![257_i64]);
+    let values = Array::from_vec(vec![257_i64]);
     assert_eq!(
         match_any!(&values { Array<u8>(_) => 0, Array<i64>(_) => 1, _ => 2 }),
         1
     );
-    assert!(!match_any!(Array::new(vec![true]) { Array<i64>(_) => true, _ => false }));
+    assert!(!match_any!(Array::from_vec(vec![true]) { Array<i64>(_) => true, _ => false }));
     assert!(!match_any!(&values { List<i64>(_) => true, _ => false }));
     let list = [257_i64].into_iter().collect::<List<i64>>();
     assert!(!match_any!(&list { Array<i64>(_) => true, List<u8>(_) => true, _ => false }));
-    let nested = Array::new(vec![Array::new(vec![Some(257_i64)])]);
+    let nested = Array::from_vec(vec![Array::from_vec(vec![Some(257_i64)])]);
     assert_eq!(
         match_any!(&nested {
             Array<Array<Option<u8>>>(_) => 0,

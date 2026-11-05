@@ -41,16 +41,16 @@ fn test_array_core_and_iteration() {
     let t1 = create_tensor(10.0, &[1, 2]);
     let t2 = create_tensor(20.0, &[3, 4, 5]);
 
-    let array = Array::new(vec![t1.clone(), t2.clone()]);
+    let array = Array::from_vec(vec![t1.clone(), t2.clone()]);
 
     // Core Accessors
     assert_eq!(array.len(), 2);
     assert!(!array.is_empty());
 
     // Value Integrity
-    assert_eq!(get_val(&Tensor::try_from(array[0]).unwrap()), 10.0);
-    assert_eq!(Tensor::try_from(array[0]).unwrap().ndim(), 2);
-    assert_eq!(Tensor::try_from(array[1]).unwrap().ndim(), 3);
+    assert_eq!(get_val(&array[0]), 10.0);
+    assert_eq!(array[0].ndim(), 2);
+    assert_eq!(array[1].ndim(), 3);
 
     // Iteration
     let vals: Vec<f32> = array.iter().map(|t| get_val(&t)).collect();
@@ -59,7 +59,7 @@ fn test_array_core_and_iteration() {
 
 #[test]
 fn test_array_any_conversions() {
-    let array = Array::new(vec![
+    let array = Array::from_vec(vec![
         create_tensor(1.0, &[1]),
         create_tensor(2.0, &[1]),
         create_tensor(3.0, &[1]),
@@ -80,10 +80,10 @@ fn test_array_any_conversions() {
 
 #[test]
 fn test_array_with_any_elements() {
-    let array = Array::new(vec![
+    let array = Array::from_vec(vec![
         Any::from(7i64),
         Any::from(String::from("value")),
-        Any::from(Array::new(vec![1i64, 2])),
+        Any::from(Array::from_vec(vec![1i64, 2])),
     ]);
 
     assert_eq!(i64::try_from(array.get(0).unwrap()).unwrap(), 7);
@@ -107,7 +107,7 @@ fn test_array_with_any_elements() {
     let by_reference = i64::try_from(array_size.call_tuple((&round_trip,)).unwrap()).unwrap();
     assert_eq!((by_value, by_reference), (3, 3));
 
-    let widened = Array::<Any>::try_from(Any::from(Array::new(vec![3i64, 4]))).unwrap();
+    let widened = Array::<Any>::try_from(Any::from(Array::from_vec(vec![3i64, 4]))).unwrap();
     assert_eq!(
         widened
             .iter()
@@ -120,7 +120,7 @@ fn test_array_with_any_elements() {
 #[test]
 fn test_array_recursive_type_checking() {
     // 1. Create an Array of Shapes
-    let shape_array = Array::new(vec![Shape::from(vec![1, 2]), Shape::from(vec![3])]);
+    let shape_array = Array::from_vec(vec![Shape::from(vec![1, 2]), Shape::from(vec![3])]);
 
     // 2. Wrap it in Any
     let any_val = Any::from(shape_array);
@@ -144,11 +144,11 @@ fn test_array_recursive_type_checking() {
 #[test]
 fn test_array_parametric_heterogeneity() {
     // Verify Array works with different ObjectRefCore types
-    let shape_array = Array::new(vec![Shape::from(vec![1, 2, 3]), Shape::from(vec![10])]);
+    let shape_array = Array::from_vec(vec![Shape::from(vec![1, 2, 3]), Shape::from(vec![10])]);
     assert_eq!(shape_array.get(0).unwrap().as_slice(), &[1, 2, 3]);
     assert_eq!(shape_array.get(1).unwrap().as_slice(), &[10]);
 
-    let function_array = Array::new(vec![
+    let function_array = Array::from_vec(vec![
         Function::get_global("ffi.String").unwrap(),
         Function::get_global("ffi.Bytes").unwrap(),
     ]);

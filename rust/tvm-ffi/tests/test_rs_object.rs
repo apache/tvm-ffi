@@ -206,7 +206,7 @@ fn point(x: i64, label: &str) -> RsPoint {
 }
 
 fn point3(x: i64, z: i64) -> RsPoint3 {
-    let tags = Array::new(vec!["a".into(), "b".into()]);
+    let tags = Array::from_vec(vec!["a".into(), "b".into()]);
     RsPoint3Obj::new(RsPointObj::new(Object::new(), x, "p3"), z, tags, 7).into()
 }
 
@@ -484,7 +484,7 @@ fn test_init_constructs_the_type_from_its_fields() {
     // The fields of the parent come first, as for a C++ type.
     let init = type_attr_function(RsPoint3Obj::type_index(), "__ffi_init__");
     let label = || tvm_ffi::String::from("l");
-    let tags = Array::<tvm_ffi::String>::new(vec!["a".into()]);
+    let tags = Array::<tvm_ffi::String>::from_vec(vec!["a".into()]);
     let p3 = init
         .call_tuple((1_i64, label(), 2_i64, tags.clone(), 3_i64))
         .unwrap();

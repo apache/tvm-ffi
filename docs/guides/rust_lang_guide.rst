@@ -89,7 +89,7 @@ the value it borrows. A number and a built-in array illustrate owning and borrow
    let number = Any::from(3_i64);
    assert_eq!(number.try_as::<i64>(), Some(3));
 
-   let value = Any::from(Array::new(vec![1_i64, 2, 3]));
+   let value = Any::from(Array::from_vec(vec![1_i64, 2, 3]));
    let view = AnyView::from(&value); // Borrow the value without a new reference.
    assert_eq!(view.downcast_ref::<ArrayObj>().unwrap().size, 3);
 
@@ -122,7 +122,7 @@ element type to ``T``. Named reference types implement |rs-objectrefcore|_ for s
    use tvm_ffi::collections::array::ArrayObj;
    use tvm_ffi::{Array, ObjectRefCore};
 
-   let array = Array::new(vec![1_i64, 2, 3]);
+   let array = Array::from_vec(vec![1_i64, 2, 3]);
    assert_eq!(array.downcast_ref::<ArrayObj>().unwrap().size, 3);
    assert_eq!(array.get(1).unwrap(), 2); // A method of the named type.
 
@@ -498,7 +498,7 @@ arm whose type matches the value runs:
    for value in [
        Any::from(42_i64),
        Any::from(tvm_ffi::String::from("hi")),
-       Any::from(Array::new(vec![1_i64, 2, 3])),
+       Any::from(Array::from_vec(vec![1_i64, 2, 3])),
        Any::from(1.5_f64),
    ] {
        println!("{}", kind(&value));
@@ -555,10 +555,10 @@ them. Let's describe nested arrays, with a separator between items:
        }
    }
 
-   let value = Any::from(Array::new(vec![
+   let value = Any::from(Array::from_vec(vec![
        Any::from(1_i64),
        Any::from(tvm_ffi::String::from("a")),
-       Any::from(Array::new(vec![2_i64, 3])),
+       Any::from(Array::from_vec(vec![2_i64, 3])),
    ]));
    let text = Describer.dispatch(AnyView::from(&value), ", ").unwrap();
    println!("{text}");
@@ -661,7 +661,7 @@ Walk handlers may take an optional trailing ``DefRegionKind`` argument:
        }
    }
 
-   let values = Array::new(vec![1_i64, 2, 3]);
+   let values = Array::from_vec(vec![1_i64, 2, 3]);
    let mut probe = Probe::default();
    structural_walk(&values, &mut probe, WalkOrder::PreOrder)?;
    assert_eq!(probe.total, 6);
@@ -682,7 +682,7 @@ take a trailing ``DefRegionKind`` argument:
 
    use tvm_ffi::{structural_walk, Array, DefRegionKind, Object, WalkOrder, WalkResult};
 
-   let values = Array::new(vec![1_i64, 2, 3]);
+   let values = Array::from_vec(vec![1_i64, 2, 3]);
 
    let mut total = 0;
    structural_walk(
@@ -725,7 +725,7 @@ propagate errors with ``?``:
 
    use tvm_ffi::{structural_walk, Array, WalkOrder, WalkResult};
 
-   let values = Array::new(vec![1_i64, 2, 3]);
+   let values = Array::from_vec(vec![1_i64, 2, 3]);
    let found = structural_walk(
        &values,
        |value: i64| {
@@ -765,7 +765,7 @@ dispatchers and closures.
        }
    }
 
-   let values = Array::new(vec![1_i64, 2]);
+   let values = Array::from_vec(vec![1_i64, 2]);
    let mut visitor = Stats::default();
    structural_visit(&values, &mut visitor)?;
    assert_eq!(visitor.total, 3);
@@ -810,7 +810,7 @@ argument tuple and return type supply the engine signature directly:
        }
    }
 
-   let values = Array::new(vec![1_i64, 2]);
+   let values = Array::from_vec(vec![1_i64, 2]);
    let mut depth = Depth::default();
    structural_visit(&values, &mut depth)?;
    assert_eq!(depth.max, 2);
@@ -868,7 +868,7 @@ catch-all and should therefore come last:
 
    let mut increment = Increment::default();
    let mapped = structural_map(
-       Array::new(vec![1_i64, 2]),
+       Array::from_vec(vec![1_i64, 2]),
        &mut increment,
        WalkOrder::PostOrder,
    )?;
@@ -958,7 +958,7 @@ Base implementations delegate to the corresponding ``StructuralVisitorObj`` or
    }
 
    let mut mutator = Stats::default();
-   let mutated = structural_mutate(Array::new(vec![1_i64, 2]), &mut mutator)?;
+   let mutated = structural_mutate(Array::from_vec(vec![1_i64, 2]), &mut mutator)?;
    let mutated = Array::<i64>::try_from(mutated)?;
    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
    assert_eq!(mutator.integers, 2);
@@ -967,7 +967,7 @@ Base implementations delegate to the corresponding ``StructuralVisitorObj`` or
 ``mutator.default_mutate(self, value)`` runs default descent. Both return
 ``Result<UnchangedOr<Any>>`` and preserve the capability's permission. For a local owning
 ``Any``, pass ``&mut owned`` and resolve the returned change with
-``change.value_or(owned)`` after the borrow ends. These calls inherit the definition
+``change.value_or_unchanged(owned)`` after the borrow ends. These calls inherit the definition
 region established by the defining node or reflected field; handlers query it
 with ``mutator.def_region_kind()``. Reserve ``with_def_region_kind`` on either view
 for hooks that establish a definition region according to their node's semantics.
@@ -1014,7 +1014,7 @@ other handler consumes it:
    }
 
    let mut increment = Increment::default();
-   let mutated = structural_mutate(Array::new(vec![1_i64, 2]), &mut increment)?;
+   let mutated = structural_mutate(Array::from_vec(vec![1_i64, 2]), &mut increment)?;
    let mutated = Array::<i64>::try_from(mutated)?;
    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
    assert_eq!(increment.integers, 2);
@@ -1043,7 +1043,7 @@ while retaining typed scalar replacements:
        }
    }
 
-   let mutated = structural_mutate(Array::new(vec![1_i64, 2]), Increment)?;
+   let mutated = structural_mutate(Array::from_vec(vec![1_i64, 2]), Increment)?;
    let mutated = Array::<i64>::try_from(mutated)?;
    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 

@@ -218,6 +218,61 @@ pub trait ContainerElement: container_element_ops::Ops {}
 impl<T: AnyCompatible> ContainerElement for T {}
 impl ContainerElement for Any {}
 
+/// Types whose value an FFI `Any` cell stores in place, so `&Self` can be
+/// borrowed from the cell, as [`crate::Array`] indexing does.
+///
+/// # Safety
+///
+/// For a cell that passes `container_check_any_strict` for `Self`,
+/// `ref_from_any` must return a reference into that cell that is a valid
+/// `Self` for as long as the cell is borrowed.
+#[doc(hidden)]
+pub unsafe trait RefFromAny: ContainerElement {
+    /// Borrow the value stored in `cell`.
+    ///
+    /// # Safety
+    ///
+    /// `cell` must hold a `Self`.
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self;
+}
+
+// The whole cell is the value.
+unsafe impl RefFromAny for Any {
+    #[inline(always)]
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+        &*(cell as *const TVMFFIAny as *const Any)
+    }
+}
+
+unsafe impl RefFromAny for crate::String {
+    #[inline(always)]
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+        &*(cell as *const TVMFFIAny as *const crate::String)
+    }
+}
+
+unsafe impl RefFromAny for crate::string::Bytes {
+    #[inline(always)]
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+        &*(cell as *const TVMFFIAny as *const crate::string::Bytes)
+    }
+}
+
+// The payload word holds the value in its own representation.
+unsafe impl RefFromAny for i64 {
+    #[inline(always)]
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+        &cell.data_union.v_int64
+    }
+}
+
+unsafe impl RefFromAny for f64 {
+    #[inline(always)]
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+        &cell.data_union.v_float64
+    }
+}
+
 mod container_element_ops {
     use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
 

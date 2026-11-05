@@ -54,8 +54,8 @@ pub struct Unchanged;
 /// one FFI value. `UnchangedOr<Any>` converts with `.into()` from
 /// [`Unchanged`], from a managed reference or scalar, and from a typed
 /// `UnchangedOr<T>`. `T` is an FFI value type or [`Any`]. Converting the
-/// wrapper into `Any` keeps the marker; use [`value_or`](Self::value_or) or
-/// [`value_or_else`](Self::value_or_else) when an actual value is needed.
+/// wrapper into `Any` keeps the marker; use [`value_or_unchanged`](Self::value_or_unchanged) or
+/// [`into_option`](Self::into_option) when an actual value is needed.
 ///
 /// # Examples
 ///
@@ -70,8 +70,8 @@ pub struct Unchanged;
 ///     }
 /// }
 ///
-/// assert_eq!(double_even(4).value_or(4), 8);
-/// assert_eq!(double_even(3).value_or(3), 3);
+/// assert_eq!(double_even(4).value_or_unchanged(4), 8);
+/// assert_eq!(double_even(3).value_or_unchanged(3), 3);
 /// ```
 #[repr(transparent)]
 pub struct UnchangedOr<T: ContainerElement = Any> {
@@ -141,7 +141,7 @@ impl<T: ContainerElement> UnchangedOr<T> {
     ///
     /// ```
     /// use tvm_ffi::{Array, UnchangedOr};
-    /// let original = Array::new(vec![1_i64]);
+    /// let original = Array::from_vec(vec![1_i64]);
     /// assert!(UnchangedOr::changed(original.clone()).unchanged_or_same_as(&original));
     /// ```
     ///
@@ -178,34 +178,19 @@ impl<T: ContainerElement> UnchangedOr<T> {
 
     /// Move out the replacement, or `original` when the result is unchanged.
     ///
-    /// `original` is taken even when it is not returned; use
-    /// [`value_or_else`](Self::value_or_else) to produce it only when needed.
+    /// `original` is the value the callback was given; to produce it only when
+    /// needed, use `into_option().unwrap_or_else(..)`.
     ///
     /// # Arguments
     ///
-    /// * `original` - The original value.
+    /// * `original` - The original value, kept when the result is unchanged.
     ///
     /// # Returns
     ///
     /// The replacement, or `original`.
     #[inline]
-    pub fn value_or(self, original: T) -> T {
-        self.value_or_else(|| original)
-    }
-
-    /// Move out the replacement, or materialize the original only if this result is
-    /// unchanged.
-    ///
-    /// # Arguments
-    ///
-    /// * `original` - Produces the original value; called only when unchanged.
-    ///
-    /// # Returns
-    ///
-    /// The replacement, or the result of `original`.
-    #[inline]
-    pub fn value_or_else(self, original: impl FnOnce() -> T) -> T {
-        self.into_option().unwrap_or_else(original)
+    pub fn value_or_unchanged(self, original: T) -> T {
+        self.into_option().unwrap_or(original)
     }
 
     /// Convert only the replacement, preserving an unchanged result.

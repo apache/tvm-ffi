@@ -487,16 +487,16 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
         R: Into<AnyView<'input>>,
         O: BorrowMut<D>,
         for<'v, 'c, 'r> H: IntoDispatcher<
-                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-                Option<Result<Option<VisitInterrupt>>>,
-                M,
-                Target = D,
-                Output = O,
-            >,
+            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+            Option<Result<Option<VisitInterrupt>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-                Option<Result<Option<VisitInterrupt>>>,
-            >,
+            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
     {
         let mut storage = dispatcher.into_dispatcher();
         let root = root.into();
@@ -1061,9 +1061,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     fn vtable<D>() -> &'static StructuralVisitorVTable
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-                Option<Result<Option<VisitInterrupt>>>,
-            >,
+            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
     {
         &StructuralVisitorVTable {
             visit: Self::rust_vtable_visit_raw::<D>,
@@ -1083,9 +1083,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     ) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-                Option<Result<Option<VisitInterrupt>>>,
-            >,
+            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
     {
         let context = (*Self::from_handle(runtime)).dispatcher;
         let raw = *value.as_raw_ffi_any();
@@ -1154,9 +1154,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     pub(super) fn run_visitor_raw<D>(root: TVMFFIAny, dispatch: &mut D) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-                Option<Result<Option<VisitInterrupt>>>,
-            >,
+            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
     {
         let base = match Base::new() {
             Ok(base) => base,
@@ -1235,7 +1235,7 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
 ///     }
 /// }
 ///
-/// let root = Array::new(vec![1_i64, 2, 3]);
+/// let root = Array::from_vec(vec![1_i64, 2, 3]);
 /// let mut sum = Sum(0);
 /// assert!(structural_visit(&root, &mut sum)?.is_none());
 /// assert_eq!(sum.0, 6);
@@ -1250,22 +1250,22 @@ where
     R: Into<AnyView<'input>>,
     O: BorrowMut<D>,
     for<'v, 'c, 'r> H: IntoDispatcher<
-            (
-                AnyView<'v>,
-                &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
-            ),
-            Option<Result<Option<VisitInterrupt>>>,
-            M,
-            Target = D,
-            Output = O,
-        >,
+        (
+            AnyView<'v>,
+            &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
+        ),
+        Option<Result<Option<VisitInterrupt>>>,
+        M,
+        Target = D,
+        Output = O,
+    >,
     for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (
-                AnyView<'v>,
-                &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
-            ),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+        (
+            AnyView<'v>,
+            &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
+        ),
+        Option<Result<Option<VisitInterrupt>>>,
+    >,
 {
     StructuralVisitEngine::visit_root(root, dispatcher)
 }

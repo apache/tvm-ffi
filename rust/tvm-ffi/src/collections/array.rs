@@ -24,7 +24,7 @@ use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
 use crate::object::{Object, ObjectArc};
-use crate::type_traits::ContainerElement;
+use crate::type_traits::{ContainerElement, RefFromAny};
 use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -63,7 +63,7 @@ unsafe impl ObjectCoreWithExtraItems for ArrayObj {
 /// ```
 /// use tvm_ffi::Array;
 ///
-/// let array = Array::new(vec![1_i64, 2, 3]);
+/// let array = Array::from_vec(vec![1_i64, 2, 3]);
 /// assert_eq!(array.len(), 3);
 /// assert_eq!(array.get(1)?, 2);
 /// assert!(array.get(3).is_err());
@@ -89,7 +89,13 @@ impl<T: ContainerElement + Clone> Debug for Array<T> {
 
 impl<T: ContainerElement + Clone> Default for Array<T> {
     fn default() -> Self {
-        Self::new(vec![])
+        Self::new()
+    }
+}
+
+impl<T: ContainerElement + Clone> From<Vec<T>> for Array<T> {
+    fn from(items: Vec<T>) -> Self {
+        Self::from_vec(items)
     }
 }
 
@@ -113,7 +119,18 @@ unsafe impl<T: ContainerElement + Clone> ObjectRefCore for Array<T> {
 }
 
 impl<T: ContainerElement + Clone> Array<T> {
-    /// Create an array holding `items`.
+    /// Create an empty array.
+    ///
+    /// # Returns
+    ///
+    /// The empty array.
+    ///
+    /// See also [`Array::from_vec`].
+    pub fn new() -> Self {
+        Self::from_vec(Vec::new())
+    }
+
+    /// Create an array holding `items`, like `Array::from(items)`.
     ///
     /// # Arguments
     ///
@@ -122,7 +139,16 @@ impl<T: ContainerElement + Clone> Array<T> {
     /// # Returns
     ///
     /// The array.
-    pub fn new(items: Vec<T>) -> Self {
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tvm_ffi::Array;
+    ///
+    /// let array = Array::from_vec(vec![1_i64, 2, 3]);
+    /// assert_eq!(array[1], 2);
+    /// ```
+    pub fn from_vec(items: Vec<T>) -> Self {
         let capacity = items.len();
         Self::new_with_capacity(items, capacity)
     }
@@ -234,10 +260,12 @@ impl<T: ContainerElement + Clone> Array<T> {
 
 // --- Index Implementation ---
 
-impl<T: ContainerElement + Clone> std::ops::Index<usize> for Array<T> {
-    type Output = AnyView<'static>;
+/// Lends `&T` from the array's cell in place. Every cell of an `Array<T>`
+/// holds a `T` (checked when the array is built), so only a debug check runs.
+impl<T: ContainerElement + Clone + RefFromAny> std::ops::Index<usize> for Array<T> {
+    type Output = T;
 
-    fn index(&self, index: usize) -> &Self::Output {
+    fn index(&self, index: usize) -> &T {
         let container = self.as_container();
         let len = container.size as usize;
         if index >= len {
@@ -247,8 +275,9 @@ impl<T: ContainerElement + Clone> std::ops::Index<usize> for Array<T> {
             );
         }
         unsafe {
-            let ptr = (container.data as *const AnyView<'static>).add(index);
-            &*ptr
+            let cell = &*(container.data as *const TVMFFIAny).add(index);
+            debug_assert!(T::container_check_any_strict(cell));
+            T::ref_from_any(cell)
         }
     }
 }
@@ -287,7 +316,7 @@ impl<'a, T: ContainerElement + Clone> IntoIterator for &'a Array<T> {
 impl<T: ContainerElement + Clone> FromIterator<T> for Array<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let items: Vec<T> = iter.into_iter().collect();
-        Self::new(items)
+        Self::from_vec(items)
     }
 }
 
@@ -391,7 +420,18 @@ where
         for cell in cells {
             items.push(T::container_try_cast_from_any_view(cell)?);
         }
-        Ok(Array::new(items))
+        Ok(Array::from_vec(items))
+    }
+}
+
+// The cell's payload word is the single object pointer of the handle.
+unsafe impl<T> crate::type_traits::RefFromAny for Array<T>
+where
+    T: ContainerElement + Clone,
+{
+    #[inline(always)]
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+        &*(core::ptr::addr_of!(cell.data_union) as *const Self)
     }
 }
 

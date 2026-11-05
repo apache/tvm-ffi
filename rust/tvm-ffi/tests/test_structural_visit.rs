@@ -111,7 +111,7 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
             seen: vec![],
             regions: vec![],
         };
-        let result = structural_visit(&Array::new(vec![1_i64, 5]), &mut visitor);
+        let result = structural_visit(&Array::from_vec(vec![1_i64, 5]), &mut visitor);
 
         match outcome {
             Outcome::Finish => assert!(result.unwrap().is_none()),
@@ -194,7 +194,10 @@ fn default_descent_retargets_without_dispatching_the_container() {
             }
         }
     }
-    let root = Array::new(vec![Any::from(Array::new(vec![7_i64])), Any::from(99_i64)]);
+    let root = Array::from_vec(vec![
+        Any::from(Array::from_vec(vec![7_i64])),
+        Any::from(99_i64),
+    ]);
     let mut visitor = Probe::default();
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
     assert_eq!(
@@ -392,7 +395,7 @@ fn public_reflection_access_uses_registered_field_and_type_attr() {
     drop(root);
     assert_eq!(selected.as_str(), "an owning C++ reflected field value");
 
-    let wrong_type = Array::new(vec![0i64]);
+    let wrong_type = Array::from_vec(vec![0i64]);
     assert!(getter.get_any(&**Array::data(&wrong_type)).is_err());
     assert!(FieldGetter::new(type_index, "missing").is_err());
 
@@ -404,7 +407,7 @@ fn public_reflection_access_uses_registered_field_and_type_attr() {
 
 #[test]
 fn plain_walk_uses_registered_array_hook() {
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut integers = 0;
     assert!(structural_walk(
         &root,
@@ -610,7 +613,7 @@ fn handler_error_crosses_map_traversal() {
 
 #[test]
 fn interrupt_stops_without_running_remaining_callbacks() {
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut integers = 0;
     let outcome = structural_walk(
         &root,
@@ -672,7 +675,7 @@ impl ManualRegionVisitor {
 
 #[test]
 fn manual_child_visit_can_override_def_region() {
-    let root = Array::new(vec![7i64, 8]);
+    let root = Array::from_vec(vec![7i64, 8]);
     let mut probe = ManualRegionVisitor::default();
     assert!(structural_visit(&root, &mut probe).unwrap().is_none());
     assert_eq!(probe.seen, vec![DefRegionKind::Simple, DefRegionKind::None]);
@@ -696,7 +699,7 @@ impl GeneratedLeafVisitor {
     ) -> Result<Option<VisitInterrupt>> {
         let kind = visitor.def_region_kind();
         if value == -1 {
-            let root = Array::new(vec![1_i64, 2]);
+            let root = Array::from_vec(vec![1_i64, 2]);
             assert!(
                 Dispatcher::dispatch_tuple(&mut *self, (AnyView::from(&root), &mut *visitor))
                     .is_none()
@@ -716,7 +719,7 @@ impl GeneratedLeafVisitor {
 
 #[test]
 fn generated_visitor_defaults_unmatched_values() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut visitor = GeneratedLeafVisitor::default();
     assert!(structural_visit(&-1_i64, &mut visitor).unwrap().is_none());
     assert_eq!(visitor.integers, vec![(0, DefRegionKind::None)]);
@@ -769,7 +772,7 @@ impl GeneratedRecursiveVisitor {
 
 #[test]
 fn generated_visitor_can_drive_recursion_through_mut_self() {
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut visitor = GeneratedRecursiveVisitor::default();
     let interrupt = structural_visit(&root, &mut visitor).unwrap().unwrap();
     assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 2);
@@ -839,7 +842,7 @@ impl MissingWholeImpl {
 
 #[test]
 fn generated_dispatch_supports_pod_and_ordered_catch_all() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut probe = GenericDispatchProbe::default();
     assert!(structural_walk(&root, &mut probe, WalkOrder::PreOrder)
         .unwrap()
@@ -847,7 +850,7 @@ fn generated_dispatch_supports_pod_and_ordered_catch_all() {
     assert_eq!(probe.integers, vec![1, 2]);
     assert_eq!(probe.objects, 1);
 
-    let floats = Array::new(vec![1.0f64, 2.0]);
+    let floats = Array::from_vec(vec![1.0f64, 2.0]);
     assert!(structural_walk(&floats, &mut probe, WalkOrder::PreOrder)
         .unwrap()
         .is_none());
@@ -921,7 +924,7 @@ impl StraddleVisitor {
 
 #[test]
 fn visitor_can_straddle_default_children() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut probe = StraddleVisitor::default();
     assert!(structural_visit(&root, &mut probe).unwrap().is_none());
     assert_eq!(
@@ -957,7 +960,7 @@ impl OrderProbe {
 
 #[test]
 fn stateful_structural_walk_supports_post_order() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut probe = OrderProbe::default();
     assert!(structural_walk(&root, &mut probe, WalkOrder::PostOrder)
         .unwrap()
@@ -967,8 +970,8 @@ fn stateful_structural_walk_supports_post_order() {
 
 #[test]
 fn nested_walk_restores_the_outer_active_visitor() {
-    let outer = Array::new(vec![10i64, 20]);
-    let inner = Array::new(vec![1i64, 2]);
+    let outer = Array::from_vec(vec![10i64, 20]);
+    let inner = Array::from_vec(vec![1i64, 2]);
     let mut entered_inner = false;
     let mut outer_values = Vec::new();
     let mut inner_values = Vec::new();
@@ -1004,7 +1007,7 @@ fn nested_walk_restores_the_outer_active_visitor() {
 
 #[test]
 fn interrupt_payload_is_returned_to_the_caller() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let outcome = structural_walk(
         &root,
         |value: AnyView<'_>| {
@@ -1024,7 +1027,7 @@ fn interrupt_payload_is_returned_to_the_caller() {
 
 #[test]
 fn handler_errors_include_native_visit_path() {
-    let root = Array::new(vec![1i64]);
+    let root = Array::from_vec(vec![1i64]);
     let error = match structural_walk(
         &root,
         |value: AnyView<'_>| -> Result<WalkResult> {
@@ -1068,7 +1071,7 @@ fn visitor_errors_include_native_visit_path() {
         }
     }
 
-    let root = Array::new(vec![1i64]);
+    let root = Array::from_vec(vec![1i64]);
     let error = match structural_visit(&root, &mut FailingVisitor) {
         Err(error) => error,
         Ok(_) => panic!("visitor unexpectedly succeeded"),
@@ -1124,8 +1127,9 @@ fn visitor_interrupt_propagates_through_default_children() {
         }
     }
 
-    let root = Array::new(vec![1i64, 2, 3]);
-    let outcome = structural_visit::<&Array<i64>, _, _, _, _>(&root, &mut InterruptingVisitor).unwrap();
+    let root = Array::from_vec(vec![1i64, 2, 3]);
+    let outcome =
+        structural_visit::<&Array<i64>, _, _, _, _>(&root, &mut InterruptingVisitor).unwrap();
     let Some(interrupt) = outcome else {
         panic!("visitor traversal unexpectedly completed");
     };
@@ -1136,7 +1140,7 @@ fn visitor_interrupt_propagates_through_default_children() {
 fn closure_walk_receives_def_region_kind() {
     // C++: StructuralWalk<kPreOrder>(root,
     //          [&](const TVarObj* var, TVMFFIDefRegionKind kind) { ... })
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut kinds = Vec::new();
     assert!(structural_walk(
         &root,
@@ -1155,7 +1159,7 @@ fn closure_walk_receives_def_region_kind() {
 
 #[test]
 fn closure_walk_supports_post_order_and_skip() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut order_probe = Vec::new();
     assert!(structural_walk(
         &root,
@@ -1194,7 +1198,10 @@ fn closure_walk_supports_post_order_and_skip() {
 // ---------------------------------------------------------------------------
 #[test]
 fn chain_accepts_owned_object_ref_links() {
-    let root = Array::new(vec![Array::new(vec![1i64]), Array::new(vec![2i64, 3])]);
+    let root = Array::from_vec(vec![
+        Array::from_vec(vec![1i64]),
+        Array::from_vec(vec![2i64, 3]),
+    ]);
     let mut lengths = Vec::new();
     assert!(structural_walk(
         &root,
@@ -1216,7 +1223,7 @@ fn chain_accepts_owned_object_ref_links() {
 
 #[test]
 fn chain_links_may_mix_def_region_arity() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut kinds = Vec::new();
     let mut objects = 0;
     assert!(structural_walk(
@@ -1242,7 +1249,10 @@ fn chain_links_may_mix_def_region_arity() {
 
 #[test]
 fn chain_links_can_skip_children() {
-    let root = Array::new(vec![Array::new(vec![1i64]), Array::new(vec![2i64])]);
+    let root = Array::from_vec(vec![
+        Array::from_vec(vec![1i64]),
+        Array::from_vec(vec![2i64]),
+    ]);
     let mut arrays = 0;
     let mut integers = 0;
     assert!(structural_walk(
@@ -1267,7 +1277,7 @@ fn chain_links_can_skip_children() {
 
 #[test]
 fn chain_link_errors_include_native_visit_path() {
-    let root = Array::new(vec![1i64]);
+    let root = Array::from_vec(vec![1i64]);
     let error = match structural_walk(
         &root,
         (
@@ -1285,7 +1295,7 @@ fn chain_link_errors_include_native_visit_path() {
 
 #[test]
 fn chain_supports_post_order() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let events = std::cell::RefCell::new(Vec::new());
     assert!(structural_walk(
         &root,
@@ -1321,7 +1331,7 @@ impl ObjectCounter {
 
 #[test]
 fn chain_splices_dispatch_walkers_between_closures() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut counter = ObjectCounter::default();
     let mut integers = 0;
     assert!(structural_walk(
@@ -1340,7 +1350,7 @@ fn chain_splices_dispatch_walkers_between_closures() {
 
 #[test]
 fn chain_supports_full_arity() {
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut integers = Vec::new();
     let mut objects = 0;
     let mut others = 0;
@@ -1383,7 +1393,7 @@ fn typed_lambda_walks_bare_and_as_single_link_tuple() {
     // A lone typed handler needs no tuple: unmatched values (the array
     // itself) advance normally. The 1-tuple spelling routes through the
     // chain impls instead and must agree.
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut bare = 0;
     assert!(structural_walk(
         &root,
@@ -1411,7 +1421,7 @@ fn typed_lambda_walks_bare_and_as_single_link_tuple() {
 
 #[test]
 fn bare_node_lambda_takes_def_region_kind() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut objects = 0;
     assert!(structural_walk(
         &root,
@@ -1461,7 +1471,7 @@ impl InheritedRegionProbe {
 
 #[test]
 fn def_region_is_inherited_through_containers() {
-    let root = Array::new(vec![Array::new(vec![1i64, 2])]);
+    let root = Array::from_vec(vec![Array::from_vec(vec![1i64, 2])]);
     let mut probe = InheritedRegionProbe {
         at_root: true,
         seen: Vec::new(),
@@ -1520,7 +1530,7 @@ fn reflected_fields_reach_typed_handlers() {
 
 #[test]
 fn nested_tuple_chain_exceeds_flat_arity() {
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut integers = Vec::new();
     let mut objects = 0;
     let mut others = 0;
@@ -1570,7 +1580,7 @@ fn nested_tuple_chain_exceeds_flat_arity() {
 
 #[test]
 fn nested_tuple_first_match_order_is_flattened() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut first = 0;
     let mut second = 0;
     assert!(structural_walk(
@@ -1630,7 +1640,7 @@ fn callback_visit_defaults_only_when_no_link_matches() {
             Ok(None)
         }
     }
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let integers = Cell::new(0);
     assert!(structural_visit(&root, Integers(&integers),)
         .unwrap()
@@ -1674,7 +1684,7 @@ impl StatefulVisitStats {
 
 #[test]
 fn stateful_callback_visit_uses_ordinary_mutable_state() {
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut visitor = StatefulVisitStats::default();
 
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
@@ -1716,7 +1726,7 @@ impl StatefulVisitDepth {
 
 #[test]
 fn stateful_callback_visit_reborrows_visitor_during_recursion() {
-    let root = Array::new(vec![Array::new(vec![1i64, 2])]);
+    let root = Array::from_vec(vec![Array::from_vec(vec![1i64, 2])]);
     let mut visitor = StatefulVisitDepth::default();
 
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
@@ -1743,7 +1753,7 @@ fn callback_visit_can_reenter_the_same_fn_through_visitor() {
             visitor.default_visit(self, &value)
         }
     }
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let visits = Cell::new(0);
     assert!(structural_visit(&root, Reenter(&visits)).unwrap().is_none());
     assert_eq!(visits.get(), 3);
@@ -1775,7 +1785,7 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
             visitor.default_visit(self, &value)
         }
     }
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let fallback = Cell::new(0);
     let interrupted = structural_visit(&root, Stop(&fallback)).unwrap().unwrap();
     assert_eq!(interrupted.value.try_as::<i64>().unwrap(), 2);
@@ -1818,7 +1828,10 @@ fn callback_visit_supports_node_links_and_nested_tuples() {
             visitor.default_visit(self, value)
         }
     }
-    let root = Array::new(vec![Any::from(Array::new(vec![1_i64])), Any::from(2_i64)]);
+    let root = Array::from_vec(vec![
+        Any::from(Array::from_vec(vec![1_i64])),
+        Any::from(2_i64),
+    ]);
     let seen = RefCell::new(Vec::new());
     assert!(structural_visit(&root, Nodes(&seen)).unwrap().is_none());
     assert_eq!(
@@ -1861,7 +1874,7 @@ fn callback_visit_with_overrides_child_def_region() {
             Ok(None)
         }
     }
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let seen = RefCell::new(Vec::new());
     assert!(structural_visit(&root, Regions(&seen)).unwrap().is_none());
     assert_eq!(
@@ -1911,7 +1924,7 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
             visitor.default_visit(self, &value)
         }
     }
-    let aligned_root = Array::new(vec![3_i64, 4]);
+    let aligned_root = Array::from_vec(vec![3_i64, 4]);
     let mut borrowed = Aligned {
         checked: false,
         calls: 0,
@@ -1931,7 +1944,7 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let observed = RefCell::new(Vec::new());
         structural_walk(
-            &Array::new(vec![Any::from(Array::new(vec![1_i64]))]),
+            &Array::from_vec(vec![Any::from(Array::from_vec(vec![1_i64]))]),
             |value: i64| {
                 observed.borrow_mut().push(value);
                 WalkResult::Advance
@@ -1984,8 +1997,8 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
             visitor.default_visit(self, &value)
         }
     }
-    let outer = Array::new(vec![10i64, 20]);
-    let inner = Array::new(vec![1i64, 2]);
+    let outer = Array::from_vec(vec![10i64, 20]);
+    let inner = Array::from_vec(vec![1i64, 2]);
     let entered_inner = Cell::new(false);
     let outer_values = RefCell::new(Vec::new());
     let inner_values = RefCell::new(Vec::new());
@@ -2006,7 +2019,7 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
 
 #[test]
 fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
-    let root = Any::from(Array::new(vec![1_i64, 2]));
+    let root = Any::from(Array::from_vec(vec![1_i64, 2]));
     let view = AnyView::from(&root);
     struct Identity;
     #[dispatch(identity, (AnyView<'a>,), AnyView<'a>)]
@@ -2115,7 +2128,7 @@ fn managed_walk_preserves_observer_address_and_drop_on_all_exits() {
     fn run<const N: usize>(mode: usize) {
         let address = Cell::new(0);
         let drops = Cell::new(0);
-        let root = Array::new(vec![1_i64, 2]);
+        let root = Array::from_vec(vec![1_i64, 2]);
         let storage = Storage {
             _padding: [0_u8; N],
             address: &address,
@@ -2173,7 +2186,10 @@ fn managed_walk_preserves_observer_address_and_drop_on_all_exits() {
 
 #[test]
 fn visitor_preserves_post_recursion_state() {
-    let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3, 4])]);
+    let root = Array::from_vec(vec![
+        Array::from_vec(vec![1_i64, 2]),
+        Array::from_vec(vec![3, 4]),
+    ]);
     #[derive(Default)]
     struct PostState {
         depth: usize,
@@ -2208,8 +2224,11 @@ fn visitor_preserves_post_recursion_state() {
 
 #[test]
 fn nested_walk_returns_one_owned_interrupt_payload_and_releases_it() {
-    let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3])]);
-    let payload = Any::from(Array::new(vec![42_i64]));
+    let root = Array::from_vec(vec![
+        Array::from_vec(vec![1_i64, 2]),
+        Array::from_vec(vec![3]),
+    ]);
+    let payload = Any::from(Array::from_vec(vec![42_i64]));
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let mut visited = Vec::new();
         let interrupt = structural_walk(
@@ -2234,8 +2253,8 @@ fn nested_walk_returns_one_owned_interrupt_payload_and_releases_it() {
 
 #[test]
 fn nested_walk_error_keeps_context_and_releases_callback_owner() {
-    let root = Array::new(vec![Array::new(vec![1_i64, 2])]);
-    let owner = Any::from(Array::new(vec![42_i64]));
+    let root = Array::from_vec(vec![Array::from_vec(vec![1_i64, 2])]);
+    let owner = Any::from(Array::from_vec(vec![42_i64]));
     let callback_owner = owner.clone();
     let error = structural_walk(
         &root,

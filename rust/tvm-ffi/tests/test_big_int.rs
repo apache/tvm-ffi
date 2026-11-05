@@ -457,7 +457,7 @@ fn test_big_int_function_round_trip() {
 #[test]
 fn test_big_int_containers() {
     let values = vec![wide(), BigInt::from(-1i64), BigInt::from(u64::MAX)];
-    let array = Array::new(values.clone());
+    let array = Array::from_vec(values.clone());
     assert_eq!(array.len(), 3);
     for (i, value) in values.iter().enumerate() {
         assert_eq!(array.get(i).unwrap(), *value);
@@ -475,7 +475,7 @@ fn test_big_int_containers() {
         .collect();
     assert_eq!(map.len(), 3);
     for (i, value) in values.iter().enumerate() {
-        assert!(map.contains_key(value));
+        assert!(map.contains_key(value).unwrap());
         assert_eq!(map.get(value).unwrap(), Some(i as i64));
     }
     assert_eq!(map.get(&BigInt::from(1u128 << 64)).unwrap(), None);
@@ -485,7 +485,7 @@ fn test_big_int_containers() {
 fn test_big_int_optional() {
     assert_eq!(std::mem::size_of::<Optional<BigInt>>(), 16);
     let some = Optional::some(wide());
-    assert!(some.has_value());
+    assert!(some.is_some());
     assert_eq!(some.get(), Some(wide()));
     let none = Optional::<BigInt>::none();
     assert!(none.is_none());
@@ -505,7 +505,7 @@ fn test_big_int_optional() {
 
 #[test]
 fn test_big_int_structural_traversal() {
-    let root = Array::new(vec![Any::from(1i64), Any::from(wide())]);
+    let root = Array::from_vec(vec![Any::from(1i64), Any::from(wide())]);
     let wide_pointer = root
         .get(1)
         .unwrap()

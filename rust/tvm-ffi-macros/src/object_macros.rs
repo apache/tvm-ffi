@@ -555,6 +555,25 @@ pub(crate) fn expand_object_ref(
             }
         }
 
+        // The handle is exactly its object pointer, which an FFI cell's
+        // payload word holds, so an `Array` cell can lend `&Self` in place.
+        const _: () = {
+            type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType;
+            assert!(
+                ::core::mem::size_of::<#struct_name>()
+                    == ::core::mem::size_of::<#tvm_ffi_crate::object::ObjectArc<ContainerType>>()
+                    && ::core::mem::offset_of!(#struct_name, #data_id) == 0,
+                "an ObjectRef must consist of its ObjectArc alone"
+            );
+        };
+
+        unsafe impl #tvm_ffi_crate::type_traits::RefFromAny for #struct_name {
+            #[inline(always)]
+            unsafe fn ref_from_any(cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> &Self {
+                &*(::core::ptr::addr_of!(cell.data_union) as *const Self)
+            }
+        }
+
         impl ::std::convert::From<&#struct_name> for #struct_name {
             #[inline]
             fn from(value: &#struct_name) -> Self {

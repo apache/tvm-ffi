@@ -50,23 +50,23 @@ pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor, TensorView};
 pub use crate::device::{current_stream, with_stream};
 pub use crate::dtype::DLDataTypeExt;
+pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
     TYPE_ERROR, VALUE_ERROR, ZERO_DIVISION_ERROR,
 };
-pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_map::structural_map;
 pub use crate::extra::structural_mutate::{
-    InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase, StructuralMutatorObj,
-    StructuralMutatorView, StructuralVarRemap, structural_mutate,
+    structural_mutate, InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase,
+    StructuralMutatorObj, StructuralMutatorView, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
-    DefRegionKind, StructuralVisitEngine, StructuralVisitorBase, StructuralVisitorObj,
-    StructuralVisitorView, VisitInterrupt, VisitInterruptObj, structural_visit,
+    structural_visit, DefRegionKind, StructuralVisitEngine, StructuralVisitorBase,
+    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt, VisitInterruptObj,
 };
-pub use crate::extra::structural_walk::{IntoWalkResult, WalkOrder, WalkResult, structural_walk};
+pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
@@ -75,8 +75,8 @@ pub use crate::object::{
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{
-    FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn, UnsafeInit,
-    get_type_attr,
+    get_type_attr, FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn,
+    UnsafeInit,
 };
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::static_init::run_static_init_blocks;
@@ -190,7 +190,7 @@ pub use tvm_ffi_macros::dispatch;
 /// }
 ///
 /// assert_eq!(kind(&Any::from(42_i64)), "integer 42");
-/// assert_eq!(kind(&Any::from(Array::new(vec![1_i64, 2, 3]))), "array of 3 items");
+/// assert_eq!(kind(&Any::from(Array::from_vec(vec![1_i64, 2, 3]))), "array of 3 items");
 /// assert_eq!(kind(&Any::from(1.5_f64)), "something else");
 /// ```
 pub use tvm_ffi_macros::match_any;

@@ -130,14 +130,14 @@ impl<T: OptionalCompatible> Optional<T> {
 
     /// Whether a value is present.
     #[inline]
-    pub fn has_value(&self) -> bool {
+    pub fn is_some(&self) -> bool {
         self.data.type_index() != TypeIndex::kTVMFFINone as i32
     }
 
     /// Whether the optional is `nullopt`.
     #[inline]
     pub fn is_none(&self) -> bool {
-        !self.has_value()
+        !self.is_some()
     }
 
     /// Decodes the value in place, cloning it out (ref-counted `inc_ref` for
@@ -150,7 +150,7 @@ impl<T: OptionalCompatible> Optional<T> {
     /// Takes the value out, consuming self (moves the payload, no `inc_ref`).
     #[inline]
     pub fn into_option(self) -> Option<T> {
-        if self.has_value() {
+        if self.is_some() {
             // Move the value out of the owning `Any` without dropping it, then
             // transfer ownership of the payload into `T` (no inc/dec ref).
             let mut raw = unsafe { Any::into_raw_ffi_any(self.data) };
@@ -180,7 +180,7 @@ impl Optional<String> {
     /// `&String`.
     #[inline]
     pub fn as_str(&self) -> Option<&str> {
-        if self.has_value() {
+        if self.is_some() {
             // SAFETY: an engaged `Optional<String>` cell is byte-identical to a
             // `String` (both are `#[repr(transparent)]` over the 16-byte cell),
             // and the borrow is tied to `&self`.

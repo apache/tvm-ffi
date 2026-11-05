@@ -656,6 +656,17 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
     }
 }
 
+// The cell's payload word is the single object pointer of the handle.
+unsafe impl<T> crate::type_traits::RefFromAny for List<T>
+where
+    T: ContainerElement,
+{
+    #[inline(always)]
+    unsafe fn ref_from_any(cell: &TVMFFIAny) -> &Self {
+        &*(core::ptr::addr_of!(cell.data_union) as *const Self)
+    }
+}
+
 impl<T: ContainerElement> TryFrom<Any> for List<T> {
     type Error = Error;
 

@@ -122,7 +122,7 @@ fn point3(x: i64, z: i64) -> Point3 {
         data: ObjectArc::new(Point3Obj {
             base: point_obj(x, 0.5, "p3"),
             z,
-            tags: Array::new(vec!["a".into(), "b".into()]),
+            tags: Array::from_vec(vec!["a".into(), "b".into()]),
             r#type: Some(point(1, 2.0, "inner")),
         }),
     }

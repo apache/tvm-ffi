@@ -280,9 +280,9 @@ fn test_object_arc_option_size() {
 fn test_object_reference_identity() {
     fn assert_hash<T: Hash>(_value: &T) {}
 
-    let first = Array::new(vec![1i64]);
+    let first = Array::from_vec(vec![1i64]);
     let alias = first.clone();
-    let second = Array::new(vec![1i64]);
+    let second = Array::from_vec(vec![1i64]);
 
     assert!(first.same_as(&alias));
     assert!(!first.same_as(&second));

@@ -122,7 +122,7 @@ fn test_list_growth_stays_with_runtime() {
 
 #[test]
 fn test_list_releases_elements() {
-    let array = Array::new(vec![1i64]);
+    let array = Array::from_vec(vec![1i64]);
     let probe = Any::from(array.clone());
     let base = probe.debug_strong_count().unwrap();
 
@@ -132,7 +132,7 @@ fn test_list_releases_elements() {
     list.insert(0, array.clone()).unwrap();
     assert_eq!(probe.debug_strong_count().unwrap(), base + 3);
 
-    list.set(0, Array::new(vec![2i64])).unwrap();
+    list.set(0, Array::from_vec(vec![2i64])).unwrap();
     assert_eq!(probe.debug_strong_count().unwrap(), base + 2);
     drop(list.remove(1).unwrap());
     assert_eq!(probe.debug_strong_count().unwrap(), base + 1);
@@ -357,7 +357,7 @@ fn test_list_of_any_and_objects() {
     let list: List<Any> = List::new();
     list.push(Any::from(1i64)).unwrap();
     list.push(Any::from(String::from("two"))).unwrap();
-    list.push(Any::from(Array::new(vec![3i64]))).unwrap();
+    list.push(Any::from(Array::from_vec(vec![3i64]))).unwrap();
     assert_eq!(list.len(), 3);
     assert_eq!(i64::try_from(list.get(0).unwrap()).unwrap(), 1);
     let nested: Array<i64> = list.get(2).unwrap().try_into().unwrap();
@@ -409,7 +409,7 @@ fn test_list_mismatched_element_is_reported() {
 #[test]
 fn test_list_conversion_copies() {
     // An `ffi.Array` converts into a new list.
-    let array = Array::new(vec![1i64, 2]);
+    let array = Array::from_vec(vec![1i64, 2]);
     let list: List<i64> = Any::from(array.clone()).try_into().unwrap();
     list.push(3).unwrap();
     assert_eq!(list.len(), 3);
