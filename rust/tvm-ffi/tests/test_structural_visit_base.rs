@@ -24,9 +24,9 @@ use tvm_ffi::tvm_ffi_sys::{
     TVMFFITypeMetadata, TVMFFITypeRegisterMetadata,
 };
 use tvm_ffi::{
-    Any, AnyView, Array, DefRegionKind, Dispatcher, Error, Function, IntoDispatcher, RUNTIME_ERROR,
-    Result, StructuralVisitEngine, StructuralVisitorBase, StructuralVisitorObj,
-    StructuralVisitorView, VisitInterrupt, dispatch, get_type_attr, structural_visit,
+    dispatch, get_type_attr, structural_visit, Any, AnyView, Array, DefRegionKind, Dispatcher,
+    Error, Function, IntoDispatcher, Result, StructuralVisitEngine, StructuralVisitorBase,
+    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt, RUNTIME_ERROR,
 };
 
 thread_local! {
@@ -104,7 +104,7 @@ unsafe impl StructuralVisitorBase for CountingBase {
         (*runtime).defaults.set((*runtime).defaults.get() + 1);
         // A default with observable behavior: redirect 10 to children 11 and 12.
         if value.try_as::<i64>() == Some(10) {
-            let children = Array::new(vec![11_i64, 12]);
+            let children = Array::from_vec(vec![11_i64, 12]);
             return StructuralVisitorObj::default_visit_raw(runtime.cast(), (&children).into());
         }
         if value.try_as::<i64>() == Some(-1) {
@@ -134,22 +134,22 @@ fn visit<'a, H, M, D, O>(root: impl Into<AnyView<'a>>, visitor: H) -> Result<Opt
 where
     O: std::borrow::BorrowMut<D>,
     for<'v, 'c, 'r> H: IntoDispatcher<
-            (
-                AnyView<'v>,
-                &'c mut StructuralVisitorView<'r, D, CountingBase>,
-            ),
-            Option<Result<Option<VisitInterrupt>>>,
-            M,
-            Target = D,
-            Output = O,
-        >,
+        (
+            AnyView<'v>,
+            &'c mut StructuralVisitorView<'r, D, CountingBase>,
+        ),
+        Option<Result<Option<VisitInterrupt>>>,
+        M,
+        Target = D,
+        Output = O,
+    >,
     for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-            (
-                AnyView<'v>,
-                &'c mut StructuralVisitorView<'r, D, CountingBase>,
-            ),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+        (
+            AnyView<'v>,
+            &'c mut StructuralVisitorView<'r, D, CountingBase>,
+        ),
+        Option<Result<Option<VisitInterrupt>>>,
+    >,
 {
     StructuralVisitEngine::<CountingBase>::visit_root(root, visitor)
 }
@@ -180,7 +180,7 @@ impl Trace {
                 result
             }),
             1 => {
-                visitor.visit(self, &Array::new(vec![2_i64, 3]))?;
+                visitor.visit(self, &Array::from_vec(vec![2_i64, 3]))?;
                 // Resume the parent dispatcher after native recursion, then recurse again.
                 self.leaves.push((4, visitor.def_region_kind()));
                 visitor.visit(self, &5_i64)
@@ -201,7 +201,7 @@ fn larger_base_defaults_recurse_and_restore_dispatcher_and_region() {
         std::mem::size_of::<View<'_, Trace>>(),
         std::mem::size_of::<usize>()
     );
-    let root = Array::new(vec![0_i64, 1, 6]);
+    let root = Array::from_vec(vec![0_i64, 1, 6]);
     let mut trace = Trace::default();
     assert!(visit(&root, &mut trace).unwrap().is_none());
     use DefRegionKind::{None as Use, Pattern};
@@ -234,16 +234,12 @@ fn unmatched_scalar_uses_selected_default_and_owned_dispatcher() {
     DROPPED.with_borrow_mut(Vec::clear);
     assert!(visit(&10_i64, Empty).unwrap().is_none());
     DROPPED.with_borrow(|drops| assert_eq!(*drops, [3]));
-    assert!(
-        structural_visit(&Array::new(vec![1_i64]), Empty)
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        structural_visit(&Array::new(vec![1_i64]), &mut Empty)
-            .unwrap()
-            .is_none()
-    );
+    assert!(structural_visit(&Array::from_vec(vec![1_i64]), Empty)
+        .unwrap()
+        .is_none());
+    assert!(structural_visit(&Array::from_vec(vec![1_i64]), &mut Empty)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -297,20 +293,18 @@ fn base_failure_and_owned_results_release_exactly_once() {
     }
     DROPPED.with_borrow_mut(Vec::clear);
     FAIL_INIT.set(true);
-    assert!(
-        visit(&1_i64, Unmatched)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("initialization failed")
-    );
+    assert!(visit(&1_i64, Unmatched)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("initialization failed"));
     FAIL_INIT.set(false);
     DROPPED.with_borrow(|drops| assert!(drops.is_empty()));
 
-    let payload = Any::from(Array::new(vec![42_i64]));
+    let payload = Any::from(Array::from_vec(vec![42_i64]));
     BASE_RESULT
         .with_borrow_mut(|slot| *slot = Some(Ok(Some(VisitInterrupt::with(payload.clone())))));
-    let result = visit(&Array::new(vec![-1_i64, 99]), Unmatched)
+    let result = visit(&Array::from_vec(vec![-1_i64, 99]), Unmatched)
         .unwrap()
         .unwrap();
     assert_eq!(payload.debug_strong_count(), Some(2));
@@ -321,7 +315,7 @@ fn base_failure_and_owned_results_release_exactly_once() {
     let error = Error::new(RUNTIME_ERROR, "base descent failed", "");
     let owner = Any::from(error.clone());
     BASE_RESULT.with_borrow_mut(|slot| *slot = Some(Err(error)));
-    let result = visit(&Array::new(vec![-1_i64, 99]), Unmatched)
+    let result = visit(&Array::from_vec(vec![-1_i64, 99]), Unmatched)
         .err()
         .unwrap();
     assert!(result.to_string().contains("base descent failed"));
@@ -365,7 +359,7 @@ fn callback_outcomes_preserve_reborrows_and_owners_through_specialized_defaults(
     }
     for fail in [false, true] {
         DROPPED.with_borrow_mut(Vec::clear);
-        let payload = Any::from(Array::new(vec![42_i64]));
+        let payload = Any::from(Array::from_vec(vec![42_i64]));
         let error = Error::new(RUNTIME_ERROR, "callback failed", "");
         let error_owner = Any::from(error.clone());
         let mut visitor = Halt {
@@ -377,18 +371,16 @@ fn callback_outcomes_preserve_reborrows_and_owners_through_specialized_defaults(
             }),
             seen: vec![],
         };
-        let result = visit(&Array::new(vec![10_i64, 100]), &mut visitor);
+        let result = visit(&Array::from_vec(vec![10_i64, 100]), &mut visitor);
         assert_eq!(visitor.seen, [10, 11, 99]);
         DROPPED.with_borrow(|drops| assert_eq!(*drops, [2]));
         if fail {
-            assert!(
-                result
-                    .as_ref()
-                    .err()
-                    .unwrap()
-                    .to_string()
-                    .contains("callback failed")
-            );
+            assert!(result
+                .as_ref()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("callback failed"));
         } else {
             assert_eq!(payload.debug_strong_count(), Some(2));
         }

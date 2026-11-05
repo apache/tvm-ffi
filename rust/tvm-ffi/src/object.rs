@@ -303,7 +303,7 @@ pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
     ///
     /// ```
     /// use tvm_ffi::{object::ObjectRef, Array, ObjectRefCast};
-    /// let object: ObjectRef = Array::new(vec![1_i64]).try_cast()?;
+    /// let object: ObjectRef = Array::from_vec(vec![1_i64]).try_cast()?;
     /// let array: Array<i64> = object.try_cast()?;
     /// assert_eq!(array.len(), 1);
     /// # Ok::<(), tvm_ffi::Error>(())

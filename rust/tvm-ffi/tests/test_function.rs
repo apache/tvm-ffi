@@ -129,12 +129,12 @@ fn test_function_rvalue_ref_arguments() {
         Ok(AnyView::from(&value).debug_strong_count().unwrap() as i64)
     });
 
-    let moved = Array::new(vec![1i64, 2]);
+    let moved = Array::from_vec(vec![1i64, 2]);
     assert_eq!(AnyView::from(&moved).debug_strong_count(), Some(1));
     let count = i64::try_from(strong_count.call_tuple((RValueRef::new(moved),)).unwrap()).unwrap();
     assert_eq!(count, 1);
 
-    let borrowed = Array::new(vec![3i64, 4]);
+    let borrowed = Array::from_vec(vec![3i64, 4]);
     assert_eq!(AnyView::from(&borrowed).debug_strong_count(), Some(1));
     let count = i64::try_from(strong_count.call_tuple((&borrowed,)).unwrap()).unwrap();
     assert_eq!(count, 2);

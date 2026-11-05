@@ -103,7 +103,7 @@ impl<'s, 'v, 'c, 'r>
                     let result =
                         mutator.mutate(self, MutationView::borrowed(AnyView::from(&key)))?;
                     assert_eq!(
-                        RemapNode::try_from(result.value_or_else(|| key.clone()))?
+                        RemapNode::try_from(result.into_option().unwrap_or_else(|| key.clone()))?
                             .data
                             .value,
                         8
@@ -152,11 +152,11 @@ impl RecursiveEntryMutator {
     ) -> Result<UnchangedOr<Any>> {
         if value.as_any_view().type_index() == TypeIndex::kTVMFFINone as i32 {
             if self.use_owned_value {
-                let value = Array::new(vec![1i64]);
+                let value = Array::from_vec(vec![1i64]);
                 self.owned_value_pointer = Some(array_pointer(&value) as usize);
                 let mut owner: Any = value.into();
                 let change = mutator.mutate(self, &mut owner)?;
-                Ok(UnchangedOr::changed(change.value_or(owner)))
+                Ok(UnchangedOr::changed(change.value_or_unchanged(owner)))
             } else {
                 mutator.mutate(self, MutationView::borrowed(AnyView::from(&1i64)))
             }
@@ -284,7 +284,7 @@ fn dict_item(dict: &Any, key: i64) -> i64 {
 
 #[test]
 fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
-    let unique = Array::new(vec![1i64, 2, 3]);
+    let unique = Array::from_vec(vec![1i64, 2, 3]);
     let unique_pointer = array_pointer(&unique);
     let mapped = structural_map(unique, &mut IncrementIntegers, WalkOrder::PostOrder)
         .and_then(Array::<i64>::try_from)
@@ -292,7 +292,7 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
     assert_eq!(array_pointer(&mapped), unique_pointer);
     assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3, 4]);
 
-    let source = Array::new(vec![4i64, 5]);
+    let source = Array::from_vec(vec![4i64, 5]);
     let source_pointer = array_pointer(&source);
     let mapped = structural_map(source.clone(), &mut IncrementIntegers, WalkOrder::PostOrder)
         .and_then(Array::<i64>::try_from)
@@ -304,7 +304,7 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
 
 #[test]
 fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
-    let unique = Array::new(vec![1i64, 2]);
+    let unique = Array::from_vec(vec![1i64, 2]);
     let unique_pointer = array_pointer(&unique);
     let mutated = structural_mutate::<Array<i64>, _, _, _, _>(unique, ManualIncrement::default())
         .and_then(Array::<i64>::try_from)
@@ -312,7 +312,7 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
     assert_eq!(array_pointer(&mutated), unique_pointer);
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 
-    let source = Array::new(vec![3i64]);
+    let source = Array::from_vec(vec![3i64]);
     let source_pointer = array_pointer(&source);
     let mutated = structural_mutate(source.clone(), ManualIncrement::default())
         .and_then(Array::<i64>::try_from)
@@ -342,9 +342,12 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
         }),
     });
     let mut dispatch = ManualIncrement::default();
-    let first = structural_mutate(Array::new(vec![key.clone(), key.clone()]), &mut dispatch)
-        .and_then(Array::<Any>::try_from)
-        .unwrap();
+    let first = structural_mutate(
+        Array::from_vec(vec![key.clone(), key.clone()]),
+        &mut dispatch,
+    )
+    .and_then(Array::<Any>::try_from)
+    .unwrap();
     let first_node = first.get(0).unwrap();
     assert_eq!(
         any_object_pointer(&first_node),
@@ -359,7 +362,7 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
     assert_eq!(RemapNode::try_from(second).unwrap().data.value, 8);
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let first = structural_map(
-            Array::new(vec![key.clone(), key.clone()]),
+            Array::from_vec(vec![key.clone(), key.clone()]),
             &mut dispatch,
             order,
         )
@@ -529,7 +532,7 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
     }
     for mode in [InplaceMode::Disallow, InplaceMode::Allow] {
         for increment in [false, true] {
-            let root = Array::new(vec![1_i64]);
+            let root = Array::from_vec(vec![1_i64]);
             let pointer = array_pointer(&root);
             let result = structural_mutate(root, &mut Controlled { mode, increment })
                 .and_then(Array::<i64>::try_from)
@@ -557,7 +560,7 @@ fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
                 return Ok((integer + 1).into());
             }
             assert_eq!(value.as_any_view().try_as::<bool>(), Some(true));
-            let source = Array::new(vec![1_i64]);
+            let source = Array::from_vec(vec![1_i64]);
             let pointer = array_pointer(&source);
             let value = MutationView::borrowed(AnyView::from(&source));
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
@@ -568,7 +571,11 @@ fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
             let value = value.with_inplace_mode(InplaceMode::Allow);
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
             let result = mutator.default_mutate(self, value)?;
-            let result = Array::<i64>::try_from(result.value_or_else(|| source.clone().into()))?;
+            let result = Array::<i64>::try_from(
+                result
+                    .into_option()
+                    .unwrap_or_else(|| source.clone().into()),
+            )?;
             assert_ne!(array_pointer(&result), pointer);
             assert_eq!(source.get(0).unwrap(), 1);
             assert_eq!(result.get(0).unwrap(), 2);
@@ -612,7 +619,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
             Unchanged.into_mutate_result()
         }
     }
-    let source = Array::new(vec![1_i64]);
+    let source = Array::from_vec(vec![1_i64]);
     let mut inspect = Inspect {
         source: &source,
         result: None,
@@ -643,7 +650,7 @@ fn owned_entry_mode_is_forwarded_by_generated_callbacks() {
             _: bool,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            let child = Array::new(vec![1_i64]);
+            let child = Array::from_vec(vec![1_i64]);
             self.pointer = array_pointer(&child) as usize;
             mutator.with_def_region_kind(DefRegionKind::Pattern, |mutator| {
                 let mut owner: Any = child.into();
@@ -667,7 +674,7 @@ fn owned_entry_mode_is_forwarded_by_generated_callbacks() {
                     assert!(change.is_unchanged());
                 }
                 assert_eq!(owner.debug_strong_count(), Some(count));
-                let result = change.value_or(owner);
+                let result = change.value_or_unchanged(owner);
                 if let Some(alias) = alias {
                     assert_eq!(Array::<i64>::try_from(alias)?.get(0)?, 1);
                 }
@@ -783,9 +790,9 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
         (Allow, true, false),
         (Allow, false, true),
     ] {
-        let child = Array::new(vec![1_i64]);
+        let child = Array::from_vec(vec![1_i64]);
         let child_ptr = array_pointer(&child);
-        let root = Array::new(vec![child]);
+        let root = Array::from_vec(vec![child]);
         let root_ptr = array_pointer(&root);
         let original = shared.then(|| root.clone());
         let mut state = Forward {
@@ -816,8 +823,8 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     let mut owner: Any = FieldNode {
         data: ObjectArc::new(FieldNodeObj {
             base: Object::new(),
-            a: Array::new(vec![1_i64]),
-            b: Array::new(vec![2_i64]).into(),
+            a: Array::from_vec(vec![1_i64]),
+            b: Array::from_vec(vec![2_i64]).into(),
         }),
     }
     .into();
@@ -894,7 +901,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
 
     for retain in [false, true] {
         for borrowed in [false, true] {
-            let root = Array::new(vec![1_i64]);
+            let root = Array::from_vec(vec![1_i64]);
             let pointer = array_pointer(&root);
             let result = if borrowed {
                 structural_mutate(root, &mut Outer { retain })
@@ -932,7 +939,7 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
         }
     }
     for fail in [false, true] {
-        let root = Array::new(vec![1_i64]);
+        let root = Array::from_vec(vec![1_i64]);
         let pointer = array_pointer(&root);
         let result = structural_mutate(root, Preserve(fail));
         if fail {
@@ -1061,7 +1068,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
             child.clone(),
         ],
     );
-    let payload = ObjectRef::try_from(Any::from(Array::new(vec![7i64]))).unwrap();
+    let payload = ObjectRef::try_from(Any::from(Array::from_vec(vec![7i64]))).unwrap();
     let records = call_global("ffi.List", &[Any::new()]);
     let context = call_global(
         "ffi.MakeObjectFromPackedArgs",
@@ -1200,14 +1207,14 @@ fn callback_errors_preserve_message_and_add_object_context() {
 
     // The failing node may be a pre-order replacement or a post-order rebuilt parent.
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-        let root = Array::new(vec![0i64]);
+        let root = Array::from_vec(vec![0i64]);
         let mut failed_node = None;
         let error = structural_map(
             root.clone(),
             (
                 |value: Array<i64>| -> Result<Any> {
                     let value = if order == WalkOrder::PreOrder {
-                        Array::new(vec![1i64])
+                        Array::from_vec(vec![1i64])
                     } else {
                         value
                     };
@@ -1250,7 +1257,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
 
 #[test]
 fn unique_map_reuses_nested_unique_value_storage() {
-    let child = Array::new(vec![1i64, 2]);
+    let child = Array::from_vec(vec![1i64, 2]);
     let child_pointer = array_pointer(&child);
     let source: Map<i64, Array<i64>> = [(1, child)].into_iter().collect();
     let source_pointer = map_pointer(&source);
@@ -1375,9 +1382,13 @@ impl GeneratedMapper {
 #[test]
 fn generated_map_dispatch_supports_kind_and_ordered_catch_all() {
     let mut mapper = GeneratedMapper::default();
-    let mapped = structural_map(Array::new(vec![1i64, 2]), &mut mapper, WalkOrder::PostOrder)
-        .and_then(Array::<i64>::try_from)
-        .unwrap();
+    let mapped = structural_map(
+        Array::from_vec(vec![1i64, 2]),
+        &mut mapper,
+        WalkOrder::PostOrder,
+    )
+    .and_then(Array::<i64>::try_from)
+    .unwrap();
 
     assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(
@@ -1430,7 +1441,7 @@ fn generated_stateless_mutate_dispatch_is_a_direct_callback() {
 
 #[test]
 fn generated_mutate_dispatch_defaults_unmatched_values_and_preserves_inplace_permit() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let mut mutator = GeneratedLeafDispatch::default();
     let mutated = structural_mutate(root, &mut mutator)
@@ -1465,10 +1476,11 @@ impl GeneratedRecursiveDispatch {
             mutated.push(i64::try_from(
                 mutator
                     .mutate(self, MutationView::borrowed(AnyView::from(&value)))?
-                    .value_or_else(|| value.into()),
+                    .into_option()
+                    .unwrap_or_else(|| value.into()),
             )?);
         }
-        Ok(Array::new(mutated).into())
+        Ok(Array::from_vec(mutated).into())
     }
 
     fn mutate_integer(
@@ -1485,7 +1497,7 @@ impl GeneratedRecursiveDispatch {
 #[test]
 fn generated_mutate_dispatch_recurses_through_context() {
     let mut mutator = GeneratedRecursiveDispatch::default();
-    let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
+    let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
 
@@ -1523,7 +1535,7 @@ impl GeneratedDefaultingDispatch {
 #[test]
 fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
     let mut mutator = GeneratedDefaultingDispatch::default();
-    let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
+    let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
 
@@ -1538,7 +1550,7 @@ fn pre_order_mapping_preserves_inplace_permission() {
         let root = match case {
             "inline" => Any::from(true),
             "retained" => call_global("ffi.List", &[Any::from(1_i64)]),
-            _ => Any::from(Array::new(vec![true])),
+            _ => Any::from(Array::from_vec(vec![true])),
         };
         let root_pointer = (case == "retained").then(|| any_object_pointer(&root));
         let alias = (case == "shared").then(|| root.clone());
@@ -1552,7 +1564,7 @@ fn pre_order_mapping_preserves_inplace_permission() {
                 retained = Some(Any::from(value));
                 Any::from(value)
             } else {
-                Array::new(vec![1_i64]).into()
+                Array::from_vec(vec![1_i64]).into()
             };
             pointer = any_object_pointer(&mapped);
             mapped
@@ -1581,7 +1593,7 @@ fn pre_order_mapping_preserves_inplace_permission() {
 
 #[test]
 fn closures_and_tuples_use_ordered_first_match() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mapped = structural_map(
         root,
         |integer: i64| Any::from(integer + 10),
@@ -1594,7 +1606,7 @@ fn closures_and_tuples_use_ordered_first_match() {
     let mut first_calls = 0;
     let mut later_calls = 0;
     let mapped = structural_map(
-        Array::new(vec![3i64]),
+        Array::from_vec(vec![3i64]),
         (
             |integer: i64| {
                 first_calls += 1;
@@ -1617,7 +1629,7 @@ fn closures_and_tuples_use_ordered_first_match() {
 #[test]
 fn callbacks_return_values_convertible_into_any() {
     let mapped = structural_map(
-        Array::new(vec![1i64, 2]),
+        Array::from_vec(vec![1i64, 2]),
         |integer: i64| integer + 10,
         WalkOrder::PostOrder,
     )
@@ -1626,7 +1638,7 @@ fn callbacks_return_values_convertible_into_any() {
     assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![11, 12]);
 
     let mapped = structural_map(
-        Array::new(vec![1i64, 2]),
+        Array::from_vec(vec![1i64, 2]),
         |integer: i64| -> Result<i64> { Ok(integer + 20) },
         WalkOrder::PostOrder,
     )
@@ -1645,7 +1657,7 @@ fn callbacks_return_values_convertible_into_any() {
             (integer * 2).into_mutate_result()
         }
     }
-    let mutated = structural_mutate(Array::new(vec![1i64, 2]), Double)
+    let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), Double)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 4]);
@@ -1674,7 +1686,7 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
     }
 
     // No rewrite: the public entry resolves unchanged to the original array.
-    let source = Array::new(vec![1i64, 2]);
+    let source = Array::from_vec(vec![1i64, 2]);
     let result = structural_mutate(source.clone(), ClampNegativeIntegers)
         .and_then(Array::<i64>::try_from)
         .unwrap();
@@ -1682,7 +1694,7 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
     assert_eq!(array_pointer(&result), array_pointer(&source));
 
     // One rewrite: replace only the negative integer and keep the source intact.
-    let source = Array::new(vec![-1i64, 2]);
+    let source = Array::from_vec(vec![-1i64, 2]);
     let result = structural_mutate(source.clone(), ClampNegativeIntegers)
         .and_then(Array::<i64>::try_from)
         .unwrap();
@@ -1693,9 +1705,9 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
 
 #[test]
 fn pre_order_unchanged_reuses_unmodified_subtrees() {
-    let unchanged = Array::new(vec![1i64, 2]);
-    let changed = Array::new(vec![-1i64, 2]);
-    let source = Array::new(vec![unchanged.clone(), changed.clone()]);
+    let unchanged = Array::from_vec(vec![1i64, 2]);
+    let changed = Array::from_vec(vec![-1i64, 2]);
+    let source = Array::from_vec(vec![unchanged.clone(), changed.clone()]);
 
     let mapped = structural_map(
         source.clone(),
@@ -1734,7 +1746,7 @@ fn pre_order_unchanged_reuses_unmodified_subtrees() {
 fn post_order_unchanged_preserves_descendant_rewrites() {
     for borrowed in [false, true] {
         for shared in [false, true] {
-            let root = Array::new(vec![1_i64]);
+            let root = Array::from_vec(vec![1_i64]);
             let pointer = array_pointer(&root);
             let alias = shared.then(|| root.clone());
             let callbacks = (
@@ -1796,7 +1808,7 @@ fn twelve_link_tuple_reaches_final_map_dispatch() {
 
 #[test]
 fn nested_tuple_chain_exceeds_flat_arity() {
-    let root = Array::new(vec![1i64, 2, 3]);
+    let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut catch_all = 0;
     let mapped = structural_map(
         root,
@@ -1836,7 +1848,7 @@ fn nested_tuple_chain_exceeds_flat_arity() {
 
 #[test]
 fn callbacks_run_in_the_configured_order() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let mut pre = Vec::new();
     structural_map(
         root.clone(),
@@ -1913,7 +1925,7 @@ fn map_keys_are_anchors_and_object_leaves_are_preserved() {
 
 #[test]
 fn callback_mutate_defaults_unmatched_values_and_preserves_root_permit() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let mutated = structural_mutate(root, GeneratedStatelessDispatch)
         .and_then(Array::<i64>::try_from)
@@ -1948,14 +1960,14 @@ impl CallbackMutateStats {
 fn callback_mutator_carries_reusable_mutable_state() {
     let mut mutator = CallbackMutateStats::default();
 
-    let first = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
+    let first = structural_mutate(Array::from_vec(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(first.iter().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(mutator.integers, vec![1, 2]);
     assert_eq!(mutator.defaults, 1);
 
-    let second = structural_mutate(Array::new(vec![3i64]), &mut mutator)
+    let second = structural_mutate(Array::from_vec(vec![3i64]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(second.iter().collect::<Vec<_>>(), vec![4]);
@@ -1990,7 +2002,7 @@ impl CallbackMutateDepth {
 
 #[test]
 fn callback_mutator_state_can_change_around_recursive_reborrows() {
-    let root = Array::new(vec![Array::new(vec![1i64, 2])]);
+    let root = Array::from_vec(vec![Array::from_vec(vec![1i64, 2])]);
     let mut mutator = CallbackMutateDepth::default();
     let mutated = structural_mutate(root, &mut mutator)
         .and_then(Array::<Array<i64>>::try_from)
@@ -2007,7 +2019,7 @@ fn callback_mutator_state_can_change_around_recursive_reborrows() {
 
 #[test]
 fn callback_mutate_explicit_default_is_repeatable_copy_path() {
-    let root = Array::new(vec![1i64, 2]);
+    let root = Array::from_vec(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let defaults = Cell::new(0);
     struct Repeat<'a>(&'a Cell<i32>);
@@ -2024,10 +2036,12 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
             self.0.set(self.0.get() + 1);
             let first = mutator
                 .default_mutate(self, MutationView::borrowed(value))?
-                .value_or_else(|| value.into());
+                .into_option()
+                .unwrap_or_else(|| value.into());
             let second = mutator
                 .default_mutate(self, MutationView::borrowed(value))?
-                .value_or_else(|| value.into());
+                .into_option()
+                .unwrap_or_else(|| value.into());
             assert_ne!(any_object_pointer(&first), any_object_pointer(&second));
             Ok(UnchangedOr::changed(first))
         }
@@ -2051,14 +2065,14 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
             _: Array<i64>,
             _: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            Ok(Array::new(vec![10i64]).into())
+            Ok(Array::from_vec(vec![10i64]).into())
         }
         fn mutate_integer(&mut self, value: i64) -> Result<UnchangedOr<Any>> {
             self.0.set(self.0.get() + 1);
             Ok((value + 1).into())
         }
     }
-    let mutated = structural_mutate(Array::new(vec![1i64]), First(&integer_calls))
+    let mutated = structural_mutate(Array::from_vec(vec![1i64]), First(&integer_calls))
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![10]);
@@ -2077,7 +2091,7 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
             mutator.default_mutate(self, MutationView::borrowed(value))
         }
     }
-    let mutated = structural_mutate(Array::new(vec![1i64, 2]), Reenter(&calls))
+    let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), Reenter(&calls))
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![1, 2]);
@@ -2127,7 +2141,7 @@ fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
 
 #[test]
 fn callback_mutate_distinguishes_borrowed_and_owned_children() {
-    let borrowed_child = Array::new(vec![1i64]);
+    let borrowed_child = Array::from_vec(vec![1i64]);
     let borrowed_pointer = array_pointer(&borrowed_child);
     struct Borrowed<'a>(&'a Array<i64>);
     #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
@@ -2160,11 +2174,11 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
             _: bool,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            let child = Array::new(vec![1i64]);
+            let child = Array::from_vec(vec![1i64]);
             self.0.set(array_pointer(&child) as usize);
             let mut owner: Any = child.into();
             let change = mutator.mutate(self, MutationView::from(&mut owner))?;
-            Ok(UnchangedOr::changed(change.value_or(owner)))
+            Ok(UnchangedOr::changed(change.value_or_unchanged(owner)))
         }
         fn mutate_integer(&mut self, value: i64) -> Result<UnchangedOr<Any>> {
             Ok((value + 1).into())
@@ -2208,7 +2222,7 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
             mutator.mutate(self, MutationView::borrowed(AnyView::from(&3i64)))
         }
     }
-    let mutated = structural_mutate(Array::new(vec![1i64]), Outer)
+    let mutated = structural_mutate(Array::from_vec(vec![1i64]), Outer)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(mutated.get(0).unwrap(), 4);
@@ -2216,7 +2230,7 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
 
 #[test]
 fn map_entries_preserve_descent_and_callback_composition() {
-    let root = || Array::new(vec![1_i64]);
+    let root = || Array::from_vec(vec![1_i64]);
     let first = |value: Any| Array::<i64>::try_from(value).unwrap().get(0).unwrap();
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let mut dispatch = IncrementIntegers;
@@ -2279,7 +2293,7 @@ fn mutation_descent_preserves_ownership_and_markers() {
         for case in 0..4 {
             // Unique, shared, retained alias, explicit copy descent.
             for increment in [false, true] {
-                let root = Array::new(vec![1_i64]);
+                let root = Array::from_vec(vec![1_i64]);
                 let pointer = array_pointer(&root);
                 let alias = (case == 1).then(|| root.clone());
                 let state = Ownership {
@@ -2378,11 +2392,13 @@ fn mutation_regions_retargeting_and_error_restore() {
                         assert_eq!(mutator.def_region_kind(), Pattern);
                         self.0.push((100, mutator.def_region_kind()));
                         {
-                            let array = Array::new(vec![5_i64]);
+                            let array = Array::from_vec(vec![5_i64]);
                             mutator
                                 .default_mutate(self, MutationView::borrowed(AnyView::from(&array)))
                                 .map(|result| {
-                                    UnchangedOr::changed(result.value_or_else(|| array.into()))
+                                    UnchangedOr::changed(
+                                        result.into_option().unwrap_or_else(|| array.into()),
+                                    )
                                 })
                         }
                     })
@@ -2417,10 +2433,14 @@ fn mutation_regions_retargeting_and_error_restore() {
             if value.as_any_view().try_as::<bool>() == Some(false) {
                 return mutator.with_def_region_kind(Pattern, |mutator| {
                     self.0.push((100, mutator.def_region_kind()));
-                    let array = Array::new(vec![1_i64]);
+                    let array = Array::from_vec(vec![1_i64]);
                     mutator
                         .default_mutate(self, MutationView::borrowed(AnyView::from(&array)))
-                        .map(|result| UnchangedOr::changed(result.value_or_else(|| array.into())))
+                        .map(|result| {
+                            UnchangedOr::changed(
+                                result.into_option().unwrap_or_else(|| array.into()),
+                            )
+                        })
                 });
             }
             if let Some(x) = value.as_any_view().try_as::<i64>() {
@@ -2487,7 +2507,10 @@ fn mutation_regions_retargeting_and_error_restore() {
 
 #[test]
 fn mapping_preserves_post_recursion_state() {
-    let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3, 4])]);
+    let root = Array::from_vec(vec![
+        Array::from_vec(vec![1_i64, 2]),
+        Array::from_vec(vec![3, 4]),
+    ]);
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let ordinary = structural_map(root.clone(), |value: i64| value + 1, order).unwrap();
         let leaves = |value: &Any| {
@@ -2537,7 +2560,7 @@ fn mapping_preserves_primitive_replacement_descent() {
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let callback = |value: i64| -> Any {
             if value == 0 {
-                Array::new(vec![1_i64, 2]).into()
+                Array::from_vec(vec![1_i64, 2]).into()
             } else {
                 (value + 10).into()
             }
@@ -2574,7 +2597,7 @@ fn dispatch_handlers_may_return_typed_results() {
             mutator.default_mutate(self, value)?.try_cast()
         }
     }
-    let mutated = structural_mutate(Array::new(vec![1i64, 2]), Typed)
+    let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), Typed)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![10, 20]);
@@ -2582,11 +2605,14 @@ fn dispatch_handlers_may_return_typed_results() {
     struct KeepTyped;
     #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
     impl KeepTyped {
-        fn mutate_array(&mut self, _: MutationView<'_, Array<i64>>) -> Result<UnchangedOr<Array<i64>>> {
+        fn mutate_array(
+            &mut self,
+            _: MutationView<'_, Array<i64>>,
+        ) -> Result<UnchangedOr<Array<i64>>> {
             Ok(UnchangedOr::unchanged())
         }
     }
-    let source = Array::new(vec![1i64, 2]);
+    let source = Array::from_vec(vec![1i64, 2]);
     let kept = structural_mutate(source.clone(), KeepTyped)
         .and_then(Array::<i64>::try_from)
         .unwrap();
@@ -2596,9 +2622,13 @@ fn dispatch_handlers_may_return_typed_results() {
 #[test]
 fn map_callbacks_may_return_typed_results() {
     let mapped = structural_map(
-        Array::new(vec![1i64, 2]),
+        Array::from_vec(vec![1i64, 2]),
         |value: i64| -> Result<UnchangedOr<i64>> {
-            Ok(if value == 1 { UnchangedOr::changed(5) } else { UnchangedOr::unchanged() })
+            Ok(if value == 1 {
+                UnchangedOr::changed(5)
+            } else {
+                UnchangedOr::unchanged()
+            })
         },
         WalkOrder::PreOrder,
     )

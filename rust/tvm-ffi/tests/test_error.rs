@@ -60,7 +60,7 @@ fn test_error_with_context() {
     let result = error_fn1(false).unwrap();
     assert_eq!(result, 1);
 
-    let payload = object::ObjectRef::try_from(Any::from(Array::new(vec![7i64]))).unwrap();
+    let payload = object::ObjectRef::try_from(Any::from(Array::from_vec(vec![7i64]))).unwrap();
     for shared in [false, true] {
         let error = Error::new_with_cause_and_extra_context(
             RUNTIME_ERROR,

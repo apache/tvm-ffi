@@ -106,7 +106,7 @@ impl RecordingVisitor {
 /// state flips to Recursive under "params" and back to None for the "body".
 #[test]
 fn records_values_and_def_region_modes() {
-    let root = Array::new(vec![10i64, 20]);
+    let root = Array::from_vec(vec![10i64, 20]);
     let mut visitor = RecordingVisitor::default();
 
     let outcome = structural_visit(&root, &mut visitor).unwrap();
@@ -127,7 +127,7 @@ fn records_values_and_def_region_modes() {
 /// halts at the marked value and the payload reaches the caller.
 #[test]
 fn stops_on_interrupt_with_payload() {
-    let root = Array::new(vec![10i64, 20]);
+    let root = Array::from_vec(vec![10i64, 20]);
     let mut visitor = RecordingVisitor {
         interrupt_on: Some(20),
         ..RecordingVisitor::default()

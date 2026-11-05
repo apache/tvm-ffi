@@ -37,7 +37,7 @@ fn dltensor(data: &mut [f32; 6], shape: &mut [i64; 2], strides: *mut i64) -> DLT
 fn describe() -> Function {
     Function::from_typed(|t: TensorView| -> Result<Array<i64>> {
         let first = unsafe { *(t.data_ptr() as *const f32) } as i64;
-        Ok(Array::new(vec![
+        Ok(Array::from_vec(vec![
             t.ndim() as i64,
             t.shape()[1],
             t.strides()[0],
@@ -48,7 +48,7 @@ fn describe() -> Function {
 
 fn call(f: &Function, arg: AnyView) -> Result<Vec<i64>> {
     let out = Array::<i64>::try_from(f.call_packed(&[arg])?)?;
-    (0..out.len()).map(|i| Ok(i64::try_from(out[i])?)).collect()
+    Ok((0..out.len()).map(|i| out[i]).collect())
 }
 
 #[test]

@@ -23,8 +23,8 @@
 //! the non-unwinding native callback boundary aborts the process.
 
 use super::structural_visit::{
-    DefRegionKind, StructuralVisitEngine, StructuralVisitorView, VisitInterrupt,
-    visit_result_from_any,
+    visit_result_from_any, DefRegionKind, StructuralVisitEngine, StructuralVisitorView,
+    VisitInterrupt,
 };
 use crate::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
 use std::borrow::BorrowMut;
@@ -245,7 +245,7 @@ where
 /// ```
 /// use tvm_ffi::{structural_walk, Array, WalkOrder, WalkResult};
 ///
-/// let root = Array::new(vec![1_i64, 2, 3]);
+/// let root = Array::from_vec(vec![1_i64, 2, 3]);
 /// let mut integers = Vec::new();
 /// structural_walk(&root, |value: i64| {
 ///     integers.push(value);
@@ -261,12 +261,12 @@ pub fn structural_walk<'input, R, M, H, D, O>(
 ) -> Result<Option<VisitInterrupt>>
 where
     for<'v> H: IntoDispatcher<
-            (AnyView<'v>, DefRegionKind),
-            Option<Result<WalkResult>>,
-            M,
-            Target = D,
-            Output = O,
-        >,
+        (AnyView<'v>, DefRegionKind),
+        Option<Result<WalkResult>>,
+        M,
+        Target = D,
+        Output = O,
+    >,
     for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
     R: Into<AnyView<'input>>,
     O: BorrowMut<D>,

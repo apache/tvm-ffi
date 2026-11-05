@@ -202,7 +202,7 @@ mod tests {
             device_type: DLDeviceType::kDLCPU,
             device_id: 0,
         };
-        assert!(!is_undefined(Array::<i64>::new(vec![])));
+        assert!(!is_undefined(Array::<i64>::new()));
         assert!(!is_undefined(String::from("")));
         assert!(!is_undefined(BigInt::from(0_i64)));
         assert!(!is_undefined(cpu));

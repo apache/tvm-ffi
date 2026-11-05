@@ -44,7 +44,7 @@
 // Local Perf note comments explain individual implementation choices.
 
 use std::cell::{RefCell, UnsafeCell};
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
@@ -58,7 +58,7 @@ use std::rc::Rc;
 pub use super::structural_map::*;
 
 use super::dispatch::Dispatcher;
-use crate::any::{Any, AnyView, is_plain_inline};
+use crate::any::{is_plain_inline, Any, AnyView};
 use crate::error::{Error, Result, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectCore};
@@ -79,7 +79,7 @@ use super::structural_common::{
     with_structural_field_error_context, with_visit_error_context,
 };
 use super::structural_visit::{
-    DefRegionKind, field_def_region, for_each_field_info, free_var_child_region,
+    field_def_region, for_each_field_info, free_var_child_region, DefRegionKind,
 };
 use super::unchanged::is_unchanged;
 pub use super::unchanged::{Unchanged, UnchangedOr};
@@ -669,7 +669,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// #         Ok(second)
     /// #     }
     /// # }
-    /// # let pair = MyPairObj::new(Object::new(), Array::new(vec![1_i64]), Array::new(vec![2_i64]));
+    /// # let pair = MyPairObj::new(Object::new(), Array::from_vec(vec![1_i64]), Array::from_vec(vec![2_i64]));
     /// # structural_mutate(MyPair::from(pair), Pass)?;
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
@@ -931,16 +931,16 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         R: Into<Any>,
         O: BorrowMut<D>,
         for<'v, 'c, 'r> H: IntoDispatcher<
-                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<UnchangedOr<Any>>>,
-                M,
-                Target = D,
-                Output = O,
-            >,
+            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+            Option<Result<UnchangedOr<Any>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<UnchangedOr<Any>>>,
-            >,
+            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+            Option<Result<UnchangedOr<Any>>>,
+        >,
     {
         let mut storage = dispatcher.into_dispatcher();
         Self::run_mutator::<D, true>(root.into(), storage.borrow_mut())
@@ -1266,9 +1266,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     fn vtable<D, const CALLBACK_CONTEXT: bool>() -> &'static StructuralMutatorVTable
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<UnchangedOr<Any>>>,
-            >,
+            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+            Option<Result<UnchangedOr<Any>>>,
+        >,
     {
         &StructuralMutatorVTable {
             mutate: Self::rust_vtable_mutate::<D, false, CALLBACK_CONTEXT>,
@@ -1291,9 +1291,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     ) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<UnchangedOr<Any>>>,
-            >,
+            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+            Option<Result<UnchangedOr<Any>>>,
+        >,
     {
         let context = (*Self::from_handle(runtime)).dispatcher;
         let raw = *value.as_raw_ffi_any();
@@ -1429,9 +1429,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     ) -> Result<Any>
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-                Option<Result<UnchangedOr<Any>>>,
-            >,
+            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+            Option<Result<UnchangedOr<Any>>>,
+        >,
     {
         let mut base = Base::new()?;
         let type_index = Base::type_index();
@@ -2054,7 +2054,7 @@ impl StructuralMutatorObj {
 ///     }
 /// }
 ///
-/// let root = Array::new(vec![Array::new(vec![1_i64, 2]), Array::new(vec![3_i64])]);
+/// let root = Array::from_vec(vec![Array::from_vec(vec![1_i64, 2]), Array::from_vec(vec![3_i64])]);
 /// let result = Array::<Array<i64>>::try_from(structural_mutate(root, Double)?)?;
 /// assert_eq!(result.get(0)?.iter().collect::<Vec<_>>(), vec![2, 4]);
 /// # Ok::<(), tvm_ffi::Error>(())
@@ -2064,22 +2064,22 @@ where
     R: Into<Any>,
     O: BorrowMut<D>,
     for<'v, 'c, 'r> H: IntoDispatcher<
-            (
-                MutationView<'v>,
-                &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
-            ),
-            Option<Result<UnchangedOr<Any>>>,
-            M,
-            Target = D,
-            Output = O,
-        >,
+        (
+            MutationView<'v>,
+            &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
+        ),
+        Option<Result<UnchangedOr<Any>>>,
+        M,
+        Target = D,
+        Output = O,
+    >,
     for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (
-                MutationView<'v>,
-                &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
-            ),
-            Option<Result<UnchangedOr<Any>>>,
-        >,
+        (
+            MutationView<'v>,
+            &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
+        ),
+        Option<Result<UnchangedOr<Any>>>,
+    >,
 {
     StructuralMutateEngine::mutate_root(root, dispatcher)
 }

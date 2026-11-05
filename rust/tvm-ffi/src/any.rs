@@ -34,7 +34,7 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyViewToOwnedAny};
 /// ```
 /// use tvm_ffi::{Any, AnyView, Array};
 ///
-/// let array = Array::new(vec![1_i64, 2, 3]);
+/// let array = Array::from_vec(vec![1_i64, 2, 3]);
 /// let view = AnyView::from(&array);
 /// assert_eq!(view.try_as::<Array<i64>>().unwrap().len(), 3);
 ///
@@ -327,7 +327,7 @@ impl Any {
     ///
     /// ```
     /// use tvm_ffi::{collections::array::ArrayObj, Any, Array};
-    /// let value = Any::from(Array::new(vec![1_i64, 2]));
+    /// let value = Any::from(Array::from_vec(vec![1_i64, 2]));
     /// assert_eq!(value.downcast_ref::<ArrayObj>().unwrap().size, 2);
     /// ```
     ///

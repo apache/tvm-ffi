@@ -218,6 +218,61 @@ pub trait ContainerElement: container_element_ops::Ops {}
 impl<T: AnyCompatible> ContainerElement for T {}
 impl ContainerElement for Any {}
 
+/// Container elements that an [`crate::Array`] cell stores in place, so that
+/// indexing can lend `&Self` from the cell.
+///
+/// # Safety
+///
+/// For a cell that passes `container_check_any_strict` for `Self`,
+/// `in_place_ref` must return a reference into that cell that is a valid
+/// `Self` for as long as the cell is borrowed.
+#[doc(hidden)]
+pub unsafe trait InPlaceElement: ContainerElement {
+    /// Borrow the value stored in `cell`.
+    ///
+    /// # Safety
+    ///
+    /// `cell` must hold a `Self`.
+    unsafe fn in_place_ref(cell: &TVMFFIAny) -> &Self;
+}
+
+// The whole cell is the value.
+unsafe impl InPlaceElement for Any {
+    #[inline(always)]
+    unsafe fn in_place_ref(cell: &TVMFFIAny) -> &Self {
+        &*(cell as *const TVMFFIAny as *const Any)
+    }
+}
+
+unsafe impl InPlaceElement for crate::String {
+    #[inline(always)]
+    unsafe fn in_place_ref(cell: &TVMFFIAny) -> &Self {
+        &*(cell as *const TVMFFIAny as *const crate::String)
+    }
+}
+
+unsafe impl InPlaceElement for crate::string::Bytes {
+    #[inline(always)]
+    unsafe fn in_place_ref(cell: &TVMFFIAny) -> &Self {
+        &*(cell as *const TVMFFIAny as *const crate::string::Bytes)
+    }
+}
+
+// The payload word holds the value in its own representation.
+unsafe impl InPlaceElement for i64 {
+    #[inline(always)]
+    unsafe fn in_place_ref(cell: &TVMFFIAny) -> &Self {
+        &cell.data_union.v_int64
+    }
+}
+
+unsafe impl InPlaceElement for f64 {
+    #[inline(always)]
+    unsafe fn in_place_ref(cell: &TVMFFIAny) -> &Self {
+        &cell.data_union.v_float64
+    }
+}
+
 mod container_element_ops {
     use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
 

@@ -21,12 +21,12 @@
 
 use super::structural_common::raw_ffi_any_same_as;
 use super::structural_mutate::{
-    IntoMutateResult, MutationView, StructuralMutateEngine, StructuralMutatorView,
-    with_mutation_error_context,
+    with_mutation_error_context, IntoMutateResult, MutationView, StructuralMutateEngine,
+    StructuralMutatorView,
 };
 use super::structural_visit::DefRegionKind;
 use super::structural_walk::WalkOrder;
-use super::unchanged::{UnchangedOr, is_unchanged};
+use super::unchanged::{is_unchanged, UnchangedOr};
 use crate::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
 use std::borrow::BorrowMut;
 
@@ -192,7 +192,7 @@ where
 /// ```
 /// use tvm_ffi::{structural_map, Array, WalkOrder};
 ///
-/// let root = Array::new(vec![1_i64, 2, 3]);
+/// let root = Array::from_vec(vec![1_i64, 2, 3]);
 /// let mapped = structural_map(root.clone(), |value: i64| value + 1, WalkOrder::PostOrder)?;
 /// let mapped = Array::<i64>::try_from(mapped)?;
 /// assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3, 4]);
@@ -204,12 +204,12 @@ where
     R: Into<Any>,
     O: BorrowMut<D>,
     for<'v> H: IntoDispatcher<
-            (AnyView<'v>, DefRegionKind),
-            Option<Result<UnchangedOr<Any>>>,
-            M,
-            Target = D,
-            Output = O,
-        >,
+        (AnyView<'v>, DefRegionKind),
+        Option<Result<UnchangedOr<Any>>>,
+        M,
+        Target = D,
+        Output = O,
+    >,
     for<'s, 'v> &'s mut D:
         Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>,
 {

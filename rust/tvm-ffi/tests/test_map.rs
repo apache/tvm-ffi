@@ -131,7 +131,7 @@ fn test_map_with_any_values() {
     let empty = Map::<String, Any>::default();
     assert!(empty.is_empty());
 
-    let array = Array::new(vec![1i64, 2, 3]);
+    let array = Array::from_vec(vec![1i64, 2, 3]);
     let array_base_count = AnyView::from(&array).debug_strong_count().unwrap();
     let map: Map<String, Any> = [
         (String::from("number"), Any::from(7i64)),
