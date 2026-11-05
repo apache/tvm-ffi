@@ -521,7 +521,7 @@ fn primitive_fast_path_preserves_none_interrupt_and_error() {
 
     let interrupt = structural_walk(
         &1i64,
-        |_value: i64| WalkResult::interrupt_with(9i64),
+        |_value: i64| WalkResult::InterruptWith(9i64.into()),
         WalkOrder::PostOrder,
     )
     .unwrap()
@@ -574,7 +574,7 @@ fn interrupt_payload_crosses_map_traversal() {
         &root,
         |value: AnyView<'_>| {
             if value.try_as::<i64>().is_some() {
-                return WalkResult::interrupt_with(99i64);
+                return WalkResult::InterruptWith(99i64.into());
             }
             WalkResult::Advance
         },
@@ -1009,7 +1009,7 @@ fn interrupt_payload_is_returned_to_the_caller() {
         &root,
         |value: AnyView<'_>| {
             if value.try_as::<i64>() == Some(1) {
-                return WalkResult::interrupt_with(42i64);
+                return WalkResult::InterruptWith(42i64.into());
             }
             WalkResult::Advance
         },

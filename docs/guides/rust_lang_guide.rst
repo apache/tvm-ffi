@@ -717,7 +717,7 @@ take a trailing ``DefRegionKind`` argument:
 
 Both entry points return ``Result<Option<VisitInterrupt>>``: ``Ok(None)`` means
 the whole graph was visited, and a handler stops the walk early by returning
-``WalkResult::interrupt_with(payload)``, which comes back to the caller as
+``WalkResult::InterruptWith(payload)``, which comes back to the caller as
 ``Ok(Some(interrupt))``. Handlers may also return ``Result<WalkResult>`` and
 propagate errors with ``?``:
 
@@ -730,7 +730,7 @@ propagate errors with ``?``:
        &values,
        |value: i64| {
            if value == 2 {
-               return WalkResult::interrupt_with(value);
+               return WalkResult::InterruptWith(value.into());
            }
            WalkResult::Advance
        },
