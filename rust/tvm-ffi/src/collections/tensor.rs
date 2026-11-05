@@ -179,7 +179,7 @@ impl Tensor {
     /// # Safety contract (caller responsibility)
     /// If the `Tensor` has been cloned (via `ObjectArc`), the caller must
     /// ensure no other clone is concurrently reading the data.
-    #[allow(clippy::wrong_self_convention)]
+    #[allow(clippy::wrong_self_convention, clippy::mut_from_ref)]
     pub fn data_as_slice_mut<T: AsDLDataType>(&self) -> Result<&mut [T]> {
         let dtype = T::DL_DATA_TYPE;
         if self.dtype() != dtype {
