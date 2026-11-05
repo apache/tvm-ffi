@@ -85,7 +85,7 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// # Arguments
     /// * `this` - The object to get the header
     ///
-    /// Returns
+    /// # Returns
     /// * `&mut TVMFFIObject` - The object header
     /// \return The object header
     ///
@@ -633,7 +633,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `ptr` - The raw pointer to move into the ObjectArc
     ///
-    /// Returns
+    /// # Returns
     /// * `ObjectArc<T>` - The ObjectArc
     /// \return The ObjectArc
     ///
@@ -654,7 +654,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to move into a raw pointer
     ///
-    /// Returns
+    /// # Returns
     /// * `*const T` - The raw pointer
     #[inline(always)]
     pub unsafe fn into_raw(this: Self) -> *const T {
@@ -669,7 +669,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the raw pointer
     ///
-    /// Returns
+    /// # Returns
     /// * `*const T` - The raw pointer
     /// \return The raw pointer
     ///
@@ -688,7 +688,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the raw pointer
     ///
-    /// Returns
+    /// # Returns
     /// * `*mut T` - The raw pointer
     ///
     /// # Safety
@@ -704,7 +704,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the strong reference count
     ///
-    /// Returns
+    /// # Returns
     /// * `usize` - The strong reference count
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
@@ -716,7 +716,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// # Arguments
     /// * `this` - The ObjectArc to get the weak reference count
     ///
-    /// Returns
+    /// # Returns
     /// * `usize` - The weak reference count
     #[inline]
     pub fn weak_count(this: &Self) -> usize {

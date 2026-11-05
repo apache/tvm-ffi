@@ -28,6 +28,14 @@
 )]
 pub trait Dispatcher<Args, Ret> {
     /// Dispatch on `args.0` with the complete argument tuple `args`.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - The argument tuple, whose first element is the value to dispatch on.
+    ///
+    /// # Returns
+    ///
+    /// `Some` of the matched handler's result, or `None` when no handler matches.
     fn dispatch_tuple(self, args: Args) -> Ret;
 }
 

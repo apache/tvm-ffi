@@ -342,8 +342,11 @@ impl<T: Into<Any>> IntoMutateResult for Result<T> {
     }
 }
 
-/// Whether a [`MutationView`] may reuse its value's storage in place, which
-/// it does only when the value is also uniquely owned.
+/// Whether a [`MutationView`] may reuse its value's storage in place.
+///
+/// `Allow` is an upper bound: a value is reused in place only when it is also
+/// uniquely owned. A view made from `&mut Any` starts as `Allow`, and a view
+/// from [`MutationView::borrowed`] is always `Disallow`.
 ///
 /// See also [`structural_mutate`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -370,9 +373,17 @@ impl InplaceMode {
 /// A borrowed value that a structural mutation may rewrite in place.
 ///
 /// Mutation handlers receive a `MutationView` instead of an owned value, so
-/// matching a node does not retain it; `MutationView<'_, T>` derefs to the
-/// node of `T`. The view is move-only, and when the node is uniquely owned
-/// its storage is reused.
+/// matching a node does not retain it. Inspect the node through the view,
+/// then pass the view to [`StructuralMutatorView::default_mutate`] to rewrite
+/// its children, or rewrite one field with [`field`](MutationView::field).
+/// When the node is uniquely owned and the view carries
+/// [`InplaceMode::Allow`], its storage is reused instead of copied.
+///
+/// `T` is the matched type: `MutationView<'_, Array<Any>>` derefs to the
+/// array's node, and the default `MutationView<'_>` matches every value. The
+/// view is move-only: it cannot be copied or cloned, and consuming it passes
+/// on the same permission. A view made from `&mut Any` may reuse storage;
+/// one made with [`borrowed`](MutationView::borrowed) never does.
 ///
 /// See also [`structural_mutate`].
 ///
@@ -442,7 +453,18 @@ impl<'a> MutationView<'a> {
         }
     }
 
-    /// Create a view of the borrowed `value` that never reuses its storage.
+    /// Create a view of a borrowed value that never reuses its storage.
+    ///
+    /// The mutation result is always a new value or [`Unchanged`]. To allow reuse,
+    /// make the view from `&mut Any` instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The value to view.
+    ///
+    /// # Returns
+    ///
+    /// A view with [`InplaceMode::Disallow`].
     #[inline(always)]
     pub fn borrowed(value: AnyView<'a>) -> Self {
         Self::new(value, InplaceMode::Disallow)
@@ -450,8 +472,9 @@ impl<'a> MutationView<'a> {
 }
 
 impl<'a> From<&'a mut Any> for MutationView<'a> {
-    /// Create a view of `value` that may reuse its storage, borrowing it
-    /// exclusively.
+    /// Borrow an owner exclusively without acquiring a reference count.
+    ///
+    /// Reuse still requires the runtime's uniqueness and alias checks.
     #[inline(always)]
     fn from(value: &'a mut Any) -> Self {
         Self::new(AnyView::from(&*value), InplaceMode::Allow)
@@ -472,14 +495,28 @@ impl<'a, T> MutationView<'a, T> {
         }
     }
 
-    /// Return whether this view may reuse its value's storage.
+    /// Return the permission this view carries.
+    ///
+    /// # Returns
+    ///
+    /// Whether this view may reuse its value's storage.
     #[inline(always)]
     pub fn inplace_mode(&self) -> InplaceMode {
         self.mode
     }
 
-    /// Return the view with its permission lowered to `requested`; it is never
-    /// raised.
+    /// Restrict the permission, without ever upgrading it.
+    ///
+    /// `Disallow` turns off reuse. `Allow` keeps the current mode, so it never
+    /// grants reuse to a view that does not have it, such as a borrowed one.
+    ///
+    /// # Arguments
+    ///
+    /// * `requested` - The permission to restrict to.
+    ///
+    /// # Returns
+    ///
+    /// The view with the restricted permission.
     #[inline(always)]
     pub fn with_inplace_mode(mut self, requested: InplaceMode) -> Self {
         if requested == InplaceMode::Disallow {
@@ -488,8 +525,14 @@ impl<'a, T> MutationView<'a, T> {
         self
     }
 
-    /// Borrow the value as an [`AnyView`], which ends when this view is
-    /// consumed.
+    /// Borrow the current value.
+    ///
+    /// The view and its copies borrow this handle, so their last use must precede
+    /// consuming it for default mutation.
+    ///
+    /// # Returns
+    ///
+    /// The value as an [`AnyView`].
     #[inline(always)]
     pub fn as_any_view(&self) -> AnyView<'_> {
         // SAFETY: the input owner keeps this payload live while the capability is
@@ -497,8 +540,14 @@ impl<'a, T> MutationView<'a, T> {
         unsafe { AnyView::from_raw_ffi_any(self.value) }
     }
 
-    /// Borrow the object as `U`, an object type such as `ArrayObj`, when its
-    /// runtime type is `U` or a subtype.
+    /// Borrow an object or subtype as `U` without changing ownership or permission.
+    ///
+    /// `U` is an object type such as `ArrayObj`. The reference borrows this view and
+    /// cannot survive its consumption.
+    ///
+    /// # Returns
+    ///
+    /// The borrowed object, or `None` when the value is not a `U`.
     #[inline(always)]
     pub fn downcast_ref<U: ObjectCore>(&self) -> Option<&U> {
         if self.value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -511,8 +560,19 @@ impl<'a, T> MutationView<'a, T> {
         Some(unsafe { &*self.value.data_union.v_obj.cast::<U>() })
     }
 
-    /// Narrow the view to `U`, with the strict check of [`Any::try_as`], or
-    /// return it unchanged when the value is not a `U`.
+    /// Narrow the matched type without acquiring an owning reference.
+    ///
+    /// The check is the strict one of [`Any::try_as`], and the view keeps its
+    /// permission.
+    ///
+    /// # Returns
+    ///
+    /// The view typed as `MutationView<'_, U>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the view unchanged when the value is not a `U`, so another type can
+    /// be tried.
     #[inline(always)]
     pub fn try_cast<U: crate::type_traits::ContainerElement>(
         self,
@@ -532,7 +592,11 @@ impl<'a, T> MutationView<'a, T> {
         }
     }
 
-    /// Erase the matched type, keeping the permission.
+    /// Erase the matched type while preserving the carried permission.
+    ///
+    /// # Returns
+    ///
+    /// The view as `MutationView<'_>`.
     #[inline(always)]
     pub fn into_untyped(self) -> MutationView<'a> {
         MutationView {
@@ -570,8 +634,26 @@ impl<T: object::ObjectRefCore> std::ops::Deref for MutationView<'_, T> {
 }
 
 impl<T: object::ObjectRefCore> MutationView<'_, T> {
-    /// Return a view of the field that `selector` picks from the node, to rewrite
-    /// with [`StructuralMutatorView::mutate`]; the result is not written back.
+    /// Borrow a direct owning field of the node as a view of its own, to rewrite it
+    /// with [`StructuralMutatorView::mutate`].
+    ///
+    /// The field view exclusively borrows this view. It may reuse the field's
+    /// storage only when this view may and the node remains uniquely owned. This
+    /// does not write the result back into the node: keep the node [`Unchanged`] or
+    /// rebuild it from the result.
+    ///
+    /// # Arguments
+    ///
+    /// * `selector` - Returns a reference to one of the node's own owning fields,
+    ///   an [`Any`] or a managed reference.
+    ///
+    /// # Returns
+    ///
+    /// A view of the field.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `selector` returns a reference outside the node.
     ///
     /// ```
     /// # use tvm_ffi::object::ObjectRef;
@@ -591,10 +673,6 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// # structural_mutate(MyPair::from(pair), Pass)?;
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if `selector` returns a reference outside the node.
     ///
     /// See also [`structural_mutate`].
     #[inline(always)]
@@ -633,6 +711,12 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
 
 /// The running structural mutation, passed to each handler.
 ///
+/// A handler that matches a node decides how its children are rewritten: call
+/// [`default_mutate`](Self::default_mutate) to rewrite every child through the
+/// dispatcher, [`mutate`](Self::mutate) to rewrite one value, or neither to
+/// leave the children as they are. Pass the handler's own `self` as `dispatch`
+/// to every method.
+///
 /// See also [`structural_mutate`].
 pub struct StructuralMutatorView<'a, D, Base = StructuralMutatorObj> {
     runtime: StructuralMutatorHandle,
@@ -642,7 +726,11 @@ pub struct StructuralMutatorView<'a, D, Base = StructuralMutatorObj> {
 }
 
 impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
-    /// Borrow the mutator's base state.
+    /// Inspect the base state without retaining the scoped mutator runtime.
+    ///
+    /// # Returns
+    ///
+    /// The base state, borrowed for the lifetime of this view.
     #[inline(always)]
     pub fn base(&self) -> &Base {
         // SAFETY: the unsafe base contract permits shared inspection, including
@@ -661,13 +749,32 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
     }
 
     /// Return the definition region the current value is in.
+    ///
+    /// Reflected fields marked as definitions set it while their values are
+    /// mutated; it is [`DefRegionKind::None`] elsewhere.
+    ///
+    /// # Returns
+    ///
+    /// The current definition region.
     #[inline(always)]
     pub fn def_region_kind(&self) -> DefRegionKind {
         unsafe { std::mem::transmute(*(*self.runtime).def_region_mode.get()) }
     }
 
-    /// Call `callback` with the definition region set to `kind`; an enclosing
-    /// `Pattern` region stays in effect.
+    /// Run `callback` under a scoped definition region.
+    ///
+    /// An enclosing [`DefRegionKind::Pattern`] region keeps precedence, since a
+    /// pattern applies to everything inside it. The previous region is restored
+    /// afterwards.
+    ///
+    /// # Arguments
+    ///
+    /// * `kind` - The definition region to enter.
+    /// * `callback` - Runs inside the region, with this view.
+    ///
+    /// # Returns
+    ///
+    /// The result of `callback`.
     #[inline(always)]
     pub fn with_def_region_kind<R>(
         &mut self,
@@ -679,7 +786,24 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         })
     }
 
-    /// Mutate `value` through `dispatch`, the handler's own `self`.
+    /// Mutate `value` through the dispatcher, as if the traversal had reached it.
+    ///
+    /// `value` keeps the permission it carries. Use it to rewrite a value other
+    /// than the current node, such as a field selected with
+    /// [`MutationView::field`].
+    ///
+    /// # Arguments
+    ///
+    /// * `dispatch` - The handler's own `self`.
+    /// * `value` - The value to mutate.
+    ///
+    /// # Returns
+    ///
+    /// The replacement, or [`Unchanged`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the handler that `value` reaches.
     #[inline(always)]
     pub fn mutate<'input, T>(
         &mut self,
@@ -696,8 +820,27 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         .and_then(UnchangedOr::from_carrier)
     }
 
-    /// Mutate the children of `value` through `dispatch`, without dispatching
+    /// Rewrite the children of `value` through the dispatcher, without dispatching
     /// `value` itself again.
+    ///
+    /// Children are found by the type's registered mutation hook or its reflected
+    /// fields. The result is unchanged when no child changed; otherwise it is a
+    /// node with the new children, made in place when `value` allows it and is
+    /// uniquely owned.
+    ///
+    /// # Arguments
+    ///
+    /// * `dispatch` - The handler's own `self`.
+    /// * `value` - The value whose children to mutate, usually the view the
+    ///   handler received.
+    ///
+    /// # Returns
+    ///
+    /// The rewritten node, or [`Unchanged`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error of a child's handler.
     #[inline(always)]
     pub fn default_mutate<'input, T>(
         &mut self,
@@ -718,7 +861,23 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         .and_then(UnchangedOr::from_carrier)
     }
 
-    /// Return the replacement recorded for the object `var` in this mutation.
+    /// Look up the replacement recorded for a variable in this mutation.
+    ///
+    /// Default mutation records the result of every free variable and DAG node it
+    /// rewrites, and replaces each later occurrence with it.
+    ///
+    /// # Arguments
+    ///
+    /// * `dispatch` - The handler's own `self`.
+    /// * `var` - The variable, an object.
+    ///
+    /// # Returns
+    ///
+    /// The recorded replacement, or `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` if `var` is not an object.
     #[inline(always)]
     pub fn var_remap_get(&mut self, dispatch: &mut D, var: AnyView<'_>) -> Result<Option<Any>> {
         unsafe {
@@ -730,8 +889,24 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
         }
     }
 
-    /// Record `value` as the replacement of the object `var` for the rest of
-    /// this mutation.
+    /// Record a replacement for a variable for the rest of this mutation.
+    ///
+    /// Default mutation then replaces each later occurrence of `var`, a free
+    /// variable or DAG node, with `value`.
+    ///
+    /// # Arguments
+    ///
+    /// * `dispatch` - The handler's own `self`.
+    /// * `var` - The variable, an object.
+    /// * `value` - The replacement.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` once the replacement is recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` if `var` is not an object.
     #[inline(always)]
     pub fn var_remap_set(&mut self, dispatch: &mut D, var: AnyView<'_>, value: &Any) -> Result<()> {
         unsafe {

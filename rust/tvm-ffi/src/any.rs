@@ -79,6 +79,10 @@ pub struct Any {
 //---------------------
 impl<'a> AnyView<'a> {
     /// Create a view of `None`, the empty FFI value.
+    ///
+    /// # Returns
+    ///
+    /// A view holding `None`.
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny::new(),
@@ -116,6 +120,10 @@ impl<'a> AnyView<'a> {
     ///
     /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
     /// non-object types; the others are object types.
+    ///
+    /// # Returns
+    ///
+    /// The type index.
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
@@ -150,6 +158,15 @@ impl<'a> AnyView<'a> {
 
     /// Borrow the viewed object as `T` when its runtime type is `T` or a subtype.
     ///
+    /// `T` is an object representation type such as `ArrayObj`. Non-object values
+    /// and unrelated object types return `None`. This does not change the object's
+    /// reference count; the borrow cannot outlive this view or the owner it
+    /// borrows.
+    ///
+    /// # Returns
+    ///
+    /// The borrowed object, or `None`.
+    ///
     /// See also [`Any::downcast_ref`].
     #[inline(always)]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
@@ -163,8 +180,15 @@ impl<'a> AnyView<'a> {
         Some(unsafe { &*self.data.data_union.v_obj.cast::<T>() })
     }
 
-    /// Return the viewed value as a `T` when it is stored as exactly `T`; the
-    /// check never converts.
+    /// Return the viewed value as a `T` when it is stored as exactly `T`.
+    ///
+    /// The check is strict and never converts: a stored integer is not returned as
+    /// `f64`, and an object is returned only as a reference type it is an instance
+    /// of. On success, `Any::from` of the result holds the same value.
+    ///
+    /// # Returns
+    ///
+    /// The value, or `None` when it is not stored as `T`.
     ///
     /// ```
     /// use tvm_ffi::AnyView;
@@ -262,6 +286,10 @@ impl<T> TryFromTemp<T> {
 //---------------------
 impl Any {
     /// Create an `Any` holding `None`, the empty FFI value.
+    ///
+    /// # Returns
+    ///
+    /// An `Any` holding `None`.
     #[inline(always)]
     pub fn new() -> Self {
         Self {
@@ -273,6 +301,10 @@ impl Any {
     ///
     /// Indices below `TypeIndex::kTVMFFIStaticObjectBegin` are the built-in
     /// non-object types; the others are object types.
+    ///
+    /// # Returns
+    ///
+    /// The type index.
     #[inline(always)]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
@@ -282,8 +314,16 @@ impl Any {
     pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
-    /// Borrow the stored object as `T`, an object type such as `ArrayObj`, when its
-    /// runtime type is `T` or a subtype.
+    /// Borrow the stored object as `T` when its runtime type is `T` or a subtype.
+    ///
+    /// `T` is an object representation type such as `ArrayObj`, rather than its
+    /// managed reference `Array`. Non-object values and unrelated object types
+    /// return `None`. This neither consumes `self` nor changes the object's
+    /// reference count, and the returned reference cannot outlive `self`.
+    ///
+    /// # Returns
+    ///
+    /// The borrowed object, or `None`.
     ///
     /// ```
     /// use tvm_ffi::{collections::array::ArrayObj, Any, Array};
@@ -291,7 +331,7 @@ impl Any {
     /// assert_eq!(value.downcast_ref::<ArrayObj>().unwrap().size, 2);
     /// ```
     ///
-    /// See also [`Any`].
+    /// See also [`try_as`](Self::try_as).
     #[inline]
     pub fn downcast_ref<T: object::ObjectCore>(&self) -> Option<&T> {
         if self.data.type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -306,9 +346,16 @@ impl Any {
 
     /// Return the stored value as a `T` when it is stored as exactly `T`.
     ///
-    /// The check never converts: a stored integer is not returned as `f64`. A
-    /// returned object reference is retained; [`downcast_ref`](Self::downcast_ref)
-    /// borrows instead.
+    /// The check is strict and never converts: a stored integer is not returned as
+    /// `f64`, and an object is returned only as a reference type it is an instance
+    /// of. On success, `Any::from` of the result holds the same value. A failed
+    /// check is cheap, so `try_as` also serves as a type test. A returned object
+    /// reference is retained; use [`downcast_ref`](Self::downcast_ref) to borrow the
+    /// object instead.
+    ///
+    /// # Returns
+    ///
+    /// The value, or `None` when it is not stored as `T`.
     ///
     /// ```
     /// use tvm_ffi::Any;

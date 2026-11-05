@@ -53,7 +53,9 @@ pub struct Unchanged;
 /// It is like `Option<T>` whose `None` means "keep what was there", stored in
 /// one FFI value. `UnchangedOr<Any>` converts with `.into()` from
 /// [`Unchanged`], from a managed reference or scalar, and from a typed
-/// `UnchangedOr<T>`.
+/// `UnchangedOr<T>`. `T` is an FFI value type or [`Any`]. Converting the
+/// wrapper into `Any` keeps the marker; use [`value_or`](Self::value_or) or
+/// [`value_or_else`](Self::value_or_else) when an actual value is needed.
 ///
 /// # Examples
 ///
@@ -78,8 +80,12 @@ pub struct UnchangedOr<T: ContainerElement = Any> {
 }
 
 impl<T: ContainerElement> UnchangedOr<T> {
-    /// Create a result that keeps the original value, without borrowing or
-    /// cloning it.
+    /// Create a result that keeps the original value, without borrowing or cloning
+    /// it.
+    ///
+    /// # Returns
+    ///
+    /// An unchanged result.
     #[inline]
     pub fn unchanged() -> Self {
         Self {
@@ -88,7 +94,15 @@ impl<T: ContainerElement> UnchangedOr<T> {
         }
     }
 
-    /// Create a result that replaces the original with `value`.
+    /// Create a result that replaces the original value.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The replacement.
+    ///
+    /// # Returns
+    ///
+    /// A result holding `value`.
     #[inline]
     pub fn changed(value: T) -> Self {
         let mut raw = TVMFFIAny::new();
@@ -102,14 +116,28 @@ impl<T: ContainerElement> UnchangedOr<T> {
         }
     }
 
-    /// Return `true` if this result keeps the original value.
+    /// Return whether this result keeps the original value.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the result is unchanged.
     #[inline]
     pub fn is_unchanged(&self) -> bool {
         is_unchanged(&self.data)
     }
 
-    /// Return `true` if this result is unchanged or holds `original` itself, the
-    /// same object rather than an equal copy.
+    /// Return whether this result is unchanged or holds `original` itself.
+    ///
+    /// An object counts as the same only when it is the same object, not an equal
+    /// copy. Use it to tell whether anything was rewritten.
+    ///
+    /// # Arguments
+    ///
+    /// * `original` - The original value.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the result is unchanged or holds `original`.
     ///
     /// ```
     /// use tvm_ffi::{Array, UnchangedOr};
@@ -131,7 +159,11 @@ impl<T: ContainerElement> UnchangedOr<T> {
         raw_ffi_any_same_as(raw, *self.data.as_raw_ffi_any())
     }
 
-    /// Return the replacement, or `None` if the result is unchanged.
+    /// Move out the replacement.
+    ///
+    /// # Returns
+    ///
+    /// The replacement, or `None` when the result is unchanged.
     #[inline]
     pub fn into_option(self) -> Option<T> {
         if self.is_unchanged() {
@@ -144,28 +176,47 @@ impl<T: ContainerElement> UnchangedOr<T> {
         }
     }
 
-    /// Return the replacement, or `original` if the result is unchanged.
+    /// Move out the replacement, or `original` when the result is unchanged.
     ///
     /// `original` is taken even when it is not returned; use
     /// [`value_or_else`](Self::value_or_else) to produce it only when needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `original` - The original value.
+    ///
+    /// # Returns
+    ///
+    /// The replacement, or `original`.
     #[inline]
     pub fn value_or(self, original: T) -> T {
         self.value_or_else(|| original)
     }
 
-    /// Return the replacement, or the result of `original` if the result is
+    /// Move out the replacement, or materialize the original only if this result is
     /// unchanged.
     ///
-    /// `original` is called only for an unchanged result.
+    /// # Arguments
+    ///
+    /// * `original` - Produces the original value; called only when unchanged.
+    ///
+    /// # Returns
+    ///
+    /// The replacement, or the result of `original`.
     #[inline]
     pub fn value_or_else(self, original: impl FnOnce() -> T) -> T {
         self.into_option().unwrap_or_else(original)
     }
 
-    /// Convert the replacement with `convert`, keeping an unchanged result
-    /// unchanged.
+    /// Convert only the replacement, preserving an unchanged result.
     ///
-    /// `convert` is called only when there is a replacement.
+    /// # Arguments
+    ///
+    /// * `convert` - Converts the replacement; called only when there is one.
+    ///
+    /// # Returns
+    ///
+    /// The converted result.
     #[inline]
     pub fn map<U: ContainerElement>(self, convert: impl FnOnce(T) -> U) -> UnchangedOr<U> {
         match self.into_option() {
@@ -174,8 +225,19 @@ impl<T: ContainerElement> UnchangedOr<T> {
         }
     }
 
-    /// Convert the replacement with the fallible `convert`, keeping an unchanged
-    /// result unchanged.
+    /// Fallibly convert only the replacement, preserving an unchanged result.
+    ///
+    /// # Arguments
+    ///
+    /// * `convert` - Converts the replacement; called only when there is one.
+    ///
+    /// # Returns
+    ///
+    /// The converted result.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of `convert` unchanged.
     ///
     /// ```
     /// use tvm_ffi::UnchangedOr;
@@ -195,12 +257,19 @@ impl<T: ContainerElement> UnchangedOr<T> {
         }
     }
 
-    /// Check that the replacement is stored as exactly `U`, returning the result as
-    /// `UnchangedOr<U>` without cloning it.
+    /// Check a replacement's FFI type without cloning it.
+    ///
+    /// An unchanged result is compatible with every replacement type. Erased and
+    /// narrowing conversions retain the strict type check of [`Any::try_as`]. For a
+    /// known typed conversion, use `map(Into::into)`.
+    ///
+    /// # Returns
+    ///
+    /// The result typed as `UnchangedOr<U>`.
     ///
     /// # Errors
     ///
-    /// Returns a `TypeError` if the replacement is not a `U`.
+    /// Returns a `TypeError` if the replacement is not stored as `U`.
     ///
     /// ```
     /// use tvm_ffi::{Any, UnchangedOr};

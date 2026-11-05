@@ -134,6 +134,16 @@ macro_rules! check_safe_call {
 /// `bail!(kind, fmt, args...)` formats the message as `format!` does and
 /// records the source location in the backtrace.
 ///
+/// # Arguments
+///
+/// * `kind` - The kind of the error, such as [`VALUE_ERROR`](crate::VALUE_ERROR).
+/// * `fmt` - The format string of the message.
+/// * `args` - The format arguments.
+///
+/// # Returns
+///
+/// Returns `Err` of the error from the enclosing function.
+///
 /// # Examples
 ///
 /// ```
@@ -169,6 +179,18 @@ macro_rules! bail {
 /// `ensure!(cond, kind, fmt, args...)` is [`bail!`](crate::bail)`(kind, fmt,
 /// args...)` when `cond` is false.
 ///
+/// # Arguments
+///
+/// * `cond` - The condition that must hold.
+/// * `kind` - The kind of the error.
+/// * `fmt` - The format string of the message.
+/// * `args` - The format arguments.
+///
+/// # Returns
+///
+/// Returns `Err` of the error from the enclosing function when `cond` is
+/// false, and does nothing otherwise.
+///
 /// # Examples
 ///
 /// ```
@@ -194,6 +216,14 @@ macro_rules! ensure {
 
 /// Append the current source location to the backtrace of an `Err` result,
 /// and pass an `Ok` through.
+///
+/// # Arguments
+///
+/// * `result` - The result to attach the context to.
+///
+/// # Returns
+///
+/// The result, with the location appended to an error's backtrace.
 ///
 /// # Examples
 ///

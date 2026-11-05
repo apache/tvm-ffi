@@ -114,6 +114,14 @@ unsafe impl<T: ContainerElement + Clone> ObjectRefCore for Array<T> {
 
 impl<T: ContainerElement + Clone> Array<T> {
     /// Create an array holding `items`.
+    ///
+    /// # Arguments
+    ///
+    /// * `items` - The elements.
+    ///
+    /// # Returns
+    ///
+    /// The array.
     pub fn new(items: Vec<T>) -> Self {
         let capacity = items.len();
         Self::new_with_capacity(items, capacity)
@@ -150,16 +158,32 @@ impl<T: ContainerElement + Clone> Array<T> {
     }
 
     /// Return the number of elements.
+    ///
+    /// # Returns
+    ///
+    /// The number of elements.
     pub fn len(&self) -> usize {
         self.data.size as usize
     }
 
     /// Return `true` if the array has no elements.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the array has no elements.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Return the element at `index`.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The position of the element.
+    ///
+    /// # Returns
+    ///
+    /// The element at `index`.
     ///
     /// # Errors
     ///
@@ -187,6 +211,10 @@ impl<T: ContainerElement + Clone> Array<T> {
     }
 
     /// Return an iterator over the elements.
+    ///
+    /// # Returns
+    ///
+    /// An iterator over the elements.
     pub fn iter(&'_ self) -> ArrayIterator<'_, T> {
         ArrayIterator {
             array: self,

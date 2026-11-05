@@ -34,7 +34,11 @@ use tvm_ffi_sys::{
 pub struct ErrorKind<'a>(&'a str);
 
 impl<'a> ErrorKind<'a> {
-    /// Return the kind's name, such as `"ValueError"`.
+    /// Get the name of the kind.
+    ///
+    /// # Returns
+    ///
+    /// The name, such as `"ValueError"`.
     pub fn as_str(&self) -> &str {
         self.0
     }
@@ -99,16 +103,36 @@ pub struct Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl Error {
-    /// Create an error of the kind `kind` with `message` and the backtrace
-    /// `traceback`, which may be empty.
+    /// Create an error.
     ///
-    /// Prefer [`bail!`](crate::bail), which fills in the source location.
+    /// Prefer [`bail!`](crate::bail), which also records the source location.
+    ///
+    /// # Arguments
+    ///
+    /// * `kind` - The kind of the error, such as [`VALUE_ERROR`].
+    /// * `message` - The message of the error.
+    /// * `traceback` - The backtrace of the error, which may be empty.
+    ///
+    /// # Returns
+    ///
+    /// The error.
     pub fn new(kind: ErrorKind<'_>, message: &str, traceback: &str) -> Self {
         Self::new_with_cause_and_extra_context(kind, message, traceback, None, None)
     }
 
-    /// Create an error as [`new`](Self::new) does, with the error that caused
-    /// it and an object of application-specific context.
+    /// Create an error retaining its cause and any application-specific context.
+    ///
+    /// # Arguments
+    ///
+    /// * `kind` - The kind of the error.
+    /// * `message` - The message of the error.
+    /// * `traceback` - The backtrace of the error, which may be empty.
+    /// * `cause_chain` - The error that caused this one, if any.
+    /// * `extra_context` - An object of application-specific context, if any.
+    ///
+    /// # Returns
+    ///
+    /// The error.
     pub fn new_with_cause_and_extra_context(
         kind: ErrorKind<'_>,
         message: &str,
@@ -139,7 +163,12 @@ impl Error {
         }
     }
 
-    /// Take the error that the last failed FFI call raised on this thread.
+    /// Create a new error by moving from the error that the last failed FFI call
+    /// raised on this thread.
+    ///
+    /// # Returns
+    ///
+    /// The raised error.
     ///
     /// # Panics
     ///
@@ -157,29 +186,50 @@ impl Error {
         }
     }
 
-    /// Raise `error` on this thread, for the caller of an FFI function to take.
+    /// Set the error as raised on this thread, for the caller of an FFI function to
+    /// take.
+    ///
+    /// # Arguments
+    ///
+    /// * `error` - The error to set as raised.
     pub fn set_raised(error: &Self) {
         unsafe {
             TVMFFIErrorSetRaised(ObjectArc::as_raw(&error.data) as TVMFFIObjectHandle);
         }
     }
 
-    /// Return the kind of the error.
+    /// Get the kind of the error.
+    ///
+    /// # Returns
+    ///
+    /// The kind of the error, such as [`VALUE_ERROR`].
     pub fn kind(&self) -> ErrorKind<'_> {
         ErrorKind(&self.data.cell.kind.as_str())
     }
 
-    /// Return the message of the error.
+    /// Get the message of the error.
+    ///
+    /// # Returns
+    ///
+    /// The message of the error.
     pub fn message(&self) -> &str {
         self.data.cell.message.as_str()
     }
 
-    /// Return the backtrace of the error, most recent call first.
+    /// Get the backtrace of the error.
+    ///
+    /// # Returns
+    ///
+    /// The backtrace, most recent call first.
     pub fn backtrace(&self) -> &str {
         self.data.cell.backtrace.as_str()
     }
 
     /// Return the cause, if one was attached to this error.
+    ///
+    /// # Returns
+    ///
+    /// The error that caused this one, or `None`.
     pub fn cause_chain(&self) -> Option<Error> {
         let handle = self.data.cell.cause_chain;
         if handle.is_null() {
@@ -195,6 +245,10 @@ impl Error {
     }
 
     /// Return the application-specific context, if present.
+    ///
+    /// # Returns
+    ///
+    /// The context object, or `None`.
     pub fn extra_context(&self) -> Option<object::ObjectRef> {
         let handle = self.data.cell.extra_context;
         if handle.is_null() {
@@ -208,8 +262,12 @@ impl Error {
         }
     }
 
-    /// Return the backtrace of the error, most recent call last, as Python
-    /// prints it.
+    /// Get the traceback of the error in the order of most recent call last, as
+    /// Python prints it.
+    ///
+    /// # Returns
+    ///
+    /// The traceback of the error.
     pub fn traceback_most_recent_call_last(&self) -> String {
         let backtrace = self.backtrace();
         let backtrace_lines = backtrace.split('\n');
@@ -221,10 +279,20 @@ impl Error {
         traceback
     }
 
-    /// Return `this` with `backtrace` appended to its backtrace.
+    /// Append the backtrace to the error.
     ///
     /// [`attach_context!`](crate::attach_context) appends the current source
-    /// location this way.
+    /// location this way. The error is updated in place when it is not shared, and
+    /// copied otherwise.
+    ///
+    /// # Arguments
+    ///
+    /// * `this` - The error to append the backtrace to.
+    /// * `backtrace` - The backtrace to append.
+    ///
+    /// # Returns
+    ///
+    /// The error with the appended backtrace.
     pub fn with_appended_backtrace(this: Self, backtrace: &str) -> Self {
         if ObjectArc::strong_count(&this.data) == 1 {
             // this is the only reference to the error
