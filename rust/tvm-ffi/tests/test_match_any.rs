@@ -71,7 +71,7 @@ fn matches_concrete_object_containers_in_source_order() {
     let size = match_any! {
         &source {
             Array::<i64>(ref handle) if {
-                assert_eq!(count(), 2);
+                assert_eq!(count(), 1);
                 assert_eq!(handle.len(), 3);
                 false
             } => unreachable!(),
@@ -95,7 +95,7 @@ fn matches_concrete_object_containers_in_source_order() {
         &source {
             Array::<i64>(ref handle) => {
                 let _: &Array<i64> = handle;
-                assert_eq!(count(), 2);
+                assert_eq!(count(), 1);
                 handle.len()
             },
             _ => 0,

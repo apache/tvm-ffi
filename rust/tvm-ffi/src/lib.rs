@@ -111,7 +111,9 @@ pub use crate::type_traits::AnyCompatible;
 ///
 /// A handler's first parameter selects what it matches, as for
 /// [`match_any!`]: an owned FFI value such as `i64` or `Array<Any>`, converted
-/// strictly; `&NodeObj`, which borrows the object node; `MutationView<'_, T>`,
+/// strictly; `&Type` (such as `&Array<i64>` or `&tvm_ffi::String`) or
+/// `&NodeObj`, which borrow the value or the object node in place without
+/// changing a reference count; `MutationView<'_, T>`,
 /// which keeps the permission to mutate in place; or `AnyView<'_>`, which
 /// matches every value and must be the last handler.
 ///
