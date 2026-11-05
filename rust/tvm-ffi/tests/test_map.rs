@@ -48,8 +48,8 @@ fn test_map_basic_lookup() {
     assert_eq!(map.get(&3).unwrap(), Some(30));
     assert_eq!(map.get(&99).unwrap(), None);
 
-    assert!(map.contains_key(&1));
-    assert!(!map.contains_key(&99));
+    assert!(map.contains_key(&1).unwrap());
+    assert!(!map.contains_key(&99).unwrap());
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn test_map_string_keys() {
     assert_eq!(map.get(&String::from("a")).unwrap(), Some(1));
     assert_eq!(map.get(&String::from("c")).unwrap(), Some(3));
     assert_eq!(map.get(&String::from("z")).unwrap(), None);
-    assert!(map.contains_key(&String::from("b")));
+    assert!(map.contains_key(&String::from("b")).unwrap());
 }
 
 #[test]
@@ -142,8 +142,8 @@ fn test_map_with_any_values() {
     .collect();
 
     assert_eq!(map.len(), 3);
-    assert!(map.contains_key(&String::from("number")));
-    assert!(!map.contains_key(&String::from("missing")));
+    assert!(map.contains_key(&String::from("number")).unwrap());
+    assert!(!map.contains_key(&String::from("missing")).unwrap());
     assert_eq!(format!("{map:?}"), "Map<String, Any>[3]");
     assert_eq!(AnyView::from(&array).debug_strong_count().unwrap(), 2);
     assert_eq!(

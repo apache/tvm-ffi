@@ -230,21 +230,18 @@ where
         }
     }
 
-    /// Returns `true` if `key` is present in the map.
-    ///
-    /// Panics if the lookup fails in the C++ runtime (e.g. `key` is not
-    /// hashable); use [`Map::get`] when such failures must be recovered from.
+    /// Returns `Ok(true)` if `key` is present in the map, or `Err` if the lookup
+    /// fails in the C++ runtime (e.g. `key` is not hashable), like
+    /// [`Map::get`].
     /// Passing a `key` whose *type* does not match the map's key type is
-    /// **undefined** (currently reads as `false`; see [`Map::get`]); debug builds
-    /// assert against it.
-    pub fn contains_key(&self, key: &K) -> bool {
-        let present = self
-            .try_contains_key(key)
-            .expect("ffi.MapCount call failed");
+    /// **undefined** (currently reads as `Ok(false)`; see [`Map::get`]); debug
+    /// builds assert against it.
+    pub fn contains_key(&self, key: &K) -> Result<bool> {
+        let present = self.try_contains_key(key)?;
         if !present {
             self.debug_assert_key_type();
         }
-        present
+        Ok(present)
     }
 
     /// Looks up `key`, returning `Ok(None)` if absent, or `Err` if the lookup
