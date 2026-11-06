@@ -61,7 +61,7 @@ use super::dispatch::Dispatcher;
 use crate::any::{is_plain_inline, Any, AnyView};
 use crate::error::{Error, Result, TYPE_ERROR};
 use crate::function::Function;
-use crate::object::{self, Object, ObjectArc, ObjectCore};
+use crate::object::{self, Object, ObjectArc};
 use crate::reflection::TypeAttrColumn;
 use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashIgnore, kTVMFFIFieldFlagBitSetterIsFunctionObj,
@@ -548,24 +548,21 @@ impl<'a, T> MutationView<'a, T> {
         unsafe { AnyView::from_raw_ffi_any(self.value) }
     }
 
-    /// Borrow an object or subtype as `U` without changing ownership or permission.
+    /// Borrow the value as `U` without changing ownership or permission.
     ///
-    /// `U` is an object type such as `ArrayObj`. The reference borrows this view and
-    /// cannot survive its consumption.
+    /// `U` is anything [`AnyView::downcast_ref`] borrows: a managed reference such as
+    /// `Array<i64>`, an object type such as `ArrayObj`, or [`Any`], borrowed in place
+    /// without a reference-count bump. The check is strict, and the reference borrows
+    /// this view and cannot survive its consumption.
     ///
     /// # Returns
     ///
-    /// The borrowed object, or `None` when the value is not a `U`.
+    /// The borrowed value, or `None` when the value is not a `U`.
     #[inline(always)]
-    pub fn downcast_ref<U: ObjectCore>(&self) -> Option<&U> {
-        if self.value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
-            || !object::is_instance_of::<U>(self.value.type_index)
-        {
-            return None;
-        }
-        // SAFETY: the type check establishes U's layout; the capability keeps
-        // the allocation borrowed for the lifetime of the returned reference.
-        Some(unsafe { &*self.value.data_union.v_obj.cast::<U>() })
+    pub fn downcast_ref<U: crate::type_traits::DowncastRefFromAny>(&self) -> Option<&U> {
+        // SAFETY: the view holds a valid cell, borrowed for the returned lifetime,
+        // and the input owner keeps its payload live.
+        unsafe { U::downcast_ref_from_any(&self.value) }
     }
 
     /// Narrow the matched type without acquiring an owning reference.
