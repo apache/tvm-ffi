@@ -197,7 +197,8 @@ fn test_big_int_words_mirror_runtime_content() {
         BigInt::from(-5i64),
     ] {
         let mut any = Any::from(value.clone());
-        let content = unsafe { tvm_ffi_sys::TVMFFIBigIntGetContentByteArray(any.as_data_ptr()) };
+        let content =
+            unsafe { tvm_ffi_sys::TVMFFIBigIntGetContentByteArray(any.as_raw_ffi_any_mut()) };
         let runtime = unsafe {
             std::slice::from_raw_parts(
                 content.data as *const i64,
@@ -466,7 +467,7 @@ fn test_big_int_containers() {
         .call_tuple((array.clone(),))
         .and_then(Array::<BigInt>::try_from)
         .unwrap();
-    assert_eq!(echoed.iter().collect::<Vec<_>>(), values);
+    assert_eq!(echoed.into_iter().collect::<Vec<_>>(), values);
 
     let map: Map<BigInt, i64> = values
         .iter()

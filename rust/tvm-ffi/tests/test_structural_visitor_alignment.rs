@@ -72,7 +72,7 @@ impl RecordingVisitor {
         // C++: if (value_ref.same_as(interrupt_on))
         //          return VisitInterrupt(String("stop"));
         if self.interrupt_on.is_some() && integer == self.interrupt_on {
-            return Ok(Some(VisitInterrupt::with(FfiString::from("stop"))));
+            return Ok(Some(VisitInterrupt::new(FfiString::from("stop"))));
         }
 
         // C++ analog: `TFuncObj::StructuralVisit` — visit "params"

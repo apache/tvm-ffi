@@ -117,19 +117,22 @@ representation, and ``ObjectRef`` is the erased managed reference.
 Define methods and associated functions on the named type, and implement traits to provide
 shared interfaces. The named type can also impose additional constraints on the underlying object.
 For example, |rs-array|_ holds an ``ObjectArc<ArrayObj>`` while constraining the array's
-element type to ``T``. Named reference types implement |rs-objectrefcore|_ for shared reference operations:
+element type to ``T``. Named reference types implement |rs-objectrefcast|_ for shared reference operations:
 
 .. code-block:: rust
 
    use tvm_ffi::collections::array::ArrayObj;
-   use tvm_ffi::{Array, ObjectRefCore};
+   use tvm_ffi::{Array, ObjectRefCast};
 
    let array = Array::from_vec(vec![1_i64, 2, 3]);
    assert_eq!(array.downcast_ref::<ArrayObj>().unwrap().size, 3);
    assert_eq!(array.get(1).unwrap(), 2); // A method of the named type.
 
 Managed references provide ``downcast_ref::<T>()`` with the same inheritance and
-borrowing rules as ``Any`` and ``AnyView``.
+borrowing rules as ``Any`` and ``AnyView``, and ``downcast::<T>()``, which takes the
+reference and hands it back unchanged as ``Err`` when the object is not a ``T``, as
+std's ``Box<dyn Any>::downcast`` does. ``.map_err(Error::downcast_failed::<T>)?``
+turns that into a ``TypeError``. Upcasts are ``From``/``Into``.
 
 Loading a Module
 ~~~~~~~~~~~~~~~~
@@ -145,7 +148,7 @@ Load a compiled TVM FFI module and call its functions:
        let module = Module::load_from_file("build/add_one_cpu.so")?;
 
        // Get function by name
-       let add_fn = module.get_function("add_one_cpu")?;
+       let add_fn = module.get_function("add_one_cpu", false)?;
 
        Ok(())
    }
@@ -189,7 +192,7 @@ Call functions with tensors:
 
    fn run_example() -> Result<()> {
        let module = Module::load_from_file("build/add_one_cpu.so")?;
-       let func = module.get_function("add_one_cpu")?;
+       let func = module.get_function("add_one_cpu", false)?;
 
        // Create input and output tensors
        let input = Tensor::from_slice(&[1.0f32, 2.0, 3.0, 4.0], &[4])?;
@@ -274,18 +277,20 @@ reserved name ``__ffi_init__``:
 
 .. code-block:: rust
 
-   use tvm_ffi::{AnyView, Function};
+   use tvm_ffi::reflection::get_method;
+   use tvm_ffi::AnyView;
 
    // Resolve the reflected constructor and construct an instance
-   let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__")?;
+   let ctor = get_method("testing.TestIntPair", "__ffi_init__")?;
    let pair = ctor.call_tuple((1i64, 2i64))?;
 
    // Resolve an instance method; the first packed argument is the object itself
-   let sum = Function::from_type_key_method("testing.TestIntPair", "sum")?;
+   let sum = get_method("testing.TestIntPair", "sum")?;
    let result = sum.call_packed(&[AnyView::from(&pair)])?;
    assert_eq!(i64::try_from(result)?, 3);
 
-``Function::from_type_method(type_index, name)`` performs the same lookup when
+``reflection::get_method`` mirrors C++ ``reflection::GetMethod``;
+``reflection::get_method_by_index(type_index, name)`` performs the same lookup when
 the type index is already known (e.g. from ``Any::type_index``).
 
 Defining Reflected Object Types
@@ -342,7 +347,7 @@ implement ``ShallowCopy`` and the other fields to be ``Clone``.
 ``#[type_reflection(path)]`` names a function that registers the type's
 methods with ``def`` (the object is the first parameter) and ``def_static``,
 each with its type schema and doc
-string, where ``Function::from_type_method`` and Python find them. It runs
+string, where ``reflection::get_method`` and Python find them. It runs
 while the type registers, so it must not call ``type_index()`` of the type or
 of another Rust type that is not registered yet. Method names, like
 reflected field names, must be unique in the type.
@@ -389,7 +394,7 @@ is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
 and any other field from anything that converts into it, as the ``new`` of a type
 bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object, and
 the object converts into it. The reference also converts into ``ParentType``, the
-reference to its parent (``ObjectRef`` for a type under ``ffi.Object``);
+reference to its parent, and every reference converts into ``ObjectRef``;
 ``impl_object_upcast!`` converts it into the references to further ancestors.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
@@ -1053,8 +1058,7 @@ while retaining typed scalar replacements:
 The context's ``var_remap_get`` and ``var_remap_set`` methods use state local to one
 invocation, preserving completed ``FreeVar`` and ``DAGNode`` substitutions without
 adding a field to the dispatcher. Explicit recursion and default descent share
-that invocation state. A dispatcher can also keep an explicit ``StructuralVarRemap``
-when substitutions must persist across invocations.
+that invocation state.
 
 Examples
 --------
@@ -1110,8 +1114,8 @@ Related Resources
 .. _rs-objectarc: ../reference/rust/generated/tvm_ffi/object/struct.ObjectArc.html
 .. |rs-array| replace:: ``Array<T>``
 .. _rs-array: ../reference/rust/generated/tvm_ffi/collections/array/struct.Array.html
-.. |rs-objectrefcore| replace:: ``ObjectRefCore``
-.. _rs-objectrefcore: ../reference/rust/generated/tvm_ffi/object/trait.ObjectRefCore.html
+.. |rs-objectrefcast| replace:: ``ObjectRefCast``
+.. _rs-objectrefcast: ../reference/rust/generated/tvm_ffi/object/trait.ObjectRefCast.html
 .. |rs-match_any| replace:: ``match_any!``
 .. _rs-match_any: ../reference/rust/generated/tvm_ffi/macro.match_any.html
 .. |rs-dispatch| replace:: ``#[dispatch]``

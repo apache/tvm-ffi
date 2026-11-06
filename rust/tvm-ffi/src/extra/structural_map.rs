@@ -195,8 +195,8 @@ where
 /// let root = Array::from_vec(vec![1_i64, 2, 3]);
 /// let mapped = structural_map(root.clone(), |value: i64| value + 1, WalkOrder::PostOrder)?;
 /// let mapped = Array::<i64>::try_from(mapped)?;
-/// assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3, 4]);
-/// assert_eq!(root.iter().collect::<Vec<_>>(), vec![1, 2, 3]);
+/// assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![2, 3, 4]);
+/// assert_eq!(root.iter().copied().collect::<Vec<_>>(), vec![1, 2, 3]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 pub fn structural_map<R, M, H, D, O>(root: R, mapper: H, order: WalkOrder) -> Result<Any>

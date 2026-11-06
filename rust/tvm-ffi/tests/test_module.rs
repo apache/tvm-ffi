@@ -69,7 +69,7 @@ fn importing_module() -> Module {
 /// Calls an exported metadata or doc getter.
 fn call_getter(getter: TVMFFISafeCallType) -> String {
     // SAFETY: the getters take no arguments and do not use the handle.
-    let getter = unsafe { Function::from_extern_c(std::ptr::null_mut(), getter, None) };
+    let getter = unsafe { Function::from_extern_c(std::ptr::null_mut(), getter, None).unwrap() };
     getter.call_packed(&[]).unwrap().try_into().unwrap()
 }
 

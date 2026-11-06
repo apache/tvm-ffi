@@ -153,6 +153,14 @@ impl<T> Clone for List<T> {
     }
 }
 
+/// A list upcasts to the root [`ObjectRef`](crate::object::ObjectRef).
+impl<T: ContainerElement> From<List<T>> for crate::object::ObjectRef {
+    #[inline]
+    fn from(value: List<T>) -> Self {
+        crate::object::into_root_object_ref(value)
+    }
+}
+
 unsafe impl<T> ObjectRefCore for List<T> {
     type ContainerType = ListObj;
 
@@ -204,14 +212,15 @@ impl<T: ContainerElement> List<T> {
                 TypeIndex::kTVMFFIList as i32
             );
             let mut result = std::mem::ManuallyDrop::new(result);
-            Ok(Self::move_from_any_after_check(&mut *result.as_data_ptr()))
+            Ok(Self::move_from_any_after_check(
+                &mut *result.as_raw_ffi_any_mut(),
+            ))
         }
     }
 
     #[inline]
     fn obj(&self) -> *mut ListObj {
-        // SAFETY: `self.data` keeps the object alive for as long as the pointer is used.
-        unsafe { ObjectArc::as_raw(&self.data) as *mut ListObj }
+        ObjectArc::as_ptr(&self.data) as *mut ListObj
     }
 
     /// Returns the number of elements.
@@ -607,7 +616,7 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIList as i32;
-        data.data_union.v_obj = ObjectArc::as_raw(Self::data(src)) as *mut TVMFFIObject;
+        data.data_union.v_obj = ObjectArc::as_ptr(Self::data(src)) as *mut TVMFFIObject;
         data.small_str_len = 0;
     }
 

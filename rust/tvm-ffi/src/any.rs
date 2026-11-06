@@ -149,7 +149,7 @@ impl<'a> AnyView<'a> {
     /// through the pointer, so the view must be converted at most once and no
     /// other access to the slot may overlap the conversion.
     #[inline(always)]
-    pub(crate) unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
+    pub unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
         Self {
             data,
             _phantom: std::marker::PhantomData,
@@ -305,16 +305,19 @@ impl Any {
         self.data.type_index
     }
 
+    /// Borrow the raw ABI representation, which this value owns.
+    /// Copying it does not retain referenced data or extend its lifetime.
     #[inline(always)]
-    pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
+    pub fn as_raw_ffi_any(&self) -> &TVMFFIAny {
         &self.data
     }
-    /// Borrow the stored object as `T` when its runtime type is `T` or a subtype.
+    /// Borrow the stored value as `T` when it holds one, without copying it.
     ///
-    /// `T` is an object representation type such as `ArrayObj`, rather than its
-    /// managed reference `Array`. Non-object values and unrelated object types
-    /// return `None`. This neither consumes `self` nor changes the object's
-    /// reference count, and the returned reference cannot outlive `self`.
+    /// `T` is an object type such as `ArrayObj`, a managed reference such as
+    /// `Array<i64>`, or a value stored in place such as `String` or `i64`. The
+    /// check is strict, as in [`try_as`](Self::try_as), and never converts.
+    /// This neither consumes `self` nor changes any reference count, and the
+    /// returned reference cannot outlive `self`.
     ///
     /// # Returns
     ///
@@ -370,17 +373,33 @@ impl Any {
         }
     }
 
+    /// Return a pointer to the raw ABI representation, for a runtime call that
+    /// writes an owned result into it, as C++ `Any` out-parameters are filled.
+    ///
+    /// Writing through the pointer is unsafe: the cell must afterwards hold a
+    /// value this `Any` may own and release, and the previous value must have
+    /// been released or moved out.
     #[inline(always)]
-    pub unsafe fn as_data_ptr(&mut self) -> *mut TVMFFIAny {
+    pub fn as_raw_ffi_any_mut(&mut self) -> *mut TVMFFIAny {
         &mut self.data
     }
 
+    /// Give up ownership of the value as its raw ABI representation, as
+    /// `Box::into_raw` does. Rebuild it with [`from_raw_ffi_any`](Self::from_raw_ffi_any)
+    /// to release it.
     #[inline(always)]
-    pub unsafe fn into_raw_ffi_any(this: Self) -> TVMFFIAny {
+    pub fn into_raw_ffi_any(this: Self) -> TVMFFIAny {
         let this = std::mem::ManuallyDrop::new(this);
         this.data
     }
 
+    /// Take ownership of a raw ABI representation.
+    ///
+    /// # Safety
+    ///
+    /// `data.type_index` must describe the payload, and the caller must hand
+    /// over the ownership `data` carries, such as one strong reference for an
+    /// object, so it is released exactly once, by this `Any`.
     #[inline(always)]
     pub unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
         Self { data }

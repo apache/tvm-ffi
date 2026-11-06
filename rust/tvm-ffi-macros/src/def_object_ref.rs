@@ -91,6 +91,20 @@ fn expand(args: &DefObjectRefArgs) -> syn::Result<TokenStream2> {
         }
     })?;
     let ref_impl = expand_object_ref(&ref_input, &tvm_ffi);
+    // `#[derive(ObjectRef)]` already upcasts every reference to `ObjectRef`.
+    let parent_is_root = match parent_type {
+        syn::Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "ObjectRef"),
+        _ => false,
+    };
+    let parent_upcast = if parent_is_root {
+        None
+    } else {
+        Some(quote!(#tvm_ffi::impl_object_upcast!(#type_name => #parent_type);))
+    };
     let doc = if attrs.iter().any(|a| a.path.is_ident("doc")) {
         None
     } else {
@@ -129,6 +143,6 @@ fn expand(args: &DefObjectRefArgs) -> syn::Result<TokenStream2> {
             }
         }
 
-        #tvm_ffi::impl_object_upcast!(#type_name => #parent_type);
+        #parent_upcast
     })
 }

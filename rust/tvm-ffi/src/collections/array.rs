@@ -69,12 +69,12 @@ unsafe impl ObjectCoreWithExtraItems for ArrayObj {
 /// assert!(array.get(3).is_err());
 ///
 /// let doubled: Array<i64> = array.iter().map(|x| x * 2).collect();
-/// assert_eq!(doubled.iter().collect::<Vec<_>>(), vec![2, 4, 6]);
+/// assert_eq!(doubled.iter().copied().collect::<Vec<_>>(), vec![2, 4, 6]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[repr(C)]
 #[derive(Clone)]
-pub struct Array<T: ContainerElement + Clone> {
+pub struct Array<T> {
     data: ObjectArc<ArrayObj>,
     _marker: PhantomData<T>,
 }
@@ -96,6 +96,14 @@ impl<T: ContainerElement + Clone> Default for Array<T> {
 impl<T: ContainerElement + Clone> From<Vec<T>> for Array<T> {
     fn from(items: Vec<T>) -> Self {
         Self::from_vec(items)
+    }
+}
+
+/// An array upcasts to the root [`ObjectRef`](crate::object::ObjectRef).
+impl<T: ContainerElement + Clone> From<Array<T>> for crate::object::ObjectRef {
+    #[inline]
+    fn from(value: Array<T>) -> Self {
+        crate::object::into_root_object_ref(value)
     }
 }
 
@@ -167,7 +175,7 @@ impl<T: ContainerElement + Clone> Array<T> {
         });
 
         unsafe {
-            let raw_ptr = ObjectArc::as_raw(&arc) as *mut ArrayObj;
+            let raw_ptr = ObjectArc::as_ptr(&arc) as *mut ArrayObj;
             let container = &mut *raw_ptr;
 
             let base_ptr = ArrayObj::extra_items_mut(container).as_ptr() as *mut TVMFFIAny;
@@ -236,25 +244,24 @@ impl<T: ContainerElement + Clone> Array<T> {
         }
     }
 
-    /// Return an iterator over the elements.
-    ///
-    /// # Returns
-    ///
-    /// An iterator over the elements.
-    pub fn iter(&'_ self) -> ArrayIterator<'_, T> {
-        ArrayIterator {
-            array: self,
-            index: 0,
-            len: self.len(),
+    /// The cells of the array, one per element.
+    #[inline]
+    fn cells(&self) -> &[TVMFFIAny] {
+        let container = self.as_container();
+        if container.size == 0 {
+            return &[];
+        }
+        // SAFETY: a non-empty array owns `size` initialized cells at `data`,
+        // and an `Array` is immutable while it is borrowed.
+        unsafe {
+            std::slice::from_raw_parts(container.data as *const TVMFFIAny, container.size as usize)
         }
     }
 
     #[inline]
     fn as_container(&self) -> &ArrayObj {
-        unsafe {
-            let ptr = ObjectArc::as_raw(&self.data) as *const ArrayObj;
-            &*ptr
-        }
+        // SAFETY: `self.data` keeps the array object alive while it is borrowed.
+        unsafe { &*ObjectArc::as_ptr(&self.data) }
     }
 }
 
@@ -284,32 +291,113 @@ impl<T: ContainerElement + Clone + RefFromAnyUnchecked> std::ops::Index<usize> f
 
 // --- Iterator Implementations ---
 
-pub struct ArrayIterator<'a, T: ContainerElement + Clone> {
-    array: &'a Array<T>,
-    index: usize,
-    len: usize,
-}
-
-impl<'a, T: ContainerElement + Clone> Iterator for ArrayIterator<'a, T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.len {
-            let item = self.array.get(self.index).ok();
-            self.index += 1;
-            item
-        } else {
-            None
+impl<T: ContainerElement + Clone + RefFromAnyUnchecked> Array<T> {
+    /// Return an iterator that borrows each element in place, without a
+    /// reference-count bump, as `array[i]` does.
+    ///
+    /// Element types stored in another representation, such as `bool` or
+    /// `i32` (held as `i64`), iterate by value instead: `for x in array`.
+    ///
+    /// ```
+    /// use tvm_ffi::Array;
+    /// let array = Array::from_vec(vec![1_i64, 2, 3]);
+    /// assert_eq!(array.iter().sum::<i64>(), 6);
+    /// ```
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            cells: self.cells().iter(),
+            _marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<'a, T: ContainerElement + Clone> IntoIterator for &'a Array<T> {
-    type Item = T;
-    type IntoIter = ArrayIterator<'a, T>;
+/// An iterator that borrows the elements of an [`Array`] in place.
+pub struct Iter<'a, T> {
+    cells: std::slice::Iter<'a, TVMFFIAny>,
+    _marker: std::marker::PhantomData<&'a T>,
+}
+
+impl<'a, T: ContainerElement + RefFromAnyUnchecked> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a T> {
+        self.cells.next().map(|cell| unsafe {
+            // SAFETY: every cell of an `Array<T>` holds a `T`, checked when the
+            // array is built.
+            debug_assert!(T::container_check_any_strict(cell));
+            T::ref_from_any_unchecked(cell)
+        })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.cells.size_hint()
+    }
+}
+
+impl<T: ContainerElement + RefFromAnyUnchecked> DoubleEndedIterator for Iter<'_, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.cells.next_back().map(|cell| unsafe {
+            debug_assert!(T::container_check_any_strict(cell));
+            T::ref_from_any_unchecked(cell)
+        })
+    }
+}
+
+impl<T: ContainerElement + RefFromAnyUnchecked> ExactSizeIterator for Iter<'_, T> {}
+
+impl<'a, T: ContainerElement + Clone + RefFromAnyUnchecked> IntoIterator for &'a Array<T> {
+    type Item = &'a T;
+    type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+/// An iterator that yields the elements of an [`Array`] by value.
+pub struct IntoIter<T> {
+    array: Array<T>,
+    index: usize,
+}
+
+impl<T: ContainerElement + Clone> Iterator for IntoIter<T> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        let cell = self.array.cells().get(self.index)?;
+        self.index += 1;
+        // SAFETY: every cell of an `Array<T>` holds a `T`, checked when the
+        // array is built.
+        Some(unsafe {
+            debug_assert!(T::container_check_any_strict(cell));
+            T::container_copy_from_any_view_after_check(cell)
+        })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.array.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<T: ContainerElement + Clone> ExactSizeIterator for IntoIter<T> {}
+
+/// Iterate by value, for every element type. Cloning an `Array` first costs one
+/// reference-count bump for the whole array.
+impl<T: ContainerElement + Clone> IntoIterator for Array<T> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter {
+            array: self,
+            index: 0,
+        }
     }
 }
 
@@ -372,7 +460,7 @@ where
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIArray as i32;
-        data.data_union.v_obj = ObjectArc::as_raw(Self::data(src)) as *mut TVMFFIObject;
+        data.data_union.v_obj = ObjectArc::as_ptr(Self::data(src)) as *mut TVMFFIObject;
         data.small_str_len = 0;
     }
 

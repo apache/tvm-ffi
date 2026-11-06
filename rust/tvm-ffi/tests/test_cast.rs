@@ -128,12 +128,12 @@ fn test_upcast_downcast_roundtrip() {
     let delete_counter = Arc::new(AtomicU32::new(0));
     let derived = new_derived(7, 8, delete_counter.clone());
     // upcast to the direct parent
-    let base: TestBase = derived.try_cast().unwrap();
+    let base: TestBase = derived.into();
     assert_eq!(base.data.value, 7);
     // upcast further to the root ObjectRef
-    let obj: ObjectRef = base.try_cast().unwrap();
+    let obj: ObjectRef = base.into();
     // downcast all the way back
-    let derived2: TestDerived = obj.try_cast().unwrap();
+    let derived2: TestDerived = obj.downcast().unwrap();
     assert_eq!(derived2.data.base.value, 7);
     assert_eq!(derived2.data.extra, 8);
     // every step moved ownership; no extra references were created
@@ -146,9 +146,7 @@ fn test_upcast_downcast_roundtrip() {
 #[test]
 fn test_borrowed_node_cast_preserves_reference_count() {
     let delete_counter = Arc::new(AtomicU32::new(0));
-    let base: TestBase = new_derived(7, 8, delete_counter.clone())
-        .try_cast()
-        .unwrap();
+    let base: TestBase = new_derived(7, 8, delete_counter.clone()).into();
     let strong_count = ObjectArc::strong_count(TestBase::data(&base));
 
     let derived = base.downcast_ref::<TestDerivedObj>().unwrap();
@@ -203,7 +201,7 @@ fn test_generated_borrow_and_upcast_conversions() {
 #[test]
 fn test_cast_checks_parameterized_container_type() {
     assert!(Array::from_vec(vec![1_i64, 2_i64])
-        .try_cast::<Array<f32>>()
+        .downcast::<Array<f32>>()
         .is_err());
 }
 
@@ -211,24 +209,28 @@ fn test_cast_checks_parameterized_container_type() {
 fn test_downcast_failure() {
     let delete_counter = Arc::new(AtomicU32::new(0));
     let base = new_base(1, delete_counter.clone());
-    let err = expect_err(base.try_cast::<TestDerived>());
+    // A failed downcast hands the reference back unchanged.
+    let base = base.downcast::<TestDerived>().unwrap_err();
+    assert_eq!(base.data.value, 1);
+    assert_eq!(ObjectArc::strong_count(&base.data), 1);
+    let err = expect_err(
+        base.downcast::<TestDerived>()
+            .map_err(Error::downcast_failed::<TestDerived>),
+    );
     assert!(err.message().contains("testing.TestObjectBase"));
     assert!(err.message().contains("testing.TestObjectDerived"));
-    // try_cast consumes the value even when the cast fails
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
 }
 
 #[test]
 fn test_try_cast_from_any_view_preserves_runtime_subtype() {
     let delete_counter = Arc::new(AtomicU32::new(0));
-    let base: TestBase = new_derived(3, 4, delete_counter.clone())
-        .try_cast()
-        .unwrap();
-    let raw = unsafe { Any::into_raw_ffi_any(Any::from(base)) };
+    let base: TestBase = new_derived(3, 4, delete_counter.clone()).into();
+    let raw = Any::into_raw_ffi_any(Any::from(base));
 
     // Array::get calls this method directly, without check_any_strict first.
     let base = unsafe { TestBase::try_cast_from_any_view(&raw) }.unwrap();
-    let derived: TestDerived = base.try_cast().unwrap();
+    let derived: TestDerived = base.downcast().unwrap();
     assert_eq!(derived.data.base.value, 3);
     assert_eq!(derived.data.extra, 4);
     assert_eq!(ObjectArc::strong_count(&derived.data), 2);
@@ -241,9 +243,7 @@ fn test_try_cast_from_any_view_preserves_runtime_subtype() {
 #[test]
 fn test_any_conversion_preserves_runtime_subtype() {
     let delete_counter = Arc::new(AtomicU32::new(0));
-    let base: TestBase = new_derived(5, 6, delete_counter.clone())
-        .try_cast()
-        .unwrap();
+    let base: TestBase = new_derived(5, 6, delete_counter.clone()).into();
     let derived_from_view: TestDerived = AnyView::from(&base).try_into().unwrap();
     assert_eq!(derived_from_view.data.extra, 6);
     drop(derived_from_view);

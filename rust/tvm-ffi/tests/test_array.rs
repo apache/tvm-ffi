@@ -95,6 +95,7 @@ fn test_array_with_any_elements() {
         Array::<i64>::try_from(array.get(2).unwrap())
             .unwrap()
             .iter()
+            .copied()
             .collect::<Vec<_>>(),
         vec![1, 2]
     );
@@ -111,7 +112,7 @@ fn test_array_with_any_elements() {
     assert_eq!(
         widened
             .iter()
-            .map(|value| i64::try_from(value).unwrap())
+            .map(|value| value.try_as::<i64>().unwrap())
             .collect::<Vec<_>>(),
         vec![3, 4]
     );

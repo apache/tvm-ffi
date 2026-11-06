@@ -19,14 +19,15 @@
 
 use std::cell::{Cell, RefCell};
 use std::sync::LazyLock;
+use tvm_ffi::reflection::TypeAttrColumn;
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeGetOrAllocIndex,
     TVMFFITypeMetadata, TVMFFITypeRegisterMetadata,
 };
 use tvm_ffi::{
-    dispatch, get_type_attr, structural_visit, Any, AnyView, Array, DefRegionKind, Dispatcher,
-    Error, Function, IntoDispatcher, Result, StructuralVisitEngine, StructuralVisitorBase,
-    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt, RUNTIME_ERROR,
+    dispatch, structural_visit, Any, AnyView, Array, DefRegionKind, Dispatcher, Error, Function,
+    IntoDispatcher, Result, StructuralVisitEngine, StructuralVisitorBase, StructuralVisitorObj,
+    StructuralVisitorView, VisitInterrupt, RUNTIME_ERROR,
 };
 
 thread_local! {
@@ -117,7 +118,9 @@ unsafe impl StructuralVisitorBase for CountingBase {
         }
         // Exercise the shared resolved-hook entry as well as ordinary fallback.
         if value.try_as::<Array<Any>>().is_some() {
-            let hook = get_type_attr(value.type_index(), "__s_visit__").unwrap();
+            let hook = TypeAttrColumn::new("__s_visit__")
+                .and_then(|column| column.get(value.type_index()))
+                .unwrap();
             return StructuralVisitorObj::call_structural_visit_hook_raw(
                 runtime.cast(),
                 *value.as_raw_ffi_any(),
@@ -303,7 +306,7 @@ fn base_failure_and_owned_results_release_exactly_once() {
 
     let payload = Any::from(Array::from_vec(vec![42_i64]));
     BASE_RESULT
-        .with_borrow_mut(|slot| *slot = Some(Ok(Some(VisitInterrupt::with(payload.clone())))));
+        .with_borrow_mut(|slot| *slot = Some(Ok(Some(VisitInterrupt::new(payload.clone())))));
     let result = visit(&Array::from_vec(vec![-1_i64, 99]), Unmatched)
         .unwrap()
         .unwrap();
@@ -367,7 +370,7 @@ fn callback_outcomes_preserve_reborrows_and_owners_through_specialized_defaults(
                 Err(error)
             } else {
                 drop(error);
-                Ok(Some(VisitInterrupt::with(payload.clone())))
+                Ok(Some(VisitInterrupt::new(payload.clone())))
             }),
             seen: vec![],
         };

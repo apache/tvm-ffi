@@ -362,7 +362,7 @@ This mirrors the C++ and Python flows:
 
   fn run_add_one(x: &Tensor, y: &Tensor) -> Result<()> {
     let module = tvm_ffi::Module::load_from_file("add_one_cpu.so")?;
-    let func = module.get_function("add_one_cpu")?;
+    let func = module.get_function("add_one_cpu", false)?;
     let typed_fn = into_typed_fn!(func, Fn(&Tensor, &Tensor) -> Result<()>);
     typed_fn(x, y)?;
     Ok(())

@@ -58,9 +58,11 @@ pub use crate::error::{
 pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_map::structural_map;
+#[doc(hidden)]
+pub use crate::extra::structural_mutate::StructuralVarRemap;
 pub use crate::extra::structural_mutate::{
     structural_mutate, InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase,
-    StructuralMutatorObj, StructuralMutatorView, StructuralVarRemap,
+    StructuralMutatorObj, StructuralMutatorView,
 };
 pub use crate::extra::structural_visit::{
     structural_visit, DefRegionKind, StructuralVisitEngine, StructuralVisitorBase,
@@ -76,8 +78,7 @@ pub use crate::object::{
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{
-    get_type_attr, FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn,
-    UnsafeInit,
+    FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn, UnsafeInit,
 };
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::static_init::run_static_init_blocks;

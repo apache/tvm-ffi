@@ -280,7 +280,7 @@ crate::def_object_ref! {
     /// with this interrupt, and `Err` means it failed.
     ///
     /// This is an owning object reference, like [`Error`]. Payload reads through
-    /// `interrupt.value` borrow the shared [`VisitInterruptObj`]; use [`Self::with`]
+    /// `interrupt.value` borrow the shared [`VisitInterruptObj`]; use [`Self::new`]
     /// instead of a payload-only struct literal. Moving or replacing the payload
     /// through this reference is not supported; clone it to retain a separate owner.
     pub VisitInterrupt, crate::object::ObjectRef, VisitInterruptObj
@@ -298,7 +298,7 @@ impl VisitInterrupt {
     ///
     /// The interrupt.
     #[inline(always)]
-    pub fn with<T: Into<Any>>(payload: T) -> Self {
+    pub fn new<T: Into<Any>>(payload: T) -> Self {
         VisitInterruptObj {
             base: Object::new(),
             value: payload.into(),
@@ -585,13 +585,10 @@ fn dispatcher_context<D>(dispatch: &mut D) -> *mut c_void {
 fn visit_result_raw(result: Result<Option<VisitInterrupt>>, raw: TVMFFIAny) -> TVMFFIAny {
     match result {
         Ok(None) => TVMFFIAny::new(),
-        Ok(Some(interrupt)) => unsafe { Any::into_raw_ffi_any(interrupt.into()) },
+        Ok(Some(interrupt)) => Any::into_raw_ffi_any(interrupt.into()),
         Err(error) => {
             core::hint::cold_path();
-            StructuralVisitorObj::with_visit_context_raw(
-                unsafe { Any::into_raw_ffi_any(error.into()) },
-                raw,
-            )
+            StructuralVisitorObj::with_visit_context_raw(Any::into_raw_ffi_any(error.into()), raw)
         }
     }
 }
@@ -855,7 +852,7 @@ impl StructuralVisitorObj {
         let address = object.offset(field.offset as isize) as *mut c_void;
         // Own the getter result so partial writes and recursive borrows drop safely.
         let mut child = Any::new();
-        if getter(address, Any::as_data_ptr(&mut child)) != 0 {
+        if getter(address, Any::as_raw_ffi_any_mut(&mut child)) != 0 {
             return with_field_error_context(Any::from(Error::from_raised()), field.name.as_str());
         }
 
@@ -971,7 +968,7 @@ impl StructuralVisitorObj {
             Ok(value) => checked_hook_result(value),
             Err(error) => error.into(),
         };
-        unsafe { Any::into_raw_ffi_any(result) }
+        Any::into_raw_ffi_any(result)
     }
 
     /// Run `callback` under requested `kind` on live borrowed `visitor`, preserving
@@ -1160,7 +1157,7 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     {
         let base = match Base::new() {
             Ok(base) => base,
-            Err(error) => return unsafe { Any::into_raw_ffi_any(error.into()) },
+            Err(error) => return Any::into_raw_ffi_any(error.into()),
         };
         let type_index = Base::type_index();
         // The managed runtime may borrow its dispatcher only for this call.
@@ -1174,7 +1171,7 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
                 type_index,
             )
         };
-        let handle = unsafe { ObjectArc::as_raw_mut(&mut engine).cast::<StructuralVisitorObj>() };
+        let handle = ObjectArc::as_mut_ptr(&mut engine).cast::<StructuralVisitorObj>();
         // The engine and outer dispatcher storage stay stationary for the whole run.
         // Only raw field projections cross recursion; no whole-engine borrow survives.
         unsafe {
@@ -1186,7 +1183,7 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
             unsafe { Any::from_raw_ffi_any(StructuralVisitorObj::call_visitor_raw(handle, root)) };
         // Trusted hooks have released every temporary strong/weak runtime reference.
         drop(engine);
-        unsafe { Any::into_raw_ffi_any(result) }
+        Any::into_raw_ffi_any(result)
     }
 }
 
@@ -1284,7 +1281,7 @@ pub(super) fn visit_result_from_any(result: Any) -> Result<Option<VisitInterrupt
         // SAFETY: the owning result protocol established a non-null interrupt.
         // Transfer that same reference, including carriers shared by native hooks.
         use crate::type_traits::AnyCompatible;
-        let mut raw = unsafe { Any::into_raw_ffi_any(result) };
+        let mut raw = Any::into_raw_ffi_any(result);
         Ok(Some(unsafe {
             VisitInterrupt::move_from_any_after_check(&mut raw)
         }))

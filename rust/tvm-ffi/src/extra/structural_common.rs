@@ -20,7 +20,7 @@
 use crate::any::{Any, AnyView};
 use crate::error::{Error, Result, RUNTIME_ERROR};
 use crate::function::Function;
-use crate::object::{self, ObjectRefCore};
+use crate::object::{self, ObjectRefCast, ObjectRefCore};
 use crate::reflection::FieldGetter;
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex,
@@ -125,7 +125,7 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
         // SAFETY: the traversal input remains live during annotation. Conversion
         // acquires ownership before the temporary view ends; raw is an object tag.
         let node = unsafe { AnyView::from_raw_ffi_any(raw) }.try_as::<object::ObjectRef>()?;
-        let mut previous = error.extra_context();
+        let mut previous = error.extra_context().cloned();
         let mut nodes = Vec::new();
         if let Some(prior) = previous.as_ref() {
             if AnyView::from(prior).type_index() == context_type {
@@ -182,7 +182,7 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
             error.kind(),
             error.message(),
             error.backtrace(),
-            error.cause_chain().as_ref(),
+            error.cause_chain(),
             Some(&context),
         ),
         None => error,
@@ -249,11 +249,9 @@ pub(crate) fn raw_ffi_any_same_as(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
 /// No payload is cloned, normalized, or released by this transfer.
 #[inline(always)]
 pub(crate) fn result_into_raw_ffi_any(result: Result<Any>) -> TVMFFIAny {
-    unsafe {
-        match result {
-            Ok(value) => Any::into_raw_ffi_any(value),
-            Err(error) => Any::into_raw_ffi_any(Any::from(error)),
-        }
+    match result {
+        Ok(value) => Any::into_raw_ffi_any(value),
+        Err(error) => Any::into_raw_ffi_any(Any::from(error)),
     }
 }
 

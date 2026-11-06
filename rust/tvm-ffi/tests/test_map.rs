@@ -159,7 +159,10 @@ fn test_map_with_any_values() {
 
     let fetched_array =
         Array::<i64>::try_from(map.get(&String::from("array")).unwrap().unwrap()).unwrap();
-    assert_eq!(fetched_array.iter().collect::<Vec<_>>(), vec![1, 2, 3]);
+    assert_eq!(
+        fetched_array.iter().copied().collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
     assert_eq!(AnyView::from(&array).debug_strong_count().unwrap(), 3);
     drop(fetched_array);
 
@@ -315,7 +318,7 @@ where
     V: AnyCompatible,
 {
     assert_eq!(any.type_index(), TypeIndex::kTVMFFIMap as i32);
-    unsafe { Map::copy_from_any_view_after_check(&*any.as_data_ptr()) }
+    unsafe { Map::copy_from_any_view_after_check(&*any.as_raw_ffi_any_mut()) }
 }
 
 /// Builds an `i64`-valued map but views it as `Map<_, String>`, bypassing the

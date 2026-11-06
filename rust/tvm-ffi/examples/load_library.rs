@@ -25,7 +25,7 @@ fn main() {
     let lib_path = concat!(env!("OUT_DIR"), "/add_one_cpu.so");
     let lib: tvm_ffi::Module = Module::load_from_file(lib_path).unwrap();
     // get the function from the library
-    let add_one_cpu: tvm_ffi::Function = lib.get_function("add_one_cpu").unwrap();
+    let add_one_cpu: tvm_ffi::Function = lib.get_function("add_one_cpu", false).unwrap();
     // load the function from the library
     // and cast into a typed version of the function
     let typed_add_one = tvm_ffi::into_typed_fn!(

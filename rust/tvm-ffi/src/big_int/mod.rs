@@ -146,7 +146,7 @@ impl BigInt {
                 object: Object::new(),
                 size,
             });
-            BigIntObj::extra_items_mut(&mut *ObjectArc::as_raw_mut(&mut obj))
+            BigIntObj::extra_items_mut(&mut *ObjectArc::as_mut_ptr(&mut obj))
                 .copy_from_slice(&words[..size]);
             Self::from_obj(ObjectArc::into_raw(obj) as *mut BigIntObj)
         }
@@ -218,6 +218,8 @@ impl BigInt {
     }
 
     /// Return the value when it fits `i64`.
+    ///
+    /// See also `i64::try_from(&big)`, which returns an `OverflowError` instead.
     #[inline]
     pub fn to_i64(&self) -> Option<i64> {
         if self.data.type_index == TypeIndex::kTVMFFIInt as i32 {
@@ -372,6 +374,27 @@ impl From<u128> for BigInt {
         }
     }
 }
+
+// Narrowing to a primitive integer, as std's `TryFrom` between integer types.
+macro_rules! impl_try_from_big_int {
+    ($($t:ty => $to:ident),*) => {$(
+        impl TryFrom<&BigInt> for $t {
+            type Error = Error;
+
+            fn try_from(value: &BigInt) -> Result<Self> {
+                value.$to().ok_or_else(|| {
+                    Error::new(
+                        OVERFLOW_ERROR,
+                        &format!("{} does not fit in {}", value, stringify!($t)),
+                        "",
+                    )
+                })
+            }
+        }
+    )*};
+}
+
+impl_try_from_big_int!(i64 => to_i64, u64 => to_u64, i128 => to_i128, u128 => to_u128);
 
 impl TryFrom<f64> for BigInt {
     type Error = Error;

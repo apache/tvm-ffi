@@ -122,21 +122,10 @@ impl Tensor {
     pub fn data_ptr_mut(&mut self) -> *mut core::ffi::c_void {
         self.data.dltensor.data
     }
-    /// Check if the Tensor is contiguous
-    ///
-    /// # Returns
-    /// * `bool` - True if the Tensor is contiguous, false otherwise
+    /// Whether the elements are laid out in row-major order without gaps, as
+    /// C++ `tvm::ffi::IsContiguous` decides; see [`TensorView::is_contiguous`].
     pub fn is_contiguous(&self) -> bool {
-        let strides = self.strides();
-        let shape = self.shape();
-        let mut expected_stride = 1;
-        for i in (0..self.ndim()).rev() {
-            if strides[i] != expected_stride {
-                return false;
-            }
-            expected_stride *= shape[i];
-        }
-        true
+        TensorView::from(self).is_contiguous()
     }
 
     pub fn data_as_slice<T: AsDLDataType>(&self) -> Result<&[T]> {
@@ -303,7 +292,7 @@ impl Tensor {
         unsafe {
             let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
             // The fresh allocation is unique and has not been exposed.
-            let object = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+            let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
             object.base.dltensor.shape =
                 TensorObjFromNDAlloc::extra_items(object).as_ptr() as *mut i64;
             object.base.dltensor.strides = object.base.dltensor.shape.add(shape.len());

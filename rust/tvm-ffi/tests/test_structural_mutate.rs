@@ -22,6 +22,7 @@ use tvm_ffi::collections::map::MapObj;
 use tvm_ffi::extra::structural_mutate::IntoMutateResult;
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
+use tvm_ffi::ObjectRefCast;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
     Array, DefRegionKind, Dispatcher, Error, FieldGetter, Function, InplaceMode, IntoDispatcher,
@@ -239,16 +240,16 @@ fn array_pointer<T>(array: &Array<T>) -> *const tvm_ffi::collections::array::Arr
 where
     T: tvm_ffi::AnyCompatible + Clone,
 {
-    unsafe { ObjectArc::as_raw(<Array<T> as ObjectRefCore>::data(array)) }
+    ObjectArc::as_ptr(<Array<T> as ObjectRefCore>::data(array))
 }
 
 fn map_pointer<K, V>(map: &Map<K, V>) -> *const tvm_ffi::collections::map::MapObj {
-    unsafe { ObjectArc::as_raw(<Map<K, V> as ObjectRefCore>::data(map)) }
+    ObjectArc::as_ptr(<Map<K, V> as ObjectRefCore>::data(map))
 }
 
 fn any_object_pointer(value: &Any) -> *const Object {
     let object = ObjectRef::try_from(value.clone()).unwrap();
-    unsafe { ObjectArc::as_raw(<ObjectRef as ObjectRefCore>::data(&object)) }
+    ObjectArc::as_ptr(<ObjectRef as ObjectRefCore>::data(&object))
 }
 
 fn call_global(name: &str, args: &[Any]) -> Any {
@@ -290,7 +291,7 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(array_pointer(&mapped), unique_pointer);
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3, 4]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![2, 3, 4]);
 
     let source = Array::from_vec(vec![4i64, 5]);
     let source_pointer = array_pointer(&source);
@@ -298,8 +299,8 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_ne!(array_pointer(&mapped), source_pointer);
-    assert_eq!(source.iter().collect::<Vec<_>>(), vec![4, 5]);
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![5, 6]);
+    assert_eq!(source.iter().copied().collect::<Vec<_>>(), vec![4, 5]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![5, 6]);
 }
 
 #[test]
@@ -310,7 +311,7 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(array_pointer(&mutated), unique_pointer);
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
 
     let source = Array::from_vec(vec![3i64]);
     let source_pointer = array_pointer(&source);
@@ -605,7 +606,7 @@ fn borrowed_capabilities_keep_their_mode_in_dispatch_adapters() {
         ) -> Result<UnchangedOr<Any>> {
             let source = self.source;
             let value = MutationView::borrowed(AnyView::from(source))
-                .try_cast::<Array<i64>>()
+                .downcast::<Array<i64>>()
                 .unwrap_or_else(|_| unreachable!());
             self.result = Some(mutator.mutate(self, value)?.into());
             Ok(UnchangedOr::changed(Any::new()))
@@ -829,7 +830,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     }
     .into();
     let mut value = MutationView::from(&mut owner)
-        .try_cast::<FieldNode>()
+        .downcast::<FieldNode>()
         .ok()
         .unwrap();
     assert_eq!(value.a.get(0).unwrap(), 1);
@@ -1007,7 +1008,7 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
         0
     );
     // This existing C++ test type deletes its copy constructor.
-    let source = Function::from_type_key_method("testing.TestNonCopyable", "__ffi_init__")
+    let source = tvm_ffi::reflection::get_method("testing.TestNonCopyable", "__ffi_init__")
         .unwrap()
         .call_tuple((1i64,))
         .unwrap();
@@ -1143,7 +1144,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
             .backtrace()
             .contains("object `testing.TestObjectBase`"));
         assert!(error.cause_chain().unwrap().same_as(&cause));
-        let context = Any::from(error.extra_context().unwrap());
+        let context = Any::from(error.extra_context().unwrap().clone());
         assert!(reflected_field::<ObjectRef>(&context, "prev_error_context").same_as(&payload));
         let records = Any::from(reflected_field::<ObjectRef>(
             &context,
@@ -1191,7 +1192,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
     )
     .err()
     .unwrap();
-    let context = Any::from(error.extra_context().unwrap());
+    let context = Any::from(error.extra_context().unwrap().clone());
     let records = Any::from(reflected_field::<ObjectRef>(
         &context,
         "reverse_visit_pattern",
@@ -1237,7 +1238,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
         )
         .err()
         .unwrap();
-        let context = Any::from(error.extra_context().unwrap());
+        let context = Any::from(error.extra_context().unwrap().clone());
         let records = Any::from(reflected_field::<ObjectRef>(
             &context,
             "reverse_visit_pattern",
@@ -1269,7 +1270,7 @@ fn unique_map_reuses_nested_unique_value_storage() {
 
     assert_eq!(map_pointer(&mapped), source_pointer);
     assert_eq!(array_pointer(&mapped_child), child_pointer);
-    assert_eq!(mapped_child.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mapped_child.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
 }
 
 #[test]
@@ -1390,7 +1391,7 @@ fn generated_map_dispatch_supports_kind_and_ordered_catch_all() {
     .and_then(Array::<i64>::try_from)
     .unwrap();
 
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(
         mapper.integers,
         vec![(1, DefRegionKind::None), (2, DefRegionKind::None),]
@@ -1449,7 +1450,7 @@ fn generated_mutate_dispatch_defaults_unmatched_values_and_preserves_inplace_per
         .unwrap();
 
     assert_eq!(array_pointer(&mutated), root_pointer);
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(
         mutator.integers,
         vec![(1, DefRegionKind::None), (2, DefRegionKind::None)]
@@ -1475,9 +1476,9 @@ impl GeneratedRecursiveDispatch {
         for value in array.iter() {
             mutated.push(i64::try_from(
                 mutator
-                    .mutate(self, MutationView::borrowed(AnyView::from(&value)))?
+                    .mutate(self, MutationView::borrowed(AnyView::from(value)))?
                     .into_option()
-                    .unwrap_or_else(|| value.into()),
+                    .unwrap_or_else(|| (*value).into()),
             )?);
         }
         Ok(Array::from_vec(mutated).into())
@@ -1501,7 +1502,7 @@ fn generated_mutate_dispatch_recurses_through_context() {
         .and_then(Array::<i64>::try_from)
         .unwrap();
 
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![11, 12]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![11, 12]);
     assert_eq!(mutator.arrays, vec![DefRegionKind::None]);
     assert_eq!(
         mutator.integers,
@@ -1539,7 +1540,7 @@ fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
         .and_then(Array::<i64>::try_from)
         .unwrap();
 
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(mutator.arrays, 1);
     assert_eq!(mutator.integers, vec![1, 2]);
 }
@@ -1601,7 +1602,7 @@ fn closures_and_tuples_use_ordered_first_match() {
     )
     .and_then(Array::<i64>::try_from)
     .unwrap();
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![11, 12]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![11, 12]);
 
     let mut first_calls = 0;
     let mut later_calls = 0;
@@ -1635,7 +1636,7 @@ fn callbacks_return_values_convertible_into_any() {
     )
     .and_then(Array::<i64>::try_from)
     .unwrap();
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![11, 12]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![11, 12]);
 
     let mapped = structural_map(
         Array::from_vec(vec![1i64, 2]),
@@ -1644,7 +1645,7 @@ fn callbacks_return_values_convertible_into_any() {
     )
     .and_then(Array::<i64>::try_from)
     .unwrap();
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![21, 22]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![21, 22]);
 
     struct Double;
     #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
@@ -1660,7 +1661,7 @@ fn callbacks_return_values_convertible_into_any() {
     let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), Double)
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 4]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 4]);
 }
 
 #[test]
@@ -1690,7 +1691,7 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
     let result = structural_mutate(source.clone(), ClampNegativeIntegers)
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(result.iter().collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(result.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
     assert_eq!(array_pointer(&result), array_pointer(&source));
 
     // One rewrite: replace only the negative integer and keep the source intact.
@@ -1698,9 +1699,9 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
     let result = structural_mutate(source.clone(), ClampNegativeIntegers)
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(result.iter().collect::<Vec<_>>(), vec![0, 2]);
+    assert_eq!(result.iter().copied().collect::<Vec<_>>(), vec![0, 2]);
     assert_ne!(array_pointer(&result), array_pointer(&source));
-    assert_eq!(source.iter().collect::<Vec<_>>(), vec![-1, 2]);
+    assert_eq!(source.iter().copied().collect::<Vec<_>>(), vec![-1, 2]);
 }
 
 #[test]
@@ -1729,15 +1730,21 @@ fn pre_order_unchanged_reuses_unmodified_subtrees() {
 
     let mapped_unchanged = mapped.get(0).unwrap();
     let mapped_changed = mapped.get(1).unwrap();
-    assert_eq!(mapped_unchanged.iter().collect::<Vec<_>>(), vec![1, 2]);
-    assert_eq!(mapped_changed.iter().collect::<Vec<_>>(), vec![0, 2]);
+    assert_eq!(
+        mapped_unchanged.iter().copied().collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(
+        mapped_changed.iter().copied().collect::<Vec<_>>(),
+        vec![0, 2]
+    );
 
     // Reuse the untouched subtree and copy the shared containers that changed.
     assert_eq!(array_pointer(&mapped_unchanged), array_pointer(&unchanged));
     assert_ne!(array_pointer(&mapped_changed), array_pointer(&changed));
     assert_ne!(array_pointer(&mapped), array_pointer(&source));
     assert_eq!(
-        source.get(1).unwrap().iter().collect::<Vec<_>>(),
+        source.get(1).unwrap().iter().copied().collect::<Vec<_>>(),
         vec![-1, 2]
     );
 }
@@ -1842,7 +1849,7 @@ fn nested_tuple_chain_exceeds_flat_arity() {
     )
     .and_then(Array::<i64>::try_from)
     .unwrap();
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![10, 20, 30]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![10, 20, 30]);
     assert_eq!(catch_all, 1);
 }
 
@@ -1931,7 +1938,7 @@ fn callback_mutate_defaults_unmatched_values_and_preserves_root_permit() {
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(array_pointer(&mutated), root_pointer);
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
 }
 
 #[derive(Default)]
@@ -1963,14 +1970,14 @@ fn callback_mutator_carries_reusable_mutable_state() {
     let first = structural_mutate(Array::from_vec(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(first.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(first.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(mutator.integers, vec![1, 2]);
     assert_eq!(mutator.defaults, 1);
 
     let second = structural_mutate(Array::from_vec(vec![3i64]), &mut mutator)
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(second.iter().collect::<Vec<_>>(), vec![4]);
+    assert_eq!(second.iter().copied().collect::<Vec<_>>(), vec![4]);
 
     let state = mutator;
     assert_eq!(state.integers, vec![1, 2, 3]);
@@ -2009,7 +2016,7 @@ fn callback_mutator_state_can_change_around_recursive_reborrows() {
         .unwrap();
 
     assert_eq!(
-        mutated.get(0).unwrap().iter().collect::<Vec<_>>(),
+        mutated.get(0).unwrap().iter().copied().collect::<Vec<_>>(),
         vec![1, 2]
     );
     assert_eq!(mutator.current, 0);
@@ -2050,7 +2057,7 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_ne!(array_pointer(&mutated), root_pointer);
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
     assert_eq!(defaults.get(), 1);
 }
 
@@ -2075,7 +2082,7 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let mutated = structural_mutate(Array::from_vec(vec![1i64]), First(&integer_calls))
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![10]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![10]);
     assert_eq!(integer_calls.get(), 0);
 
     let calls = Cell::new(0);
@@ -2094,7 +2101,7 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), Reenter(&calls))
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
     assert_eq!(calls.get(), 3);
 }
 
@@ -2600,7 +2607,7 @@ fn dispatch_handlers_may_return_typed_results() {
     let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), Typed)
         .and_then(Array::<i64>::try_from)
         .unwrap();
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![10, 20]);
+    assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![10, 20]);
 
     struct KeepTyped;
     #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
@@ -2634,5 +2641,5 @@ fn map_callbacks_may_return_typed_results() {
     )
     .and_then(Array::<i64>::try_from)
     .unwrap();
-    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![5, 2]);
+    assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![5, 2]);
 }

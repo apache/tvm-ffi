@@ -153,7 +153,7 @@ impl<T: OptionalCompatible> Optional<T> {
         if self.is_some() {
             // Move the value out of the owning `Any` without dropping it, then
             // transfer ownership of the payload into `T` (no inc/dec ref).
-            let mut raw = unsafe { Any::into_raw_ffi_any(self.data) };
+            let mut raw = Any::into_raw_ffi_any(self.data);
             Some(unsafe { T::move_from_any_after_check(&mut raw) })
         } else {
             None

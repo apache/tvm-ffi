@@ -182,21 +182,21 @@ fn test_function_echo_tensor_typed() {
 }
 
 #[test]
-fn test_function_from_type_key_method_ctor_and_method() {
+fn test_get_method_ctor_and_method() {
     // constructors registered via refl::init are reachable as `__ffi_init__`
-    let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__").unwrap();
+    let ctor = tvm_ffi::reflection::get_method("testing.TestIntPair", "__ffi_init__").unwrap();
     let pair = ctor.call_tuple((1i64, 2i64)).unwrap();
     // instance method: the first packed argument is the object itself
-    let sum = Function::from_type_key_method("testing.TestIntPair", "sum").unwrap();
+    let sum = tvm_ffi::reflection::get_method("testing.TestIntPair", "sum").unwrap();
     let result = sum.call_packed(&[AnyView::from(&pair)]).unwrap();
     assert_eq!(i64::try_from(result).unwrap(), 3);
 }
 
 #[test]
-fn test_function_from_type_method_by_index() {
-    let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__").unwrap();
+fn test_get_method_by_index() {
+    let ctor = tvm_ffi::reflection::get_method("testing.TestIntPair", "__ffi_init__").unwrap();
     let pair = ctor.call_tuple((5i64, 7i64)).unwrap();
-    let sum = Function::from_type_method(pair.type_index(), "sum").unwrap();
+    let sum = tvm_ffi::reflection::get_method_by_index(pair.type_index(), "sum").unwrap();
     let result = sum.call_packed(&[AnyView::from(&pair)]).unwrap();
     assert_eq!(i64::try_from(result).unwrap(), 12);
 }
@@ -205,23 +205,24 @@ fn test_function_from_type_method_by_index() {
 fn test_function_reflection_access_path() {
     use tvm_ffi::reflection::{AccessPath, AccessPathObj, AccessStep};
 
-    let root = Function::from_type_method(AccessPathObj::type_index(), "_root").unwrap();
+    let root =
+        tvm_ffi::reflection::get_method_by_index(AccessPathObj::type_index(), "_root").unwrap();
     let root: AccessPath = root.call_tuple(()).unwrap().try_into().unwrap();
-    let attr = Function::from_type_key_method("ffi.reflection.AccessPath", "_attr").unwrap();
+    let attr = tvm_ffi::reflection::get_method("ffi.reflection.AccessPath", "_attr").unwrap();
     let path: AccessPath = attr
         .call_tuple((&root, String::from("x")))
         .unwrap()
         .try_into()
         .unwrap();
     let to_steps =
-        Function::from_type_key_method("ffi.reflection.AccessPath", "_to_steps").unwrap();
+        tvm_ffi::reflection::get_method("ffi.reflection.AccessPath", "_to_steps").unwrap();
     let steps: Array<AccessStep> = to_steps.call_tuple((&path,)).unwrap().try_into().unwrap();
     assert_eq!(steps.len(), 1);
 }
 
 #[test]
-fn test_function_from_type_method_unknown_method() {
-    let error = Function::from_type_key_method("testing.TestIntPair", "nonexistent_method")
+fn test_get_method_unknown_method() {
+    let error = tvm_ffi::reflection::get_method("testing.TestIntPair", "nonexistent_method")
         .err()
         .unwrap();
     assert_eq!(error.kind(), TYPE_ERROR);
@@ -230,8 +231,8 @@ fn test_function_from_type_method_unknown_method() {
 }
 
 #[test]
-fn test_function_from_type_key_method_unknown_type_key() {
-    let error = Function::from_type_key_method("testing.NonExistentType", "sum")
+fn test_get_method_unknown_type_key() {
+    let error = tvm_ffi::reflection::get_method("testing.NonExistentType", "sum")
         .err()
         .unwrap();
     assert!(error.message().contains("testing.NonExistentType"));
@@ -245,8 +246,9 @@ tvm_ffi_dll_export_typed_func!(testing_add_one, testing_add_one);
 #[test]
 fn test_function_from_extern_c() {
     // SAFETY: null handle is valid for testing_add_one which doesn't use the handle.
-    let add_one =
-        unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_testing_add_one, None) };
+    let add_one = unsafe {
+        Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_testing_add_one, None).unwrap()
+    };
     let typed_add_one = into_typed_fn!(add_one, Fn(i32) -> Result<i32>);
     assert_eq!(typed_add_one(1).unwrap(), 2);
 }
@@ -294,7 +296,7 @@ tvm_ffi_dll_export_typed_func!(test_add_one_tensor, test_add_one_tensor);
 fn test_function_call_tensor_fn() {
     // SAFETY: null handle is valid for test_add_one_tensor which doesn't use the handle.
     let add_one = unsafe {
-        Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_test_add_one_tensor, None)
+        Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_test_add_one_tensor, None).unwrap()
     };
     let typed_add_one = into_typed_fn!(add_one, Fn(&Tensor, &Tensor) -> Result<()>);
     let x_data: &[f32] = &[0.0, 1.0, 2.0, 3.0];
@@ -322,7 +324,9 @@ tvm_ffi_dll_export_typed_func!(testing_panic, testing_panic);
 #[test]
 fn test_function_exported_panic_raises_internal_error() {
     // SAFETY: null handle is valid for testing_panic which doesn't use the handle.
-    let f = unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_testing_panic, None) };
+    let f = unsafe {
+        Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_testing_panic, None).unwrap()
+    };
     let typed = into_typed_fn!(f, Fn(i32) -> Result<i32>);
     assert_eq!(typed(1).unwrap(), 1);
     let error = typed(-1).unwrap_err();

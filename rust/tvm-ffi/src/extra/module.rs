@@ -59,17 +59,27 @@ impl Module {
             .try_into()
     }
 
-    /// Get a function from the module by name.
+    /// Get a function from the module by name (C++ `Module::GetFunction`).
     ///
     /// # Arguments
     /// * `name` - The name of the function to retrieve
+    /// * `query_imports` - Whether to also check the modules this module imports
     ///
     /// # Returns
     /// * `Result<Function>` - A `Function` instance on success
-    pub fn get_function<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the module has no function `name`, as Python's
+    /// `Module.get_function` raises.
+    pub fn get_function<Str: AsRef<str>>(
+        &self,
+        name: Str,
+        query_imports: bool,
+    ) -> Result<Function> {
         let name = crate::string::String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunction")
-            .call_tuple_with_len::<3, _>((self, name, true))?
+            .call_tuple_with_len::<3, _>((self, name, query_imports))?
             .try_into()
     }
 

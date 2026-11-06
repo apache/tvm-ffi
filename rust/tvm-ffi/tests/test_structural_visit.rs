@@ -19,11 +19,13 @@
 
 use std::cell::{Cell, RefCell};
 use tvm_ffi::object::ObjectRef;
+use tvm_ffi::reflection::TypeAttrColumn;
+use tvm_ffi::ObjectRefCast;
 use tvm_ffi::{
-    dispatch, get_type_attr, structural_visit, structural_walk, Any, AnyView, Array, DLDataType,
-    DLDataTypeCode, DefRegionKind, Dispatcher, Error, FieldGetter, Function, Map, Object,
-    ObjectRefCore, Result, String as FfiString, StructuralVisitorView, TypeIndex, VisitInterrupt,
-    WalkOrder, WalkResult, RUNTIME_ERROR,
+    dispatch, structural_visit, structural_walk, Any, AnyView, Array, DLDataType, DLDataTypeCode,
+    DefRegionKind, Dispatcher, Error, FieldGetter, Function, Map, Object, ObjectRefCore, Result,
+    String as FfiString, StructuralVisitorView, TypeIndex, VisitInterrupt, WalkOrder, WalkResult,
+    RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -60,7 +62,7 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
             if let Some(integer) = value.try_as::<i64>() {
                 self.seen.push((integer, outer));
                 return match (integer, self.outcome) {
-                    (1, Outcome::Interrupt) => Ok(Some(VisitInterrupt::with(42_i64))),
+                    (1, Outcome::Interrupt) => Ok(Some(VisitInterrupt::new(42_i64))),
                     (1, Outcome::Error) => Err(runtime_error("descent failed")),
                     _ => Ok(None),
                 };
@@ -257,10 +259,12 @@ fn regions_compose_with_field_flags_and_function_hooks() {
     for with_hook in [false, true] {
         let root = visit_region_graph(with_hook);
         if with_hook {
-            assert!(
-                Function::try_from(get_type_attr(root.type_index(), "__s_visit__").unwrap())
-                    .is_ok()
-            );
+            assert!(Function::try_from(
+                TypeAttrColumn::new("__s_visit__")
+                    .and_then(|column| column.get(root.type_index()))
+                    .unwrap()
+            )
+            .is_ok());
         }
         for region in [Use, Simple, Pattern] {
             let ordinary = if with_hook && region == Use {
@@ -400,9 +404,15 @@ fn public_reflection_access_uses_registered_field_and_type_attr() {
     assert!(FieldGetter::new(type_index, "missing").is_err());
 
     // ObjectDef registers this Function-valued attribute for copyable C++ types.
-    assert!(Function::try_from(get_type_attr(type_index, "__ffi_shallow_copy__").unwrap()).is_ok());
-    assert!(Function::from_type_attr(type_index, "__ffi_shallow_copy__").is_ok());
-    assert!(get_type_attr(type_index, "missing").is_none());
+    assert!(Function::try_from(
+        TypeAttrColumn::new("__ffi_shallow_copy__")
+            .and_then(|column| column.get(type_index))
+            .unwrap()
+    )
+    .is_ok());
+    assert!(TypeAttrColumn::new("missing")
+        .and_then(|column| column.get(type_index))
+        .is_none());
 }
 
 #[test]
@@ -451,7 +461,9 @@ fn plain_walk_visits_map_values_without_visiting_keys() {
 
 #[test]
 fn primitive_values_are_leaves_in_pre_and_post_order() {
-    assert!(get_type_attr(TypeIndex::kTVMFFIDataType as i32, "__s_visit__").is_none());
+    assert!(TypeAttrColumn::new("__s_visit__")
+        .and_then(|column| column.get(TypeIndex::kTVMFFIDataType as i32))
+        .is_none());
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
 
     let mut pre = Vec::new();
@@ -751,7 +763,7 @@ impl GeneratedRecursiveVisitor {
         self.events.push("enter:array".to_string());
         for value in array.iter() {
             if let Some(interrupt) =
-                visitor.with_def_region_kind(kind, |visitor| visitor.visit(self, &value))?
+                visitor.with_def_region_kind(kind, |visitor| visitor.visit(self, value))?
             {
                 return Ok(Some(interrupt));
             }
@@ -762,7 +774,7 @@ impl GeneratedRecursiveVisitor {
 
     fn visit_integer(&mut self, value: i64) -> Result<Option<VisitInterrupt>> {
         self.events.push(format!("int:{value}"));
-        Ok((value == 2).then(|| VisitInterrupt::with(value)))
+        Ok((value == 2).then(|| VisitInterrupt::new(value)))
     }
 
     fn visit_other_object(&mut self, _value: &Object) -> Result<Option<VisitInterrupt>> {
@@ -1119,7 +1131,7 @@ fn visitor_interrupt_propagates_through_default_children() {
         ) -> Result<Option<VisitInterrupt>> {
             let def_region_kind = visitor.def_region_kind();
             if value.try_as::<i64>() == Some(2) {
-                return Ok(Some(VisitInterrupt::with(7i64)));
+                return Ok(Some(VisitInterrupt::new(7i64)));
             }
             visitor.with_def_region_kind(def_region_kind, |visitor| {
                 visitor.default_visit(self, &value)
@@ -1774,7 +1786,7 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
             value: i64,
             _: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
-            Ok((value == 2).then(|| VisitInterrupt::with(value)))
+            Ok((value == 2).then(|| VisitInterrupt::new(value)))
         }
         fn visit_any<'value>(
             &mut self,
@@ -1857,7 +1869,7 @@ fn callback_visit_with_overrides_child_def_region() {
             for value in array.iter() {
                 if let Some(interrupt) = visitor
                     .with_def_region_kind(DefRegionKind::Pattern, |visitor| {
-                        visitor.visit(self, &value)
+                        visitor.visit(self, value)
                     })?
                 {
                     return Ok(Some(interrupt));
@@ -2079,7 +2091,7 @@ fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
     .unwrap();
     drop(root);
     let retained = Array::<i64>::try_from(retained.unwrap()).unwrap();
-    assert_eq!(retained.iter().collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(retained.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
 }
 
 #[test]

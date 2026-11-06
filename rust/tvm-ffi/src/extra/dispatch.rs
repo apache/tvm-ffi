@@ -303,7 +303,7 @@ macro_rules! mutation_callback_prefix {
             #[inline(always)]
             fn dispatch_link(&mut self, (value, $($a,)*): (crate::MutationView<'v>, $($A,)*)) -> Option<R> {
                 $(let _ = &$a;)*
-                value.try_cast::<T>().ok().map(|typed| self(typed, $($b,)*).callback_result())
+                value.downcast::<T>().ok().map(|typed| self(typed, $($b,)*).callback_result())
             }
         }
     };

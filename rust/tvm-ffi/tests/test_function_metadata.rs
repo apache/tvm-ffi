@@ -43,7 +43,7 @@ extern "C" {
 #[cfg(feature = "export-metadata")]
 fn call_getter(getter: tvm_ffi::tvm_ffi_sys::TVMFFISafeCallType) -> String {
     // SAFETY: the getters take no arguments and do not use the handle.
-    let getter = unsafe { Function::from_extern_c(std::ptr::null_mut(), getter, None) };
+    let getter = unsafe { Function::from_extern_c(std::ptr::null_mut(), getter, None).unwrap() };
     getter.call_packed(&[]).unwrap().try_into().unwrap()
 }
 
@@ -135,7 +135,8 @@ mod without_export_metadata {
 fn test_exports_without_metadata() {
     // The functions themselves are exported.
     // SAFETY: rust_add takes two arguments and does not use the handle.
-    let add = unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_rust_add, None) };
+    let add =
+        unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_rust_add, None).unwrap() };
     let sum = add.call_tuple_with_len::<2, _>((1i64, 2i64)).unwrap();
     assert_eq!(i64::try_from(sum).unwrap(), 3);
     without_export_metadata::__tvm_ffi__metadata_rust_schema_id_int();
