@@ -22,13 +22,13 @@ use tvm_ffi::collections::map::MapObj;
 use tvm_ffi::extra::structural_mutate::IntoMutateResult;
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
-use tvm_ffi::ObjectRefCast;
+use tvm_ffi::ObjectRefCore;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
     Array, DefRegionKind, Dispatcher, Error, FieldGetter, Function, InplaceMode, IntoDispatcher,
-    Map, MutationView, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
-    StructuralMutatorView, StructuralVarRemap, StructuralVisitorView, TypeIndex, Unchanged,
-    UnchangedOr, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
+    Map, MutationView, Object, ObjectArc, Result, String as FfiString, StructuralMutatorView,
+    StructuralVarRemap, StructuralVisitorView, TypeIndex, Unchanged, UnchangedOr, VisitInterrupt,
+    WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 /// The value when it is stored as a `bool`, not converted from an integer.

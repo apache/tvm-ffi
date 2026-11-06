@@ -141,16 +141,18 @@ impl Error {
         Self::new(INTERNAL_ERROR, &format!("panicked: {message}"), "")
     }
 
-    /// The `TypeError` for a reference that [`downcast`](crate::ObjectRefCast::downcast)
+    /// The `TypeError` for a reference that [`downcast`](crate::ObjectRefCore::downcast)
     /// handed back because it is not a `B`, naming both types.
     ///
     /// ```
-    /// use tvm_ffi::{object::ObjectRef, Array, Error, ObjectRefCast, TYPE_ERROR};
+    /// use tvm_ffi::{object::ObjectRef, Array, Error, ObjectRefCore, TYPE_ERROR};
     /// let object: ObjectRef = Array::from_vec(vec![1_i64]).into();
     /// let error = object.downcast::<Array<f64>>().map_err(Error::downcast_failed::<Array<f64>>);
     /// assert_eq!(error.unwrap_err().kind(), TYPE_ERROR);
     /// ```
-    pub fn downcast_failed<B: AnyCompatible>(source: impl object::ObjectRefCast) -> Self {
+    pub fn downcast_failed<B: AnyCompatible>(
+        source: impl object::ObjectRefCore + AnyCompatible,
+    ) -> Self {
         let mut cell = TVMFFIAny::new();
         // SAFETY: `source` stays alive while its borrowed cell is inspected.
         unsafe { AnyCompatible::copy_to_any_view(&source, &mut cell) };

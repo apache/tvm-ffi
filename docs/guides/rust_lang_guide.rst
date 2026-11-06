@@ -121,12 +121,12 @@ representation, and ``ObjectRef`` is the erased managed reference.
 Define methods and associated functions on the named type, and implement traits to provide
 shared interfaces. The named type can also impose additional constraints on the underlying object.
 For example, |rs-array|_ holds an ``ObjectArc<ArrayObj>`` while constraining the array's
-element type to ``T``. Named reference types implement |rs-objectrefcast|_ for shared reference operations:
+element type to ``T``. Named reference types implement |rs-objectrefcore|_ for shared reference operations:
 
 .. code-block:: rust
 
    use tvm_ffi::collections::array::ArrayObj;
-   use tvm_ffi::{Array, ObjectRefCast};
+   use tvm_ffi::{Array, ObjectRefCore};
 
    let array = Array::from_vec(vec![1_i64, 2, 3]);
    assert_eq!(array.downcast_ref::<ArrayObj>().unwrap().size, 3);
@@ -1118,8 +1118,8 @@ Related Resources
 .. _rs-objectarc: ../reference/rust/generated/tvm_ffi/object/struct.ObjectArc.html
 .. |rs-array| replace:: ``Array<T>``
 .. _rs-array: ../reference/rust/generated/tvm_ffi/collections/array/struct.Array.html
-.. |rs-objectrefcast| replace:: ``ObjectRefCast``
-.. _rs-objectrefcast: ../reference/rust/generated/tvm_ffi/object/trait.ObjectRefCast.html
+.. |rs-objectrefcore| replace:: ``ObjectRefCore``
+.. _rs-objectrefcore: ../reference/rust/generated/tvm_ffi/object/trait.ObjectRefCore.html
 .. |rs-match_any| replace:: ``match_any!``
 .. _rs-match_any: ../reference/rust/generated/tvm_ffi/macro.match_any.html
 .. |rs-dispatch| replace:: ``#[dispatch]``

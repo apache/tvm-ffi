@@ -20,10 +20,10 @@
 use std::cell::{Cell, RefCell};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::reflection::TypeAttrColumn;
-use tvm_ffi::ObjectRefCast;
+use tvm_ffi::ObjectRefCore;
 use tvm_ffi::{
     dispatch, structural_visit, structural_walk, Any, AnyView, Array, DLDataType, DLDataTypeCode,
-    DefRegionKind, Dispatcher, Error, FieldGetter, Function, Map, Object, ObjectRefCore, Result,
+    DefRegionKind, Dispatcher, Error, FieldGetter, Function, Map, Object, Result,
     String as FfiString, StructuralVisitorView, TypeIndex, VisitInterrupt, WalkOrder, WalkResult,
     RUNTIME_ERROR,
 };

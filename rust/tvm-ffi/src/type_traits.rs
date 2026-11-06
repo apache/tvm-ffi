@@ -380,12 +380,12 @@ pub unsafe fn downcast_ref_from_any_in_place<T: RefFromAnyUnchecked>(
     }
 }
 
-/// Types that an object reference's [`ObjectRefCast::downcast_ref`] can borrow
+/// Types that an object reference's [`ObjectRefCore::downcast_ref`] can borrow
 /// from the reference's object pointer: object types (`ArrayObj`), and managed
 /// references that are exactly one object pointer (`Array<T>`, every
 /// `#[derive(ObjectRef)]` type).
 ///
-/// [`ObjectRefCast::downcast_ref`]: crate::object::ObjectRefCast::downcast_ref
+/// [`ObjectRefCore::downcast_ref`]: crate::object::ObjectRefCore::downcast_ref
 ///
 /// # Safety
 ///

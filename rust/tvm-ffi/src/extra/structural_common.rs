@@ -20,7 +20,7 @@
 use crate::any::{Any, AnyView};
 use crate::error::{Error, Result, RUNTIME_ERROR};
 use crate::function::Function;
-use crate::object::{self, ObjectRefCast, ObjectRefCore};
+use crate::object::{self, ObjectRefCore};
 use crate::reflection::FieldGetter;
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex,

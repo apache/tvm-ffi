@@ -41,7 +41,7 @@ use std::ops::BitOr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::function_internal::AsPackedCallable;
-use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCast, ObjectRefCore};
+use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter,
     TVMFFIGetTypeInfo, TVMFFIMethodInfo, TVMFFIObject, TVMFFIObjectCreator, TVMFFIObjectHandle,

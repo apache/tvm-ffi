@@ -73,7 +73,6 @@ pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrd
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
 pub use crate::function_internal::AsPackedCallable;
-pub use crate::object::ObjectRefCast;
 pub use crate::object::{
     IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity,
     ObjectRefCore,

@@ -121,11 +121,19 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
     }
 }
 
-/// Traits to specify core operations of ObjectRef
+/// A managed object reference: the category of types such as [`ObjectRef`](struct@ObjectRef),
+/// `Array<T>` and every `#[derive(ObjectRef)]` type, with the operations every
+/// reference supports: identity ([`same_as`](Self::same_as)) and strict casts
+/// between reference types, which check the object's runtime type and never
+/// convert. [`downcast_ref`](Self::downcast_ref) borrows in place, and
+/// [`downcast`](Self::downcast) takes the reference, as std's
+/// `dyn Any::downcast_ref` and `Box<dyn Any>::downcast` do. Upcasts are
+/// `From`/`Into`, which `#[derive(ObjectRef)]` and
+/// [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast) generate.
 ///
-/// used by the ffi Any system and not user facing
-///
-/// We mark as unsafe since it moves out the internal of the ObjectRef
+/// The derive implements it. `data`, `into_data` and `from_data` are the
+/// handle plumbing the FFI uses, called as associated functions; the trait is
+/// `unsafe` to implement because they move the reference's internals.
 ///
 /// # Safety
 ///
@@ -154,6 +162,77 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     /// for zero-state views that share a container type but accept only a
     /// subset of its values, such as a typed expression view.
     unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
+
+    /// Return whether two object references point to the same allocation.
+    #[inline]
+    fn same_as<Other: ObjectRefCore>(&self, other: &Other) -> bool {
+        ObjectArc::as_ptr(Self::data(self)).cast::<()>()
+            == ObjectArc::as_ptr(Other::data(other)).cast::<()>()
+    }
+
+    /// Borrow the underlying object as `T` when it is one.
+    ///
+    /// `T` is an object type such as `FooObj`, or a managed reference such as
+    /// `Foo`: `&Expr` borrows as `&Add` when the expression is an `Add`.
+    /// Unrelated types return `None`. Unlike [`downcast`](Self::downcast), this
+    /// method neither consumes the reference nor changes the object's reference
+    /// count. The returned borrow cannot outlive `self`.
+    /// See [`crate::Any::downcast_ref`] for an example.
+    #[inline(always)]
+    fn downcast_ref<T: crate::type_traits::DowncastRefFromObject>(&self) -> Option<&T> {
+        // SAFETY: `ObjectArc` is exactly one non-null object pointer, and
+        // ObjectRefCore guarantees a live object allocation.
+        unsafe {
+            let place = &*(Self::data(self) as *const ObjectArc<Self::ContainerType>
+                as *const *mut TVMFFIObject);
+            T::downcast_ref_from_object(place)
+        }
+    }
+
+    /// Take `self` as the reference type `B` when its object is one, without
+    /// copying the object or changing its reference count.
+    ///
+    /// `B` is a subtype, or a parameterized container such as `Array<i64>`,
+    /// whose elements are checked too. On a mismatch the reference is returned
+    /// unchanged, so another type can be tried;
+    /// [`Error::downcast_failed`](crate::Error::downcast_failed) turns it into a
+    /// `TypeError` for `?`.
+    ///
+    /// ```
+    /// use tvm_ffi::{object::ObjectRef, Array, Error, ObjectRefCore};
+    /// let object: ObjectRef = Array::from_vec(vec![1_i64]).into();
+    /// let object = object.downcast::<Array<f64>>().unwrap_err();
+    /// let array: Array<i64> = object.downcast().map_err(Error::downcast_failed::<Array<i64>>)?;
+    /// assert_eq!(array.len(), 1);
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    #[inline(always)]
+    fn downcast<B>(self) -> std::result::Result<B, Self>
+    where
+        Self: AnyCompatible,
+        B: ObjectRefCore + AnyCompatible,
+    {
+        let mut any_data = TVMFFIAny::new();
+        unsafe {
+            // Keep ownership in `self` while the target check runs, so a
+            // mismatch can hand it back and a panic unwinds normally.
+            Self::copy_to_any_view(&self, &mut any_data);
+            debug_assert!(any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+            // SAFETY: ObjectRefCore's contract requires its AnyCompatible
+            // representation to contain a valid object-range type index.
+            std::hint::assert_unchecked(
+                any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
+            );
+            if B::check_any_strict(&any_data) {
+                // Transfer ownership only after the borrowed representation has
+                // passed the target's complete hierarchy/container check.
+                Self::move_to_any(self, &mut any_data);
+                Ok(B::move_from_any_after_check(&mut any_data))
+            } else {
+                Err(self)
+            }
+        }
+    }
 }
 
 /// A value that converts into the object reference `T`, owned or borrowed.
@@ -171,7 +250,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 ///
 /// ```
 /// use std::borrow::Borrow;
-/// use tvm_ffi::object::{IntoObjectRef, ObjectRef, ObjectRefCast};
+/// use tvm_ffi::object::{IntoObjectRef, ObjectRef, ObjectRefCore};
 /// use tvm_ffi::{def_object_ref, rs_object, Object};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
@@ -326,87 +405,6 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     }
 }
 
-/// The operations on every managed reference: identity, and checked casts
-/// between reference types.
-///
-/// Every managed reference implements this trait. Casts are strict: they check
-/// the object's runtime type and never convert. [`downcast_ref`](Self::downcast_ref)
-/// borrows in place, and [`downcast`](Self::downcast) takes the reference, as
-/// std's `dyn Any::downcast_ref` and `Box<dyn Any>::downcast` do. Upcasts are
-/// `From`/`Into`, which `#[derive(ObjectRef)]` and
-/// [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast) generate.
-pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
-    /// Return whether two object references point to the same allocation.
-    #[inline]
-    fn same_as<Other: ObjectRefCore>(&self, other: &Other) -> bool {
-        ObjectArc::as_ptr(Self::data(self)).cast::<()>()
-            == ObjectArc::as_ptr(Other::data(other)).cast::<()>()
-    }
-
-    /// Borrow the underlying object as `T` when it is one.
-    ///
-    /// `T` is an object type such as `FooObj`, or a managed reference such as
-    /// `Foo`: `&Expr` borrows as `&Add` when the expression is an `Add`.
-    /// Unrelated types return `None`. Unlike [`downcast`](Self::downcast), this
-    /// method neither consumes the reference nor changes the object's reference
-    /// count. The returned borrow cannot outlive `self`.
-    /// See [`crate::Any::downcast_ref`] for an example.
-    #[inline(always)]
-    fn downcast_ref<T: crate::type_traits::DowncastRefFromObject>(&self) -> Option<&T> {
-        // SAFETY: `ObjectArc` is exactly one non-null object pointer, and
-        // ObjectRefCore guarantees a live object allocation.
-        unsafe {
-            let place = &*(Self::data(self) as *const ObjectArc<Self::ContainerType>
-                as *const *mut TVMFFIObject);
-            T::downcast_ref_from_object(place)
-        }
-    }
-
-    /// Take `self` as the reference type `B` when its object is one, without
-    /// copying the object or changing its reference count.
-    ///
-    /// `B` is a subtype, or a parameterized container such as `Array<i64>`,
-    /// whose elements are checked too. On a mismatch the reference is returned
-    /// unchanged, so another type can be tried;
-    /// [`Error::downcast_failed`](crate::Error::downcast_failed) turns it into a
-    /// `TypeError` for `?`.
-    ///
-    /// ```
-    /// use tvm_ffi::{object::ObjectRef, Array, Error, ObjectRefCast};
-    /// let object: ObjectRef = Array::from_vec(vec![1_i64]).into();
-    /// let object = object.downcast::<Array<f64>>().unwrap_err();
-    /// let array: Array<i64> = object.downcast().map_err(Error::downcast_failed::<Array<i64>>)?;
-    /// assert_eq!(array.len(), 1);
-    /// # Ok::<(), tvm_ffi::Error>(())
-    /// ```
-    #[inline(always)]
-    fn downcast<B>(self) -> std::result::Result<B, Self>
-    where
-        B: ObjectRefCore + AnyCompatible,
-    {
-        let mut any_data = TVMFFIAny::new();
-        unsafe {
-            // Keep ownership in `self` while the target check runs, so a
-            // mismatch can hand it back and a panic unwinds normally.
-            Self::copy_to_any_view(&self, &mut any_data);
-            debug_assert!(any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
-            // SAFETY: ObjectRefCore's contract requires its AnyCompatible
-            // representation to contain a valid object-range type index.
-            std::hint::assert_unchecked(
-                any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
-            );
-            if B::check_any_strict(&any_data) {
-                // Transfer ownership only after the borrowed representation has
-                // passed the target's complete hierarchy/container check.
-                Self::move_to_any(self, &mut any_data);
-                Ok(B::move_from_any_after_check(&mut any_data))
-            } else {
-                Err(self)
-            }
-        }
-    }
-}
-
 /// Upcast a managed reference to the root [`ObjectRef`], keeping its allocation.
 #[inline]
 pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
@@ -444,8 +442,6 @@ pub(crate) fn type_key_of_index(type_index: i32) -> String {
         }
     }
 }
-
-impl<T: ObjectRefCore + AnyCompatible> ObjectRefCast for T {}
 
 /// A generic managed reference to a TVM-FFI object.
 ///
