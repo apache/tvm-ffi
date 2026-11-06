@@ -25,7 +25,6 @@
 #define TVM_FFI_EXTRA_VISIT_ERROR_CONTEXT_H_
 
 #include <tvm/ffi/container/array.h>
-#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/base.h>
 #include <tvm/ffi/function.h>
@@ -69,7 +68,7 @@ class VisitErrorContextObj : public Object {
    * \brief Visit records that get populated, which include the object visit
    *        path pattern in innermost-first order. Best-effort — not exhaustive.
    */
-  List<ObjectRef> reverse_visit_pattern;
+  Array<ObjectRef> reverse_visit_pattern;
 
   /*!
    * \brief Pre-existing Error::extra_context payload before we placed the
@@ -78,7 +77,6 @@ class VisitErrorContextObj : public Object {
   Optional<ObjectRef> prev_error_context;
 
   /// \cond Doxygen_Suppress
-  static constexpr bool _type_mutable = true;
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindUnsupported;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("ffi.VisitErrorContext", VisitErrorContextObj, Object);
   /// \endcond
@@ -282,37 +280,45 @@ namespace detail {
 TVM_FFI_COLD_CODE
 inline VisitErrorContext MakeVisitErrorContext(const ObjectRef& node) {
   ObjectPtr<VisitErrorContextObj> obj = make_object<VisitErrorContextObj>();
-  obj->reverse_visit_pattern = List<ObjectRef>{node};
+  obj->reverse_visit_pattern = Array<ObjectRef>{node};
   return VisitErrorContext(std::move(obj));
 }
 
 /*!
  * \brief Implementation helper for TVM_FFI_VISIT_END(node).
  *        Calling convention may change; do not call directly from user code.
+ *
+ * Appends with copy-on-write at each level: \p err is replaced by a shallow copy when its
+ * ErrorObj is shared, and the error's VisitErrorContext is replaced by a copy when shared.
+ * Each level is borrowed through its parent's field, so an Error owned only by the unwinding
+ * frame is updated in place.
  */
 TVM_FFI_COLD_CODE
 inline void UpdateVisitErrorContext(Error& err, const ObjectRef& node) {  // NOLINT(*)
-  // NOTE: This function mutates the ErrorObj in place via ObjectUnsafe.
-  // Expected to run only inside the exception throw chain, where the Error
-  // is single-owned by this thread. The tradeoff avoids reallocating a
-  // fresh Error per catch frame; the immutability invariant returns once
-  // the unwind window closes.
-  std::optional<ObjectRef> extra_context = err.extra_context();
-  if (extra_context) {
-    Optional<VisitErrorContext> visit_context = extra_context->as<VisitErrorContext>();
-    if (visit_context) {
-      visit_context.value()->reverse_visit_pattern.push_back(node);
-      return;
+  if (!err.unique()) {
+    err = Error(err.kind(), err.message(), err.backtrace(), err.cause_chain(), err.extra_context());
+  }
+  ErrorObj* error_obj =
+      static_cast<ErrorObj*>(detail::ObjectUnsafe::RawObjectPtrFromObjectRef(err));
+  Object* extra_context = static_cast<Object*>(error_obj->extra_context);
+  if (extra_context != nullptr && extra_context->IsInstance<VisitErrorContextObj>()) {
+    VisitErrorContextObj* visit_context = static_cast<VisitErrorContextObj*>(extra_context);
+    if (!visit_context->unique()) {
+      ObjectPtr<VisitErrorContextObj> copy = make_object<VisitErrorContextObj>(*visit_context);
+      visit_context = copy.get();
+      detail::ObjectUnsafe::DecRefObjectHandle(error_obj->extra_context);
+      error_obj->extra_context =
+          detail::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(copy));
     }
+    visit_context->reverse_visit_pattern.push_back(node);
+    return;
   }
   // Build a fresh VisitErrorContext, preserving any pre-existing payload.
   ObjectPtr<VisitErrorContextObj> new_context = make_object<VisitErrorContextObj>();
-  new_context->reverse_visit_pattern = List<ObjectRef>{node};
-  if (extra_context) new_context->prev_error_context = *extra_context;
-
-  ErrorObj* error_obj =
-      static_cast<ErrorObj*>(detail::ObjectUnsafe::RawObjectPtrFromObjectRef(err));
-  if (error_obj->extra_context != nullptr) {
+  new_context->reverse_visit_pattern = Array<ObjectRef>{node};
+  if (extra_context != nullptr) {
+    new_context->prev_error_context = detail::ObjectUnsafe::ObjectRefFromObjectPtr<ObjectRef>(
+        detail::ObjectUnsafe::ObjectPtrFromUnowned<Object>(extra_context));
     detail::ObjectUnsafe::DecRefObjectHandle(error_obj->extra_context);
   }
   error_obj->extra_context =
@@ -324,16 +330,18 @@ inline void UpdateVisitErrorContext(Error& err, const ObjectRef& node) {  // NOL
  *
  * The overload the visit and mutate engines use at a hook boundary: hooks propagate errors
  * untouched, and the engine, which knows the node it dispatched on, adds that frame. The Error
- * is refcounted, so annotating this handle annotates the object \p result carries.
+ * is borrowed out of \p result and stored back, so an Error owned only by \p result is
+ * updated in place.
  *
  * \param result A raw result already known to hold an Error.
  * \param node The node to name; a non-object node has no frame to add.
  */
-TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(const TVMFFIAny& result,
-                                                      AnyView node) noexcept {
+TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(TVMFFIAny* result, AnyView node) noexcept {
   if (node.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
-    Error err = AnyView::CopyFromTVMFFIAny(result).cast<Error>();
+    Error err = detail::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
+        detail::ObjectUnsafe::ObjectPtrFromOwned<Object>(result->v_obj));
     UpdateVisitErrorContext(err, node.cast<ObjectRef>());
+    result->v_obj = detail::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(err));
   }
 }
 
@@ -346,8 +354,7 @@ TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(const TVMFFIAny& result,
  * `noexcept`, so an unguarded cast would terminate rather than propagate; skipping the frame is
  * correct because a non-object node has no identity to name in the context.
  *
- * \param err The Error to annotate. Refcounted, so annotating this handle annotates the shared
- *            object the caller's result carries.
+ * \param err The Error to annotate; replaced by an annotated copy when shared.
  * \param node The node to name; skipped when it is not object-backed.
  */
 TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(Error& err,
@@ -355,6 +362,22 @@ TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(Error& err,
   if (node.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
     UpdateVisitErrorContext(err, node.cast<ObjectRef>());
   }
+}
+
+/*!
+ * \brief Name \p node in a failed Expected result's visit error context.
+ *
+ * The Error is moved out of \p result and back, so an Error owned only by \p result is
+ * updated in place.
+ *
+ * \param result A result already known to hold an Error.
+ * \param node The node to name; skipped when it is not object-backed.
+ */
+template <typename T>
+TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(Expected<T>* result, AnyView node) noexcept {
+  Error err = std::move(*result).error();
+  UpdateVisitErrorContext(err, node);
+  *result = Unexpected<Error>(std::move(err));
 }
 }  // namespace detail
 

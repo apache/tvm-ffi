@@ -837,7 +837,7 @@ TEST(StructuralMap, RegisteredMutateHookUsesAssignOrReturn) {
   ASSERT_TRUE(failed.is_err());
   Optional<VisitErrorContext> context = VisitErrorContext::TryGetFromError(failed.error());
   ASSERT_TRUE(context.has_value());
-  const List<ObjectRef>& reverse_pattern = context.value()->reverse_visit_pattern;
+  const Array<ObjectRef>& reverse_pattern = context.value()->reverse_visit_pattern;
   ASSERT_EQ(reverse_pattern.size(), 2U);
   EXPECT_TRUE(reverse_pattern[0].same_as(lhs));
   EXPECT_TRUE(reverse_pattern[1].same_as(root));

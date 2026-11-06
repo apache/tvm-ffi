@@ -134,13 +134,13 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
                     .ok()?
                     .get_any(object)
                     .ok()?;
-                let size = Function::get_global("ffi.ListSize")
+                let size = Function::get_global("ffi.ArraySize")
                     .ok()?
                     .call_tuple((records.clone(),))
                     .ok()?
                     .downcast_ref::<i64>()
                     .copied()?;
-                let get_item = Function::get_global("ffi.ListGetItem").ok()?;
+                let get_item = Function::get_global("ffi.ArrayGetItem").ok()?;
                 if size > 0 {
                     let last: Option<object::ObjectRef> = get_item
                         .call_tuple((records.clone(), size - 1))
@@ -162,7 +162,7 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
             }
         }
         nodes.push(Any::from(node));
-        let records = Function::get_global("ffi.List")
+        let records = Function::get_global("ffi.Array")
             .ok()?
             .call_packed(&nodes.iter().map(AnyView::from).collect::<Vec<_>>())
             .ok()?;
