@@ -979,9 +979,9 @@ or panic. State remains available after the recursive call.
 
 Typed ``MutationView<'_, T>`` inputs work with the same recursive methods.
 Use ``value.with_inplace_mode(InplaceMode::Disallow)`` to restrict permission.
-Inspect an object through ``value.downcast_ref::<NodeObj>()`` or other payloads
-through ``value.as_any_view()``; finish using those borrows before consuming the
-capability. A typed object capability also dereferences to its shared node.
+Borrow the value in place through ``value.downcast_ref::<Node>()``, as with
+``AnyView``, or other payloads through ``value.as_any_view()``; finish using those
+borrows before consuming the capability. A typed object capability also dereferences to its shared node.
 Use ``value.field(|node| &node.a)`` to borrow a direct ``Any`` or owning object-handle
 field for recursive mutation. The child capability exclusively borrows its parent
 and inherits permission only while that parent is unique; child uniqueness is
