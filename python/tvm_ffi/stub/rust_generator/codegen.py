@@ -16,8 +16,9 @@
 # under the License.
 """Rust code generation for ``tvm-ffi-stubgen``.
 
-Every reflected object gets a ``#[repr(C)]`` object struct, a reference wrapper,
-``Deref``, and the upcasts along its ancestor chain. The struct's contents follow
+Every reflected object gets a ``#[repr(C)]`` object struct, a reference wrapper
+(whose ``#[derive(ObjectRef)]`` adds ``Deref`` to the object), and the upcasts
+along its ancestor chain. The struct's contents follow
 the verdict of :mod:`tvm_ffi.stub.layout`:
 
 - *complete*: the struct mirrors every physical field at its real offset and
@@ -416,7 +417,7 @@ class _ObjectRenderer:
         ]
 
     def _upcast_lines(self) -> list[str]:
-        """``unsafe_impl_object_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
+        """``unsafe_impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
         targets: list[str] = []
         for key in self.info.ancestors:
             provider = self._provider(key)
@@ -429,7 +430,7 @@ class _ObjectRenderer:
         if not targets:
             return []
         pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
-        return [f"tvm_ffi::unsafe_impl_object_upcast!({pairs});"]
+        return [f"tvm_ffi::unsafe_impl_object_ref_upcast!({pairs});"]
 
     def _struct_lines(self, verdict: Verdict, base: str) -> list[str]:
         """Render the object struct: every field when complete, the parent alone when opaque."""
@@ -655,9 +656,10 @@ class _ObjectRenderer:
         self.imports.reserved.update((self.leaf, self.obj_struct))
         verdict = self.classify()
         # Derive macros are spelled by full path: their leaves collide with `Object` / `ObjectRef`.
-        self.imports.record("std::ops::Deref")
         self.imports.record("tvm_ffi::ObjectArc")
         base, has_parent = self._base_type()
+        if has_parent:
+            self.imports.record("std::ops::Deref")
         fields = self.info.fields
         has_accessors = bool(fields) and not verdict.is_complete
         if has_accessors:
@@ -682,7 +684,6 @@ class _ObjectRenderer:
                 "}",
             ]
         )
-        sections.append(self._deref_lines(self.leaf, self.obj_struct, "base"))
         if has_parent:
             sections.append(self._deref_lines(self.obj_struct, base, "base"))
         if has_accessors:

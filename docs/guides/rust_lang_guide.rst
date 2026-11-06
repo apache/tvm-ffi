@@ -141,6 +141,9 @@ borrows it in place, with the same rules as ``Any`` and ``AnyView``. ``try_from`
 ``Any`` may convert by the FFI's conversion rules, such as an integer into a float, while
 ``try_from`` a reference only checks.
 
+``AnyCompatible`` is the root contract for crossing into ``Any``; ``#[derive(ObjectRef)]``
+is its object-reference default, and ``ObjectRefAnyCompatible`` customizes it.
+
 Loading a Module
 ~~~~~~~~~~~~~~~~
 
@@ -336,7 +339,7 @@ first ``type_index()``, which allocating an instance calls:
 
    impl PointObj {
        fn reflect_methods(def: &mut ObjectDef<Self>) {
-           def.def("x_abs", |p: Point| -> Result<i64> { Ok(p.data.x.abs()) }, "The |x|.")
+           def.def("x_abs", |p: Point| -> Result<i64> { Ok(p.x.abs()) }, "The |x|.")
                .def_static("zero", || -> Result<i64> { Ok(0) }, "");
        }
    }
@@ -366,12 +369,13 @@ Defining Object Types from Their Fields
 ``py_class``. The first field, ``base``, is the parent's object; every other field
 is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
 ``reflection = path`` after the type key is ``#[type_reflection(path)]``.
-``def_object_ref!(TypeName, ParentType, ObjectName)`` defines the reference:
+``#[derive(ObjectRef)]`` declares the reference, and ``#[object_ref(parent = Point)]``
+names the reference to the parent's object:
 
 .. code-block:: rust
 
-   use tvm_ffi::object::ObjectRef;
-   use tvm_ffi::{def_object_ref, rs_object, Object};
+   use tvm_ffi::derive::ObjectRef;
+   use tvm_ffi::{rs_object, Object, ObjectArc};
 
    #[rs_object("my.Point", s_eq_hash_kind = "TreeNode")]
    pub struct PointObj {
@@ -381,7 +385,10 @@ is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
        pub label: tvm_ffi::String,
    }
 
-   def_object_ref!(pub Point, ObjectRef, PointObj);
+   #[derive(Clone, ObjectRef)]
+   pub struct Point {
+       data: ObjectArc<PointObj>,
+   }
 
    #[rs_object("my.Point3", final)]
    pub struct Point3Obj {
@@ -389,9 +396,19 @@ is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
        pub z: i64,
    }
 
-   def_object_ref!(pub Point3, Point, Point3Obj);
+   #[derive(Clone, ObjectRef)]
+   #[object_ref(parent = Point)]
+   pub struct Point3 {
+       data: ObjectArc<Point3Obj>,
+   }
 
-   let point3 = Point3::from(Point3Obj::new(PointObj::new(Object::new(), 1, "p"), 3));
+   impl Point3 {
+       pub fn new(x: i64, label: &str, z: i64) -> Self {
+           Self::from_object(Point3Obj::new(PointObj::new(Object::new(), x, label), z))
+       }
+   }
+
+   let point3 = Point3::new(1, "p", 3);
    assert_eq!((point3.x, point3.z), (1, 3));
    let point: Point = point3.into();
 
@@ -399,10 +416,11 @@ is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
 ``Point3Obj::new``, which takes the parent's object, then the fields: a scalar
 (``bool``, an integer or a float) as its own type, so that a literal infers as it,
 and any other field from anything that converts into it, as the ``new`` of a type
-bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object, and
-the object converts into it. The reference also converts into ``ParentType``, the
-reference to its parent, and every reference converts into ``ObjectRef``;
-``unsafe_impl_object_upcast!`` converts it into the references to further ancestors.
+bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object
+(``#[object_ref(skip_deref)]`` opts out), and its private ``from_object`` wraps a new
+object for the type's constructors. The reference also converts into ``parent``,
+and every reference converts into ``ObjectRef``; ``unsafe_impl_object_ref_upcast!``
+converts it into the references to further ancestors.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads

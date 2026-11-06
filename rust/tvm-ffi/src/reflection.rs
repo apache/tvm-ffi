@@ -196,6 +196,7 @@ pub struct AccessStepObj {
 
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
+#[object_ref(skip_deref)]
 pub struct AccessStep {
     data: ObjectArc<AccessStepObj>,
 }
@@ -211,6 +212,7 @@ pub struct AccessPathObj {
 
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
+#[object_ref(skip_deref)]
 pub struct AccessPath {
     data: ObjectArc<AccessPathObj>,
 }

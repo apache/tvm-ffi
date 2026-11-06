@@ -164,28 +164,8 @@ pub trait IntoArgHolder {
     fn into_arg_holder(self) -> Self::Target;
 }
 
-crate::impl_into_arg_holder_default!(
-    (),
-    bool,
-    i8,
-    i16,
-    i32,
-    i64,
-    isize,
-    u8,
-    u16,
-    u32,
-    u64,
-    usize,
-    f32,
-    f64,
-    String,
-    Bytes,
-    crate::big_int::BigInt,
-    Any,
-    crate::DLDataType,
-    crate::DLDevice
-);
+// `Any` itself is an argument; every other value type is listed in `any.rs`.
+crate::impl_into_arg_holder_default!(Any);
 
 // string will be converted to String for argument passing
 impl IntoArgHolder for &str {
@@ -277,28 +257,8 @@ where
     }
 }
 
-crate::impl_arg_into_ref!(
-    (),
-    bool,
-    i8,
-    i16,
-    i32,
-    i64,
-    isize,
-    u8,
-    u16,
-    u32,
-    u64,
-    usize,
-    f32,
-    f64,
-    String,
-    Bytes,
-    crate::big_int::BigInt,
-    Any,
-    crate::DLDataType,
-    crate::DLDevice
-);
+// `Any` itself is an argument; every other value type is listed in `any.rs`.
+crate::impl_arg_into_ref!(Any);
 
 // Generic holders require explicit implementations rather than scalar macro entries.
 impl<T: AnyCompatible> IntoArgHolder for Option<T> {

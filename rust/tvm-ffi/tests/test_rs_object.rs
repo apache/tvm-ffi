@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use tvm_ffi::derive::Object;
+use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{ObjectArc, ObjectRef, ObjectRefCore};
 use tvm_ffi::reflection::TypeAttrColumn;
 use tvm_ffi::reflection::{drop_if_defined, FieldFlags, ObjectDef};
@@ -40,7 +40,10 @@ pub struct RsPointObj {
     pub label: tvm_ffi::String,
 }
 
-def_object_ref!(pub RsPoint, ObjectRef, RsPointObj);
+#[derive(Clone, ObjectRef)]
+pub struct RsPoint {
+    data: ObjectArc<RsPointObj>,
+}
 
 impl RsPointObj {
     fn reflect_methods(def: &mut ObjectDef<Self>) {
@@ -63,12 +66,12 @@ pub struct RsPoint3Obj {
     tag: i64,
 }
 
-def_object_ref!(
-    /// The reference with its own docs.
-    pub RsPoint3,
-    RsPoint,
-    RsPoint3Obj,
-);
+/// The reference with its own docs.
+#[derive(Clone, ObjectRef)]
+#[object_ref(parent = RsPoint)]
+pub struct RsPoint3 {
+    data: ObjectArc<RsPoint3Obj>,
+}
 
 /// A subtype without fields, which still registers its reflection.
 #[rs_object("testing.rust.RsMarker", final)]
@@ -76,7 +79,11 @@ pub struct RsMarkerObj {
     base: RsPointObj,
 }
 
-def_object_ref!(pub RsMarker, RsPoint, RsMarkerObj);
+#[derive(Clone, ObjectRef)]
+#[object_ref(parent = RsPoint)]
+pub struct RsMarker {
+    data: ObjectArc<RsMarkerObj>,
+}
 
 /// Scalar fields, whose literal arguments to `new` infer as the field types.
 #[rs_object("testing.rust.RsScalars", final)]
@@ -88,7 +95,10 @@ pub struct RsScalarsObj {
     pub ratio: f32,
 }
 
-def_object_ref!(pub RsScalars, ObjectRef, RsScalarsObj);
+#[derive(Clone, tvm_ffi::derive::ObjectRef)]
+pub struct RsScalars {
+    data: tvm_ffi::object::ObjectArc<RsScalarsObj>,
+}
 
 // `testing.TestCxxClassBase` from libtvm_ffi_testing, bound as tvm-ffi-stubgen
 // binds a complete C++ type that can have children: with a public `new`,
@@ -130,8 +140,11 @@ unsafe impl UnsafeInit for TestCxxClassBaseObj {
     }
 }
 
-// `def_object_ref!` takes any object type, not only an `rs_object` one.
-def_object_ref!(pub TestCxxClassBase, ObjectRef, TestCxxClassBaseObj);
+// A reference to any object type, not only an `rs_object` one.
+#[derive(Clone, ObjectRef)]
+pub struct TestCxxClassBase {
+    data: ObjectArc<TestCxxClassBaseObj>,
+}
 
 /// A subtype of a C++ type.
 #[rs_object("testing.rust.RsCxxChild", final, s_eq_hash_kind = "TreeNode")]
@@ -140,7 +153,11 @@ pub struct RsCxxChildObj {
     pub name: tvm_ffi::String,
 }
 
-def_object_ref!(pub RsCxxChild, TestCxxClassBase, RsCxxChildObj);
+#[derive(Clone, ObjectRef)]
+#[object_ref(parent = TestCxxClassBase)]
+pub struct RsCxxChild {
+    data: ObjectArc<RsCxxChildObj>,
+}
 
 /// A type that defines its own `__ffi_init__`, over which C++ generates none.
 #[rs_object("testing.rust.RsOwnInit", final, reflection = RsOwnInitObj::reflect_methods)]
@@ -149,13 +166,21 @@ pub struct RsOwnInitObj {
     pub v: i64,
 }
 
-def_object_ref!(pub RsOwnInit, ObjectRef, RsOwnInitObj);
+#[derive(Clone, ObjectRef)]
+pub struct RsOwnInit {
+    data: ObjectArc<RsOwnInitObj>,
+}
 
 impl RsOwnInitObj {
     fn reflect_methods(def: &mut ObjectDef<Self>) {
         def.def_static(
             "__ffi_init__",
-            |v: i64| -> Result<RsOwnInit> { Ok(RsOwnInitObj::new(Object::new(), 2 * v).into()) },
+            |v: i64| -> Result<RsOwnInit> {
+                Ok(RsOwnInit::from_object(RsOwnInitObj::new(
+                    Object::new(),
+                    2 * v,
+                )))
+            },
             "Twice `v`.",
         );
     }
@@ -172,7 +197,10 @@ pub struct RsInitOffObj {
     pub point: Option<RsPoint>,
 }
 
-def_object_ref!(pub RsInitOff, ObjectRef, RsInitOffObj);
+#[derive(Clone, ObjectRef)]
+pub struct RsInitOff {
+    data: ObjectArc<RsInitOffObj>,
+}
 
 /// An `init_off` reference, which all-zero bytes leave undefined: its registration fails.
 #[rs_object("testing.rust.RsInitOffReference", final)]
@@ -194,27 +222,40 @@ mod reexported {
         pub v: i64,
     }
 
-    ::tvm_ffi::def_object_ref!(
-        pub Reexported,
-        ::tvm_ffi::object::ObjectRef,
-        ReexportedObj,
-        crate = ::tvm_ffi
-    );
+    #[derive(Clone, ::tvm_ffi::derive::ObjectRef)]
+    #[object_ref(crate = ::tvm_ffi)]
+    pub struct Reexported {
+        data: ::tvm_ffi::object::ObjectArc<ReexportedObj>,
+    }
+
+    impl Reexported {
+        pub fn new(v: i64) -> Self {
+            Self::from_object(ReexportedObj::new(::tvm_ffi::Object::new(), v))
+        }
+    }
 }
 
 fn point(x: i64, label: &str) -> RsPoint {
-    RsPointObj::new(Object::new(), x, label).into()
+    RsPoint::from_object(RsPointObj::new(Object::new(), x, label))
 }
 
 fn point3(x: i64, z: i64) -> RsPoint3 {
     let tags = Array::from_vec(vec!["a".into(), "b".into()]);
-    RsPoint3Obj::new(RsPointObj::new(Object::new(), x, "p3"), z, tags, 7).into()
+    RsPoint3::from_object(RsPoint3Obj::new(
+        RsPointObj::new(Object::new(), x, "p3"),
+        z,
+        tags,
+        7,
+    ))
 }
 
 /// The dummy call keeps libtvm_ffi_testing, which registers `testing.TestCxxClassBase`, linked.
 fn cxx_child(v_i64: i64, v_i32: i32, name: &str) -> RsCxxChild {
     assert_eq!(unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() }, 0);
-    RsCxxChildObj::new(TestCxxClassBaseObj::new(v_i64, v_i32), name).into()
+    RsCxxChild::from_object(RsCxxChildObj::new(
+        TestCxxClassBaseObj::new(v_i64, v_i32),
+        name,
+    ))
 }
 
 fn type_info<N: ObjectCore>() -> &'static TVMFFITypeInfo {
@@ -352,7 +393,7 @@ fn test_constructors_deref_and_upcast() {
     assert!(back.same_as(&p3));
     assert!(RsPoint3::try_from(Any::from(point(1, ""))).is_err());
 
-    let marker = RsMarker::from(RsMarkerObj::new(RsPointObj::new(Object::new(), 4, "m")));
+    let marker = RsMarker::from_object(RsMarkerObj::new(RsPointObj::new(Object::new(), 4, "m")));
     assert_eq!(marker.x, 4);
     assert!(RsPoint::from(&marker).same_as(&marker));
 
@@ -364,7 +405,8 @@ fn test_constructors_deref_and_upcast() {
 #[test]
 fn test_new_takes_literals_of_the_field_types() {
     register_types();
-    let scalars = RsScalars::from(RsScalarsObj::new(Object::new(), 5_000_000_000, 1, 2, 0.5));
+    let scalars =
+        RsScalars::from_object(RsScalarsObj::new(Object::new(), 5_000_000_000, 1, 2, 0.5));
     assert_eq!(
         (scalars.big, scalars.count, scalars.port, scalars.ratio),
         (5_000_000_000, 1, 2, 0.5)
@@ -411,7 +453,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
     assert!(is_final(RsPoint3Obj::type_index()));
     assert!(is_final(RsMarkerObj::type_index()));
 
-    let original = RsMarker::from(RsMarkerObj::new(RsPointObj::new(Object::new(), 3, "m")));
+    let original = RsMarker::from_object(RsMarkerObj::new(RsPointObj::new(Object::new(), 3, "m")));
     let shallow_copy =
         Function::try_from(attr(RsMarkerObj::type_index(), "__ffi_shallow_copy__")).unwrap();
     let copy = RsMarker::try_from(shallow_copy.call_tuple((original.clone(),)).unwrap()).unwrap();
@@ -430,7 +472,7 @@ fn test_subtype_of_a_cpp_type() {
     assert_eq!((child.v_i64, child.v_i32, child.name.as_str()), (7, 8, "c"));
     // The C++ fields are reflected under the subtype.
     let v_i64 = FieldGetter::new(RsCxxChildObj::type_index(), "v_i64").unwrap();
-    assert_eq!(v_i64.get::<_, i64>(&*child.base).unwrap(), 7);
+    assert_eq!(v_i64.get::<_, i64>(&*child).unwrap(), 7);
     assert_eq!(field_names::<RsCxxChildObj>(), ["name"]);
 
     let base = TestCxxClassBase::from(child.clone());
@@ -448,7 +490,7 @@ fn test_subtype_of_a_cpp_type() {
 #[test]
 fn test_crate_path_names_a_reexported_tvm_ffi() {
     register_types();
-    let value = reexported::Reexported::from(reexported::ReexportedObj::new(Object::new(), 5));
+    let value = reexported::Reexported::new(5);
     assert_eq!(value.v, 5);
     assert!(ObjectRef::from(&value).same_as(&value));
     assert_eq!(field_names::<reexported::ReexportedObj>(), ["v"]);

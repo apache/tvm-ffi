@@ -19,10 +19,11 @@
 
 // The three ways a downstream crate makes an object reference `AnyCompatible`.
 
-use tvm_ffi::object::{ObjectArc, ObjectRef};
+use tvm_ffi::derive::ObjectRef;
+use tvm_ffi::object::ObjectArc;
 use tvm_ffi::tvm_ffi_sys::TVMFFIAny;
-use tvm_ffi::{def_object_ref, impl_try_from_any, match_any, rs_object, unsafe_impl_ref_downcast};
-use tvm_ffi::{Any, AnyCompatible, AnyView, Function, Object, ObjectRefCore};
+use tvm_ffi::{impl_any_compatible_conversions, match_any, rs_object};
+use tvm_ffi::{Any, AnyCompatible, AnyView, Object, ObjectRefCore};
 
 // A derived reference.
 #[rs_object("testing.object_ref_any.Pair", final)]
@@ -31,29 +32,21 @@ pub struct PairObj {
     pub first: i64,
     pub second: i64,
 }
-def_object_ref!(pub Pair, ObjectRef, PairObj);
+#[derive(Clone, ObjectRef)]
+pub struct Pair {
+    data: ObjectArc<PairObj>,
+}
 
 fn pair(first: i64, second: i64) -> Pair {
-    Pair::from(PairObj::new(Object::new(), first, second))
+    Pair::from_object(PairObj::new(Object::new(), first, second))
 }
 
 // A typed reference: a `Pair` whose `first` is positive; a positive integer
 // `n` converts to `(n, n)`.
-#[derive(Clone)]
-#[repr(transparent)]
-pub struct PositivePair(ObjectArc<PairObj>);
-
-unsafe impl ObjectRefCore for PositivePair {
-    type ContainerType = PairObj;
-    fn data(this: &Self) -> &ObjectArc<PairObj> {
-        &this.0
-    }
-    fn into_data(this: Self) -> ObjectArc<PairObj> {
-        this.0
-    }
-    unsafe fn from_data(data: ObjectArc<PairObj>) -> Self {
-        Self(data)
-    }
+#[derive(Clone, ObjectRef)]
+#[object_ref(skip_any_compatible)]
+pub struct PositivePair {
+    data: ObjectArc<PairObj>,
 }
 
 unsafe impl tvm_ffi::ObjectRefAnyCompatible for PositivePair {
@@ -63,7 +56,7 @@ unsafe impl tvm_ffi::ObjectRefAnyCompatible for PositivePair {
 
     fn convert_fallback(value: AnyView<'_>) -> Option<Self> {
         let n = i64::try_from(value).ok().filter(|n| *n > 0)?;
-        Some(Self(ObjectArc::new(PairObj::new(Object::new(), n, n))))
+        Some(Self::from_object(PairObj::new(Object::new(), n, n)))
     }
 
     fn custom_type_str() -> String {
@@ -77,7 +70,6 @@ unsafe impl tvm_ffi::ObjectRefAnyCompatible for PositivePair {
         }
     }
 }
-unsafe_impl_ref_downcast!(PositivePair);
 
 // A reference with a hand-written `AnyCompatible`, as the containers have.
 #[derive(Clone)]
@@ -121,32 +113,13 @@ unsafe impl AnyCompatible for RawPair {
     }
 }
 
-impl_try_from_any!(PositivePair, RawPair);
+impl_any_compatible_conversions!(RawPair);
 
+// The trait's doc example covers the strict check and the fallback; here, what
+// it does not: borrows never fall back, and the mismatch message is custom.
 #[test]
-fn strict_casts_check_extra_check_and_never_fall_back() {
-    assert!(Any::from(pair(1, 2))
-        .downcast_ref::<PositivePair>()
-        .is_some());
-    assert!(Any::from(pair(-1, 2))
-        .downcast_ref::<PositivePair>()
-        .is_none());
-    assert!(ObjectRef::from(pair(-1, 2))
-        .downcast::<PositivePair>()
-        .is_err());
+fn typed_reference_borrow_never_falls_back_and_names_the_mismatch() {
     assert!(Any::from(3_i64).downcast_ref::<PositivePair>().is_none());
-}
-
-#[test]
-fn converting_casts_fall_back() {
-    assert_eq!(
-        PositivePair::try_from(Any::from(3_i64)).unwrap().0.second,
-        3
-    );
-    let first =
-        Function::from_typed(|pair: PositivePair| -> tvm_ffi::Result<i64> { Ok(pair.0.first) });
-    let result = first.call_packed(&[AnyView::from(&3_i64)]).unwrap();
-    assert_eq!(i64::try_from(result).unwrap(), 3);
     let error = PositivePair::try_from(Any::from(pair(-1, 2)))
         .err()
         .unwrap();

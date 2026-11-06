@@ -249,7 +249,7 @@ impl ContainerElement for Any {}
 /// cell, as [`Array`](crate::Array) indexing does.
 ///
 /// A reference type implemented by hand gets it from
-/// [`unsafe_impl_ref_downcast!`](crate::unsafe_impl_ref_downcast).
+/// [`unsafe_impl_object_ref_downcast_ref!`](crate::unsafe_impl_object_ref_downcast_ref).
 ///
 /// # Safety
 ///

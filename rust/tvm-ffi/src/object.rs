@@ -273,9 +273,8 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 /// # Examples
 ///
 /// ```
-/// use tvm_ffi::object::{ObjectArc, ObjectRef};
-/// use tvm_ffi::{def_object_ref, impl_try_from_any, rs_object, unsafe_impl_ref_downcast};
-/// use tvm_ffi::{Any, AnyView, Object, ObjectRefAnyCompatible, ObjectRefCore};
+/// use tvm_ffi::derive::ObjectRef;
+/// use tvm_ffi::{rs_object, Any, AnyView, Object, ObjectArc, ObjectRefAnyCompatible};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -283,24 +282,17 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 ///     pub first: i64,
 ///     pub second: i64,
 /// }
-/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+///
+/// #[derive(Clone, ObjectRef)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
 ///
 /// /// A `MyPair` whose `first` is positive.
-/// #[derive(Clone)]
-/// #[repr(transparent)]
-/// pub struct PositivePair(ObjectArc<MyPairObj>);
-///
-/// unsafe impl ObjectRefCore for PositivePair {
-///     type ContainerType = MyPairObj;
-///     fn data(this: &Self) -> &ObjectArc<MyPairObj> {
-///         &this.0
-///     }
-///     fn into_data(this: Self) -> ObjectArc<MyPairObj> {
-///         this.0
-///     }
-///     unsafe fn from_data(data: ObjectArc<MyPairObj>) -> Self {
-///         Self(data)
-///     }
+/// #[derive(Clone, ObjectRef)]
+/// #[object_ref(skip_any_compatible)]
+/// pub struct PositivePair {
+///     data: ObjectArc<MyPairObj>,
 /// }
 ///
 /// unsafe impl ObjectRefAnyCompatible for PositivePair {
@@ -311,16 +303,14 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 ///     // A positive integer `n` converts to the pair `(n, n)`.
 ///     fn convert_fallback(value: AnyView<'_>) -> Option<Self> {
 ///         let n = i64::try_from(value).ok().filter(|n| *n > 0)?;
-///         Some(Self(ObjectArc::new(MyPairObj::new(Object::new(), n, n))))
+///         Some(Self::from_object(MyPairObj::new(Object::new(), n, n)))
 ///     }
 /// }
-/// unsafe_impl_ref_downcast!(PositivePair);
-/// impl_try_from_any!(PositivePair);
 ///
-/// let negative = Any::from(MyPair::from(MyPairObj::new(Object::new(), -1, 2)));
+/// let negative = Any::from(MyPair::from_object(MyPairObj::new(Object::new(), -1, 2)));
 /// assert!(negative.downcast_ref::<PositivePair>().is_none());
 /// assert!(PositivePair::try_from(negative).is_err());
-/// assert_eq!(PositivePair::try_from(Any::from(3_i64))?.0.second, 3);
+/// assert_eq!(PositivePair::try_from(Any::from(3_i64))?.second, 3);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 pub unsafe trait ObjectRefAnyCompatible: ObjectRefCore {
@@ -446,7 +436,7 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
 ///
 /// An owned reference converts into an owned `T`, and a borrowed one borrows
 /// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
-/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast)
+/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_ref_upcast!`](crate::unsafe_impl_object_ref_upcast)
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes
@@ -457,8 +447,9 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
 ///
 /// ```
 /// use std::borrow::Borrow;
+/// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::object::{IntoObjectRef, ObjectRef, ObjectRefCore};
-/// use tvm_ffi::{def_object_ref, rs_object, Object};
+/// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -466,13 +457,17 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
 ///     pub first: i64,
 ///     pub second: i64,
 /// }
-/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+///
+/// #[derive(Clone, ObjectRef)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
 ///
 /// fn same(a: impl IntoObjectRef<ObjectRef>, b: &ObjectRef) -> bool {
 ///     a.into_object_ref().borrow().same_as(b)
 /// }
 ///
-/// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, 2));
+/// let pair = MyPair::from_object(MyPairObj::new(Object::new(), 1, 2));
 /// let base: ObjectRef = pair.clone().into();
 /// assert!(same(&pair, &base)); // borrowed as `&ObjectRef`, no new reference
 /// assert!(same(pair.clone(), &base)); // moved into an `ObjectRef`
@@ -692,6 +687,7 @@ pub(crate) fn type_key_of_index(type_index: i32) -> String {
 /// through reference counting.
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
+#[object_ref(skip_deref)]
 pub struct ObjectRef {
     data: ObjectArc<Object>,
 }

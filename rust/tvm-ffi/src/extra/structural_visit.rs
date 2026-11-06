@@ -62,7 +62,7 @@ use super::cold_init_lazy_lock::ColdInitLazyLock;
 pub use super::structural_walk::*;
 
 use crate::any::{Any, AnyView};
-use crate::derive::Object;
+use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{Object, ObjectArc};
@@ -238,19 +238,21 @@ const _: () = {
     assert!(DefRegionKind::Simple as i32 == TVMFFIDefRegionKind::kTVMFFIDefRegionKindSimple as i32);
 };
 
-crate::def_object_ref! {
-    /// Interrupt state of a traversal, mirroring C++ `ffi.VisitInterrupt`.
-    ///
-    /// Entry points and visitor-layer calls return
-    /// `Result<Option<VisitInterrupt>>`: `Ok(None)` means the (sub)graph was
-    /// visited completely, `Ok(Some(..))` means a handler halted the traversal
-    /// with this interrupt, and `Err` means it failed.
-    ///
-    /// This is an owning object reference, like [`Error`]. Payload reads through
-    /// `interrupt.value` borrow the shared [`VisitInterruptObj`]; use [`Self::new`]
-    /// instead of a payload-only struct literal. Moving or replacing the payload
-    /// through this reference is not supported; clone it to retain a separate owner.
-    pub VisitInterrupt, crate::object::ObjectRef, VisitInterruptObj
+/// Interrupt state of a traversal, mirroring C++ `ffi.VisitInterrupt`.
+///
+/// Entry points and visitor-layer calls return
+/// `Result<Option<VisitInterrupt>>`: `Ok(None)` means the (sub)graph was
+/// visited completely, `Ok(Some(..))` means a handler halted the traversal
+/// with this interrupt, and `Err` means it failed.
+///
+/// This is an owning object reference, like [`Error`]. Payload reads through
+/// `interrupt.value` borrow the shared [`VisitInterruptObj`]; use [`Self::new`]
+/// instead of a payload-only struct literal. Moving or replacing the payload
+/// through this reference is not supported; clone it to retain a separate owner.
+#[repr(C)]
+#[derive(Clone, ObjectRef)]
+pub struct VisitInterrupt {
+    data: ObjectArc<VisitInterruptObj>,
 }
 
 impl VisitInterrupt {
@@ -266,11 +268,10 @@ impl VisitInterrupt {
     /// The interrupt.
     #[inline(always)]
     pub fn new<T: Into<Any>>(payload: T) -> Self {
-        VisitInterruptObj {
+        Self::from_object(VisitInterruptObj {
             base: Object::new(),
             value: payload.into(),
-        }
-        .into()
+        })
     }
 }
 

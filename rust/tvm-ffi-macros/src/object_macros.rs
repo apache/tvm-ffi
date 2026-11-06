@@ -516,13 +516,18 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
     TokenStream::from(expand_object_ref(&derive_input, &get_tvm_ffi_crate()))
 }
 
-/// The `ObjectRefCore` and `AnyCompatible` impls of a reference struct,
+/// The impls of a reference struct, as configured by `#[object_ref(...)]`,
 /// naming the tvm-ffi crate `tvm_ffi_crate`.
 pub(crate) fn expand_object_ref(
     derive_input: &DeriveInput,
     tvm_ffi_crate: &TokenStream2,
 ) -> TokenStream2 {
     let struct_name = derive_input.ident.clone();
+    let options = object_ref_options(derive_input);
+    let tvm_ffi_crate = &match &options.tvm_ffi_crate {
+        Some(path) => quote!(#path),
+        None => tvm_ffi_crate.clone(),
+    };
 
     // The `ObjectArc<T>` slot is the first field; its name is the struct's choice
     // (`data` in this crate, `base` in stubgen output, so that reflected fields
@@ -536,10 +541,13 @@ pub(crate) fn expand_object_ref(
         _ => panic!("derive only works for structs"),
     }
     .expect("First field must be `<name>: ObjectArc<T>`");
+    // Spell the object type as written, so rustdoc shows `Target = FooObj`.
+    let object_ty = object_arc_argument(&data_ty)
+        .unwrap_or_else(|| quote!(<#data_ty as ::core::ops::Deref>::Target));
 
     let mut expanded = quote! {
         unsafe impl #tvm_ffi_crate::object::ObjectRefCore for #struct_name {
-            type ContainerType = <#data_ty as std::ops::Deref>::Target;
+            type ContainerType = #object_ty;
             #[inline]
             fn data(this: &Self) -> &#tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
                 &this.#data_id
@@ -556,6 +564,15 @@ pub(crate) fn expand_object_ref(
             }
         }
 
+        impl #struct_name {
+            /// The reference to a new object, for the type's constructors.
+            #[allow(dead_code)]
+            #[inline(always)]
+            fn from_object(object: #object_ty) -> Self {
+                Self { #data_id: #tvm_ffi_crate::object::ObjectArc::new(object) }
+            }
+        }
+
         // The handle is exactly its object pointer, which an FFI cell's
         // payload word holds, so an `Array` cell can lend `&Self` in place.
         const _: () = {
@@ -568,12 +585,8 @@ pub(crate) fn expand_object_ref(
             );
         };
 
-        unsafe impl #tvm_ffi_crate::type_traits::RefFromAnyUnchecked for #struct_name {
-            #[inline(always)]
-            unsafe fn ref_from_any_unchecked(cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> &Self {
-                &*(::core::ptr::addr_of!(cell.data_union) as *const Self)
-            }
-        }
+        // SAFETY: one `ObjectArc` (asserted above), checked by `check_any_strict`.
+        #tvm_ffi_crate::unsafe_impl_object_ref_downcast_ref!(#struct_name);
 
         // As `str`, `Path` and `[T]` do, so `impl AsRef<Base>` bounds accept the
         // base itself; upcasts add `AsRef` to each base.
@@ -581,24 +594,6 @@ pub(crate) fn expand_object_ref(
             #[inline(always)]
             fn as_ref(&self) -> &Self {
                 self
-            }
-        }
-
-        unsafe impl #tvm_ffi_crate::type_traits::DowncastRefFromAny for #struct_name {
-            #[inline(always)]
-            unsafe fn downcast_ref_from_any(
-                cell: &#tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny,
-            ) -> ::core::option::Option<&Self> {
-                #tvm_ffi_crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
-            }
-        }
-
-        unsafe impl #tvm_ffi_crate::type_traits::DowncastRefFromObject for #struct_name {
-            #[inline(always)]
-            unsafe fn downcast_ref_from_object(
-                place: &*mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject,
-            ) -> ::core::option::Option<&Self> {
-                #tvm_ffi_crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
             }
         }
 
@@ -624,42 +619,116 @@ pub(crate) fn expand_object_ref(
                 value.clone()
             }
         }
-
-        // The default `AnyCompatible`: the object type check alone, which
-        // `match_any!` may route by.
-        unsafe impl #tvm_ffi_crate::object::ObjectRefAnyCompatible for #struct_name {
-            const MATCH_ANY_EXACT: bool = true;
-        }
     };
-    // The runtime type key and object address, so `Result<_, Self>` from
-    // `downcast` can be unwrapped. `#[object_ref(skip_debug)]` keeps a
-    // hand-written one.
-    if !object_ref_options(derive_input).skip_debug {
+    // The default `AnyCompatible`: the object type check alone, which
+    // `match_any!` may route by.
+    if !options.skip_any_compatible {
         expanded.extend(quote! {
-        impl ::core::fmt::Debug for #struct_name {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            unsafe impl #tvm_ffi_crate::object::ObjectRefAnyCompatible for #struct_name {
+                const MATCH_ANY_EXACT: bool = true;
+            }
+        });
+    }
+    // Field reads through the reference, as C++ `operator->`.
+    if !options.skip_deref {
+        expanded.extend(quote! {
+            impl ::core::ops::Deref for #struct_name {
+                type Target = #object_ty;
+                #[inline(always)]
+                fn deref(&self) -> &Self::Target {
+                    &self.#data_id
+                }
+            }
+        });
+    }
+    // The runtime type key and object address, so `Result<_, Self>` from
+    // `downcast` can be unwrapped.
+    if !options.skip_debug {
+        expanded.extend(quote! {
+            impl ::core::fmt::Debug for #struct_name {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     #tvm_ffi_crate::object::fmt_object_ref(self, f)
                 }
             }
         });
     }
-    // skip ObjectRef since it can create circular dependency with any.rs
+    // `ObjectRef` itself skips these: `any.rs` implements them for it.
     if struct_name != "ObjectRef" {
         expanded.extend(quote! {
-            #tvm_ffi_crate::impl_try_from_any!(#struct_name);
-            #tvm_ffi_crate::impl_arg_into_ref!(#struct_name);
-            #tvm_ffi_crate::impl_into_arg_holder_default!(#struct_name);
+            #tvm_ffi_crate::impl_any_compatible_conversions!(#struct_name);
             // Every object reference upcasts to the root `ObjectRef`.
-            #tvm_ffi_crate::unsafe_impl_object_upcast!(#struct_name => #tvm_ffi_crate::object::ObjectRef);
+            #tvm_ffi_crate::unsafe_impl_object_ref_upcast!(#struct_name => #tvm_ffi_crate::object::ObjectRef);
+        });
+    }
+    // The root upcast is already above.
+    if let Some(parent) = options.parent.filter(|parent| !is_object_ref_root(parent)) {
+        expanded.extend(quote! {
+            #tvm_ffi_crate::unsafe_impl_object_ref_upcast!(#struct_name => #parent);
         });
     }
     expanded
 }
 
+/// `T` of a field type spelled `ObjectArc<T>`.
+fn object_arc_argument(ty: &syn::Type) -> Option<TokenStream2> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    let last = path.path.segments.last()?;
+    if last.ident != "ObjectArc" {
+        return None;
+    }
+    match &last.arguments {
+        syn::PathArguments::AngleBracketed(args) => match args.args.first()? {
+            syn::GenericArgument::Type(object) if args.args.len() == 1 => Some(quote!(#object)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether `ty` names the root `ObjectRef`.
+fn is_object_ref_root(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "ObjectRef"),
+        _ => false,
+    }
+}
+
 /// The options of `#[object_ref(...)]` on an `ObjectRef` derive.
 #[derive(Default)]
 struct ObjectRefOptions {
+    tvm_ffi_crate: Option<syn::Path>,
+    parent: Option<syn::Type>,
+    skip_deref: bool,
     skip_debug: bool,
+    skip_any_compatible: bool,
+}
+
+/// One `#[object_ref(...)]` item: a flag, `parent = Type` or `crate = path`.
+enum ObjectRefOption {
+    Flag(syn::Ident),
+    Parent(Box<syn::Type>),
+    Crate(syn::Path),
+}
+
+impl syn::parse::Parse for ObjectRefOption {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let name: syn::Ident = input.call(syn::Ident::parse_any)?;
+        if name == "parent" {
+            input.parse::<syn::Token![=]>()?;
+            return Ok(ObjectRefOption::Parent(Box::new(input.parse()?)));
+        }
+        if name == "crate" {
+            input.parse::<syn::Token![=]>()?;
+            return Ok(ObjectRefOption::Crate(syn::Path::parse_mod_style(input)?));
+        }
+        Ok(ObjectRefOption::Flag(name))
+    }
 }
 
 fn object_ref_options(derive_input: &DeriveInput) -> ObjectRefOptions {
@@ -669,16 +738,25 @@ fn object_ref_options(derive_input: &DeriveInput) -> ObjectRefOptions {
         .iter()
         .filter(|a| a.path.is_ident("object_ref"))
     {
-        let nested = match attr.parse_meta() {
-            Ok(syn::Meta::List(list)) => list.nested,
-            _ => abort!(attr, "expected `#[object_ref(...)]`"),
-        };
-        for item in nested {
+        let items = attr
+            .parse_args_with(
+                syn::punctuated::Punctuated::<ObjectRefOption, syn::Token![,]>::parse_terminated,
+            )
+            .unwrap_or_else(|error| abort!(error.span(), "{}", error));
+        for item in items {
             match item {
-                syn::NestedMeta::Meta(syn::Meta::Path(path)) if path.is_ident("skip_debug") => {
-                    options.skip_debug = true
+                ObjectRefOption::Parent(parent) => options.parent = Some(*parent),
+                ObjectRefOption::Crate(path) => options.tvm_ffi_crate = Some(path),
+                ObjectRefOption::Flag(flag) if flag == "skip_deref" => options.skip_deref = true,
+                ObjectRefOption::Flag(flag) if flag == "skip_debug" => options.skip_debug = true,
+                ObjectRefOption::Flag(flag) if flag == "skip_any_compatible" => {
+                    options.skip_any_compatible = true
                 }
-                other => abort!(other, "unknown `object_ref` option; expected `skip_debug`"),
+                ObjectRefOption::Flag(flag) => abort!(
+                    flag,
+                    "unknown `object_ref` option; expected `parent = ...`, `skip_deref`, \
+                     `skip_debug`, `skip_any_compatible` or `crate = ...`"
+                ),
             }
         }
     }

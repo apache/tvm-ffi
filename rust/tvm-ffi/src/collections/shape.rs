@@ -50,6 +50,7 @@ pub struct ShapeObj {
 /// ```
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
+#[object_ref(skip_deref)]
 pub struct Shape {
     data: ObjectArc<ShapeObj>,
 }

@@ -20,7 +20,6 @@
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 
-mod def_object_ref;
 mod dispatch;
 mod match_any;
 mod object_macros;
@@ -105,12 +104,8 @@ pub fn derive_object(input: TokenStream) -> TokenStream {
     object_macros::derive_object(input)
 }
 
-/// Derive `ObjectRefCore` for a reference struct whose only field is an
-/// `ObjectArc<T>`, with the default `ObjectRefAnyCompatible`, the in-place
-/// downcasts, `TryFrom<Any>`, the upcast to `ObjectRef`, and `Debug`.
-///
-/// `#[object_ref(skip_debug)]` leaves `Debug` to a hand-written impl. A
-/// reference that overrides `ObjectRefAnyCompatible` is written by hand.
+// Documented on the `tvm_ffi::derive::ObjectRef` re-export, whose examples
+// run as tvm-ffi doctests.
 #[proc_macro_error]
 #[proc_macro_derive(ObjectRef, attributes(object_ref))]
 pub fn derive_object_ref(input: TokenStream) -> TokenStream {
@@ -123,12 +118,4 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
     rs_object::rs_object(args, item)
-}
-
-// Documented on the `tvm_ffi::def_object_ref` re-export, whose examples run as
-// tvm-ffi doctests.
-#[proc_macro_error]
-#[proc_macro]
-pub fn def_object_ref(input: TokenStream) -> TokenStream {
-    def_object_ref::def_object_ref(input)
 }
