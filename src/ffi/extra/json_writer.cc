@@ -168,6 +168,7 @@ class JSONWriter {
                                 fixed ? 1 : 17);
     return static_cast<int>(result.ptr - buffer);
 #else
+    // Create "C" numeric locale once to ignore process locale; twin: json_parser.cc.
     static const struct NumberLocale {
 #ifdef _WIN32
       _locale_t value = _create_locale(LC_NUMERIC, "C");

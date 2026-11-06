@@ -243,8 +243,10 @@ class JSONParserContext {
       return true;
     }
 #endif
+    // Subnormals fall through to strtod_l to preserve underflow reporting (ERANGE).
     std::string temp_buffer(start_pos, cur_);
     char* end_ptr;
+    // Create "C" numeric locale once to ignore process locale; twin: json_writer.cc.
     static const struct NumberLocale {
 #ifdef _WIN32
       _locale_t value = _create_locale(LC_NUMERIC, "C");
