@@ -18,12 +18,27 @@
  */
 use tvm_ffi::*;
 
-/// Address of the element buffer and of its deleter.
+/// Address of the element buffer and of its deleter, read through the C ABI
+/// layout of C++ `ListObj`: the object header, then its sequence cell.
 fn buffer_identity<T>(list: &List<T>) -> (usize, usize) {
-    let obj = <List<T> as ObjectRefCore>::data(list);
+    #[repr(C)]
+    struct SeqCell {
+        data: *mut core::ffi::c_void,
+        size: i64,
+        capacity: i64,
+        data_deleter: Option<unsafe extern "C" fn(*mut core::ffi::c_void)>,
+    }
+    #[repr(C)]
+    struct Layout {
+        header: tvm_ffi::tvm_ffi_sys::TVMFFIObject,
+        cell: SeqCell,
+    }
+    let object = ObjectArc::as_ptr(<List<T> as ObjectRefCore>::data(list)) as *const Layout;
+    // SAFETY: a `List` object is laid out as C++ `ListObj`, and `list` keeps it alive.
+    let cell = unsafe { &(*object).cell };
     (
-        obj.data as usize,
-        obj.data_deleter.map(|f| f as usize).unwrap_or(0),
+        cell.data as usize,
+        cell.data_deleter.map(|f| f as usize).unwrap_or(0),
     )
 }
 
