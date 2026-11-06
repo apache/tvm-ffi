@@ -273,6 +273,20 @@ unsafe impl RefFromAnyUnchecked for f64 {
     }
 }
 
+unsafe impl RefFromAnyUnchecked for tvm_ffi_sys::dlpack::DLDataType {
+    #[inline(always)]
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
+        &cell.data_union.v_dtype
+    }
+}
+
+unsafe impl RefFromAnyUnchecked for tvm_ffi_sys::dlpack::DLDevice {
+    #[inline(always)]
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
+        &cell.data_union.v_device
+    }
+}
+
 /// Types that [`crate::Any::downcast_ref`] and [`crate::AnyView::downcast_ref`]
 /// can borrow from an FFI cell in place: object types (`ArrayObj`), and the
 /// [`RefFromAnyUnchecked`] types (managed references such as `Array<T>`, `String`,
@@ -401,7 +415,15 @@ macro_rules! impl_downcast_ref_from_any {
     };
 }
 
-impl_downcast_ref_from_any!(Any, crate::String, crate::string::Bytes, i64, f64);
+impl_downcast_ref_from_any!(
+    Any,
+    crate::String,
+    crate::string::Bytes,
+    i64,
+    f64,
+    tvm_ffi_sys::dlpack::DLDataType,
+    tvm_ffi_sys::dlpack::DLDevice,
+);
 
 mod container_element_ops {
     use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
