@@ -36,10 +36,11 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyViewToOwnedAny};
 ///
 /// let array = Array::from_vec(vec![1_i64, 2, 3]);
 /// let view = AnyView::from(&array);
-/// assert_eq!(view.try_as::<Array<i64>>().unwrap().len(), 3);
+/// assert_eq!(view.downcast_ref::<Array<i64>>().unwrap().len(), 3);
 ///
 /// let owned = Any::from(view);
-/// assert_eq!(owned.try_as::<Array<i64>>().unwrap().len(), 3);
+/// assert_eq!(Array::<i64>::try_from(owned)?.len(), 3);
+/// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -54,8 +55,8 @@ pub struct AnyView<'a> {
 /// `Any` holds any FFI value, such as an integer, a string or an object, and
 /// owns it: cloning an `Any` that holds an object retains the object, and
 /// dropping it releases the object. Any [`AnyCompatible`] value converts into
-/// it with `From`; [`try_as`](Self::try_as) and [`match_any!`](crate::match_any)
-/// read it back. Borrow it as an [`AnyView`] to pass it without retaining.
+/// it with `From`; `TryFrom` (converting), [`downcast_ref`](Self::downcast_ref)
+/// (borrowing) and [`match_any!`](crate::match_any) read it back. Borrow it as an [`AnyView`] to pass it without retaining.
 ///
 /// # Examples
 ///
@@ -63,11 +64,12 @@ pub struct AnyView<'a> {
 /// use tvm_ffi::Any;
 ///
 /// let value = Any::from(42_i64);
-/// assert_eq!(value.try_as::<i64>(), Some(42));
-/// assert_eq!(value.try_as::<tvm_ffi::String>(), None);
+/// assert_eq!(i64::try_from(&value)?, 42);
+/// assert!(tvm_ffi::String::try_from(&value).is_err());
 ///
 /// let text = Any::from(tvm_ffi::String::from("hello"));
-/// assert_eq!(text.try_as::<tvm_ffi::String>().unwrap().as_str(), "hello");
+/// assert_eq!(text.downcast_ref::<tvm_ffi::String>().unwrap().as_str(), "hello");
+/// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[repr(C)]
 pub struct Any {
@@ -160,7 +162,7 @@ impl<'a> AnyView<'a> {
     ///
     /// `T` is an object type such as `ArrayObj`, a managed reference such as
     /// `Array<i64>`, or a value stored in place such as `String` or `i64`. The
-    /// check is strict, as in [`try_as`](Self::try_as), and never converts.
+    /// check is strict and never converts, unlike `TryFrom`.
     /// The borrow does not change any reference count and is tied to this view,
     /// which holds its own copy of the value's cell.
     ///
@@ -175,25 +177,11 @@ impl<'a> AnyView<'a> {
         unsafe { T::downcast_ref_from_any(&self.data) }
     }
 
-    /// Return the viewed value as a `T` when it is stored as exactly `T`.
-    ///
-    /// The check is strict and never converts: a stored integer is not returned as
-    /// `f64`, and an object is returned only as a reference type it is an instance
-    /// of. On success, `Any::from` of the result holds the same value.
-    ///
-    /// # Returns
-    ///
-    /// The value, or `None` when it is not stored as `T`.
-    ///
-    /// ```
-    /// use tvm_ffi::AnyView;
-    /// assert_eq!(AnyView::from(&7_i64).try_as::<i64>(), Some(7));
-    /// assert_eq!(AnyView::from(&7_i64).try_as::<f64>(), None);
-    /// ```
-    ///
-    /// See also [`Any::try_as`].
+    /// The value as a `T` when it is stored as exactly `T`, never converting:
+    /// the strict check that dispatch and `Optional` rely on. Public code
+    /// converts with `TryFrom` or borrows with [`downcast_ref`](Self::downcast_ref).
     #[inline(always)]
-    pub fn try_as<T>(&self) -> Option<T>
+    pub(crate) fn as_strict<T>(&self) -> Option<T>
     where
         T: AnyCompatible,
     {
@@ -316,7 +304,7 @@ impl Any {
     ///
     /// `T` is an object type such as `ArrayObj`, a managed reference such as
     /// `Array<i64>`, or a value stored in place such as `String` or `i64`. The
-    /// check is strict, as in [`try_as`](Self::try_as), and never converts.
+    /// check is strict and never converts, unlike `TryFrom`.
     /// This neither consumes `self` nor changes any reference count, and the
     /// returned reference cannot outlive `self`.
     ///
@@ -332,36 +320,18 @@ impl Any {
     /// assert!(value.downcast_ref::<i64>().is_none());
     /// ```
     ///
-    /// See also [`try_as`](Self::try_as).
+    /// See also [`match_any!`](crate::match_any).
     #[inline]
     pub fn downcast_ref<T: crate::type_traits::DowncastRefFromAny>(&self) -> Option<&T> {
         // SAFETY: the owned cell stays valid for as long as `self` is borrowed.
         unsafe { T::downcast_ref_from_any(&self.data) }
     }
 
-    /// Return the stored value as a `T` when it is stored as exactly `T`.
-    ///
-    /// The check is strict and never converts: a stored integer is not returned as
-    /// `f64`, and an object is returned only as a reference type it is an instance
-    /// of. On success, `Any::from` of the result holds the same value. A failed
-    /// check is cheap, so `try_as` also serves as a type test. A returned object
-    /// reference is retained; use [`downcast_ref`](Self::downcast_ref) to borrow the
-    /// object instead.
-    ///
-    /// # Returns
-    ///
-    /// The value, or `None` when it is not stored as `T`.
-    ///
-    /// ```
-    /// use tvm_ffi::Any;
-    /// let value = Any::from(7_i64);
-    /// assert_eq!(value.try_as::<i64>(), Some(7));
-    /// assert_eq!(value.try_as::<f64>(), None);
-    /// ```
-    ///
-    /// See also [`match_any!`](crate::match_any).
-    #[inline]
-    pub fn try_as<T>(&self) -> Option<T>
+    /// The value as a `T` when it is stored as exactly `T`, never converting:
+    /// the strict check that dispatch and `Optional` rely on. Public code
+    /// converts with `TryFrom` or borrows with [`downcast_ref`](Self::downcast_ref).
+    #[inline(always)]
+    pub(crate) fn as_strict<T>(&self) -> Option<T>
     where
         T: AnyCompatible,
     {
@@ -530,6 +500,14 @@ impl<'a, T: AnyCompatible> TryFrom<AnyView<'a>> for TryFromTemp<T> {
                     .map(TryFromTemp::new)
             }
         }
+    }
+}
+
+impl<'a, T: AnyCompatible> TryFrom<&'a Any> for TryFromTemp<T> {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: &'a Any) -> Result<Self, Self::Error> {
+        TryFromTemp::try_from(AnyView::from(value))
     }
 }
 

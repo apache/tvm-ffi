@@ -144,7 +144,7 @@ impl<T: OptionalCompatible> Optional<T> {
     /// object payloads). Returns `None` when `nullopt`. No FFI call.
     #[inline]
     pub fn get(&self) -> Option<T> {
-        self.data.try_as::<T>()
+        self.data.as_strict::<T>()
     }
 
     /// Takes the value out, consuming self (moves the payload, no `inc_ref`).

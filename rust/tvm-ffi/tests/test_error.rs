@@ -89,7 +89,7 @@ fn test_error_with_context() {
 fn test_error_any_convert() {
     let error = Error::new(RUNTIME_ERROR, "test error", "test traceback");
     let any = Any::from(error.clone());
-    let error2 = any.clone().try_as::<Error>().unwrap();
+    let error2 = any.clone().downcast_ref::<Error>().cloned().unwrap();
     assert_eq!(error2.kind(), RUNTIME_ERROR);
     assert_eq!(error2.message(), "test error");
     assert_eq!(error2.backtrace(), "test traceback");

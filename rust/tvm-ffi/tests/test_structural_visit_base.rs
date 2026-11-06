@@ -104,11 +104,11 @@ unsafe impl StructuralVisitorBase for CountingBase {
         );
         (*runtime).defaults.set((*runtime).defaults.get() + 1);
         // A default with observable behavior: redirect 10 to children 11 and 12.
-        if value.try_as::<i64>() == Some(10) {
+        if value.downcast_ref::<i64>().copied() == Some(10) {
             let children = Array::from_vec(vec![11_i64, 12]);
             return StructuralVisitorObj::default_visit_raw(runtime.cast(), (&children).into());
         }
-        if value.try_as::<i64>() == Some(-1) {
+        if value.downcast_ref::<i64>().copied() == Some(-1) {
             let result = BASE_RESULT.with_borrow_mut(Option::take).unwrap();
             return Any::into_raw_ffi_any(match result {
                 Ok(None) => Any::new(),
@@ -117,7 +117,7 @@ unsafe impl StructuralVisitorBase for CountingBase {
             });
         }
         // Exercise the shared resolved-hook entry as well as ordinary fallback.
-        if value.try_as::<Array<Any>>().is_some() {
+        if value.downcast_ref::<Array<Any>>().cloned().is_some() {
             let hook = TypeAttrColumn::new("__s_visit__")
                 .and_then(|column| column.get(value.type_index()))
                 .unwrap();

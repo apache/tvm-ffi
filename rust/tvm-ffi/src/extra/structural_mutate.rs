@@ -571,7 +571,7 @@ impl<'a, T> MutationView<'a, T> {
 
     /// Narrow the matched type without acquiring an owning reference.
     ///
-    /// The check is the strict one of [`Any::try_as`], and the view keeps its
+    /// The check is the strict one of [`Any::downcast_ref`], and the view keeps its
     /// permission.
     ///
     /// # Returns

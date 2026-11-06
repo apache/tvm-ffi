@@ -59,7 +59,7 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             let outer = visitor.def_region_kind();
-            if let Some(integer) = value.try_as::<i64>() {
+            if let Some(integer) = value.downcast_ref::<i64>().copied() {
                 self.seen.push((integer, outer));
                 return match (integer, self.outcome) {
                     (1, Outcome::Interrupt) => Ok(Some(VisitInterrupt::new(42_i64))),
@@ -94,13 +94,19 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
                 visitor.with_def_region_kind(Use, |visitor| {
                     let current = value;
                     let result = visitor.default_visit(self, &current);
-                    assert_eq!(current.try_as::<Array<i64>>().unwrap().len(), 2);
+                    assert_eq!(
+                        current.downcast_ref::<Array<i64>>().cloned().unwrap().len(),
+                        2
+                    );
                     result
                 })
             };
             self.depth -= 1;
             assert_eq!(visitor.def_region_kind(), outer);
-            assert_eq!(value.try_as::<Array<i64>>().unwrap().len(), 2);
+            assert_eq!(
+                value.downcast_ref::<Array<i64>>().cloned().unwrap().len(),
+                2
+            );
             assert!(visitor.visit(self, &[4_i64, 3, 2][level])?.is_none());
             result
         }
@@ -118,7 +124,16 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
         match outcome {
             Outcome::Finish => assert!(result.unwrap().is_none()),
             Outcome::Interrupt => {
-                assert_eq!(result.unwrap().unwrap().value.try_as::<i64>().unwrap(), 42)
+                assert_eq!(
+                    result
+                        .unwrap()
+                        .unwrap()
+                        .value
+                        .downcast_ref::<i64>()
+                        .copied()
+                        .unwrap(),
+                    42
+                )
             }
             Outcome::Error => assert!(result.err().unwrap().to_string().contains("descent failed")),
         }
@@ -162,7 +177,7 @@ fn default_descent_retargets_without_dispatching_the_container() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             let kind = visitor.def_region_kind();
-            if value.try_as::<i64>() == Some(-1) {
+            if value.downcast_ref::<i64>().copied() == Some(-1) {
                 assert!(visitor
                     .with_def_region_kind(DefRegionKind::Pattern, |visitor| visitor
                         .default_visit(self, &Any::new()))?
@@ -171,11 +186,11 @@ fn default_descent_retargets_without_dispatching_the_container() {
                 let result = visitor.with_def_region_kind(DefRegionKind::Pattern, |visitor| {
                     visitor.default_visit(self, &target)
                 });
-                assert_eq!(value.try_as::<i64>(), Some(-1));
+                assert_eq!(value.downcast_ref::<i64>().copied(), Some(-1));
                 assert_eq!(visitor.def_region_kind(), DefRegionKind::None);
                 return result;
             }
-            if let Some(array) = value.try_as::<Array<Any>>() {
+            if let Some(array) = value.downcast_ref::<Array<Any>>().cloned() {
                 assert_eq!(
                     array.len(),
                     2,
@@ -185,13 +200,19 @@ fn default_descent_retargets_without_dispatching_the_container() {
                 let result = visitor.with_def_region_kind(DefRegionKind::Pattern, |visitor| {
                     visitor.default_visit(self, &array.get(0).unwrap())
                 });
-                assert_eq!(value.try_as::<Array<Any>>().unwrap().len(), 2);
+                assert_eq!(
+                    value.downcast_ref::<Array<Any>>().cloned().unwrap().len(),
+                    2
+                );
                 assert_eq!(visitor.def_region_kind(), DefRegionKind::None);
                 self.0.push(("after", 2, visitor.def_region_kind()));
                 result
             } else {
-                self.0
-                    .push(("integer", value.try_as::<i64>().unwrap(), kind));
+                self.0.push((
+                    "integer",
+                    value.downcast_ref::<i64>().copied().unwrap(),
+                    kind,
+                ));
                 Ok(None)
             }
         }
@@ -241,7 +262,7 @@ fn regions_compose_with_field_flags_and_function_hooks() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             let kind = visitor.def_region_kind();
-            if let Some(integer) = value.try_as::<i64>() {
+            if let Some(integer) = value.downcast_ref::<i64>().copied() {
                 self.seen.push((integer, kind));
                 Ok(None)
             } else {
@@ -322,7 +343,7 @@ fn reflected_pattern_precedes_default_descent() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             let kind = visitor.def_region_kind();
-            match value.try_as::<i64>() {
+            match value.downcast_ref::<i64>().copied() {
                 Some(integer) => {
                     self.0.push((integer, kind));
                     match integer {
@@ -422,7 +443,7 @@ fn plain_walk_uses_registered_array_hook() {
     assert!(structural_walk(
         &root,
         |value: AnyView<'_>| {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 integers += 1;
             }
             WalkResult::Advance
@@ -444,9 +465,9 @@ fn plain_walk_visits_map_values_without_visiting_keys() {
     assert!(structural_walk(
         &root,
         |value: AnyView<'_>| {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 integers += 1;
-            } else if value.try_as::<FfiString>().is_some() {
+            } else if value.downcast_ref::<FfiString>().cloned().is_some() {
                 strings += 1;
             }
             WalkResult::Advance
@@ -470,9 +491,9 @@ fn primitive_values_are_leaves_in_pre_and_post_order() {
     assert!(structural_walk(
         &dtype,
         |value: AnyView<'_>| {
-            if value.try_as::<DLDataType>().is_some() {
+            if value.downcast_ref::<DLDataType>().copied().is_some() {
                 pre.push("dtype");
-            } else if value.try_as::<i64>().is_some() {
+            } else if value.downcast_ref::<i64>().copied().is_some() {
                 pre.push("child");
             }
             WalkResult::Advance
@@ -487,7 +508,7 @@ fn primitive_values_are_leaves_in_pre_and_post_order() {
     assert!(structural_walk(
         &dtype,
         |value: AnyView<'_>| {
-            if value.try_as::<DLDataType>().is_some() {
+            if value.downcast_ref::<DLDataType>().copied().is_some() {
                 skipped.push("dtype");
                 WalkResult::Skip
             } else {
@@ -505,9 +526,9 @@ fn primitive_values_are_leaves_in_pre_and_post_order() {
     assert!(structural_walk(
         &dtype,
         |value: AnyView<'_>| {
-            if value.try_as::<DLDataType>().is_some() {
+            if value.downcast_ref::<DLDataType>().copied().is_some() {
                 post.push("dtype");
-            } else if value.try_as::<i64>().is_some() {
+            } else if value.downcast_ref::<i64>().copied().is_some() {
                 post.push("child");
             }
             WalkResult::Advance
@@ -541,7 +562,7 @@ fn primitive_fast_path_preserves_none_interrupt_and_error() {
     )
     .unwrap()
     .unwrap();
-    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 9);
+    assert_eq!(interrupt.value.downcast_ref::<i64>().copied().unwrap(), 9);
 
     let error = match structural_walk(
         &1i64,
@@ -565,9 +586,9 @@ fn registered_map_hook_visits_all_values_without_visiting_keys() {
     assert!(structural_walk(
         &root,
         |value: AnyView<'_>| {
-            if let Some(integer) = value.try_as::<i64>() {
+            if let Some(integer) = value.downcast_ref::<i64>().copied() {
                 sum += integer;
-            } else if value.try_as::<FfiString>().is_some() {
+            } else if value.downcast_ref::<FfiString>().cloned().is_some() {
                 strings += 1;
             }
             WalkResult::Advance
@@ -588,7 +609,7 @@ fn interrupt_payload_crosses_map_traversal() {
     let outcome = structural_walk(
         &root,
         |value: AnyView<'_>| {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 return WalkResult::InterruptWith(99i64.into());
             }
             WalkResult::Advance
@@ -599,7 +620,7 @@ fn interrupt_payload_crosses_map_traversal() {
     let Some(interrupt) = outcome else {
         panic!("map walk unexpectedly completed");
     };
-    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 99);
+    assert_eq!(interrupt.value.downcast_ref::<i64>().copied().unwrap(), 99);
 }
 
 #[test]
@@ -608,7 +629,7 @@ fn handler_error_crosses_map_traversal() {
     let error = match structural_walk(
         &root,
         |value: AnyView<'_>| -> Result<WalkResult> {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 Err(runtime_error("map handler failed"))
             } else {
                 Ok(WalkResult::Advance)
@@ -630,7 +651,7 @@ fn interrupt_stops_without_running_remaining_callbacks() {
     let outcome = structural_walk(
         &root,
         |value: AnyView<'_>| {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 integers += 1;
                 return WalkResult::Interrupt;
             }
@@ -663,7 +684,7 @@ impl ManualRegionVisitor {
         visitor: &mut StructuralVisitorView<'_, Self>,
     ) -> Result<Option<VisitInterrupt>> {
         let def_region_kind = visitor.def_region_kind();
-        if let Some(array) = value.try_as::<Array<i64>>() {
+        if let Some(array) = value.downcast_ref::<Array<i64>>().cloned() {
             // Override the state for exactly this child's subtree...
             let overridden = array.get(0).unwrap();
             if let Some(interrupt) = visitor
@@ -678,7 +699,7 @@ impl ManualRegionVisitor {
             return visitor
                 .with_def_region_kind(def_region_kind, |visitor| visitor.visit(self, &inherited));
         }
-        if value.try_as::<i64>().is_some() {
+        if value.downcast_ref::<i64>().copied().is_some() {
             self.seen.push(def_region_kind);
         }
         Ok(None)
@@ -787,7 +808,7 @@ fn generated_visitor_can_drive_recursion_through_mut_self() {
     let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut visitor = GeneratedRecursiveVisitor::default();
     let interrupt = structural_visit(&root, &mut visitor).unwrap().unwrap();
-    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 2);
+    assert_eq!(interrupt.value.downcast_ref::<i64>().copied().unwrap(), 2);
     assert_eq!(visitor.events, vec!["enter:array", "int:1", "int:2"]);
 }
 
@@ -919,7 +940,7 @@ impl StraddleVisitor {
         visitor: &mut StructuralVisitorView<'_, Self>,
     ) -> Result<Option<VisitInterrupt>> {
         let def_region_kind = visitor.def_region_kind();
-        let label = match value.try_as::<i64>() {
+        let label = match value.downcast_ref::<i64>().copied() {
             Some(integer) => format!("int:{integer}"),
             None => "node".to_string(),
         };
@@ -991,7 +1012,7 @@ fn nested_walk_restores_the_outer_active_visitor() {
     assert!(structural_walk(
         &outer,
         |value: AnyView<'_>| -> Result<WalkResult> {
-            if let Some(value) = value.try_as::<i64>() {
+            if let Some(value) = value.downcast_ref::<i64>().copied() {
                 outer_values.push(value);
             }
             if !entered_inner {
@@ -999,7 +1020,7 @@ fn nested_walk_restores_the_outer_active_visitor() {
                 structural_walk(
                     &inner,
                     |value: AnyView<'_>| {
-                        if let Some(value) = value.try_as::<i64>() {
+                        if let Some(value) = value.downcast_ref::<i64>().copied() {
                             inner_values.push(value);
                         }
                         WalkResult::Advance
@@ -1023,7 +1044,7 @@ fn interrupt_payload_is_returned_to_the_caller() {
     let outcome = structural_walk(
         &root,
         |value: AnyView<'_>| {
-            if value.try_as::<i64>() == Some(1) {
+            if value.downcast_ref::<i64>().copied() == Some(1) {
                 return WalkResult::InterruptWith(42i64.into());
             }
             WalkResult::Advance
@@ -1034,7 +1055,7 @@ fn interrupt_payload_is_returned_to_the_caller() {
     let Some(interrupt) = outcome else {
         panic!("walk unexpectedly completed");
     };
-    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 42);
+    assert_eq!(interrupt.value.downcast_ref::<i64>().copied().unwrap(), 42);
 }
 
 #[test]
@@ -1043,7 +1064,7 @@ fn handler_errors_include_native_visit_path() {
     let error = match structural_walk(
         &root,
         |value: AnyView<'_>| -> Result<WalkResult> {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 Err(runtime_error("handler failed"))
             } else {
                 Ok(WalkResult::Advance)
@@ -1074,7 +1095,7 @@ fn visitor_errors_include_native_visit_path() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             let def_region_kind = visitor.def_region_kind();
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 return Err(runtime_error("visitor failed"));
             }
             visitor.with_def_region_kind(def_region_kind, |visitor| {
@@ -1130,7 +1151,7 @@ fn visitor_interrupt_propagates_through_default_children() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             let def_region_kind = visitor.def_region_kind();
-            if value.try_as::<i64>() == Some(2) {
+            if value.downcast_ref::<i64>().copied() == Some(2) {
                 return Ok(Some(VisitInterrupt::new(7i64)));
             }
             visitor.with_def_region_kind(def_region_kind, |visitor| {
@@ -1145,7 +1166,7 @@ fn visitor_interrupt_propagates_through_default_children() {
     let Some(interrupt) = outcome else {
         panic!("visitor traversal unexpectedly completed");
     };
-    assert_eq!(interrupt.value.try_as::<i64>().unwrap(), 7);
+    assert_eq!(interrupt.value.downcast_ref::<i64>().copied().unwrap(), 7);
 }
 
 #[test]
@@ -1157,7 +1178,7 @@ fn closure_walk_receives_def_region_kind() {
     assert!(structural_walk(
         &root,
         |value: AnyView<'_>, kind: DefRegionKind| {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 kinds.push(kind);
             }
             WalkResult::Advance
@@ -1176,7 +1197,7 @@ fn closure_walk_supports_post_order_and_skip() {
     assert!(structural_walk(
         &root,
         |value: AnyView<'_>| {
-            order_probe.push(value.try_as::<i64>());
+            order_probe.push(value.downcast_ref::<i64>().copied());
             WalkResult::Advance
         },
         WalkOrder::PostOrder,
@@ -1190,7 +1211,7 @@ fn closure_walk_supports_post_order_and_skip() {
         &root,
         |value: AnyView<'_>| {
             visited += 1;
-            if value.try_as::<i64>().is_none() {
+            if value.downcast_ref::<i64>().copied().is_none() {
                 WalkResult::Skip
             } else {
                 WalkResult::Advance
@@ -1468,7 +1489,7 @@ impl InheritedRegionProbe {
         let def_region_kind = visitor.def_region_kind();
         if self.at_root {
             self.at_root = false;
-            let outer = value.try_as::<Array<Array<i64>>>().unwrap();
+            let outer = value.downcast_ref::<Array<Array<i64>>>().cloned().unwrap();
             let inner = outer.get(0).unwrap();
             return visitor.with_def_region_kind(DefRegionKind::Pattern, |visitor| {
                 visitor.visit(self, &inner)
@@ -1685,7 +1706,10 @@ impl StatefulVisitStats {
         visitor: &mut StructuralVisitorView<'_, Self>,
     ) -> Result<Option<VisitInterrupt>> {
         self.arrays += 1;
-        assert!(AnyView::from(&array).try_as::<Array<i64>>().is_some());
+        assert!(AnyView::from(&array)
+            .downcast_ref::<Array<i64>>()
+            .cloned()
+            .is_some());
         visitor.default_visit(self, &array)
     }
     fn visit_integer(&mut self, value: i64) -> Result<Option<VisitInterrupt>> {
@@ -1800,7 +1824,7 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
     let root = Array::from_vec(vec![1i64, 2, 3]);
     let fallback = Cell::new(0);
     let interrupted = structural_visit(&root, Stop(&fallback)).unwrap().unwrap();
-    assert_eq!(interrupted.value.try_as::<i64>().unwrap(), 2);
+    assert_eq!(interrupted.value.downcast_ref::<i64>().copied().unwrap(), 2);
     assert_eq!(fallback.get(), 1);
 }
 
@@ -2000,7 +2024,7 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
             value: AnyView<'_>,
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
-            if let Some(value) = value.try_as::<i64>() {
+            if let Some(value) = value.downcast_ref::<i64>().copied() {
                 self.outer_values.borrow_mut().push(value);
             }
             if !self.entered.replace(true) {
@@ -2053,7 +2077,7 @@ fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
                 assert_eq!(borrowed.type_index(), copy.type_index());
                 assert_eq!(base.type_index(), copy.type_index());
                 assert_eq!(borrowed.debug_strong_count(), Some(1));
-                let typed = copy.try_as::<Array<i64>>().unwrap();
+                let typed = copy.downcast_ref::<Array<i64>>().cloned().unwrap();
                 assert_eq!(copy.debug_strong_count(), Some(2));
                 drop(typed);
                 retained = Some(Any::from(copy));
@@ -2221,7 +2245,7 @@ fn visitor_preserves_post_recursion_state() {
             self.depth -= 1;
             assert_eq!(self.depth, depth);
             self.completed += 1;
-            if let Some(value) = value.try_as::<i64>() {
+            if let Some(value) = value.downcast_ref::<i64>().copied() {
                 self.leaves.push(value);
             }
             Ok(result)
@@ -2255,8 +2279,12 @@ fn nested_walk_returns_one_owned_interrupt_payload_and_releases_it() {
         .unwrap();
         assert_eq!(visited, vec![1]);
         assert_eq!(payload.debug_strong_count(), Some(2));
-        let original = payload.try_as::<ObjectRef>().unwrap();
-        let returned = interrupt.value.try_as::<ObjectRef>().unwrap();
+        let original = payload.downcast_ref::<ObjectRef>().cloned().unwrap();
+        let returned = interrupt
+            .value
+            .downcast_ref::<ObjectRef>()
+            .cloned()
+            .unwrap();
         assert!(original.same_as(&returned));
         drop((original, returned, interrupt));
         assert_eq!(payload.debug_strong_count(), Some(1));

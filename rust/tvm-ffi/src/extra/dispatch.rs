@@ -130,7 +130,7 @@ pub mod marker {
 /// let mut dispatcher = IntoDispatcher::<(AnyView<'_>,), Option<Result<Any>>, _>::into_dispatcher(callbacks);
 /// let result: Option<Result<Any>> = dispatcher.dispatch_tuple((AnyView::from(&41_i64),));
 /// let result = result.unwrap()?;
-/// assert_eq!(result.try_as::<i64>(), Some(42));
+/// assert_eq!(i64::try_from(result)?, 42);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 pub trait IntoDispatcher<Args, Ret, M> {
@@ -255,7 +255,7 @@ macro_rules! callback_prefix {
             #[inline(always)]
             fn dispatch_link(&mut self, (value, $($a,)*): (AnyView<'v>, $($A,)*)) -> Option<R> {
                 $(let _ = &$a;)*
-                value.try_as::<T>().map(|typed| self(typed, $($b,)*).callback_result())
+                value.as_strict::<T>().map(|typed| self(typed, $($b,)*).callback_result())
             }
         }
         impl<'v, F, T, O, R, $($A,)*>

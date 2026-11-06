@@ -396,7 +396,7 @@ fn test_big_int_any_round_trip() {
     let any = Any::from(value.clone());
     assert_eq!(any.type_index(), TypeIndex::kTVMFFIBigInt as i32);
     assert_eq!(any.debug_strong_count(), Some(2));
-    assert_eq!(any.try_as::<BigInt>(), Some(value.clone()));
+    assert_eq!(any.downcast_ref::<BigInt>().cloned(), Some(value.clone()));
     let view = AnyView::from(&value);
     assert_eq!(BigInt::try_from(view).unwrap(), value);
     let restored = BigInt::try_from(any).unwrap();
@@ -410,12 +410,15 @@ fn test_big_int_any_round_trip() {
     assert_eq!(any.type_index(), TypeIndex::kTVMFFIInt as i32);
     assert_eq!(i64::try_from(any).unwrap(), -42);
     assert_eq!(BigInt::try_from(Any::from(-42i64)).unwrap(), small);
-    assert_eq!(Any::from(7i32).try_as::<BigInt>(), Some(BigInt::from(7i64)));
+    assert_eq!(
+        Any::from(7i32).downcast_ref::<BigInt>().cloned(),
+        Some(BigInt::from(7i64))
+    );
     assert_eq!(
         BigInt::try_from(Any::from(true)).unwrap(),
         BigInt::from(1i64)
     );
-    assert_eq!(Any::from(true).try_as::<BigInt>(), None);
+    assert_eq!(Any::from(true).downcast_ref::<BigInt>().cloned(), None);
 
     let error = BigInt::try_from(Any::from(1.5f64)).unwrap_err();
     assert_eq!(error.kind(), TYPE_ERROR);
@@ -510,7 +513,8 @@ fn test_big_int_structural_traversal() {
     let wide_pointer = root
         .get(1)
         .unwrap()
-        .try_as::<BigInt>()
+        .downcast_ref::<BigInt>()
+        .cloned()
         .unwrap()
         .words()
         .as_ptr();
@@ -545,8 +549,16 @@ fn test_big_int_structural_traversal() {
     )
     .and_then(Array::<Any>::try_from)
     .unwrap();
-    assert_eq!(mapped.get(0).unwrap().try_as::<i64>(), Some(2));
-    let leaf = mapped.get(1).unwrap().try_as::<BigInt>().unwrap();
+    assert_eq!(
+        mapped.get(0).unwrap().downcast_ref::<i64>().copied(),
+        Some(2)
+    );
+    let leaf = mapped
+        .get(1)
+        .unwrap()
+        .downcast_ref::<BigInt>()
+        .cloned()
+        .unwrap();
     assert_eq!(leaf, wide());
     assert_eq!(leaf.words().as_ptr(), wide_pointer);
 }

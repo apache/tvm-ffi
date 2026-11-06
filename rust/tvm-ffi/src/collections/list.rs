@@ -707,6 +707,15 @@ where
     }
 }
 
+impl<'b, T: ContainerElement> TryFrom<&'b Any> for List<T> {
+    type Error = Error;
+
+    fn try_from(value: &'b Any) -> Result<Self> {
+        let temp: TryFromTemp<Self> = TryFromTemp::try_from(value)?;
+        Ok(TryFromTemp::into_value(temp))
+    }
+}
+
 impl<T: ContainerElement> TryFrom<Any> for List<T> {
     type Error = Error;
 

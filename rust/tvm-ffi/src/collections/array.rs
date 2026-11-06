@@ -543,6 +543,18 @@ where
     }
 }
 
+impl<'b, T> TryFrom<&'b Any> for Array<T>
+where
+    T: ContainerElement + Clone,
+{
+    type Error = crate::error::Error;
+
+    fn try_from(value: &'b Any) -> Result<Self, Self::Error> {
+        let temp: TryFromTemp<Self> = TryFromTemp::try_from(value)?;
+        Ok(TryFromTemp::into_value(temp))
+    }
+}
+
 impl<T> TryFrom<Any> for Array<T>
 where
     T: ContainerElement + Clone,

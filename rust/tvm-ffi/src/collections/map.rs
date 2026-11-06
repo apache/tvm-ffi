@@ -616,6 +616,19 @@ where
     }
 }
 
+impl<'b, K, V> TryFrom<&'b Any> for Map<K, V>
+where
+    K: ContainerElement,
+    V: ContainerElement,
+{
+    type Error = Error;
+
+    fn try_from(value: &'b Any) -> Result<Self> {
+        let temp: TryFromTemp<Self> = TryFromTemp::try_from(value)?;
+        Ok(TryFromTemp::into_value(temp))
+    }
+}
+
 impl<K, V> TryFrom<Any> for Map<K, V>
 where
     K: ContainerElement,

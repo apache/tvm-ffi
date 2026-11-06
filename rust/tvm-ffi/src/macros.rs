@@ -302,7 +302,7 @@ macro_rules! attach_context {
 // ----------------------------------------------------------------------------
 
 // implements try from any for all integer types
-/// Implement `TryFrom<AnyView>` and `TryFrom<Any>` for each listed
+/// Implement `TryFrom<AnyView>`, `TryFrom<Any>` and `TryFrom<&Any>` for each listed
 /// [`AnyCompatible`](crate::type_traits::AnyCompatible) type, so it converts out of
 /// FFI values.
 ///
@@ -335,6 +335,17 @@ macro_rules! impl_try_from_any {
                     return TryFromTemp::try_from(value).map(TryFromTemp::into_value);
                 }
             }
+
+            impl<'a> TryFrom<&'a $crate::any::Any> for $t {
+                type Error = $crate::error::Error;
+                #[inline(always)]
+                fn try_from(
+                    value: &'a $crate::any::Any
+                ) -> Result<Self, Self::Error> {
+                    type TryFromTemp = $crate::any::TryFromTemp<$t>;
+                    return TryFromTemp::try_from(value).map(TryFromTemp::into_value);
+                }
+            }
         )*
     };
 }
@@ -359,6 +370,15 @@ macro_rules! impl_try_from_any_for_parametric {
             type Error = $crate::error::Error;
             #[inline(always)]
             fn try_from(value: $crate::any::Any) -> Result<Self, Self::Error> {
+                type TryFromTemp<T> = $crate::any::TryFromTemp<$generic_type<$param>>;
+                return TryFromTemp::<T>::try_from(value).map(TryFromTemp::<T>::into_value);
+            }
+        }
+
+        impl<'a, $param: AnyCompatible> TryFrom<&'a $crate::any::Any> for $generic_type<$param> {
+            type Error = $crate::error::Error;
+            #[inline(always)]
+            fn try_from(value: &'a $crate::any::Any) -> Result<Self, Self::Error> {
                 type TryFromTemp<T> = $crate::any::TryFromTemp<$generic_type<$param>>;
                 return TryFromTemp::<T>::try_from(value).map(TryFromTemp::<T>::into_value);
             }

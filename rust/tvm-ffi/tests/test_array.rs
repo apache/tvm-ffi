@@ -112,7 +112,7 @@ fn test_array_with_any_elements() {
     assert_eq!(
         widened
             .iter()
-            .map(|value| value.try_as::<i64>().unwrap())
+            .map(|value| value.downcast_ref::<i64>().copied().unwrap())
             .collect::<Vec<_>>(),
         vec![3, 4]
     );

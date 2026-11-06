@@ -105,10 +105,10 @@ fn test_type_mismatch_error() {
     // Try to convert int to bool - should be ok
     let result: Result<bool, _> = bool::try_from(any);
     assert!(result.is_ok());
-    // try_as is more strict and do not allow conversion from int to bool
+    // The value is still stored as an int; only the converting `TryFrom` reads
+    // it as a bool.
     let any = Any::from(42i32);
-    let opt_try_as = any.try_as::<bool>();
-    assert!(opt_try_as.is_none());
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIInt as i32);
 }
 
 #[test]
@@ -386,7 +386,7 @@ fn test_to_any_matches_from_value() {
             let any = value.to_any();
             assert_eq!(any.type_index(), TypeIndex::$type_index as i32);
             assert_eq!(any.type_index(), Any::from(value).type_index());
-            assert_eq!(any.try_as::<$ty>(), Some($value));
+            assert_eq!(<$ty>::try_from(&any).unwrap(), $value);
             assert_eq!(any.debug_strong_count(), None);
         }};
     }
@@ -408,7 +408,7 @@ fn test_to_any_matches_from_value() {
     let any = s.to_any();
     assert_eq!(any.type_index(), TypeIndex::kTVMFFIStr as i32);
     assert_eq!(any.debug_strong_count(), Some(2));
-    assert_eq!(any.try_as::<String>().unwrap(), s);
+    assert_eq!(any.downcast_ref::<String>().cloned().unwrap(), s);
     drop(any);
     assert_eq!(AnyView::from(&s).debug_strong_count(), Some(1));
 }
@@ -428,14 +428,17 @@ fn test_to_any_from_borrowed_object_field() {
 
     let any = holder.lhs.to_any();
     assert_eq!(any.debug_strong_count(), Some(4));
-    assert_eq!(any.try_as::<String>().unwrap(), lhs);
+    assert_eq!(any.downcast_ref::<String>().cloned().unwrap(), lhs);
 
     let any_opt = holder.rhs.to_any();
     assert_eq!(
-        any_opt.try_as::<Option<String>>().unwrap(),
+        Option::<String>::try_from(&any_opt).unwrap(),
         Some(lhs.clone())
     );
-    assert_eq!(holder.count.to_any().try_as::<i64>(), Some(11));
+    assert_eq!(
+        holder.count.to_any().downcast_ref::<i64>().copied(),
+        Some(11)
+    );
 
     drop(any);
     drop(any_opt);

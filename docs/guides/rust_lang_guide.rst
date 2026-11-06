@@ -86,24 +86,28 @@ the value it borrows. A number and a built-in array illustrate owning and borrow
    use tvm_ffi::{Any, AnyView, Array};
 
    let number = Any::from(3_i64);
-   assert_eq!(number.try_as::<i64>(), Some(3));
+   assert_eq!(number.downcast_ref::<i64>(), Some(&3)); // Strict: an i64 is stored.
+   assert_eq!(f64::try_from(&number).unwrap(), 3.0); // Converting, as C++ `Any::cast`.
 
    let value = Any::from(Array::from_vec(vec![1_i64, 2, 3]));
    let view = AnyView::from(&value); // Borrow the value without a new reference.
    let borrowed: &Array<i64> = view.downcast_ref::<Array<i64>>().unwrap();
    assert_eq!(borrowed.len(), 3);
 
-   let array = value.try_as::<Array<i64>>().unwrap(); // Acquire another strong reference.
+   let array = Array::<i64>::try_from(&value).unwrap(); // Acquire another strong reference.
    assert_eq!(array.len(), 3);
 
 Both ``Any`` and ``AnyView`` provide ``downcast_ref::<T>() -> Option<&T>``, which borrows
 the value in place as a managed reference such as ``Array<i64>``, a value such as
 ``tvm_ffi::String`` or ``i64``, or an object type such as ``ArrayObj``. The check is
-strict, as in ``try_as``, and never converts; it returns ``None`` for other types. The
-returned reference borrows its source without consuming it or incrementing the
-reference count.
-In contrast, ``try_as::<Array<i64>>()`` returns an owned managed reference, which retains
-the object independently of the source ``Any`` or ``AnyView``.
+strict and never converts; it returns ``None`` for other types. The returned
+reference borrows its source without consuming it or incrementing the reference
+count.
+In contrast, ``TryFrom`` (``T::try_from(&value)`` or ``value.try_into()``) returns an
+owned value and converts as C++ ``Any::cast`` does: an integer reads as a float or a
+boolean. For a managed reference such as ``Array<i64>`` it retains the object
+independently of the source ``Any`` or ``AnyView``; from an owned ``Any`` it moves the
+object out instead.
 
 Object and ObjectRef
 ~~~~~~~~~~~~~~~~~~~~
@@ -835,7 +839,7 @@ mutation dispatch consumes ``MutationView<'_>`` instead. Copying an ``AnyView``
 preserves a borrow without incrementing a reference count. Bind the view
 before calling ``downcast_ref::<Node>()`` when the node
 reference is used across statements; that reference borrows the view.
-Use ``try_as::<Handle>()`` for an owned typed handle or ``Any::from(value)`` to
+Use ``Handle::try_from(value)`` for an owned typed handle or ``Any::from(value)`` to
 retain an erased value beyond the callback. Mapping callbacks return
 replacement values; their input view does not grant in-place mutation
 permission.

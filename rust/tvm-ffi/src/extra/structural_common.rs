@@ -124,7 +124,7 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
         }
         // SAFETY: the traversal input remains live during annotation. Conversion
         // acquires ownership before the temporary view ends; raw is an object tag.
-        let node = unsafe { AnyView::from_raw_ffi_any(raw) }.try_as::<object::ObjectRef>()?;
+        let node = unsafe { AnyView::from_raw_ffi_any(raw) }.as_strict::<object::ObjectRef>()?;
         let mut previous = error.extra_context().cloned();
         let mut nodes = Vec::new();
         if let Some(prior) = previous.as_ref() {
@@ -138,13 +138,13 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
                     .ok()?
                     .call_tuple((records.clone(),))
                     .ok()?
-                    .try_as::<i64>()?;
+                    .as_strict::<i64>()?;
                 let get_item = Function::get_global("ffi.ListGetItem").ok()?;
                 if size > 0 {
                     let last = get_item
                         .call_tuple((records.clone(), size - 1))
                         .ok()?
-                        .try_as::<object::ObjectRef>();
+                        .as_strict::<object::ObjectRef>();
                     // Callback, policy and default descent can report the same frame.
                     if last.is_some_and(|last| last.same_as(&node)) {
                         return None;
@@ -174,7 +174,7 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
                 previous,
             ))
             .ok()?
-            .try_as::<object::ObjectRef>()
+            .as_strict::<object::ObjectRef>()
     })();
     // Diagnostic enrichment must not replace the original error on failure.
     match context {

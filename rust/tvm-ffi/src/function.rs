@@ -147,7 +147,7 @@ impl Function {
     /// use tvm_ffi::{AnyView, Function, Result};
     /// let add = Function::from_typed(|x: i64, y: i64| -> Result<i64> { Ok(x + y) });
     /// let result = add.call_packed(&[AnyView::from(&1_i64), AnyView::from(&2_i64)])?;
-    /// assert_eq!(result.try_as::<i64>(), Some(3));
+    /// assert_eq!(i64::try_from(result)?, 3);
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     ///
@@ -191,7 +191,7 @@ impl Function {
     /// use tvm_ffi::{Function, Result};
     /// let add = Function::from_typed(|x: i64, y: i64| -> Result<i64> { Ok(x + y) });
     /// let result = add.call_tuple((1_i64, 2_i64))?;
-    /// assert_eq!(result.try_as::<i64>(), Some(3));
+    /// assert_eq!(i64::try_from(result)?, 3);
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     ///
@@ -274,7 +274,7 @@ impl Function {
     /// let double = Function::from_typed(|x: i64| -> tvm_ffi::Result<i64> { Ok(x * 2) });
     /// Function::register_global("my_ext.double", double)?;
     /// let double = Function::get_global("my_ext.double")?;
-    /// assert_eq!(double.call_tuple((21_i64,))?.try_as::<i64>(), Some(42));
+    /// assert_eq!(i64::try_from(double.call_tuple((21_i64,))?)?, 42);
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     ///
@@ -398,7 +398,7 @@ impl Function {
     /// let count = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
     ///     Ok(Any::from(args.len() as i64))
     /// });
-    /// assert_eq!(count.call_tuple((1_i64, true))?.try_as::<i64>(), Some(2));
+    /// assert_eq!(i64::try_from(count.call_tuple((1_i64, true))?)?, 2);
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     ///
@@ -434,7 +434,7 @@ impl Function {
     /// ```
     /// use tvm_ffi::{Function, Result};
     /// let scale = Function::from_typed(|x: f64, factor: f64| -> Result<f64> { Ok(x * factor) });
-    /// assert_eq!(scale.call_tuple((2.0_f64, 1.5_f64))?.try_as::<f64>(), Some(3.0));
+    /// assert_eq!(f64::try_from(scale.call_tuple((2.0_f64, 1.5_f64))?)?, 3.0);
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     ///

@@ -31,6 +31,11 @@ use tvm_ffi::{
     UnchangedOr, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
+/// The value when it is stored as a `bool`, not converted from an integer.
+fn strict_bool(value: AnyView<'_>) -> Option<bool> {
+    (value.type_index() == TypeIndex::kTVMFFIBool as i32).then(|| bool::try_from(value).unwrap())
+}
+
 struct IncrementIntegers;
 
 impl<'receiver, 'value>
@@ -43,7 +48,8 @@ impl<'receiver, 'value>
         (value, _def_region_kind): (AnyView<'value>, DefRegionKind),
     ) -> Option<Result<UnchangedOr<Any>>> {
         value
-            .try_as::<i64>()
+            .downcast_ref::<i64>()
+            .copied()
             .map(|integer| Ok((integer + 1).into()))
     }
 }
@@ -81,7 +87,7 @@ impl<'s, 'v, 'c, 'r>
             &'c mut StructuralMutatorView<'r, ManualIncrement>,
         ),
     ) -> Option<Result<UnchangedOr<Any>>> {
-        Some(if value.as_any_view().try_as::<bool>() == Some(true) {
+        Some(if strict_bool(value.as_any_view()) == Some(true) {
             let key = self.remap_probe.as_ref().unwrap().clone();
             (|| {
                 assert!(mutator.var_remap_get(self, AnyView::from(&key))?.is_none());
@@ -116,7 +122,7 @@ impl<'s, 'v, 'c, 'r>
                 self.remap.set(AnyView::from(&key), &replacement)?;
                 Ok(UnchangedOr::changed(replacement))
             })()
-        } else if let Some(integer) = value.as_any_view().try_as::<i64>() {
+        } else if let Some(integer) = value.as_any_view().downcast_ref::<i64>().copied() {
             Ok((integer + 1).into())
         } else {
             mutator.default_mutate(self, value)
@@ -161,7 +167,7 @@ impl RecursiveEntryMutator {
             } else {
                 mutator.mutate(self, MutationView::borrowed(AnyView::from(&1i64)))
             }
-        } else if let Some(integer) = value.as_any_view().try_as::<i64>() {
+        } else if let Some(integer) = value.as_any_view().downcast_ref::<i64>().copied() {
             Ok((integer + 1).into())
         } else {
             mutator.default_mutate(self, value)
@@ -557,10 +563,10 @@ fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
             value: MutationView<'_>,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            if let Some(integer) = value.as_any_view().try_as::<i64>() {
+            if let Some(integer) = value.as_any_view().downcast_ref::<i64>().copied() {
                 return Ok((integer + 1).into());
             }
-            assert_eq!(value.as_any_view().try_as::<bool>(), Some(true));
+            assert_eq!(strict_bool(value.as_any_view()), Some(true));
             let source = Array::from_vec(vec![1_i64]);
             let pointer = array_pointer(&source);
             let value = MutationView::borrowed(AnyView::from(&source));
@@ -741,7 +747,11 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
             assert!(value.downcast_ref::<FunctionObj>().is_none());
             assert_eq!(value.as_any_view().debug_strong_count(), count);
             // A temporary typed handle must not permanently revoke permission.
-            let temporary = value.as_any_view().try_as::<Array<Any>>().unwrap();
+            let temporary = value
+                .as_any_view()
+                .downcast_ref::<Array<Any>>()
+                .cloned()
+                .unwrap();
             if self.retain && self.alias.is_none() {
                 self.alias = Some(temporary.clone().into());
             }
@@ -871,7 +881,13 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
     }
 
     fn transfer(value: MutationView<'_>, retain: bool) -> Result<UnchangedOr<Any>> {
-        let alias = retain.then(|| value.as_any_view().try_as::<Array<i64>>().unwrap());
+        let alias = retain.then(|| {
+            value
+                .as_any_view()
+                .downcast_ref::<Array<i64>>()
+                .cloned()
+                .unwrap()
+        });
         assert_eq!(value.inplace_mode(), InplaceMode::Allow);
         // Carry the result back to the array callback: Unchanged belongs to
         // that input, not to the nested traversal's boolean root.
@@ -927,7 +943,7 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
             value: MutationView<'_>,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.as_any_view().try_as::<i64>().is_some() {
+            if value.as_any_view().downcast_ref::<i64>().copied().is_some() {
                 return if self.0 {
                     Err(Error::new(RUNTIME_ERROR, "child failed", ""))
                 } else {
@@ -1039,7 +1055,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
             value: AnyView<'_>,
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
-            if value.try_as::<i64>().is_some() {
+            if value.downcast_ref::<i64>().copied().is_some() {
                 return Err(self.0.clone());
             }
             visitor.default_visit(self, &value)
@@ -1053,7 +1069,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
             value: MutationView<'_>,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.as_any_view().try_as::<i64>().is_some() {
+            if value.as_any_view().downcast_ref::<i64>().copied().is_some() {
                 return Err(self.0.clone());
             }
             mutator.default_mutate(self, value)
@@ -1153,8 +1169,8 @@ fn callback_errors_preserve_message_and_add_object_context() {
         let size = i64::try_from(call_global("ffi.ListSize", &[records.clone()])).unwrap();
         assert_eq!(size, 3);
         assert_eq!(
-            call_global("ffi.ListGetItem", &[records.clone(), 0_i64.into()]).try_as::<()>(),
-            Some(())
+            call_global("ffi.ListGetItem", &[records.clone(), 0_i64.into()]).type_index(),
+            TypeIndex::kTVMFFINone as i32
         );
         let innermost = call_global("ffi.ListGetItem", &[records.clone(), 1_i64.into()]);
         assert_eq!(any_object_pointer(&innermost), any_object_pointer(&child));
@@ -1164,11 +1180,12 @@ fn callback_errors_preserve_message_and_add_object_context() {
             "ffi.VisitErrorContext.FindAccessPaths",
             &[root.clone(), context, false.into()],
         );
-        let paths = paths.try_as::<Array<Any>>().unwrap();
+        let paths = paths.downcast_ref::<Array<Any>>().cloned().unwrap();
         assert_eq!(paths.len(), 1);
         assert_eq!(
             call_global("ffi.ReprPrint", &[paths.get(0).unwrap()])
-                .try_as::<FfiString>()
+                .downcast_ref::<FfiString>()
+                .cloned()
                 .unwrap()
                 .as_str(),
             "<root>.value"
@@ -1245,7 +1262,8 @@ fn callback_errors_preserve_message_and_add_object_context() {
         ));
         let node = call_global("ffi.ListGetItem", &[records.clone(), 0i64.into()]);
         assert!(node
-            .try_as::<ObjectRef>()
+            .downcast_ref::<ObjectRef>()
+            .cloned()
             .unwrap()
             .same_as(&failed_node.unwrap()));
         assert_eq!(
@@ -1558,7 +1576,7 @@ fn pre_order_mapping_preserves_inplace_permission() {
         let mut retained = None;
         let mut pointer = std::ptr::null();
         let callback = |value: AnyView<'_>| {
-            if let Some(integer) = value.try_as::<i64>() {
+            if let Some(integer) = value.downcast_ref::<i64>().copied() {
                 return Any::from(integer + 1);
             }
             let mapped = if case == "retained" {
@@ -1674,7 +1692,7 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
             value: MutationView<'_>,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            if let Some(integer) = value.as_any_view().try_as::<i64>() {
+            if let Some(integer) = value.as_any_view().downcast_ref::<i64>().copied() {
                 if integer >= 0 {
                     // Keep this input without constructing an owning return value.
                     return Ok(UnchangedOr::<Any>::unchanged().into());
@@ -1759,7 +1777,15 @@ fn post_order_unchanged_preserves_descendant_rewrites() {
             let callbacks = (
                 |integer: i64| integer + 1,
                 |value: AnyView<'_>| {
-                    assert_eq!(value.try_as::<Array<i64>>().unwrap().get(0).unwrap(), 2);
+                    assert_eq!(
+                        value
+                            .downcast_ref::<Array<i64>>()
+                            .cloned()
+                            .unwrap()
+                            .get(0)
+                            .unwrap(),
+                        2
+                    );
                     Unchanged
                 },
             );
@@ -1860,7 +1886,7 @@ fn callbacks_run_in_the_configured_order() {
     structural_map(
         root.clone(),
         |value: AnyView<'_>| {
-            pre.push(value.try_as::<i64>());
+            pre.push(value.downcast_ref::<i64>().copied());
             Any::from(value)
         },
         WalkOrder::PreOrder,
@@ -1872,7 +1898,7 @@ fn callbacks_run_in_the_configured_order() {
     structural_map(
         root,
         |value: AnyView<'_>| {
-            post.push(value.try_as::<i64>());
+            post.push(value.downcast_ref::<i64>().copied());
             Any::from(value)
         },
         WalkOrder::PostOrder,
@@ -2386,7 +2412,7 @@ fn mutation_regions_retargeting_and_error_restore() {
             value: MutationView<'_>,
             mutator: &mut StructuralMutatorView<'_, Self>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.as_any_view().try_as::<bool>() == Some(true) {
+            if strict_bool(value.as_any_view()) == Some(true) {
                 assert_eq!(mutator.def_region_kind(), Use);
                 assert_eq!(
                     mutator.with_def_region_kind(Pattern, |mutator| mutator.def_region_kind()),
@@ -2437,7 +2463,7 @@ fn mutation_regions_retargeting_and_error_restore() {
                 mutator.mutate(self, MutationView::borrowed(AnyView::from(&6_i64)))?;
                 return Ok(result);
             }
-            if value.as_any_view().try_as::<bool>() == Some(false) {
+            if strict_bool(value.as_any_view()) == Some(false) {
                 return mutator.with_def_region_kind(Pattern, |mutator| {
                     self.0.push((100, mutator.def_region_kind()));
                     let array = Array::from_vec(vec![1_i64]);
@@ -2450,7 +2476,7 @@ fn mutation_regions_retargeting_and_error_restore() {
                         })
                 });
             }
-            if let Some(x) = value.as_any_view().try_as::<i64>() {
+            if let Some(x) = value.as_any_view().downcast_ref::<i64>().copied() {
                 assert!(value.downcast_ref::<Object>().is_none());
                 self.map_integer(x, mutator.def_region_kind())?;
                 if x == 2 {
