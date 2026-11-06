@@ -279,6 +279,12 @@ fn list_item(list: &Any, index: i64) -> i64 {
         .unwrap()
 }
 
+type Pattern = Array<Option<ObjectRef>>;
+
+fn pattern_pointer(records: &Pattern, index: usize) -> *const Object {
+    ObjectArc::as_ptr(ObjectRef::data(&records.get(index).unwrap().unwrap()))
+}
+
 fn array_item(array: &Any, index: i64) -> Any {
     Function::get_global("ffi.ArrayGetItem")
         .unwrap()
@@ -1167,20 +1173,11 @@ fn callback_errors_preserve_message_and_add_object_context() {
         assert!(error.cause_chain().unwrap().same_as(&cause));
         let context = Any::from(error.extra_context().unwrap().clone());
         assert!(reflected_field::<ObjectRef>(&context, "prev_error_context").same_as(&payload));
-        let records = Any::from(reflected_field::<ObjectRef>(
-            &context,
-            "reverse_visit_pattern",
-        ));
-        let size = i64::try_from(call_global("ffi.ArraySize", &[records.clone()])).unwrap();
-        assert_eq!(size, 3);
-        assert_eq!(
-            call_global("ffi.ArrayGetItem", &[records.clone(), 0_i64.into()]).type_index(),
-            TypeIndex::kTVMFFINone as i32
-        );
-        let innermost = call_global("ffi.ArrayGetItem", &[records.clone(), 1_i64.into()]);
-        assert_eq!(any_object_pointer(&innermost), any_object_pointer(&child));
-        let outermost = call_global("ffi.ArrayGetItem", &[records, (size - 1).into()]);
-        assert_eq!(any_object_pointer(&outermost), any_object_pointer(&root));
+        let records: Pattern = reflected_field(&context, "reverse_visit_pattern");
+        assert_eq!(records.len(), 3);
+        assert!(records.get(0).unwrap().is_none());
+        assert_eq!(pattern_pointer(&records, 1), any_object_pointer(&child));
+        assert_eq!(pattern_pointer(&records, 2), any_object_pointer(&root));
         let paths = call_global(
             "ffi.VisitErrorContext.FindAccessPaths",
             &[root.clone(), context, false.into()],
@@ -1196,14 +1193,8 @@ fn callback_errors_preserve_message_and_add_object_context() {
             "<root>.value"
         );
     }
-    let records = Any::from(reflected_field::<ObjectRef>(
-        &context,
-        "reverse_visit_pattern",
-    ));
-    assert_eq!(
-        i64::try_from(call_global("ffi.ArraySize", &[records])).unwrap(),
-        1
-    );
+    let records: Pattern = reflected_field(&context, "reverse_visit_pattern");
+    assert_eq!(records.len(), 1);
     assert_eq!(source.backtrace(), "origin");
 
     // Keep nonconsecutive occurrences: child -> root -> child is a distinct path.
@@ -1215,20 +1206,13 @@ fn callback_errors_preserve_message_and_add_object_context() {
     .err()
     .unwrap();
     let context = Any::from(error.extra_context().unwrap().clone());
-    let records = Any::from(reflected_field::<ObjectRef>(
-        &context,
-        "reverse_visit_pattern",
-    ));
-    assert_eq!(
-        i64::try_from(call_global("ffi.ArraySize", &[records.clone()])).unwrap(),
-        4
-    );
+    let records: Pattern = reflected_field(&context, "reverse_visit_pattern");
+    assert_eq!(records.len(), 4);
     for (i, expected) in [&child, &root, &child].into_iter().enumerate() {
-        let node = call_global(
-            "ffi.ArrayGetItem",
-            &[records.clone(), (i as i64 + 1).into()],
+        assert_eq!(
+            pattern_pointer(&records, i + 1),
+            any_object_pointer(expected)
         );
-        assert_eq!(any_object_pointer(&node), any_object_pointer(expected));
     }
 
     // The failing node may be a pre-order replacement or a post-order rebuilt parent.
@@ -1264,20 +1248,13 @@ fn callback_errors_preserve_message_and_add_object_context() {
         .err()
         .unwrap();
         let context = Any::from(error.extra_context().unwrap().clone());
-        let records = Any::from(reflected_field::<ObjectRef>(
-            &context,
-            "reverse_visit_pattern",
-        ));
-        let node = call_global("ffi.ArrayGetItem", &[records.clone(), 0i64.into()]);
-        assert!(node
-            .downcast_ref::<ObjectRef>()
-            .cloned()
+        let records: Pattern = reflected_field(&context, "reverse_visit_pattern");
+        assert!(records
+            .get(0)
+            .unwrap()
             .unwrap()
             .same_as(&failed_node.unwrap()));
-        assert_eq!(
-            i64::try_from(call_global("ffi.ArraySize", &[records])).unwrap(),
-            1
-        );
+        assert_eq!(records.len(), 1);
         assert_eq!(root.get(0).unwrap(), 0);
     }
 }

@@ -323,6 +323,27 @@ impl Error {
         Some(unsafe { &*(handle as *const _ as *const object::ObjectRef) })
     }
 
+    /// The `extra_context` slot, to update in place. A shared error is first
+    /// replaced by a shallow copy, so the update reaches no other holder.
+    pub(crate) fn extra_context_mut(&mut self) -> &mut Option<object::ObjectRef> {
+        if ObjectArc::strong_count(&self.data) != 1 {
+            *self = Self::new_with_cause_and_extra_context(
+                self.kind(),
+                self.message(),
+                self.backtrace(),
+                self.cause_chain(),
+                self.extra_context(),
+            );
+        }
+        // SAFETY: this handle is the only reference, and the slot owns a nullable
+        // object handle, which is exactly an `Option<ObjectRef>`.
+        unsafe {
+            let error = ObjectArc::as_mut_ptr(&mut self.data);
+            &mut *std::ptr::addr_of_mut!((*error).cell.extra_context)
+                .cast::<Option<object::ObjectRef>>()
+        }
+    }
+
     /// Get the traceback of the error in the order of most recent call last, as
     /// Python prints it.
     ///
