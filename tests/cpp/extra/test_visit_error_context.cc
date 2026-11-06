@@ -129,7 +129,7 @@ TEST(VisitErrorContext, MacroBuildsChain) {
 
   // reverse_visit_pattern is innermost-first: leaf pushed first (inner catch
   // fires first during unwind), root pushed last.
-  const List<ObjectRef>& chain = visit_context.value()->reverse_visit_pattern;
+  const Array<ObjectRef>& chain = visit_context.value()->reverse_visit_pattern;
   EXPECT_GE(chain.size(), 2u);
   // Innermost entry is leaf (the throw site).
   EXPECT_TRUE(chain[0].same_as(leaf));
@@ -137,7 +137,7 @@ TEST(VisitErrorContext, MacroBuildsChain) {
   EXPECT_TRUE(chain[chain.size() - 1].same_as(root));
 
   // Verify order structurally: [leaf, ..., root].
-  List<ObjectRef> expected_chain = {leaf, root};
+  Array<ObjectRef> expected_chain = {leaf, root};
   EXPECT_TRUE(StructuralEqual::Equal(expected_chain, chain));
 }
 
@@ -145,7 +145,7 @@ TEST(VisitErrorContext, MacroBuildsChain) {
 // MacroPreExistingPayloadWrap: when UpdateVisitErrorContext is called on
 // an error that already has a non-context extra_context payload, the existing
 // payload is stashed in prev_error_context and the visit chain starts
-// fresh.  Subsequent pushes append to the same context object; prev_error_context
+// fresh.  Subsequent pushes append to the context; prev_error_context
 // is not modified.
 // ---------------------------------------------------------------------------
 
@@ -161,7 +161,7 @@ TEST(VisitErrorContext, MacroPreExistingPayloadWrap) {
   ASSERT_TRUE(err.extra_context().has_value());
 
   // First push: existing payload is not a VisitErrorContext → wrapped.
-  tvm::ffi::detail::UpdateVisitErrorContext(err, leaf);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, leaf);
 
   Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context.has_value());
@@ -171,17 +171,36 @@ TEST(VisitErrorContext, MacroPreExistingPayloadWrap) {
   EXPECT_TRUE(visit_context.value()->prev_error_context.value().same_as(existing_payload));
 
   // Second push: context already exists → node appended; prev_error_context unchanged.
-  tvm::ffi::detail::UpdateVisitErrorContext(err, root);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, root);
 
   Optional<VisitErrorContext> visit_context_after = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context_after.has_value());
 
-  List<ObjectRef> expected_chain = {leaf, root};
+  Array<ObjectRef> expected_chain = {leaf, root};
   EXPECT_TRUE(
       StructuralEqual::Equal(expected_chain, visit_context_after.value()->reverse_visit_pattern));
 
   ASSERT_TRUE(visit_context_after.value()->prev_error_context.has_value());
   EXPECT_TRUE(visit_context_after.value()->prev_error_context.value().same_as(existing_payload));
+}
+
+// Appending to a shared Error or context copies it; other holders keep their pattern.
+TEST(VisitErrorContext, UpdateCopiesSharedError) {
+  Array<ObjectRef> empty;
+  TPairRef leaf(empty, empty);
+  TPairRef root(leaf, empty);
+  Error err("RuntimeError", "test", "");
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, leaf);
+  Error shared = err;
+  VisitErrorContext context = VisitErrorContext::TryGetFromError(err).value();
+
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, root);
+  EXPECT_FALSE(err.same_as(shared));
+  EXPECT_EQ(err.kind(), "RuntimeError");
+  EXPECT_EQ(err.message(), "test");
+  EXPECT_EQ(VisitErrorContext::TryGetFromError(err).value()->reverse_visit_pattern.size(), 2U);
+  EXPECT_TRUE(VisitErrorContext::TryGetFromError(shared).value().same_as(context));
+  EXPECT_EQ(context->reverse_visit_pattern.size(), 1U);
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +238,7 @@ TEST(VisitErrorContext, MacroThrowBuildsChain) {
 
     Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(caught);
     ASSERT_TRUE(visit_context.has_value());
-    const List<ObjectRef>& chain = visit_context.value()->reverse_visit_pattern;
+    const Array<ObjectRef>& chain = visit_context.value()->reverse_visit_pattern;
     ASSERT_EQ(chain.size(), 1u);
     EXPECT_TRUE(chain[0].same_as(throw_site));
   }
@@ -242,9 +261,9 @@ TEST(VisitErrorContext, MacroThrowBuildsChain) {
 
     Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(caught);
     ASSERT_TRUE(visit_context.has_value());
-    const List<ObjectRef>& chain = visit_context.value()->reverse_visit_pattern;
+    const Array<ObjectRef>& chain = visit_context.value()->reverse_visit_pattern;
     // THROW seeds with throw_site; END appends root.
-    List<ObjectRef> expected = {throw_site, root};
+    Array<ObjectRef> expected = {throw_site, root};
     EXPECT_TRUE(StructuralEqual::Equal(expected, chain));
   }
 }
@@ -289,7 +308,7 @@ TEST(FindAccessPaths, BasicMatch) {
     TPairRef root(mid, empty);
 
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{leaf, mid, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{leaf, mid, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -305,7 +324,7 @@ TEST(FindAccessPaths, BasicMatch) {
     TPairRef root(shared, shared);
 
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{shared, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{shared, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -354,7 +373,7 @@ TEST(FindAccessPaths, AccessKindCoverage) {
     TPairRef root(mid, empty);
 
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{leaf, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{leaf, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -372,7 +391,7 @@ TEST(FindAccessPaths, AccessKindCoverage) {
     TPairRef root(arr, empty);
 
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{leaf1, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{leaf1, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -390,7 +409,7 @@ TEST(FindAccessPaths, AccessKindCoverage) {
     TPairRef root(m, empty);
 
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{target, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{target, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -443,7 +462,7 @@ TEST(FindAccessPaths, SparsePatternAnchors) {
   // Scenario 1: pattern = [m_inner, root] → 2 paths (one per branch).
   {
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{m_inner, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{m_inner, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -453,7 +472,7 @@ TEST(FindAccessPaths, SparsePatternAnchors) {
   // Scenario 2: pattern = [m_inner, m_outer, root] → 1 path through branch_b.
   {
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{m_inner, m_outer, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{m_inner, m_outer, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -487,7 +506,7 @@ TEST(FindAccessPaths, PartialChain) {
   TPairRef root(child, empty);
 
   ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-  ctx_obj->reverse_visit_pattern = List<ObjectRef>{unreachable, child, root};
+  ctx_obj->reverse_visit_pattern = Array<ObjectRef>{unreachable, child, root};
   VisitErrorContext ctx(std::move(ctx_obj));
 
   // Sub-scenario A: strict mode — no full match.
@@ -541,7 +560,7 @@ TEST(FindAccessPaths, EdgeCases) {
     TPairRef root(empty, empty);
 
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -555,7 +574,7 @@ TEST(FindAccessPaths, EdgeCases) {
 
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
     ObjectRef null_ref;
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{null_ref, null_ref};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{null_ref, null_ref};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths;
@@ -585,7 +604,7 @@ TEST(FindAccessPaths, RecordsCleanup) {
   // Raw pattern: [leaf, leaf, root, root]; effective: [leaf, root].
   {
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{leaf, leaf, root, root};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{leaf, leaf, root, root};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -597,7 +616,7 @@ TEST(FindAccessPaths, RecordsCleanup) {
   // Raw pattern: [null, leaf, null, root, null]; effective: [leaf, root].
   {
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{null_ref, leaf, null_ref, root, null_ref};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{null_ref, leaf, null_ref, root, null_ref};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -609,7 +628,7 @@ TEST(FindAccessPaths, RecordsCleanup) {
   // Raw pattern: [leaf, null, leaf, root, root, null]; effective: [leaf, root].
   {
     ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{leaf, null_ref, leaf, root, root, null_ref};
+    ctx_obj->reverse_visit_pattern = Array<ObjectRef>{leaf, null_ref, leaf, root, root, null_ref};
     VisitErrorContext ctx(std::move(ctx_obj));
 
     Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
@@ -635,8 +654,8 @@ TEST(VisitErrorContext, TryGetFromError) {
   EXPECT_FALSE(no_context.has_value());
 
   // Attach context via UpdateVisitErrorContext.
-  tvm::ffi::detail::UpdateVisitErrorContext(err, leaf);
-  tvm::ffi::detail::UpdateVisitErrorContext(err, root);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, leaf);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, root);
 
   Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context.has_value());
@@ -654,7 +673,7 @@ TEST(VisitErrorContext, EnrichmentLeavesContextFreeErrorsUnchanged) {
   Array<ObjectRef> root;
   EXPECT_TRUE(VisitErrorContext::EnrichVisitError(original, root).same_as(original));
   auto contextual = Error("ValueError", "contextual failure", "trace");
-  detail::UpdateVisitErrorContext(contextual, root);
+  detail::UpdateVisitErrorContext(&contextual, root);
   EXPECT_TRUE(VisitErrorContext::EnrichVisitError(contextual, root).same_as(contextual));
   EXPECT_TRUE(VisitErrorContext::EnrichVisitError(contextual, ObjectRef()).same_as(contextual));
 }

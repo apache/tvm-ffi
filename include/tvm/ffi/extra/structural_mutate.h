@@ -675,7 +675,7 @@ class StructuralMutatorObj : public Object {
   /*! \brief Keep address-taking for error decoration off the successful raw-result path. */
   TVM_FFI_COLD_CODE static TVMFFIAny AttachVisitErrorContextRaw(TVMFFIAny result,
                                                                 AnyView value) noexcept {
-    detail::UpdateVisitErrorContext(result, value);
+    detail::UpdateVisitErrorContext(&result, value);
     return result;
   }
 
@@ -788,14 +788,9 @@ class StructuralMutatorObj : public Object {
    * \param result The failed result whose Error is annotated.
    * \param node The borrowed node to name in the context.
    */
-  TVM_FFI_COLD_CODE static void UpdateVisitErrorContext(const Expected<Any>& result,
+  TVM_FFI_COLD_CODE static void UpdateVisitErrorContext(Expected<Any>* result,  // NOLINT(*)
                                                         AnyView node) noexcept {
-    // The Error is refcounted, so annotating the local handle annotates the object the result
-    // holds. A non-object node has no context to add.
-    if (node.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
-      Error err = result.error();
-      ::tvm::ffi::detail::UpdateVisitErrorContext(err, node.cast<ObjectRef>());
-    }
+    ::tvm::ffi::detail::UpdateVisitErrorContext(result, node);
   }
 
   /*!
@@ -1323,7 +1318,7 @@ class StructuralMapEngine : public detail::StructuralMutatorEngineParent<Parent>
         }
       }();
       if (TVM_FFI_PREDICT_FALSE(callback_result.is_err())) {
-        this->UpdateVisitErrorContext(callback_result, value);
+        this->UpdateVisitErrorContext(&callback_result, value);
         *out = std::move(callback_result);
         return true;
       }
@@ -1373,7 +1368,7 @@ class StructuralMapEngine : public detail::StructuralMutatorEngineParent<Parent>
         }
       }();
       if (TVM_FFI_PREDICT_FALSE(callback_result.is_err())) {
-        this->UpdateVisitErrorContext(callback_result, mapped_view);
+        this->UpdateVisitErrorContext(&callback_result, mapped_view);
         *out = std::move(callback_result);
         return true;
       }
@@ -1550,7 +1545,7 @@ class StructuralMapDynEngine : public detail::StructuralMutatorEngineParent<Pare
       Expected<Any> callback_result =
           InvokeLink(*matched, with_kind, value, this->def_region_kind());
       if (TVM_FFI_PREDICT_FALSE(callback_result.is_err())) {
-        this->UpdateVisitErrorContext(callback_result, value);
+        this->UpdateVisitErrorContext(&callback_result, value);
         *out = std::move(callback_result);
         return true;
       }
@@ -1591,7 +1586,7 @@ class StructuralMapDynEngine : public detail::StructuralMutatorEngineParent<Pare
       Expected<Any> callback_result =
           InvokeLink(*matched, with_kind, mapped_view, this->def_region_kind());
       if (TVM_FFI_PREDICT_FALSE(callback_result.is_err())) {
-        this->UpdateVisitErrorContext(callback_result, mapped_view);
+        this->UpdateVisitErrorContext(&callback_result, mapped_view);
         *out = std::move(callback_result);
         return true;
       }
@@ -1707,7 +1702,7 @@ class StructuralMutateEngine : public detail::StructuralMutatorEngineParent<Pare
       if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
         // Keep callback-boundary context in addition to the default-descent
         // context: a callback may return a rebuilt value, so the two nodes can differ.
-        Parent::UpdateVisitErrorContext(result, value);
+        Parent::UpdateVisitErrorContext(&result, value);
       }
       return detail::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
     }
@@ -1722,7 +1717,7 @@ class StructuralMutateEngine : public detail::StructuralMutatorEngineParent<Pare
       if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
         // Keep callback-boundary context in addition to the default-descent
         // context: a callback may return a rebuilt value, so the two nodes can differ.
-        Parent::UpdateVisitErrorContext(result, value);
+        Parent::UpdateVisitErrorContext(&result, value);
       }
       return detail::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
     }
@@ -1763,7 +1758,7 @@ class StructuralMutateEngine : public detail::StructuralMutatorEngineParent<Pare
   /*! \brief Materialize the callback result only on the cold Parent error-decoration path. */
   TVM_FFI_COLD_CODE TVMFFIAny AnnotateCallbackErrorRaw(TVMFFIAny raw, AnyView value) noexcept {
     Expected<Any> result = detail::ExpectedUnsafe::MoveFromTVMFFIAny<Any>(raw);
-    Parent::UpdateVisitErrorContext(result, value);
+    Parent::UpdateVisitErrorContext(&result, value);
     return detail::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
   }
 

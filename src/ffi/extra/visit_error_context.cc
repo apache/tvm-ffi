@@ -63,7 +63,7 @@ class VisitErrorAccessPathFinder {
     // The matcher operates on `records_` from here on; the original
     // `context_->reverse_visit_pattern` is left untouched so callers that
     // inspect the context for debugging still see the raw history.
-    const List<ObjectRef>& raw = context_->reverse_visit_pattern;
+    const Array<ObjectRef>& raw = context_->reverse_visit_pattern;
     records_.reserve(raw.size());
     for (const ObjectRef& entry : raw) {
       if (!entry.defined()) continue;

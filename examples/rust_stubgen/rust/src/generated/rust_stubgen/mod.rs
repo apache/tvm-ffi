@@ -108,6 +108,8 @@ impl IntPair {
         Self { base: ObjectArc::new(obj) }
     }
 }
+
+unsafe impl tvm_ffi::object::ImmutableObject for IntPairObj {}
 // tvm-ffi-stubgen(end)
 
 // Hand-written code lives outside the blocks; the generator never touches it.

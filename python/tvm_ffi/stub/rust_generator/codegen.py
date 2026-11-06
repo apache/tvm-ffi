@@ -583,11 +583,7 @@ class _ObjectRenderer:
         """
         if self.info.is_mutable is not False:
             return None
-        return [
-            f"// SAFETY: `{self.type_key}` is not `_type_mutable`: a shared instance is never",
-            "// mutated, as C++ changes it only through copy-on-write.",
-            f"unsafe impl tvm_ffi::object::ImmutableObject for {self.obj_struct} {{}}",
-        ]
+        return [f"unsafe impl tvm_ffi::object::ImmutableObject for {self.obj_struct} {{}}"]
 
     def _shallow_copy_lines(self) -> list[str] | None:
         """``ShallowCopy``, which a subtype defined in Rust needs of its parent's object.

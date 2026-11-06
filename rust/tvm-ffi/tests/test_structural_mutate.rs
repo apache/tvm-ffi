@@ -1091,7 +1091,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
         ],
     );
     let payload = ObjectRef::try_from(Any::from(Array::from_vec(vec![7i64]))).unwrap();
-    let records = call_global("ffi.List", &[Any::new()]);
+    let records = call_global("ffi.Array", &[Any::new()]);
     let context = call_global(
         "ffi.MakeObjectFromPackedArgs",
         &[
@@ -1171,15 +1171,15 @@ fn callback_errors_preserve_message_and_add_object_context() {
             &context,
             "reverse_visit_pattern",
         ));
-        let size = i64::try_from(call_global("ffi.ListSize", &[records.clone()])).unwrap();
+        let size = i64::try_from(call_global("ffi.ArraySize", &[records.clone()])).unwrap();
         assert_eq!(size, 3);
         assert_eq!(
-            call_global("ffi.ListGetItem", &[records.clone(), 0_i64.into()]).type_index(),
+            call_global("ffi.ArrayGetItem", &[records.clone(), 0_i64.into()]).type_index(),
             TypeIndex::kTVMFFINone as i32
         );
-        let innermost = call_global("ffi.ListGetItem", &[records.clone(), 1_i64.into()]);
+        let innermost = call_global("ffi.ArrayGetItem", &[records.clone(), 1_i64.into()]);
         assert_eq!(any_object_pointer(&innermost), any_object_pointer(&child));
-        let outermost = call_global("ffi.ListGetItem", &[records, (size - 1).into()]);
+        let outermost = call_global("ffi.ArrayGetItem", &[records, (size - 1).into()]);
         assert_eq!(any_object_pointer(&outermost), any_object_pointer(&root));
         let paths = call_global(
             "ffi.VisitErrorContext.FindAccessPaths",
@@ -1201,7 +1201,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
         "reverse_visit_pattern",
     ));
     assert_eq!(
-        i64::try_from(call_global("ffi.ListSize", &[records])).unwrap(),
+        i64::try_from(call_global("ffi.ArraySize", &[records])).unwrap(),
         1
     );
     assert_eq!(source.backtrace(), "origin");
@@ -1220,11 +1220,14 @@ fn callback_errors_preserve_message_and_add_object_context() {
         "reverse_visit_pattern",
     ));
     assert_eq!(
-        i64::try_from(call_global("ffi.ListSize", &[records.clone()])).unwrap(),
+        i64::try_from(call_global("ffi.ArraySize", &[records.clone()])).unwrap(),
         4
     );
     for (i, expected) in [&child, &root, &child].into_iter().enumerate() {
-        let node = call_global("ffi.ListGetItem", &[records.clone(), (i as i64 + 1).into()]);
+        let node = call_global(
+            "ffi.ArrayGetItem",
+            &[records.clone(), (i as i64 + 1).into()],
+        );
         assert_eq!(any_object_pointer(&node), any_object_pointer(expected));
     }
 
@@ -1265,14 +1268,14 @@ fn callback_errors_preserve_message_and_add_object_context() {
             &context,
             "reverse_visit_pattern",
         ));
-        let node = call_global("ffi.ListGetItem", &[records.clone(), 0i64.into()]);
+        let node = call_global("ffi.ArrayGetItem", &[records.clone(), 0i64.into()]);
         assert!(node
             .downcast_ref::<ObjectRef>()
             .cloned()
             .unwrap()
             .same_as(&failed_node.unwrap()));
         assert_eq!(
-            i64::try_from(call_global("ffi.ListSize", &[records])).unwrap(),
+            i64::try_from(call_global("ffi.ArraySize", &[records])).unwrap(),
             1
         );
         assert_eq!(root.get(0).unwrap(), 0);
