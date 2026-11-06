@@ -29,13 +29,29 @@ use crate::utils::get_tvm_ffi_crate;
 
 pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as DispatchArgs);
-    let item_impl = parse_macro_input!(item as ItemImpl);
+    let mut item_impl = parse_macro_input!(item as ItemImpl);
+    inline_handlers(&mut item_impl, &args);
     match expand(&item_impl, &args) {
         Ok(generated) => quote!(#item_impl #generated).into(),
         Err(error) => {
             let error = error.to_compile_error();
             let cfg = presence_attrs(&item_impl.attrs).unwrap_or_default();
             quote!(#item_impl #(#[#cfg])* #error).into()
+        }
+    }
+}
+
+// Handlers sit on the hot path of every dispatched value, and outlining them
+// costs a frame per node, so inline them unless the user chose otherwise.
+fn inline_handlers(item: &mut ItemImpl, args: &DispatchArgs) {
+    let method_prefix = format!("{}_", args.prefix);
+    for member in &mut item.items {
+        if let ImplItem::Method(method) = member {
+            if method.sig.ident.to_string().starts_with(&method_prefix)
+                && !method.attrs.iter().any(|attr| attr.path.is_ident("inline"))
+            {
+                method.attrs.push(syn::parse_quote!(#[inline(always)]));
+            }
         }
     }
 }

@@ -26,53 +26,6 @@ use tvm_ffi_sys::{
     TVMFFIErrorMoveFromRaised, TVMFFIErrorSetRaised, TVMFFIObjectHandle, TVMFFITypeIndex,
 };
 
-/// The kind of an [`Error`], such as `ValueError`, matching the exception
-/// type that Python raises.
-///
-/// Use the constants such as [`VALUE_ERROR`] and [`TYPE_ERROR`], or
-/// [`ErrorKind::new("MyError")`](ErrorKind::new) for a custom kind.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ErrorKind<'a>(&'a str);
-
-impl<'a> ErrorKind<'a> {
-    /// The kind named `name`, which Python raises as that exception type.
-    ///
-    /// ```
-    /// use tvm_ffi::{Error, ErrorKind};
-    /// const MY_ERROR: ErrorKind = ErrorKind::new("MyError");
-    /// let error = Error::new(MY_ERROR, "bad input", "");
-    /// assert_eq!(error.kind().as_str(), "MyError");
-    /// ```
-    pub const fn new(name: &'a str) -> Self {
-        Self(name)
-    }
-
-    /// Get the name of the kind.
-    ///
-    /// # Returns
-    ///
-    /// The name, such as `"ValueError"`.
-    pub fn as_str(&self) -> &str {
-        self.0
-    }
-}
-
-impl<'a> std::fmt::Display for ErrorKind<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-pub const VALUE_ERROR: ErrorKind = ErrorKind::new("ValueError");
-pub const TYPE_ERROR: ErrorKind = ErrorKind::new("TypeError");
-pub const RUNTIME_ERROR: ErrorKind = ErrorKind::new("RuntimeError");
-pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind::new("AttributeError");
-pub const KEY_ERROR: ErrorKind = ErrorKind::new("KeyError");
-pub const INDEX_ERROR: ErrorKind = ErrorKind::new("IndexError");
-pub const INTERNAL_ERROR: ErrorKind = ErrorKind::new("InternalError");
-pub const OVERFLOW_ERROR: ErrorKind = ErrorKind::new("OverflowError");
-pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind::new("ZeroDivisionError");
-
 /// The object behind an [`Error`]: its kind, message, backtrace, cause and context.
 #[repr(C)]
 #[derive(Object)]
@@ -122,6 +75,53 @@ unsafe impl Sync for Error {}
 
 /// A `Result` whose error type defaults to [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// The kind of an [`Error`], such as `ValueError`, matching the exception
+/// type that Python raises.
+///
+/// Use the constants such as [`VALUE_ERROR`] and [`TYPE_ERROR`], or
+/// [`ErrorKind::new("MyError")`](ErrorKind::new) for a custom kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorKind<'a>(&'a str);
+
+impl<'a> ErrorKind<'a> {
+    /// The kind named `name`, which Python raises as that exception type.
+    ///
+    /// ```
+    /// use tvm_ffi::{Error, ErrorKind};
+    /// const MY_ERROR: ErrorKind = ErrorKind::new("MyError");
+    /// let error = Error::new(MY_ERROR, "bad input", "");
+    /// assert_eq!(error.kind().as_str(), "MyError");
+    /// ```
+    pub const fn new(name: &'a str) -> Self {
+        Self(name)
+    }
+
+    /// Get the name of the kind.
+    ///
+    /// # Returns
+    ///
+    /// The name, such as `"ValueError"`.
+    pub fn as_str(&self) -> &str {
+        self.0
+    }
+}
+
+impl<'a> std::fmt::Display for ErrorKind<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+pub const VALUE_ERROR: ErrorKind = ErrorKind::new("ValueError");
+pub const TYPE_ERROR: ErrorKind = ErrorKind::new("TypeError");
+pub const RUNTIME_ERROR: ErrorKind = ErrorKind::new("RuntimeError");
+pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind::new("AttributeError");
+pub const KEY_ERROR: ErrorKind = ErrorKind::new("KeyError");
+pub const INDEX_ERROR: ErrorKind = ErrorKind::new("IndexError");
+pub const INTERNAL_ERROR: ErrorKind = ErrorKind::new("InternalError");
+pub const OVERFLOW_ERROR: ErrorKind = ErrorKind::new("OverflowError");
+pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind::new("ZeroDivisionError");
 
 impl Error {
     /// The `InternalError` for a panic caught at an FFI boundary, where unwinding
@@ -325,21 +325,6 @@ impl Error {
         }
     }
 
-    /// Make this handle the only reference to its error, copying a shared one, as
-    /// `Arc::make_mut`.
-    fn make_mut(&mut self) -> *mut ErrorObj {
-        if !ObjectArc::is_unique(&self.data) {
-            *self = Self::new_with_cause_and_extra_context(
-                self.kind(),
-                self.message(),
-                self.backtrace(),
-                self.cause_chain(),
-                self.extra_context(),
-            );
-        }
-        ObjectArc::as_mut_ptr(&mut self.data)
-    }
-
     /// Get the traceback of the error in the order of most recent call last, as
     /// Python prints it.
     ///
@@ -383,6 +368,21 @@ impl Error {
             );
         }
         this
+    }
+
+    /// Make this handle the only reference to its error, copying a shared one, as
+    /// `Arc::make_mut`.
+    fn make_mut(&mut self) -> *mut ErrorObj {
+        if !ObjectArc::is_unique(&self.data) {
+            *self = Self::new_with_cause_and_extra_context(
+                self.kind(),
+                self.message(),
+                self.backtrace(),
+                self.cause_chain(),
+                self.extra_context(),
+            );
+        }
+        ObjectArc::as_mut_ptr(&mut self.data)
     }
 }
 

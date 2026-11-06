@@ -40,6 +40,28 @@ pub struct Object {
     header: TVMFFIObject,
 }
 
+impl Object {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            header: TVMFFIObject::new(),
+        }
+    }
+}
+
+unsafe impl ObjectCore for Object {
+    const TYPE_KEY: &'static str = "ffi.Object";
+    const TYPE_DEPTH: i32 = 0;
+    #[inline]
+    fn type_index() -> i32 {
+        TypeIndex::kTVMFFIStaticObjectBegin as i32
+    }
+    #[inline]
+    unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
+        &mut this.header
+    }
+}
+
 /// Arc-like wrapper for Object that allows shared ownership
 ///
 /// \tparam T The type of the object to be wrapped
@@ -47,6 +69,213 @@ pub struct Object {
 pub struct ObjectArc<T: ObjectCore> {
     ptr: std::ptr::NonNull<T>,
     _phantom: std::marker::PhantomData<T>,
+}
+
+impl ObjectArc<Object> {
+    /// Allocate a synchronous runtime payload that may contain borrowed Rust state.
+    ///
+    /// # Safety
+    /// `T` begins with a valid Object header and is ABI-compatible with the
+    /// registered `type_index`. The caller must keep this owner scoped to the
+    /// payload's borrows and ensure every temporary strong and weak reference
+    /// is released before those borrows end. Neither native handles nor this
+    /// erased owner may escape that synchronous scope. Destruction uses T's
+    /// exact layout and drop function, not the erased Object layout.
+    /// The erased owner and handles must remain on this thread unless the
+    /// concrete payload permits sharing or transfer; erasure grants neither.
+    pub(crate) unsafe fn new_opaque_unchecked<T>(data: T, type_index: i32) -> Self {
+        Self {
+            ptr: allocate_object(data, type_index).cast(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: ObjectCore> ObjectArc<T> {
+    /// Allocate an initialized object at its stable managed address.
+    pub fn new(data: T) -> Self {
+        // Resolve metadata before moving the payload into its allocation.
+        let type_index = T::type_index();
+        unsafe {
+            Self {
+                ptr: allocate_object(data, type_index),
+                _phantom: std::marker::PhantomData,
+            }
+        }
+    }
+
+    /// Allocate a stable object followed by its type's extra item storage.
+    pub fn new_with_extra_items<U>(data: T) -> Self
+    where
+        T: ObjectCoreWithExtraItems<ExtraItem = U>,
+    {
+        unsafe {
+            // ensure strict alignment requirements
+            // so we can have { T, U*extra_items } layout
+            assert_eq!(std::mem::align_of::<T>() % std::mem::align_of::<U>(), 0);
+            assert_eq!(std::mem::size_of::<T>() % std::mem::align_of::<U>(), 0);
+            let extra_items_count = T::extra_items_count(&data);
+            let layout = unsafe_::extra_items_layout::<T, U>(extra_items_count);
+            let raw_data_ptr = std::alloc::alloc(layout);
+            if raw_data_ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
+            let ptr = raw_data_ptr as *mut T;
+            std::ptr::write(ptr, data);
+            // now override the header directly
+            std::ptr::write(
+                ptr as *mut TVMFFIObject,
+                TVMFFIObject {
+                    combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
+                    type_index: T::type_index(),
+                    __padding: 0,
+                    deleter: Some(unsafe_::object_deleter_for_new_with_extra_items::<T, U>),
+                },
+            );
+            // move into the object arc ptr
+            Self {
+                ptr: std::ptr::NonNull::new_unchecked(ptr),
+                _phantom: std::marker::PhantomData,
+            }
+        }
+    }
+
+    /// Whether `this` holds a null pointer, as all-zero bytes do: no
+    /// `ObjectArc`, but the field of an object that a creator left undefined.
+    ///
+    /// See also [`AnyCompatible::is_undefined`].
+    ///
+    /// # Safety
+    ///
+    /// `this` points to an `ObjectArc<T>` or to all-zero bytes.
+    #[inline]
+    pub unsafe fn is_null(this: *const Self) -> bool {
+        (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
+    }
+
+    /// Move a previously allocated object into the ObjectArc
+    ///
+    /// # Arguments
+    /// * `ptr` - The raw pointer to move into the ObjectArc
+    ///
+    /// # Returns
+    /// * `ObjectArc<T>` - The ObjectArc
+    ///
+    /// # Safety
+    /// `ptr` must own one strong reference to a live, stable managed allocation
+    /// whose dynamic type is compatible with `T` and whose payload is valid.
+    /// Ownership of that reference is transferred into the returned handle.
+    #[inline(always)]
+    pub unsafe fn from_raw(ptr: *const T) -> Self {
+        Self {
+            ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Move the ObjectArc into a raw pointer
+    ///
+    /// # Arguments
+    /// * `this` - The ObjectArc to move into a raw pointer
+    ///
+    /// # Returns
+    /// * `*const T` - The raw pointer, which owns the strong reference; pass it
+    ///   back to [`ObjectArc::from_raw`] to release it, as std `Arc::into_raw`.
+    #[inline(always)]
+    pub fn into_raw(this: Self) -> *const T {
+        let droped_this = std::mem::ManuallyDrop::new(this);
+        droped_this.ptr.as_ptr() as *const T
+    }
+
+    /// Get the raw pointer from the ObjectArc
+    ///
+    /// Caller should view this as a non-owning reference
+    ///
+    /// # Arguments
+    /// * `this` - The ObjectArc to get the raw pointer
+    ///
+    /// # Returns
+    /// * `*const T` - The raw pointer, as std `Arc::as_ptr`. Dereferencing it
+    ///   must respect existing borrows, and it cannot outlive an owning handle.
+    #[inline]
+    pub fn as_ptr(this: &Self) -> *const T {
+        this.ptr.as_ptr() as *const T
+    }
+
+    /// Get the raw mutable pointer from the ObjectArc
+    ///
+    /// Caller should view this as a non-owning reference
+    ///
+    /// # Arguments
+    /// * `this` - The ObjectArc to get the raw pointer
+    ///
+    /// # Returns
+    /// * `*mut T` - The raw pointer. The handle need not be unique: writing
+    ///   through it needs exclusive access to the object, and must not move or
+    ///   replace the object or its header.
+    #[inline]
+    pub fn as_mut_ptr(this: &mut Self) -> *mut T {
+        this.ptr.as_ptr()
+    }
+
+    /// Get the strong reference count of the ObjectArc
+    ///
+    /// # Arguments
+    /// * `this` - The ObjectArc to get the strong reference count
+    ///
+    /// # Returns
+    /// * `usize` - The strong reference count
+    #[inline]
+    pub fn strong_count(this: &Self) -> usize {
+        unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+    }
+
+    /// Whether this is the only reference, so it may be mutated in place.
+    #[inline]
+    pub(crate) fn is_unique(this: &Self) -> bool {
+        unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+    }
+
+    /// Get the weak reference count of the ObjectArc
+    ///
+    /// # Arguments
+    /// * `this` - The ObjectArc to get the weak reference count
+    ///
+    /// # Returns
+    /// * `usize` - The weak reference count
+    #[inline]
+    pub fn weak_count(this: &Self) -> usize {
+        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+    }
+}
+
+// implement Deref for ObjectArc
+impl<T: ObjectCore> Deref for ObjectArc<T> {
+    type Target = T;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.ptr.as_ref() }
+    }
+}
+
+// implement Drop for ObjectArc
+impl<T: ObjectCore> Drop for ObjectArc<T> {
+    #[inline(always)]
+    fn drop(&mut self) {
+        unsafe { unsafe_::dec_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
+    }
+}
+
+// implement Clone for ObjectArc
+impl<T: ObjectCore> Clone for ObjectArc<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        unsafe { unsafe_::inc_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
+        Self {
+            ptr: self.ptr,
+            _phantom: std::marker::PhantomData,
+        }
+    }
 }
 
 /// An object type whose shared instances are never mutated, so `ObjectArc<T>` is
@@ -64,6 +293,17 @@ pub unsafe trait ImmutableObject: ObjectCore {}
 unsafe impl<T: ImmutableObject + Send + Sync> Send for ObjectArc<T> {}
 // SAFETY: as for `Send`.
 unsafe impl<T: ImmutableObject + Send + Sync> Sync for ObjectArc<T> {}
+
+/// A generic managed reference to a TVM-FFI object.
+///
+/// Holds an `ObjectArc<Object>` that manages the underlying object's lifetime
+/// through reference counting.
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+#[object_ref(skip_deref)]
+pub struct ObjectRef {
+    data: ObjectArc<Object>,
+}
 
 /// The native representation of an object-system type.
 ///
@@ -351,17 +591,6 @@ pub unsafe trait ObjectRefAnyCompatible: ObjectRefCore {
     }
 }
 
-/// Write the object cell of the live object `ptr`.
-#[inline(always)]
-unsafe fn write_object_cell<T: ObjectCore>(ptr: *const T, data: &mut TVMFFIAny) {
-    let object = ptr as *mut TVMFFIObject;
-    data.type_index = (*object).type_index;
-    // SAFETY: a live object's header holds its registered object-range type index.
-    std::hint::assert_unchecked(data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
-    data.small_str_len = 0;
-    data.data_union.v_obj = object;
-}
-
 // The object cell encoding, with the strict check `is_instance_of` then
 // `extra_check`, and `convert_fallback` after it in converting casts.
 unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
@@ -603,6 +832,39 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     }
 }
 
+/// Format a managed reference as its runtime type key and object address, as
+/// the `Debug` implementation of `#[derive(ObjectRef)]` does.
+///
+/// Call it from `Debug` for a reference type implemented by hand, such as a
+/// typed view over another reference, so that `downcast(..).unwrap()` and
+/// `assert_eq!` can print it.
+///
+/// ```
+/// use tvm_ffi::object::{fmt_object_ref, ObjectRef};
+/// use tvm_ffi::Array;
+/// struct Shown(ObjectRef);
+/// impl std::fmt::Debug for Shown {
+///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         fmt_object_ref(&self.0, f)
+///     }
+/// }
+/// let shown = Shown(Array::from_vec(vec![1_i64]).into());
+/// assert!(format!("{shown:?}").starts_with("ffi.Array@"));
+/// ```
+pub fn fmt_object_ref<T: ObjectRefCore>(
+    this: &T,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    let object = ObjectArc::as_ptr(T::data(this)).cast::<TVMFFIObject>();
+    // SAFETY: `this` keeps the object, and so its header, alive.
+    let type_index = unsafe { (*object).type_index };
+    write!(f, "{}@{:p}", type_key_of_index(type_index), object)
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
 /// The strict downcast from the root [`ObjectRef`] to `B`, for the containers'
 /// `TryFrom<ObjectRef>`, which are hand-written as their upcasts are.
 #[inline(always)]
@@ -640,35 +902,6 @@ pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
     }
 }
 
-/// Format a managed reference as its runtime type key and object address, as
-/// the `Debug` implementation of `#[derive(ObjectRef)]` does.
-///
-/// Call it from `Debug` for a reference type implemented by hand, such as a
-/// typed view over another reference, so that `downcast(..).unwrap()` and
-/// `assert_eq!` can print it.
-///
-/// ```
-/// use tvm_ffi::object::{fmt_object_ref, ObjectRef};
-/// use tvm_ffi::Array;
-/// struct Shown(ObjectRef);
-/// impl std::fmt::Debug for Shown {
-///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-///         fmt_object_ref(&self.0, f)
-///     }
-/// }
-/// let shown = Shown(Array::from_vec(vec![1_i64]).into());
-/// assert!(format!("{shown:?}").starts_with("ffi.Array@"));
-/// ```
-pub fn fmt_object_ref<T: ObjectRefCore>(
-    this: &T,
-    f: &mut std::fmt::Formatter<'_>,
-) -> std::fmt::Result {
-    let object = ObjectArc::as_ptr(T::data(this)).cast::<TVMFFIObject>();
-    // SAFETY: `this` keeps the object, and so its header, alive.
-    let type_index = unsafe { (*object).type_index };
-    write!(f, "{}@{:p}", type_key_of_index(type_index), object)
-}
-
 /// The registered type key of `type_index`, or `<type_index N>` when it has none.
 pub(crate) fn type_key_of_index(type_index: i32) -> String {
     unsafe {
@@ -681,15 +914,37 @@ pub(crate) fn type_key_of_index(type_index: i32) -> String {
     }
 }
 
-/// A generic managed reference to a TVM-FFI object.
-///
-/// Holds an `ObjectArc<Object>` that manages the underlying object's lifetime
-/// through reference counting.
-#[repr(C)]
-#[derive(ObjectRef, Clone)]
-#[object_ref(skip_deref)]
-pub struct ObjectRef {
-    data: ObjectArc<Object>,
+/// Write the object cell of the live object `ptr`.
+#[inline(always)]
+unsafe fn write_object_cell<T: ObjectCore>(ptr: *const T, data: &mut TVMFFIAny) {
+    let object = ptr as *mut TVMFFIObject;
+    data.type_index = (*object).type_index;
+    // SAFETY: a live object's header holds its registered object-range type index.
+    std::hint::assert_unchecked(data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+    data.small_str_len = 0;
+    data.data_union.v_obj = object;
+}
+
+// Allocate and initialize the normal FFI header while preserving the concrete
+// payload's alignment and drop/layout deleter. The payload starts with an Object.
+unsafe fn allocate_object<T>(data: T, type_index: i32) -> NonNull<T> {
+    let layout = std::alloc::Layout::new::<T>();
+    let allocation = std::alloc::alloc(layout);
+    if allocation.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+    let ptr = allocation.cast::<T>();
+    std::ptr::write(ptr, data);
+    std::ptr::write(
+        ptr.cast::<TVMFFIObject>(),
+        TVMFFIObject {
+            combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
+            type_index,
+            __padding: 0,
+            deleter: Some(unsafe_::object_deleter_for_new::<T>),
+        },
+    );
+    NonNull::new_unchecked(ptr)
 }
 
 /// Unsafe operations on object
@@ -825,257 +1080,6 @@ pub mod unsafe_ {
                     extra_items_layout::<T, U>(extra_items_count),
                 );
             }
-        }
-    }
-}
-
-impl Object {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {
-            header: TVMFFIObject::new(),
-        }
-    }
-}
-
-unsafe impl ObjectCore for Object {
-    const TYPE_KEY: &'static str = "ffi.Object";
-    const TYPE_DEPTH: i32 = 0;
-    #[inline]
-    fn type_index() -> i32 {
-        TypeIndex::kTVMFFIStaticObjectBegin as i32
-    }
-    #[inline]
-    unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
-        &mut this.header
-    }
-}
-
-// Allocate and initialize the normal FFI header while preserving the concrete
-// payload's alignment and drop/layout deleter. The payload starts with an Object.
-unsafe fn allocate_object<T>(data: T, type_index: i32) -> NonNull<T> {
-    let layout = std::alloc::Layout::new::<T>();
-    let allocation = std::alloc::alloc(layout);
-    if allocation.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-    let ptr = allocation.cast::<T>();
-    std::ptr::write(ptr, data);
-    std::ptr::write(
-        ptr.cast::<TVMFFIObject>(),
-        TVMFFIObject {
-            combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
-            type_index,
-            __padding: 0,
-            deleter: Some(unsafe_::object_deleter_for_new::<T>),
-        },
-    );
-    NonNull::new_unchecked(ptr)
-}
-
-impl ObjectArc<Object> {
-    /// Allocate a synchronous runtime payload that may contain borrowed Rust state.
-    ///
-    /// # Safety
-    /// `T` begins with a valid Object header and is ABI-compatible with the
-    /// registered `type_index`. The caller must keep this owner scoped to the
-    /// payload's borrows and ensure every temporary strong and weak reference
-    /// is released before those borrows end. Neither native handles nor this
-    /// erased owner may escape that synchronous scope. Destruction uses T's
-    /// exact layout and drop function, not the erased Object layout.
-    /// The erased owner and handles must remain on this thread unless the
-    /// concrete payload permits sharing or transfer; erasure grants neither.
-    pub(crate) unsafe fn new_opaque_unchecked<T>(data: T, type_index: i32) -> Self {
-        Self {
-            ptr: allocate_object(data, type_index).cast(),
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T: ObjectCore> ObjectArc<T> {
-    /// Allocate an initialized object at its stable managed address.
-    pub fn new(data: T) -> Self {
-        // Resolve metadata before moving the payload into its allocation.
-        let type_index = T::type_index();
-        unsafe {
-            Self {
-                ptr: allocate_object(data, type_index),
-                _phantom: std::marker::PhantomData,
-            }
-        }
-    }
-
-    /// Allocate a stable object followed by its type's extra item storage.
-    pub fn new_with_extra_items<U>(data: T) -> Self
-    where
-        T: ObjectCoreWithExtraItems<ExtraItem = U>,
-    {
-        unsafe {
-            // ensure strict alignment requirements
-            // so we can have { T, U*extra_items } layout
-            assert_eq!(std::mem::align_of::<T>() % std::mem::align_of::<U>(), 0);
-            assert_eq!(std::mem::size_of::<T>() % std::mem::align_of::<U>(), 0);
-            let extra_items_count = T::extra_items_count(&data);
-            let layout = unsafe_::extra_items_layout::<T, U>(extra_items_count);
-            let raw_data_ptr = std::alloc::alloc(layout);
-            if raw_data_ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
-            let ptr = raw_data_ptr as *mut T;
-            std::ptr::write(ptr, data);
-            // now override the header directly
-            std::ptr::write(
-                ptr as *mut TVMFFIObject,
-                TVMFFIObject {
-                    combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
-                    type_index: T::type_index(),
-                    __padding: 0,
-                    deleter: Some(unsafe_::object_deleter_for_new_with_extra_items::<T, U>),
-                },
-            );
-            // move into the object arc ptr
-            Self {
-                ptr: std::ptr::NonNull::new_unchecked(ptr),
-                _phantom: std::marker::PhantomData,
-            }
-        }
-    }
-
-    /// Whether `this` holds a null pointer, as all-zero bytes do: no
-    /// `ObjectArc`, but the field of an object that a creator left undefined.
-    ///
-    /// See also [`AnyCompatible::is_undefined`].
-    ///
-    /// # Safety
-    ///
-    /// `this` points to an `ObjectArc<T>` or to all-zero bytes.
-    #[inline]
-    pub unsafe fn is_null(this: *const Self) -> bool {
-        (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
-    }
-
-    /// Move a previously allocated object into the ObjectArc
-    ///
-    /// # Arguments
-    /// * `ptr` - The raw pointer to move into the ObjectArc
-    ///
-    /// # Returns
-    /// * `ObjectArc<T>` - The ObjectArc
-    ///
-    /// # Safety
-    /// `ptr` must own one strong reference to a live, stable managed allocation
-    /// whose dynamic type is compatible with `T` and whose payload is valid.
-    /// Ownership of that reference is transferred into the returned handle.
-    #[inline(always)]
-    pub unsafe fn from_raw(ptr: *const T) -> Self {
-        Self {
-            ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
-    /// Move the ObjectArc into a raw pointer
-    ///
-    /// # Arguments
-    /// * `this` - The ObjectArc to move into a raw pointer
-    ///
-    /// # Returns
-    /// * `*const T` - The raw pointer, which owns the strong reference; pass it
-    ///   back to [`ObjectArc::from_raw`] to release it, as std `Arc::into_raw`.
-    #[inline(always)]
-    pub fn into_raw(this: Self) -> *const T {
-        let droped_this = std::mem::ManuallyDrop::new(this);
-        droped_this.ptr.as_ptr() as *const T
-    }
-
-    /// Get the raw pointer from the ObjectArc
-    ///
-    /// Caller should view this as a non-owning reference
-    ///
-    /// # Arguments
-    /// * `this` - The ObjectArc to get the raw pointer
-    ///
-    /// # Returns
-    /// * `*const T` - The raw pointer, as std `Arc::as_ptr`. Dereferencing it
-    ///   must respect existing borrows, and it cannot outlive an owning handle.
-    #[inline]
-    pub fn as_ptr(this: &Self) -> *const T {
-        this.ptr.as_ptr() as *const T
-    }
-
-    /// Get the raw mutable pointer from the ObjectArc
-    ///
-    /// Caller should view this as a non-owning reference
-    ///
-    /// # Arguments
-    /// * `this` - The ObjectArc to get the raw pointer
-    ///
-    /// # Returns
-    /// * `*mut T` - The raw pointer. The handle need not be unique: writing
-    ///   through it needs exclusive access to the object, and must not move or
-    ///   replace the object or its header.
-    #[inline]
-    pub fn as_mut_ptr(this: &mut Self) -> *mut T {
-        this.ptr.as_ptr()
-    }
-
-    /// Get the strong reference count of the ObjectArc
-    ///
-    /// # Arguments
-    /// * `this` - The ObjectArc to get the strong reference count
-    ///
-    /// # Returns
-    /// * `usize` - The strong reference count
-    #[inline]
-    pub fn strong_count(this: &Self) -> usize {
-        unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
-    }
-
-    /// Whether this is the only reference, so it may be mutated in place.
-    #[inline]
-    pub(crate) fn is_unique(this: &Self) -> bool {
-        unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
-    }
-
-    /// Get the weak reference count of the ObjectArc
-    ///
-    /// # Arguments
-    /// * `this` - The ObjectArc to get the weak reference count
-    ///
-    /// # Returns
-    /// * `usize` - The weak reference count
-    #[inline]
-    pub fn weak_count(this: &Self) -> usize {
-        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
-    }
-}
-
-// implement Deref for ObjectArc
-impl<T: ObjectCore> Deref for ObjectArc<T> {
-    type Target = T;
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.ptr.as_ref() }
-    }
-}
-
-// implement Drop for ObjectArc
-impl<T: ObjectCore> Drop for ObjectArc<T> {
-    #[inline(always)]
-    fn drop(&mut self) {
-        unsafe { unsafe_::dec_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
-    }
-}
-
-// implement Clone for ObjectArc
-impl<T: ObjectCore> Clone for ObjectArc<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        unsafe { unsafe_::inc_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
-        Self {
-            ptr: self.ptr,
-            _phantom: std::marker::PhantomData,
         }
     }
 }

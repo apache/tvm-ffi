@@ -19,6 +19,7 @@
 // Re-export paste for the export macros, so downstream crates need not depend on it.
 #[doc(hidden)]
 pub use paste;
+
 // ----------------------------------------------------------------------------
 // Macros for error handling
 // ----------------------------------------------------------------------------
@@ -73,6 +74,166 @@ macro_rules! cached_global_func {
         &*FUNC
     }};
 }
+
+/// Check the return code of the safe call
+///
+/// # Arguments
+/// * `ret_code` - The return code of the safe call
+///
+/// # Returns
+/// * `Result<(), Error>` - The result of the safe call
+/// Macro to check safe calls and automatically update traceback with file/line info
+///
+/// Usage: check_safe_call!(function(args))?;
+#[doc(hidden)]
+#[macro_export]
+macro_rules! check_safe_call {
+    ($expr:expr) => {{
+        let ret_code = $expr;
+        if ret_code == 0 {
+            Ok(())
+        } else {
+            let error = $crate::error::Error::from_raised();
+            Err(error)
+        }
+    }};
+}
+
+/// Return an [`Error`](crate::Error) of a kind with a formatted message from
+/// the current function.
+///
+/// `bail!(kind, fmt, args...)` formats the message as `format!` does and
+/// records the source location in the backtrace.
+///
+/// # Arguments
+///
+/// * `kind` - The kind of the error, such as [`VALUE_ERROR`](crate::VALUE_ERROR).
+/// * `fmt` - The format string of the message.
+/// * `args` - The format arguments.
+///
+/// # Returns
+///
+/// Returns `Err` of the error from the enclosing function.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{bail, Result, INDEX_ERROR};
+///
+/// fn get(items: &[i64], index: usize) -> Result<i64> {
+///     if index >= items.len() {
+///         bail!(INDEX_ERROR, "index {} out of range for length {}", index, items.len());
+///     }
+///     Ok(items[index])
+/// }
+///
+/// assert_eq!(get(&[1, 2], 1)?, 2);
+/// assert_eq!(get(&[1, 2], 5).unwrap_err().message(), "index 5 out of range for length 2");
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+#[macro_export]
+macro_rules! bail {
+    ($error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
+        let context = format!(
+            "  File \"{}\", line {}, in {}\n",
+            file!(),
+            line!(),
+            $crate::function_name!()
+        );
+        return Err($crate::error::Error::new($error_kind, &format!($fmt $(, $args)*), &context));
+    }};
+}
+
+/// Return an [`Error`](crate::Error) from the current function unless a
+/// condition holds.
+///
+/// `ensure!(cond, kind, fmt, args...)` is [`bail!`](crate::bail)`(kind, fmt,
+/// args...)` when `cond` is false.
+///
+/// # Arguments
+///
+/// * `cond` - The condition that must hold.
+/// * `kind` - The kind of the error.
+/// * `fmt` - The format string of the message.
+/// * `args` - The format arguments.
+///
+/// # Returns
+///
+/// Returns `Err` of the error from the enclosing function when `cond` is
+/// false, and does nothing otherwise.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{ensure, Result, VALUE_ERROR};
+///
+/// fn sqrt(x: f64) -> Result<f64> {
+///     ensure!(x >= 0.0, VALUE_ERROR, "sqrt of negative number {}", x);
+///     Ok(x.sqrt())
+/// }
+///
+/// assert_eq!(sqrt(4.0)?, 2.0);
+/// assert!(sqrt(-1.0).is_err());
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+#[macro_export]
+macro_rules! ensure {
+    ($cond:expr, $error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
+        if !$cond {
+            $crate::bail!($error_kind, $fmt $(, $args)*);
+        }
+    }};
+}
+
+/// Append the current source location to the backtrace of an `Err` result,
+/// and pass an `Ok` through.
+///
+/// # Arguments
+///
+/// * `result` - The result to attach the context to.
+///
+/// # Returns
+///
+/// The result, with the location appended to an error's backtrace.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{attach_context, bail, Result, RUNTIME_ERROR};
+///
+/// fn inner() -> Result<()> {
+///     bail!(RUNTIME_ERROR, "failed");
+/// }
+///
+/// fn outer() -> Result<()> {
+///     attach_context!(inner())
+/// }
+///
+/// assert!(outer().unwrap_err().backtrace().contains("outer"));
+/// ```
+#[macro_export]
+macro_rules! attach_context {
+    ($error:expr) => {{
+        match $error {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                let context = format!(
+                    "  File \"{}\", line {}, in {}\n",
+                    file!(),
+                    line!(),
+                    $crate::function_name!()
+                );
+                Err($crate::error::Error::with_appended_backtrace(
+                    error, &context,
+                ))
+            }
+        }
+    }};
+}
+
+// ----------------------------------------------------------------------------
+// Macros for object references
+// ----------------------------------------------------------------------------
 
 /// Implement zero-copy conversions from a derived object reference to one of
 /// its base object-reference types: `From<Source>` and `From<&Source>` into
@@ -286,162 +447,6 @@ macro_rules! unsafe_impl_object_ref_downcast_ref {
             }
         )+
     };
-}
-
-/// Check the return code of the safe call
-///
-/// # Arguments
-/// * `ret_code` - The return code of the safe call
-///
-/// # Returns
-/// * `Result<(), Error>` - The result of the safe call
-/// Macro to check safe calls and automatically update traceback with file/line info
-///
-/// Usage: check_safe_call!(function(args))?;
-#[doc(hidden)]
-#[macro_export]
-macro_rules! check_safe_call {
-    ($expr:expr) => {{
-        let ret_code = $expr;
-        if ret_code == 0 {
-            Ok(())
-        } else {
-            let error = $crate::error::Error::from_raised();
-            Err(error)
-        }
-    }};
-}
-
-/// Return an [`Error`](crate::Error) of a kind with a formatted message from
-/// the current function.
-///
-/// `bail!(kind, fmt, args...)` formats the message as `format!` does and
-/// records the source location in the backtrace.
-///
-/// # Arguments
-///
-/// * `kind` - The kind of the error, such as [`VALUE_ERROR`](crate::VALUE_ERROR).
-/// * `fmt` - The format string of the message.
-/// * `args` - The format arguments.
-///
-/// # Returns
-///
-/// Returns `Err` of the error from the enclosing function.
-///
-/// # Examples
-///
-/// ```
-/// use tvm_ffi::{bail, Result, INDEX_ERROR};
-///
-/// fn get(items: &[i64], index: usize) -> Result<i64> {
-///     if index >= items.len() {
-///         bail!(INDEX_ERROR, "index {} out of range for length {}", index, items.len());
-///     }
-///     Ok(items[index])
-/// }
-///
-/// assert_eq!(get(&[1, 2], 1)?, 2);
-/// assert_eq!(get(&[1, 2], 5).unwrap_err().message(), "index 5 out of range for length 2");
-/// # Ok::<(), tvm_ffi::Error>(())
-/// ```
-#[macro_export]
-macro_rules! bail {
-    ($error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
-        let context = format!(
-            "  File \"{}\", line {}, in {}\n",
-            file!(),
-            line!(),
-            $crate::function_name!()
-        );
-        return Err($crate::error::Error::new($error_kind, &format!($fmt $(, $args)*), &context));
-    }};
-}
-
-/// Return an [`Error`](crate::Error) from the current function unless a
-/// condition holds.
-///
-/// `ensure!(cond, kind, fmt, args...)` is [`bail!`](crate::bail)`(kind, fmt,
-/// args...)` when `cond` is false.
-///
-/// # Arguments
-///
-/// * `cond` - The condition that must hold.
-/// * `kind` - The kind of the error.
-/// * `fmt` - The format string of the message.
-/// * `args` - The format arguments.
-///
-/// # Returns
-///
-/// Returns `Err` of the error from the enclosing function when `cond` is
-/// false, and does nothing otherwise.
-///
-/// # Examples
-///
-/// ```
-/// use tvm_ffi::{ensure, Result, VALUE_ERROR};
-///
-/// fn sqrt(x: f64) -> Result<f64> {
-///     ensure!(x >= 0.0, VALUE_ERROR, "sqrt of negative number {}", x);
-///     Ok(x.sqrt())
-/// }
-///
-/// assert_eq!(sqrt(4.0)?, 2.0);
-/// assert!(sqrt(-1.0).is_err());
-/// # Ok::<(), tvm_ffi::Error>(())
-/// ```
-#[macro_export]
-macro_rules! ensure {
-    ($cond:expr, $error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
-        if !$cond {
-            $crate::bail!($error_kind, $fmt $(, $args)*);
-        }
-    }};
-}
-
-/// Append the current source location to the backtrace of an `Err` result,
-/// and pass an `Ok` through.
-///
-/// # Arguments
-///
-/// * `result` - The result to attach the context to.
-///
-/// # Returns
-///
-/// The result, with the location appended to an error's backtrace.
-///
-/// # Examples
-///
-/// ```
-/// use tvm_ffi::{attach_context, bail, Result, RUNTIME_ERROR};
-///
-/// fn inner() -> Result<()> {
-///     bail!(RUNTIME_ERROR, "failed");
-/// }
-///
-/// fn outer() -> Result<()> {
-///     attach_context!(inner())
-/// }
-///
-/// assert!(outer().unwrap_err().backtrace().contains("outer"));
-/// ```
-#[macro_export]
-macro_rules! attach_context {
-    ($error:expr) => {{
-        match $error {
-            Ok(value) => Ok(value),
-            Err(error) => {
-                let context = format!(
-                    "  File \"{}\", line {}, in {}\n",
-                    file!(),
-                    line!(),
-                    $crate::function_name!()
-                );
-                Err($crate::error::Error::with_appended_backtrace(
-                    error, &context,
-                ))
-            }
-        }
-    }};
 }
 
 // ----------------------------------------------------------------------------

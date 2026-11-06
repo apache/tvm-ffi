@@ -52,13 +52,6 @@ unsafe impl ObjectCoreWithExtraItems for ArrayObj {
     }
 }
 
-/// Move `value` into the uninitialized `cell`.
-unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
-    let mut raw = TVMFFIAny::new();
-    T::container_move_to_any(value, &mut raw);
-    std::ptr::write(cell, raw);
-}
-
 // Runs only for a Rust-allocated array; one allocated in C++ is released by its
 // own deleter.
 impl Drop for ArrayObj {
@@ -217,33 +210,6 @@ impl<T: ContainerElement + Clone> Array<T> {
         Self::new_with_capacity(items, capacity)
     }
 
-    /// Internal helper to allocate an ArrayObj with specific headroom.
-    fn new_with_capacity(items: Vec<T>, capacity: usize) -> Self {
-        let size = items.len();
-
-        // Allocate with capacity
-        let mut arc = ObjectArc::<ArrayObj>::new_with_extra_items(ArrayObj {
-            object: Object::new(),
-            data: core::ptr::null_mut(),
-            size: size as i64,
-            capacity: capacity as i64,
-            data_deleter: None,
-        });
-
-        unsafe {
-            let container = &mut *ObjectArc::as_mut_ptr(&mut arc);
-
-            let base_ptr = ArrayObj::extra_items_mut(container).as_mut_ptr();
-            container.data = base_ptr as *mut _;
-
-            for (i, item) in items.into_iter().enumerate() {
-                write_cell(base_ptr.add(i), item);
-            }
-        }
-        // SAFETY: `arc` was allocated and initialized above as an `Array<T>`.
-        unsafe { Self::from_data(arc) }
-    }
-
     /// Append `value` to the end.
     ///
     /// See also [`List::push`](crate::List::push).
@@ -345,50 +311,6 @@ impl<T: ContainerElement + Clone> Array<T> {
         Ok(())
     }
 
-    /// Make this handle the only reference to its cells, with room for at least
-    /// `capacity` of them, and return the container to edit in place.
-    fn make_mut(&mut self, capacity: usize) -> &mut ArrayObj {
-        // As C++ `Array::CopyOnWrite(reserve)`.
-        let unique = ObjectArc::is_unique(&self.data);
-        let current = self.data.capacity as usize;
-        if !unique || capacity > current {
-            let capacity = if capacity > current {
-                (current * 2).max(capacity)
-            } else {
-                current
-            };
-            self.copy_to_new_buffer(capacity, unique);
-        }
-        // SAFETY: this handle is now the only reference, so no one else observes
-        // the container while it is mutably borrowed.
-        unsafe { &mut *ObjectArc::as_mut_ptr(&mut self.data) }
-    }
-
-    /// Replace `self` with a unique array of `capacity` cells holding the same
-    /// elements: moved out of a `unique` source, otherwise each re-referenced.
-    fn copy_to_new_buffer(&mut self, capacity: usize, unique: bool) {
-        let size = self.len();
-        let mut grown = Self::new_with_capacity(Vec::new(), capacity);
-        let source = self.as_container().data as *const TVMFFIAny;
-        // SAFETY: `grown` is fresh with room for `size` cells. A unique source
-        // forgets the cells it moved; a shared one keeps its own references.
-        unsafe {
-            let target = ObjectArc::as_mut_ptr(&mut grown.data);
-            let cells = (*target).data as *mut TVMFFIAny;
-            if unique {
-                std::ptr::copy_nonoverlapping(source, cells, size);
-                (*ObjectArc::as_mut_ptr(&mut self.data)).size = 0;
-            } else {
-                for i in 0..size {
-                    let copy = Any::from(AnyView::from_raw_ffi_any(*source.add(i)));
-                    std::ptr::write(cells.add(i), Any::into_raw_ffi_any(copy));
-                }
-            }
-            (*target).size = size as i64;
-        }
-        *self = grown;
-    }
-
     /// Return the number of elements.
     ///
     /// # Returns
@@ -442,6 +364,77 @@ impl<T: ContainerElement + Clone> Array<T> {
         }
     }
 
+    /// Internal helper to allocate an ArrayObj with specific headroom.
+    fn new_with_capacity(items: Vec<T>, capacity: usize) -> Self {
+        let size = items.len();
+
+        // Allocate with capacity
+        let mut arc = ObjectArc::<ArrayObj>::new_with_extra_items(ArrayObj {
+            object: Object::new(),
+            data: core::ptr::null_mut(),
+            size: size as i64,
+            capacity: capacity as i64,
+            data_deleter: None,
+        });
+
+        unsafe {
+            let container = &mut *ObjectArc::as_mut_ptr(&mut arc);
+
+            let base_ptr = ArrayObj::extra_items_mut(container).as_mut_ptr();
+            container.data = base_ptr as *mut _;
+
+            for (i, item) in items.into_iter().enumerate() {
+                write_cell(base_ptr.add(i), item);
+            }
+        }
+        // SAFETY: `arc` was allocated and initialized above as an `Array<T>`.
+        unsafe { Self::from_data(arc) }
+    }
+
+    /// Make this handle the only reference to its cells, with room for at least
+    /// `capacity` of them, and return the container to edit in place.
+    fn make_mut(&mut self, capacity: usize) -> &mut ArrayObj {
+        // As C++ `Array::CopyOnWrite(reserve)`.
+        let unique = ObjectArc::is_unique(&self.data);
+        let current = self.data.capacity as usize;
+        if !unique || capacity > current {
+            let capacity = if capacity > current {
+                (current * 2).max(capacity)
+            } else {
+                current
+            };
+            self.copy_to_new_buffer(capacity, unique);
+        }
+        // SAFETY: this handle is now the only reference, so no one else observes
+        // the container while it is mutably borrowed.
+        unsafe { &mut *ObjectArc::as_mut_ptr(&mut self.data) }
+    }
+
+    /// Replace `self` with a unique array of `capacity` cells holding the same
+    /// elements: moved out of a `unique` source, otherwise each re-referenced.
+    fn copy_to_new_buffer(&mut self, capacity: usize, unique: bool) {
+        let size = self.len();
+        let mut grown = Self::new_with_capacity(Vec::new(), capacity);
+        let source = self.as_container().data as *const TVMFFIAny;
+        // SAFETY: `grown` is fresh with room for `size` cells. A unique source
+        // forgets the cells it moved; a shared one keeps its own references.
+        unsafe {
+            let target = ObjectArc::as_mut_ptr(&mut grown.data);
+            let cells = (*target).data as *mut TVMFFIAny;
+            if unique {
+                std::ptr::copy_nonoverlapping(source, cells, size);
+                (*ObjectArc::as_mut_ptr(&mut self.data)).size = 0;
+            } else {
+                for i in 0..size {
+                    let copy = Any::from(AnyView::from_raw_ffi_any(*source.add(i)));
+                    std::ptr::write(cells.add(i), Any::into_raw_ffi_any(copy));
+                }
+            }
+            (*target).size = size as i64;
+        }
+        *self = grown;
+    }
+
     /// The cells of the array, one per element.
     #[inline]
     fn cells(&self) -> &[TVMFFIAny] {
@@ -462,6 +455,10 @@ impl<T: ContainerElement + Clone> Array<T> {
         unsafe { &*ObjectArc::as_ptr(&self.data) }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Index
+// -----------------------------------------------------------------------------
 
 /// Lends `&T` from the array's cell in place. Every cell of an `Array<T>`
 /// holds a `T` (checked when the array is built), so only a debug check runs.
@@ -484,6 +481,10 @@ impl<T: ContainerElement + Clone + RefFromAnyUnchecked> std::ops::Index<usize> f
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Iterators
+// -----------------------------------------------------------------------------
 
 impl<T: ContainerElement + Clone + RefFromAnyUnchecked> Array<T> {
     /// Return an iterator that borrows each element in place, without a
@@ -601,6 +602,10 @@ impl<T: ContainerElement + Clone> FromIterator<T> for Array<T> {
         Self::from_vec(items)
     }
 }
+
+// -----------------------------------------------------------------------------
+// Any conversions
+// -----------------------------------------------------------------------------
 
 unsafe impl<T> AnyCompatible for Array<T>
 where
@@ -769,4 +774,15 @@ where
         let temp: TryFromTemp<Self> = TryFromTemp::try_from(value)?;
         Ok(TryFromTemp::into_value(temp))
     }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+/// Move `value` into the uninitialized `cell`.
+unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
+    let mut raw = TVMFFIAny::new();
+    T::container_move_to_any(value, &mut raw);
+    std::ptr::write(cell, raw);
 }
