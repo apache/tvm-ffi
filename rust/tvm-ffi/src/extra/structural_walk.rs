@@ -99,14 +99,14 @@ struct WalkVisitor<'a, D, const PRE_ORDER: bool> {
     observer: &'a mut D,
 }
 
-impl<'s, 'v, 'c, 'r, 'a, D, const PRE_ORDER: bool>
+impl<'v, 'c, 'r, 'a, D, const PRE_ORDER: bool>
     Dispatcher<
         (
             AnyView<'v>,
             &'c mut StructuralVisitorView<'r, WalkVisitor<'a, D, PRE_ORDER>>,
         ),
         Option<Result<Option<VisitInterrupt>>>,
-    > for &'s mut WalkVisitor<'a, D, PRE_ORDER>
+    > for &mut WalkVisitor<'a, D, PRE_ORDER>
 where
     for<'d, 'b> &'d mut D: Dispatcher<(AnyView<'b>, DefRegionKind), Option<Result<WalkResult>>>,
 {
@@ -171,8 +171,7 @@ where
     for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
 {
     let root = *root.as_raw_ffi_any();
-    // Own the result while dropping the observer: user capture destructors can
-    // unwind after the native callback has returned.
+    // Take ownership of the raw result right after the native call.
     let result = match order {
         WalkOrder::PreOrder => {
             let mut visitor = WalkVisitor::<D, true> { observer };
@@ -180,9 +179,7 @@ where
                 root,
                 &mut visitor,
             );
-            let result = unsafe { Any::from_raw_ffi_any(raw) };
-            drop(visitor);
-            result
+            unsafe { Any::from_raw_ffi_any(raw) }
         }
         WalkOrder::PostOrder => {
             let mut visitor = WalkVisitor::<D, false> { observer };
@@ -190,9 +187,7 @@ where
                 root,
                 &mut visitor,
             );
-            let result = unsafe { Any::from_raw_ffi_any(raw) };
-            drop(visitor);
-            result
+            unsafe { Any::from_raw_ffi_any(raw) }
         }
     };
     visit_result_from_any(result)

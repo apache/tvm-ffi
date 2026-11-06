@@ -47,6 +47,10 @@ use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// for those values; it is the pointer-sized mirror of C++'s nullable
 /// `ObjectPtr`-backed optional.
 ///
+/// # Safety
+/// Implement only for types whose C++ `ffi::Optional<T>` uses the `TVMFFIAny`
+/// representation; for an object class it would mismatch the C++ pointer layout.
+///
 /// ```compile_fail,E0277
 /// use tvm_ffi::{Array, Optional};
 /// let _ = Optional::<Array<i64>>::none();

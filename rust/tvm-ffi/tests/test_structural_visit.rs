@@ -88,12 +88,12 @@ fn default_descent_scopes_regions_and_restores_after_halts() {
             self.regions.push(outer);
             let result = if level < 2 {
                 visitor.with_def_region_kind([Simple, Pattern][level], |visitor| {
-                    visitor.visit(self, &value)
+                    visitor.visit(self, value)
                 })
             } else {
                 visitor.with_def_region_kind(Use, |visitor| {
                     let current = value;
-                    let result = visitor.default_visit(self, &current);
+                    let result = visitor.default_visit(self, current);
                     assert_eq!(
                         current.downcast_ref::<Array<i64>>().cloned().unwrap().len(),
                         2
@@ -272,7 +272,7 @@ fn regions_compose_with_field_flags_and_function_hooks() {
                     kind
                 };
                 visitor
-                    .with_def_region_kind(requested, |visitor| visitor.default_visit(self, &value))
+                    .with_def_region_kind(requested, |visitor| visitor.default_visit(self, value))
             }
         }
     }
@@ -357,8 +357,9 @@ fn reflected_pattern_precedes_default_descent() {
                         _ => Ok(None),
                     }
                 }
-                None => visitor
-                    .with_def_region_kind(kind, |visitor| visitor.default_visit(self, &value)),
+                None => {
+                    visitor.with_def_region_kind(kind, |visitor| visitor.default_visit(self, value))
+                }
             }
         }
     }
@@ -946,7 +947,7 @@ impl StraddleVisitor {
         };
         self.events.push(format!("enter:{label}"));
         if let Some(interrupt) = visitor.with_def_region_kind(def_region_kind, |visitor| {
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         })? {
             return Ok(Some(interrupt));
         }
@@ -1099,7 +1100,7 @@ fn visitor_errors_include_native_visit_path() {
                 return Err(runtime_error("visitor failed"));
             }
             visitor.with_def_region_kind(def_region_kind, |visitor| {
-                visitor.default_visit(self, &value)
+                visitor.default_visit(self, value)
             })
         }
     }
@@ -1155,7 +1156,7 @@ fn visitor_interrupt_propagates_through_default_children() {
                 return Ok(Some(VisitInterrupt::new(7i64)));
             }
             visitor.with_def_region_kind(def_region_kind, |visitor| {
-                visitor.default_visit(self, &value)
+                visitor.default_visit(self, value)
             })
         }
     }
@@ -1497,7 +1498,7 @@ impl InheritedRegionProbe {
         }
         self.seen.push(def_region_kind);
         visitor.with_def_region_kind(def_region_kind, |visitor| {
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         })
     }
 }
@@ -1754,7 +1755,7 @@ impl StatefulVisitDepth {
         self.calls += 1;
         let current = self.current;
         self.maximum = self.maximum.max(current);
-        let outcome = visitor.default_visit(self, &value);
+        let outcome = visitor.default_visit(self, value);
         self.current -= 1;
         outcome
     }
@@ -1786,7 +1787,7 @@ fn callback_visit_can_reenter_the_same_fn_through_visitor() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             self.0.set(self.0.get() + 1);
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         }
     }
     let root = Array::from_vec(vec![1i64, 2]);
@@ -1818,7 +1819,7 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
             visitor: &mut StructuralVisitorView<'_, Self>,
         ) -> Result<Option<VisitInterrupt>> {
             self.0.set(self.0.get() + 1);
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         }
     }
     let root = Array::from_vec(vec![1i64, 2, 3]);
@@ -1948,16 +1949,16 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
                 for default in [false, true] {
                     let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         if default {
-                            visitor.default_visit(&mut other, &value)
+                            visitor.default_visit(&mut other, value)
                         } else {
-                            visitor.visit(&mut other, &value)
+                            visitor.visit(&mut other, value)
                         }
                     }));
                     assert!(rejected.is_err());
                     assert_eq!(other.calls, 0);
                 }
             }
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         }
     }
     let aligned_root = Array::from_vec(vec![3_i64, 4]);
@@ -2030,7 +2031,7 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
             if !self.entered.replace(true) {
                 structural_visit(self.inner, Inner(self.inner_values))?;
             }
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         }
     }
     let outer = Array::from_vec(vec![10i64, 20]);
@@ -2068,7 +2069,7 @@ fn copied_views_forward_borrows_and_retain_only_explicit_owners() {
     assert_eq!(copy.debug_strong_count(), Some(1));
     let mut retained = None;
     structural_walk(
-        &copy,
+        copy,
         |value: AnyView<'_>| {
             let copy = value;
             if let Some(node) = copy.downcast_ref::<tvm_ffi::collections::array::ArrayObj>() {
@@ -2241,7 +2242,7 @@ fn visitor_preserves_post_recursion_state() {
         ) -> Result<Option<VisitInterrupt>> {
             let depth = self.depth;
             self.depth += 1;
-            let result = visitor.default_visit(self, &value)?;
+            let result = visitor.default_visit(self, value)?;
             self.depth -= 1;
             assert_eq!(self.depth, depth);
             self.completed += 1;

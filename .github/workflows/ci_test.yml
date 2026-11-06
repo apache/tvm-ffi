@@ -36,6 +36,7 @@ jobs:
       cpp_changed: ${{ steps.cpp_files.outputs.changed }}
       cpp_files: ${{ steps.cpp_files.outputs.files }}
       orcjit_changed: ${{ steps.orcjit_files.outputs.changed }}
+      rust_changed: ${{ steps.rust_files.outputs.changed }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -61,6 +62,13 @@ jobs:
           FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
             addons/tvm_ffi_orcjit/ .github/actions/build-orcjit-wheel/ | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
+          [ -n "$FILES" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
+
+      - name: Detect Rust changes
+        id: rust_files
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- \
+            rust/ .github/workflows/ci_test.yml | tr '\n' ' ')
           [ -n "$FILES" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
 
   lint:
@@ -209,6 +217,15 @@ jobs:
         run: |
           cargo test
           cargo test -p tvm-ffi --features export-metadata
+      # Pin clippy so new lints arrive with a toolchain bump, not a runner update.
+      - name: Run rust clippy
+        if: >
+          matrix.os == 'ubuntu-latest' &&
+          (github.event_name != 'pull_request' || needs.prepare.outputs.rust_changed == 'true')
+        working-directory: rust
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component clippy
+          cargo +1.99.1 clippy --workspace --all-targets -- -D warnings
 
       # Build the Rust stubgen example against the installed package. Its post-build
       # step refreshes the bindings in place, so a diff means the checked-in file was stale.

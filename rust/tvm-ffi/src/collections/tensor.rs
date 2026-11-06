@@ -32,6 +32,11 @@ use tvm_ffi_sys::{TVMFFIEnvTensorAlloc, TVMFFIObjectHandle};
 // NDAllocator Trait
 //-----------------------------------------------------
 /// Trait for n-dimensional array allocators
+///
+/// # Safety
+/// `alloc_data` must return a pointer aligned to `MIN_ALIGN` and valid for
+/// `numel() * item_size()` bytes of the prototype, and `free_data` must release
+/// exactly what `alloc_data` returned.
 pub unsafe trait NDAllocator: 'static {
     /// The minimum alignment of the data allocated by the allocator
     const MIN_ALIGN: usize;
@@ -41,6 +46,9 @@ pub unsafe trait NDAllocator: 'static {
     /// * `tensor` - The DLTensor to allocate data for
     ///
     /// This method should fill in the data pointer of the DLTensor.
+    ///
+    /// # Safety
+    /// `prototype` must have a valid shape and dtype.
     unsafe fn alloc_data(&mut self, prototype: &DLTensor) -> *mut core::ffi::c_void;
 
     /// Free data for the given DLTensor
@@ -49,6 +57,10 @@ pub unsafe trait NDAllocator: 'static {
     /// * `tensor` - The DLTensor to free data for
     ///
     /// This method should free the data pointer of the DLTensor.
+    ///
+    /// # Safety
+    /// `tensor.data` must come from `alloc_data` on this allocator with the same
+    /// shape and dtype, and must not be used afterwards.
     unsafe fn free_data(&mut self, tensor: &DLTensor);
 }
 
@@ -73,7 +85,7 @@ impl DLTensorExt for DLTensor {
     }
 
     fn item_size(&self) -> usize {
-        (self.dtype.bits as usize * self.dtype.lanes as usize + 7) / 8
+        (self.dtype.bits as usize * self.dtype.lanes as usize).div_ceil(8)
     }
 }
 
@@ -311,15 +323,15 @@ impl Tensor {
                 object: Object::new(),
                 dltensor: DLTensor {
                     data: std::ptr::null_mut(),
-                    device: device,
+                    device,
                     ndim: shape.len() as i32,
-                    dtype: dtype,
+                    dtype,
                     shape: std::ptr::null_mut(),
                     strides: std::ptr::null_mut(),
                     byte_offset: 0,
                 },
             },
-            alloc: alloc,
+            alloc,
         };
         unsafe {
             let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
@@ -403,9 +415,9 @@ unsafe impl NDAllocator for CPUNDAlloc {
     const MIN_ALIGN: usize = 64;
 
     unsafe fn alloc_data(&mut self, prototype: &DLTensor) -> *mut core::ffi::c_void {
-        let numel = prototype.numel() as usize;
+        let numel = prototype.numel();
         let item_size = prototype.item_size();
-        let size = numel * item_size as usize;
+        let size = numel * item_size;
         // A zero-size allocation is undefined behavior; an empty tensor gets an
         // aligned dangling pointer, which `free_data` does not release.
         if size == 0 {
@@ -420,7 +432,7 @@ unsafe impl NDAllocator for CPUNDAlloc {
     }
 
     unsafe fn free_data(&mut self, tensor: &DLTensor) {
-        let numel = tensor.numel() as usize;
+        let numel = tensor.numel();
         let item_size = tensor.item_size();
         let size = numel * item_size;
         if size == 0 {

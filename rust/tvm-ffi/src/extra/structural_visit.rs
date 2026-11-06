@@ -327,6 +327,7 @@ impl VisitInterrupt {
 /// See also [`structural_visit`].
 pub struct StructuralVisitorView<'a, D, Base = StructuralVisitorObj> {
     runtime: StructuralVisitorHandle,
+    #[allow(clippy::type_complexity)]
     _scope: PhantomData<(&'a mut (), fn(&mut D) -> Base, Rc<()>)>,
 }
 

@@ -168,6 +168,7 @@ pub struct TVMFFIObject {
 }
 
 impl TVMFFIObject {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             combined_ref_count: AtomicU64::new(0),
@@ -217,6 +218,7 @@ pub struct TVMFFIAny {
 
 impl TVMFFIAny {
     /// create a new instance of TVMFFIAny that represents None
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             type_index: TVMFFITypeIndex::kTVMFFINone as i32,
@@ -253,14 +255,16 @@ impl TVMFFIByteArray {
         unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.data, self.size)) }
     }
     /// Unsafe function to create a TVMFFIByteArray from a string
-    /// This function is unsafe as it does not check lifetime of the string
-    /// the caller must ensure that the string is valid for the lifetime of the TVMFFIByteArray
     ///
     /// # Arguments
     /// * `data` - The string to create the TVMFFIByteArray from.
     ///
     /// # Returns
     /// * `TVMFFIByteArray` - The created TVMFFIByteArray.
+    ///
+    /// # Safety
+    /// The result borrows `data` without a lifetime; the caller must keep the
+    /// string alive for as long as the TVMFFIByteArray is used.
     pub unsafe fn from_str(data: &str) -> Self {
         Self {
             data: data.as_ptr(),

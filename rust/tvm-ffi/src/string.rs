@@ -110,7 +110,7 @@ unsafe impl ObjectCoreWithExtraItems for BytesObj {
     #[inline]
     /// Get the count of extra items (trailing null byte for FFI compatibility)
     fn extra_items_count(this: &Self) -> usize {
-        return this.data.size + 1;
+        this.data.size + 1
     }
 }
 
@@ -133,7 +133,7 @@ where
                     data: TVMFFIAny {
                         type_index: TypeIndex::kTVMFFISmallBytes as i32,
                         small_str_len: value.len() as u32,
-                        data_union: data_union,
+                        data_union,
                     },
                 }
             } else {
@@ -207,7 +207,7 @@ impl Eq for Bytes {}
 impl PartialOrd for Bytes {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_slice().partial_cmp(other.as_slice())
+        Some(self.cmp(other))
     }
 }
 
@@ -284,7 +284,7 @@ unsafe impl ObjectCoreWithExtraItems for StringObj {
     /// Get the count of extra items (trailing null byte for FFI compatibility)
     fn extra_items_count(this: &Self) -> usize {
         // extra item is the trailing \0 for ffi compatibility
-        return this.data.size + 1;
+        this.data.size + 1
     }
 }
 
@@ -349,7 +349,7 @@ where
                     data: TVMFFIAny {
                         type_index: TypeIndex::kTVMFFISmallStr as i32,
                         small_str_len: bytes.len() as u32,
-                        data_union: data_union,
+                        data_union,
                     },
                 }
             } else {
@@ -449,7 +449,7 @@ where
 impl PartialOrd for String {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_str().partial_cmp(other.as_str())
+        Some(self.cmp(other))
     }
 }
 
@@ -505,8 +505,8 @@ unsafe impl AnyCompatible for Bytes {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return data.type_index == TypeIndex::kTVMFFISmallBytes as i32
-            || data.type_index == TypeIndex::kTVMFFIBytes as i32;
+        data.type_index == TypeIndex::kTVMFFISmallBytes as i32
+            || data.type_index == TypeIndex::kTVMFFIBytes as i32
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
@@ -559,8 +559,8 @@ unsafe impl AnyCompatible for String {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return data.type_index == TypeIndex::kTVMFFISmallStr as i32
-            || data.type_index == TypeIndex::kTVMFFIStr as i32;
+        data.type_index == TypeIndex::kTVMFFISmallStr as i32
+            || data.type_index == TypeIndex::kTVMFFIStr as i32
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {

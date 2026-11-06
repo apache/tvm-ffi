@@ -166,6 +166,7 @@ impl<'a> Restore<crate::MutationView<'a>> for CapabilitySource<'a> {
 #[doc(hidden)]
 pub trait MatchPattern<S>: Sized {
     type Recovery;
+    #[allow(clippy::result_unit_err)]
     fn try_match(source: S) -> Result<Matched<Self, Self::Recovery>, ()>;
 }
 impl<'b, T: crate::type_traits::ContainerElement, S: SourceView> MatchPattern<&'b mut S> for T {
@@ -274,6 +275,7 @@ impl<T> RefPatternMetadata for &PatternConversionProbe<T> {
 pub trait RefPatternConversion<'b, S, T> {
     type Holder: std::borrow::Borrow<T>;
     type Recovery;
+    #[allow(clippy::result_unit_err)]
     fn try_convert_ref(
         &self,
         source: &'b mut S,
@@ -365,6 +367,7 @@ impl LeafLookupTable {
 
     #[doc(hidden)]
     #[inline(always)]
+    #[allow(clippy::result_unit_err)]
     pub fn lookup(&self, pattern_list_id: TypeId, type_index: i32) -> Result<Option<ArmId>, ()> {
         if self.pattern_list_id != pattern_list_id {
             return Err(());

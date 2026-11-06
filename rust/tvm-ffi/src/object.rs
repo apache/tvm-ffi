@@ -111,7 +111,6 @@ pub unsafe trait ObjectCore: Sized + 'static {
     ///
     /// # Returns
     /// * `&mut TVMFFIObject` - The object header
-    /// \return The object header
     ///
     /// # Safety
     /// The caller must have exclusive access to the header and preserve the
@@ -122,12 +121,19 @@ pub unsafe trait ObjectCore: Sized + 'static {
 /// Traits for objects with extra items that follows the object
 ///
 /// This extra trait can be helpful to implement array types and string types
+///
+/// # Safety
+/// Every allocation of `Self` must be followed by `extra_items_count` initialized
+/// `ExtraItem`s, as `ObjectArc::new_with_extra_items` lays them out.
 pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
     /// type of extra items storage that follows the object
     type ExtraItem;
     /// Return the number of extra items
     fn extra_items_count(this: &Self) -> usize;
     /// Return the extra items data pointer
+    ///
+    /// # Safety
+    /// `this` must be an allocation that carries its extra items.
     unsafe fn extra_items(this: &Self) -> &[Self::ExtraItem] {
         let extra_items_ptr = (this as *const Self as *const u8).add(std::mem::size_of::<Self>());
         std::slice::from_raw_parts(
@@ -136,6 +142,9 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
         )
     }
     /// Return the extra items data pointer
+    ///
+    /// # Safety
+    /// `this` must be an allocation that carries its extra items.
     unsafe fn extra_items_mut(this: &mut Self) -> &mut [Self::ExtraItem] {
         let extra_items_ptr = (this as *mut Self as *mut u8).add(std::mem::size_of::<Self>());
         std::slice::from_raw_parts_mut(
@@ -659,6 +668,7 @@ pub mod unsafe_ {
 //---------------------
 
 impl Object {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             header: TVMFFIObject::new(),
@@ -768,7 +778,7 @@ impl<T: ObjectCore> ObjectArc<T> {
             );
             // move into the object arc ptr
             Self {
-                ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
+                ptr: std::ptr::NonNull::new_unchecked(ptr),
                 _phantom: std::marker::PhantomData,
             }
         }
@@ -793,7 +803,6 @@ impl<T: ObjectCore> ObjectArc<T> {
     ///
     /// # Returns
     /// * `ObjectArc<T>` - The ObjectArc
-    /// \return The ObjectArc
     ///
     /// # Safety
     /// `ptr` must own one strong reference to a live, stable managed allocation

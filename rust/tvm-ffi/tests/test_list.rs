@@ -306,9 +306,8 @@ fn test_list_insert_many_with_self_mutating_iterator() {
     list.push(0).unwrap();
     list.insert_many(
         0,
-        (1..=3).map(|i| {
+        (1..=3).inspect(|&i| {
             list.push(100 + i).unwrap();
-            i
         }),
     )
     .unwrap();
@@ -320,9 +319,8 @@ fn test_list_insert_many_with_self_mutating_iterator() {
     );
 
     // `extend` appends after whatever the iterator added.
-    list.extend((1..=2).map(|i| {
+    list.extend((1..=2).inspect(|&i| {
         list.push(200 + i).unwrap();
-        i
     }))
     .unwrap();
     assert_eq!(
