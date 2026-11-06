@@ -107,6 +107,9 @@ pub struct ErrorObj {
 /// assert_eq!(error.kind(), VALUE_ERROR);
 /// assert_eq!(error.message(), "not a digit: 'x'");
 /// ```
+///
+/// An `Error` is `Send + Sync`, so a `Result` can cross threads; its attached
+/// context is treated as immutable diagnostic data.
 #[repr(C)]
 #[derive(Clone, ObjectRef)]
 #[custom_debug]
