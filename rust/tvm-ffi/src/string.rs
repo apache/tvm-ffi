@@ -76,6 +76,11 @@ impl Bytes {
         self.as_slice().len()
     }
 
+    /// Return `true` if there are no bytes.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Get the bytes as a slice
     pub fn as_slice(&self) -> &[u8] {
         unsafe {
@@ -298,6 +303,11 @@ impl String {
     /// Get the length of the string in bytes
     pub fn len(&self) -> usize {
         self.as_bytes().len()
+    }
+
+    /// Return `true` if the string is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Get the string as a byte slice

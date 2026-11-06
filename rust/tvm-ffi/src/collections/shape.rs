@@ -58,6 +58,14 @@ pub struct Shape {
 unsafe impl Send for Shape {}
 unsafe impl Sync for Shape {}
 
+impl Default for Shape {
+    /// The empty shape, like [`Shape::new`].
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Shape {
     /// Create a new empty Shape
     pub fn new() -> Self {
