@@ -18,13 +18,12 @@
  */
 
 use crate::any::{Any, AnyView};
+use crate::collections::array::Array;
+use crate::derive::Object;
 use crate::error::{Error, Result, RUNTIME_ERROR};
-use crate::function::Function;
-use crate::object::{self, ObjectRefCore};
-use crate::reflection::FieldGetter;
+use crate::object::{self, Object, ObjectArc, ObjectRef, ObjectRefCore};
 use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex,
-    TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeIndex,
 };
 
 // -----------------------------------------------------------------------------
@@ -108,88 +107,95 @@ pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
 }
 
+/// Rust binding of C++ `VisitErrorContextObj`, the payload that
+/// `Error::extra_context` carries to name the nodes a failed visit unwound through.
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "ffi.VisitErrorContext"]
+#[type_final]
+pub(crate) struct VisitErrorContextObj {
+    base: Object,
+    /// Visited nodes, innermost first; C++ `ObjectRef` is nullable.
+    reverse_visit_pattern: Array<Option<ObjectRef>>,
+    /// The `extra_context` the error carried before this context replaced it.
+    prev_error_context: Option<ObjectRef>,
+}
+
+/// Name the visited object in `raw` in the error's visit context, like C++
+/// `detail::UpdateVisitErrorContext`. Copy-on-write at each level: the Error, its
+/// context and the context's pattern are each copied only when shared, so an error
+/// owned by the unwinding frame is appended in place.
 #[cold]
-pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
+pub(crate) fn with_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Error {
     if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
         return error;
     }
-    let context = (|| {
-        let mut context_type = 0;
+    // SAFETY: the traversal input remains live during annotation. Conversion
+    // acquires ownership before the temporary view ends; raw is an object tag.
+    let Ok(node) = ObjectRef::try_from(unsafe { AnyView::from_raw_ffi_any(raw) }) else {
+        return error;
+    };
+    let as_context = |context: &ObjectRef| {
+        let object = ObjectArc::as_ptr(ObjectRef::data(context));
+        // SAFETY: `context` keeps its object alive; the type is checked first.
         unsafe {
-            crate::check_safe_call!(TVMFFITypeKeyToIndex(
-                &TVMFFIByteArray::from_str("ffi.VisitErrorContext"),
-                &mut context_type,
-            ))
-            .ok()?;
+            object::is_instance_of::<VisitErrorContextObj>(
+                (*object.cast::<TVMFFIObject>()).type_index,
+            )
+            .then(|| &*object.cast::<VisitErrorContextObj>())
         }
-        // SAFETY: the traversal input remains live during annotation. Conversion
-        // acquires ownership before the temporary view ends; raw is an object tag.
-        let node = object::ObjectRef::try_from(unsafe { AnyView::from_raw_ffi_any(raw) }).ok()?;
-        let mut previous = error.extra_context().cloned();
-        let mut nodes = Vec::new();
-        if let Some(prior) = previous.as_ref() {
-            if AnyView::from(prior).type_index() == context_type {
-                let object = &**object::ObjectRef::data(prior);
-                let records = FieldGetter::new(context_type, "reverse_visit_pattern")
-                    .ok()?
-                    .get_any(object)
-                    .ok()?;
-                let size = Function::get_global("ffi.ArraySize")
-                    .ok()?
-                    .call_tuple((records.clone(),))
-                    .ok()?
-                    .downcast_ref::<i64>()
-                    .copied()?;
-                let get_item = Function::get_global("ffi.ArrayGetItem").ok()?;
-                if size > 0 {
-                    let last: Option<object::ObjectRef> = get_item
-                        .call_tuple((records.clone(), size - 1))
-                        .ok()?
-                        .try_into()
-                        .ok();
-                    // Callback, policy and default descent can report the same frame.
-                    if last.is_some_and(|last| last.same_as(&node)) {
-                        return None;
-                    }
-                }
-                for i in 0..size {
-                    nodes.push(get_item.call_tuple((records.clone(), i)).ok()?);
-                }
-                previous = FieldGetter::new(context_type, "prev_error_context")
-                    .ok()?
-                    .get::<_, Option<object::ObjectRef>>(object)
-                    .ok()?;
-            }
+    };
+    // Callback, policy and default descent can report the same frame.
+    if let Some(context) = error.extra_context().and_then(as_context) {
+        if context
+            .reverse_visit_pattern
+            .iter()
+            .next_back()
+            .and_then(Option::as_ref)
+            .is_some_and(|last| last.same_as(&node))
+        {
+            return error;
         }
-        nodes.push(Any::from(node));
-        let records = Function::get_global("ffi.Array")
-            .ok()?
-            .call_packed(&nodes.iter().map(AnyView::from).collect::<Vec<_>>())
-            .ok()?;
-        Function::get_global("ffi.MakeObjectFromPackedArgs")
-            .ok()?
-            .call_tuple((
-                context_type,
-                crate::String::from("reverse_visit_pattern"),
-                records,
-                crate::String::from("prev_error_context"),
-                previous,
-            ))
-            .ok()?
-            .try_into()
-            .ok()
-    })();
-    // Diagnostic enrichment must not replace the original error on failure.
-    match context {
-        Some(context) => Error::new_with_cause_and_extra_context(
-            error.kind(),
-            error.message(),
-            error.backtrace(),
-            error.cause_chain(),
-            Some(&context),
-        ),
-        None => error,
     }
+    let slot = error.extra_context_mut();
+    let previous = slot.take();
+    let context = match previous {
+        Some(previous) if as_context(&previous).is_some() => {
+            // SAFETY: `previous` was checked to be a `VisitErrorContextObj`.
+            let mut context = unsafe {
+                ObjectArc::from_raw(
+                    ObjectArc::into_raw(ObjectRef::into_data(previous))
+                        .cast::<VisitErrorContextObj>(),
+                )
+            };
+            if ObjectArc::strong_count(&context) != 1 {
+                context = ObjectArc::new(VisitErrorContextObj {
+                    base: Object::new(),
+                    reverse_visit_pattern: context.reverse_visit_pattern.clone(),
+                    prev_error_context: context.prev_error_context.clone(),
+                });
+            }
+            // SAFETY: this handle is the context's only reference.
+            unsafe {
+                (*ObjectArc::as_mut_ptr(&mut context))
+                    .reverse_visit_pattern
+                    .push(Some(node))
+            };
+            context
+        }
+        previous => ObjectArc::new(VisitErrorContextObj {
+            base: Object::new(),
+            reverse_visit_pattern: Array::from_vec(vec![Some(node)]),
+            prev_error_context: previous,
+        }),
+    };
+    // SAFETY: every object starts with the root `Object` header.
+    *slot = Some(unsafe {
+        ObjectRef::from_data(ObjectArc::from_raw(
+            ObjectArc::into_raw(context).cast::<Object>(),
+        ))
+    });
+    error
 }
 
 // Generate the tuple arities supported by the standard library (1 through 12).
@@ -277,4 +283,58 @@ pub(crate) unsafe fn raw_ffi_any_into_result(raw: TVMFFIAny) -> Result<Any> {
         raw.small_str_len,
         raw.data_union,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::object::ObjectCore;
+
+    #[test]
+    fn visit_error_context_matches_registered_layout() {
+        let info = unsafe { &*TVMFFIGetTypeInfo(VisitErrorContextObj::type_index()) };
+        let fields = unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) };
+        let offset = |name: &str| {
+            fields
+                .iter()
+                .find(|field| field.name.as_str() == name)
+                .map(|field| field.offset as usize)
+        };
+        assert_eq!(
+            offset("reverse_visit_pattern"),
+            Some(std::mem::offset_of!(
+                VisitErrorContextObj,
+                reverse_visit_pattern
+            ))
+        );
+        assert_eq!(
+            offset("prev_error_context"),
+            Some(std::mem::offset_of!(
+                VisitErrorContextObj,
+                prev_error_context
+            ))
+        );
+    }
+
+    #[test]
+    fn unique_error_appends_in_place() {
+        let raw = |node: &ObjectRef| {
+            let mut raw = TVMFFIAny::new();
+            unsafe { crate::AnyCompatible::copy_to_any_view(node, &mut raw) };
+            raw
+        };
+        let (inner, outer): (ObjectRef, ObjectRef) = (
+            Array::from_vec(vec![1_i64]).into(),
+            Array::from_vec(vec![2_i64]).into(),
+        );
+        let error = with_visit_error_context(runtime_error("bad"), raw(&inner));
+        let address = ObjectArc::as_ptr(Error::data(&error));
+        let error = with_visit_error_context(error, raw(&outer));
+        assert_eq!(ObjectArc::as_ptr(Error::data(&error)), address);
+        let context = error.extra_context().unwrap();
+        let context =
+            unsafe { &*ObjectArc::as_ptr(ObjectRef::data(context)).cast::<VisitErrorContextObj>() };
+        let pattern: Vec<_> = context.reverse_visit_pattern.iter().flatten().collect();
+        assert!(pattern.len() == 2 && pattern[0].same_as(&inner) && pattern[1].same_as(&outer));
+    }
 }

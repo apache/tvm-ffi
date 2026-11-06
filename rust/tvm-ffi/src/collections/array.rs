@@ -43,10 +43,24 @@ pub struct ArrayObj {
     pub data_deleter: Option<unsafe extern "C" fn(*mut core::ffi::c_void)>,
 }
 
+// A Rust-allocated array holds `capacity` cells inline, of which the first `size`
+// are initialized.
 unsafe impl ObjectCoreWithExtraItems for ArrayObj {
     type ExtraItem = TVMFFIAny;
     fn extra_items_count(this: &Self) -> usize {
-        this.size as usize
+        this.capacity as usize
+    }
+}
+
+// Runs only for a Rust-allocated array; one allocated in C++ is released by its
+// own deleter.
+impl Drop for ArrayObj {
+    fn drop(&mut self) {
+        let cells = self.data as *const TVMFFIAny;
+        for i in 0..self.size as usize {
+            // SAFETY: the first `size` cells are initialized and owned by the array.
+            drop(unsafe { Any::from_raw_ffi_any(*cells.add(i)) });
+        }
     }
 }
 
@@ -199,7 +213,7 @@ impl<T: ContainerElement + Clone> Array<T> {
             let raw_ptr = ObjectArc::as_ptr(&arc) as *mut ArrayObj;
             let container = &mut *raw_ptr;
 
-            let base_ptr = ArrayObj::extra_items_mut(container).as_ptr() as *mut TVMFFIAny;
+            let base_ptr = ArrayObj::extra_items_mut(container).as_mut_ptr();
             container.data = base_ptr as *mut _;
 
             for (i, item) in items.into_iter().enumerate() {
@@ -210,6 +224,50 @@ impl<T: ContainerElement + Clone> Array<T> {
         }
         // SAFETY: `arc` was allocated and initialized above as an `Array<T>`.
         unsafe { Self::from_data(arc) }
+    }
+
+    /// Append `value`, copy-on-write like C++ `Array::push_back`: in place when
+    /// this handle is the only reference and the buffer has room, otherwise into
+    /// a new buffer that grows geometrically when full.
+    pub(crate) fn push(&mut self, value: T) {
+        let size = self.len();
+        let capacity = self.data.capacity as usize;
+        let unique = ObjectArc::strong_count(&self.data) == 1;
+        if !unique || size == capacity {
+            let capacity = if size == capacity {
+                (capacity * 2).max(size + 1)
+            } else {
+                capacity
+            };
+            let mut grown = Self::new_with_capacity(Vec::new(), capacity);
+            let source = self.as_container().data as *const TVMFFIAny;
+            // SAFETY: `grown` is fresh with room for `size` cells. A unique source
+            // moves its cells and forgets them; a shared one keeps its cells, so each
+            // copy takes its own reference.
+            unsafe {
+                let target = ObjectArc::as_mut_ptr(&mut grown.data);
+                let cells = (*target).data as *mut TVMFFIAny;
+                if unique {
+                    std::ptr::copy_nonoverlapping(source, cells, size);
+                    (*ObjectArc::as_mut_ptr(&mut self.data)).size = 0;
+                } else {
+                    for i in 0..size {
+                        let copy = Any::from(AnyView::from_raw_ffi_any(*source.add(i)));
+                        std::ptr::write(cells.add(i), Any::into_raw_ffi_any(copy));
+                    }
+                }
+                (*target).size = size as i64;
+            }
+            *self = grown;
+        }
+        // SAFETY: this handle is now the only reference, with room for one more cell.
+        unsafe {
+            let container = ObjectArc::as_mut_ptr(&mut self.data);
+            let mut cell = TVMFFIAny::new();
+            T::container_move_to_any(value, &mut cell);
+            std::ptr::write(((*container).data as *mut TVMFFIAny).add(size), cell);
+            (*container).size += 1;
+        }
     }
 
     /// Return the number of elements.
