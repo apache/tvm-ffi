@@ -21,7 +21,6 @@
  *
  * \brief A minimalistic JSON writer based on ffi values.
  */
-#include <locale.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/dict.h>
@@ -33,6 +32,7 @@
 #include <tvm/ffi/string.h>
 
 #include <charconv>
+#include <clocale>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>

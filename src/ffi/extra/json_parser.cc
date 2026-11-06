@@ -21,7 +21,6 @@
  *
  * \brief A minimalistic JSON parser based on ffi values.
  */
-#include <locale.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
@@ -32,6 +31,7 @@
 
 #include <cerrno>
 #include <charconv>
+#include <clocale>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
