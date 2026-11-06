@@ -574,6 +574,21 @@ class _ObjectRenderer:
         )
         return sections
 
+    def _thread_safe_lines(self) -> list[str] | None:
+        """``ThreadSafeObject`` for a class that C++ declares not ``_type_mutable``.
+
+        Such a class only hands out const access and changes through copy-on-write,
+        so its handles may cross threads when its fields can. A mutable class, or one
+        whose mutability is not registered, stays single-threaded.
+        """
+        if self.info.is_mutable is not False:
+            return None
+        return [
+            f"// SAFETY: `{self.type_key}` is not `_type_mutable`: a shared instance is never",
+            "// mutated, as C++ changes it only through copy-on-write.",
+            f"unsafe impl tvm_ffi::object::ThreadSafeObject for {self.obj_struct} {{}}",
+        ]
+
     def _shallow_copy_lines(self) -> list[str] | None:
         """``ShallowCopy``, which a subtype defined in Rust needs of its parent's object.
 
@@ -693,6 +708,9 @@ class _ObjectRenderer:
             if shallow_copy:
                 sections.append(shallow_copy)
                 sections.append(self._unsafe_init_lines())
+        thread_safe = self._thread_safe_lines()
+        if thread_safe:
+            sections.append(thread_safe)
         upcasts = self._upcast_lines()
         if upcasts:
             sections.append(upcasts)

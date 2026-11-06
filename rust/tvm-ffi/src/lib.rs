@@ -75,7 +75,7 @@ pub use crate::function::Function;
 pub use crate::function_internal::AsPackedCallable;
 pub use crate::object::{
     IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity,
-    ObjectRefCore,
+    ObjectRefCore, ThreadSafeObject,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{

@@ -438,6 +438,14 @@ inline constexpr reflection::AttrKey<TypedFunction<ObjectRef(const Object*)>> kS
  */
 inline constexpr reflection::AttrKey<bool> kTypeFinal{"__ffi_type_final__"};
 /*!
+ * \brief Whether the class exposes mutable access (``Class::_type_mutable``).
+ *
+ * Registered as a ``bool`` by every ``ObjectDef<Class>``. A class that is not
+ * mutable is only changed through copy-on-write, so a binding generator may
+ * treat a shared instance as immutable.
+ */
+inline constexpr reflection::AttrKey<bool> kTypeMutable{"__ffi_type_mutable__"};
+/*!
  * \brief Custom Any-level hash for use as ``Map``/``Dict`` key.
  *
  * Unlike ``kHash`` (which operates on objects and is recursive), this

@@ -252,3 +252,16 @@ fn test_any_conversion_preserves_runtime_subtype() {
     drop(derived_from_any);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
 }
+
+// `TestBaseObj` opts in; `TestDerivedObj` does not, so only `TestBase` crosses threads.
+// SAFETY: test objects are never mutated after construction.
+unsafe impl tvm_ffi::ThreadSafeObject for TestBaseObj {}
+
+#[test]
+fn test_thread_safe_object_handles() {
+    fn thread_safe<T: Send + Sync>() {}
+    thread_safe::<TestBase>();
+    let base = new_base(3, Arc::new(AtomicU32::new(0)));
+    let value = std::thread::spawn(move || base.data.value).join().unwrap();
+    assert_eq!(value, 3);
+}
