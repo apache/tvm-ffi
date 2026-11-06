@@ -1666,7 +1666,9 @@ def test_blocks_are_named_by_the_module_of_their_file(
     text = nested.read_text(encoding="utf-8")
     assert "use crate::TestCxxClassBase;\nuse crate::TestCxxClassBaseObj;\n" in text
     assert "    base: TestCxxClassBaseObj," in text
-    assert "tvm_ffi::unsafe_impl_object_ref_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
+    assert (
+        "tvm_ffi::unsafe_impl_object_ref_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
+    )
     assert "super::" not in text
     # Moving the parent's block moves the path, not the type key.
     lib.write_text("", encoding="utf-8")
