@@ -281,15 +281,15 @@ reserved name ``__ffi_init__``:
 
 .. code-block:: rust
 
-   use tvm_ffi::reflection::get_method;
+   use tvm_ffi::reflection;
    use tvm_ffi::AnyView;
 
    // Resolve the reflected constructor and construct an instance
-   let ctor = get_method("testing.TestIntPair", "__ffi_init__")?;
+   let ctor = reflection::get_method("testing.TestIntPair", "__ffi_init__")?;
    let pair = ctor.call_tuple((1i64, 2i64))?;
 
    // Resolve an instance method; the first packed argument is the object itself
-   let sum = get_method("testing.TestIntPair", "sum")?;
+   let sum = reflection::get_method("testing.TestIntPair", "sum")?;
    let result = sum.call_packed(&[AnyView::from(&pair)])?;
    assert_eq!(i64::try_from(result)?, 3);
 
