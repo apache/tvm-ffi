@@ -66,6 +66,8 @@ macro_rules! cached_global_func {
 /// `Target`, `AsRef<Target>`, which borrows a `&Source` as `&Target`
 /// without touching the reference count, and
 /// [`IntoObjectRef<Target>`](crate::object::IntoObjectRef) for `Source` and `&Source`.
+/// It also implements the strict downcast back, `TryFrom<Target>` and
+/// `TryFrom<&Target>` for `Source`, which return a `TypeError` naming both types.
 ///
 /// # Safety
 ///
@@ -139,6 +141,33 @@ macro_rules! unsafe_impl_object_upcast {
                 }
             }
 
+            // The strict downcast back, as a `TryFrom` for `?`: a reference
+            // never converts, so this only checks the object's runtime type.
+            impl ::core::convert::TryFrom<$target> for $source {
+                type Error = $crate::error::Error;
+                #[inline]
+                fn try_from(value: $target) -> ::core::result::Result<Self, Self::Error> {
+                    $crate::object::ObjectRefCore::downcast::<$source>(value)
+                        .map_err($crate::error::Error::downcast_failed::<$source>)
+                }
+            }
+
+            impl ::core::convert::TryFrom<&$target> for $source {
+                type Error = $crate::error::Error;
+                #[inline]
+                fn try_from(value: &$target) -> ::core::result::Result<Self, Self::Error> {
+                    match $crate::object::ObjectRefCore::downcast_ref::<$source>(value) {
+                        ::core::option::Option::Some(found) => {
+                            ::core::result::Result::Ok(::core::clone::Clone::clone(found))
+                        }
+                        ::core::option::Option::None => ::core::result::Result::Err(
+                            $crate::error::Error::downcast_failed::<$source>(
+                                ::core::clone::Clone::clone(value),
+                            ),
+                        ),
+                    }
+                }
+            }
         )+
     };
 }

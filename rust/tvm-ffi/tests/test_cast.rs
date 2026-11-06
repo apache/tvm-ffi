@@ -213,10 +213,7 @@ fn test_downcast_failure() {
     let base = base.downcast::<TestDerived>().unwrap_err();
     assert_eq!(base.data.value, 1);
     assert_eq!(ObjectArc::strong_count(&base.data), 1);
-    let err = expect_err(
-        base.downcast::<TestDerived>()
-            .map_err(Error::downcast_failed::<TestDerived>),
-    );
+    let err = expect_err(TestDerived::try_from(base));
     assert!(err.message().contains("testing.TestObjectBase"));
     assert!(err.message().contains("testing.TestObjectDerived"));
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);

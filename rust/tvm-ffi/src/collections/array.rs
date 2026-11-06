@@ -111,6 +111,23 @@ impl<T: ContainerElement + Clone> From<Array<T>> for crate::object::ObjectRef {
     }
 }
 
+/// The strict downcast from the root [`ObjectRef`](crate::object::ObjectRef).
+impl<T: ContainerElement + Clone> TryFrom<crate::object::ObjectRef> for Array<T> {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into(value)
+    }
+}
+
+impl<T: ContainerElement + Clone> TryFrom<&crate::object::ObjectRef> for Array<T> {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: &crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into_ref(value)
+    }
+}
+
 unsafe impl<T: ContainerElement + Clone> ObjectRefCore for Array<T> {
     type ContainerType = ArrayObj;
 

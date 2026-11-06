@@ -249,7 +249,12 @@ where
     ObjectArc::as_ptr(<Array<T> as ObjectRefCore>::data(array))
 }
 
-fn map_pointer<K, V>(map: &Map<K, V>) -> *const tvm_ffi::collections::map::MapObj {
+fn map_pointer<
+    K: tvm_ffi::type_traits::ContainerElement,
+    V: tvm_ffi::type_traits::ContainerElement,
+>(
+    map: &Map<K, V>,
+) -> *const tvm_ffi::collections::map::MapObj {
     ObjectArc::as_ptr(<Map<K, V> as ObjectRefCore>::data(map))
 }
 

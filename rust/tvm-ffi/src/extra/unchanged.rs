@@ -469,7 +469,7 @@ impl From<Unchanged> for UnchangedOr<Any> {
 }
 
 /// A managed reference replaces the original value.
-impl<T: crate::object::ObjectRefCore + AnyCompatible> From<T> for UnchangedOr<Any> {
+impl<T: crate::object::ObjectRefCore> From<T> for UnchangedOr<Any> {
     #[inline]
     fn from(value: T) -> Self {
         Self::changed(Any::from(value))
@@ -477,7 +477,7 @@ impl<T: crate::object::ObjectRefCore + AnyCompatible> From<T> for UnchangedOr<An
 }
 
 /// A typed result keeps its unchanged marker or replacement.
-impl<T: crate::object::ObjectRefCore + AnyCompatible> From<UnchangedOr<T>> for UnchangedOr<Any> {
+impl<T: crate::object::ObjectRefCore> From<UnchangedOr<T>> for UnchangedOr<Any> {
     #[inline]
     fn from(value: UnchangedOr<T>) -> Self {
         Self::from_any(Any::from(value))

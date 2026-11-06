@@ -25,7 +25,7 @@ use std::marker::PhantomData;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex as TypeIndex};
 
 use crate::any::ArgTryFromAnyView;
-use crate::{AnyCompatible, AnyView, Error, ObjectRefCore, Result};
+use crate::{AnyView, Error, ObjectRefCore, Result};
 
 /// A move-aware object argument compatible with C++ `ffi::RValueRef<T>`.
 ///
@@ -33,7 +33,7 @@ use crate::{AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 /// count; otherwise this wrapper retains and releases it.
 pub struct RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     slot: UnsafeCell<*mut TVMFFIObject>,
     _marker: PhantomData<T>,
@@ -41,7 +41,7 @@ where
 
 impl<T> RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     /// Transfer an owned object reference into an rvalue argument slot.
     pub fn new(value: T) -> Self {
@@ -96,7 +96,7 @@ where
 
 impl<T> From<T> for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     fn from(value: T) -> Self {
         Self::new(value)
@@ -105,7 +105,7 @@ where
 
 impl<'a, T> From<&'a RValueRef<T>> for AnyView<'a>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     fn from(value: &'a RValueRef<T>) -> Self {
         let mut raw = TVMFFIAny::new();
@@ -117,7 +117,7 @@ where
 
 impl<T> TryFrom<AnyView<'_>> for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     type Error = Error;
 
@@ -128,7 +128,7 @@ where
 
 impl<T> crate::type_traits::TypeSchema for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     fn type_schema() -> std::string::String {
         crate::type_traits::type_schema("ObjectRValueRef", &[T::type_schema()])
@@ -137,7 +137,7 @@ where
 
 impl<T> ArgTryFromAnyView for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     fn try_from_any_view(value: &AnyView<'_>, arg_index: usize) -> Result<Self> {
         unsafe { Self::from_view(value, Some(arg_index)) }
@@ -146,7 +146,7 @@ where
 
 impl<T> Drop for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     fn drop(&mut self) {
         let object = *self.slot.get_mut();
@@ -177,7 +177,7 @@ unsafe fn conversion_error<T>(
     already_moved: bool,
 ) -> Error
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     let source = if already_moved {
         "an already-moved RValueRef".to_string()

@@ -146,7 +146,30 @@ where
     }
 }
 
-unsafe impl<K, V> ObjectRefCore for Map<K, V> {
+/// The strict downcast from the root [`ObjectRef`](crate::object::ObjectRef).
+impl<K, V> TryFrom<crate::object::ObjectRef> for Map<K, V>
+where
+    Map<K, V>: ObjectRefCore,
+{
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into(value)
+    }
+}
+
+impl<K, V> TryFrom<&crate::object::ObjectRef> for Map<K, V>
+where
+    Map<K, V>: ObjectRefCore + crate::type_traits::DowncastRefFromObject,
+{
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: &crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into_ref(value)
+    }
+}
+
+unsafe impl<K: ContainerElement, V: ContainerElement> ObjectRefCore for Map<K, V> {
     type ContainerType = MapObj;
 
     fn data(this: &Self) -> &ObjectArc<MapObj> {

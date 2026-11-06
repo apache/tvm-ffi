@@ -266,7 +266,7 @@ impl PackedArg for Any {
 
 impl<T> PackedArg for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     #[inline]
     fn as_packed_arg(&self) -> AnyView<'_> {
@@ -353,7 +353,7 @@ impl<T: ContainerElement + Clone> ArgIntoRef for &crate::Array<T> {
 
 impl<T> IntoArgHolder for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     type Target = Self;
     fn into_arg_holder(self) -> Self::Target {
@@ -363,7 +363,7 @@ where
 
 impl<T> ArgIntoRef for RValueRef<T>
 where
-    T: ObjectRefCore + AnyCompatible,
+    T: ObjectRefCore,
 {
     type Target = Self;
     fn to_ref(&self) -> &Self::Target {

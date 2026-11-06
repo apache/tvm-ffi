@@ -159,9 +159,7 @@ impl Error {
     /// let error = object.downcast::<Array<f64>>().map_err(Error::downcast_failed::<Array<f64>>);
     /// assert_eq!(error.unwrap_err().kind(), TYPE_ERROR);
     /// ```
-    pub fn downcast_failed<B: AnyCompatible>(
-        source: impl object::ObjectRefCore + AnyCompatible,
-    ) -> Self {
+    pub fn downcast_failed<B: AnyCompatible>(source: impl object::ObjectRefCore) -> Self {
         let mut cell = TVMFFIAny::new();
         // SAFETY: `source` stays alive while its borrowed cell is inspected.
         unsafe { AnyCompatible::copy_to_any_view(&source, &mut cell) };

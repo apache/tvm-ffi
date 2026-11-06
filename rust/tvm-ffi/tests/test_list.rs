@@ -20,7 +20,7 @@ use tvm_ffi::*;
 
 /// Address of the element buffer and of its deleter, read through the C ABI
 /// layout of C++ `ListObj`: the object header, then its sequence cell.
-fn buffer_identity<T>(list: &List<T>) -> (usize, usize) {
+fn buffer_identity<T: tvm_ffi::type_traits::ContainerElement>(list: &List<T>) -> (usize, usize) {
     #[repr(C)]
     struct SeqCell {
         data: *mut core::ffi::c_void,
