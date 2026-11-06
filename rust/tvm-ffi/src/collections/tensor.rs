@@ -62,6 +62,10 @@ pub trait DLTensorExt {
 
 impl DLTensorExt for DLTensor {
     fn numel(&self) -> usize {
+        // A scalar (`ndim == 0`) has one element and may have a null shape.
+        if self.ndim <= 0 {
+            return 1;
+        }
         unsafe {
             std::slice::from_raw_parts(self.shape, self.ndim as usize)
                 .iter()
@@ -196,7 +200,12 @@ impl Tensor {
     }
 
     pub fn shape(&self) -> &[i64] {
-        unsafe { std::slice::from_raw_parts(self.data.dltensor.shape, self.ndim()) }
+        let t = &self.data.dltensor;
+        // A scalar may have a null shape, which a slice cannot.
+        if t.ndim == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(t.shape, t.ndim as usize) }
     }
 
     pub fn ndim(&self) -> usize {
@@ -207,8 +216,21 @@ impl Tensor {
         self.data.dltensor.numel()
     }
 
+    /// The strides, in elements.
+    ///
+    /// # Panics
+    /// If the tensor has null strides and at least one dimension, as
+    /// [`TensorView::strides`] does.
     pub fn strides(&self) -> &[i64] {
-        unsafe { std::slice::from_raw_parts(self.data.dltensor.strides, self.ndim()) }
+        let t = &self.data.dltensor;
+        if t.ndim == 0 {
+            return &[];
+        }
+        assert!(
+            !t.strides.is_null(),
+            "Tensor::strides of a DLTensor with null strides"
+        );
+        unsafe { std::slice::from_raw_parts(t.strides, t.ndim as usize) }
     }
 
     pub fn dtype(&self) -> DLDataType {
@@ -373,8 +395,16 @@ unsafe impl NDAllocator for CPUNDAlloc {
         let numel = prototype.numel() as usize;
         let item_size = prototype.item_size();
         let size = numel * item_size as usize;
+        // A zero-size allocation is undefined behavior; an empty tensor gets an
+        // aligned dangling pointer, which `free_data` does not release.
+        if size == 0 {
+            return Self::MIN_ALIGN as *mut core::ffi::c_void;
+        }
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
         let ptr = std::alloc::alloc(layout);
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
         ptr as *mut core::ffi::c_void
     }
 
@@ -382,6 +412,9 @@ unsafe impl NDAllocator for CPUNDAlloc {
         let numel = tensor.numel() as usize;
         let item_size = tensor.item_size();
         let size = numel * item_size;
+        if size == 0 {
+            return;
+        }
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
         std::alloc::dealloc(tensor.data as *mut u8, layout);
     }

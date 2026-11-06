@@ -71,6 +71,10 @@ impl Shape {
 
     /// Get the shape as a slice
     pub fn as_slice(&self) -> &[i64] {
+        // An empty shape may have a null data pointer, which a slice cannot.
+        if self.data.data.size == 0 {
+            return &[];
+        }
         unsafe { std::slice::from_raw_parts(self.data.data.data, self.data.data.size) }
     }
 
