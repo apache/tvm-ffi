@@ -105,8 +105,14 @@ pub fn derive_object(input: TokenStream) -> TokenStream {
     object_macros::derive_object(input)
 }
 
+/// Derive `ObjectRefCore` for a reference struct whose only field is an
+/// `ObjectArc<T>`, with the default `ObjectRefAnyCompatible`, the in-place
+/// downcasts, `TryFrom<Any>`, the upcast to `ObjectRef`, and `Debug`.
+///
+/// `#[object_ref(skip_debug)]` leaves `Debug` to a hand-written impl. A
+/// reference that overrides `ObjectRefAnyCompatible` is written by hand.
 #[proc_macro_error]
-#[proc_macro_derive(ObjectRef, attributes(type_key, type_index, custom_debug))]
+#[proc_macro_derive(ObjectRef, attributes(object_ref))]
 pub fn derive_object_ref(input: TokenStream) -> TokenStream {
     object_macros::derive_object_ref(input)
 }

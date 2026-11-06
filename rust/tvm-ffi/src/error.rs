@@ -111,7 +111,7 @@ pub struct ErrorObj {
 /// An `Error` is `Send + Sync`, so a `Result` can cross threads.
 #[repr(C)]
 #[derive(Clone, ObjectRef)]
-#[custom_debug]
+#[object_ref(skip_debug)]
 pub struct Error {
     data: ObjectArc<ErrorObj>,
 }

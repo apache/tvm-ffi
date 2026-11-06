@@ -129,11 +129,7 @@ pub unsafe trait AnyCompatible: Sized {
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
     /// Get the type key of a type when TryCastFromAnyView fails.
     fn get_mismatch_type_info(data: &TVMFFIAny) -> String {
-        unsafe {
-            let info = TVMFFIGetTypeInfo(data.type_index);
-            assert!(!info.is_null(), "TVMFFIGetTypeInfo returned null");
-            (*info).type_key.as_str().to_string()
-        }
+        runtime_type_key(data.type_index)
     }
     /// the type string of the type
     fn type_str() -> String;
@@ -158,6 +154,15 @@ pub unsafe trait AnyCompatible: Sized {
     #[inline]
     fn to_any(&self) -> Any {
         AnyView::from(self).into()
+    }
+}
+
+/// The type key of the runtime type index `type_index`.
+pub(crate) fn runtime_type_key(type_index: i32) -> String {
+    unsafe {
+        let info = TVMFFIGetTypeInfo(type_index);
+        assert!(!info.is_null(), "TVMFFIGetTypeInfo returned null");
+        (*info).type_key.as_str().to_string()
     }
 }
 

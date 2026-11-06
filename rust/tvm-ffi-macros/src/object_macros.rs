@@ -18,6 +18,7 @@
  */
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
+use proc_macro_error::abort;
 use quote::{format_ident, quote};
 use syn::ext::IdentExt;
 use syn::DeriveInput;
@@ -624,139 +625,16 @@ pub(crate) fn expand_object_ref(
             }
         }
 
-        // implement AnyCompatible for #struct_name
-        unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
-            const MATCH_ANY_EXACT: bool = {
-                type ContainerType =
-                    <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType;
-                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL
-            };
-
-            const MATCH_ANY_STRICT_EXACT: bool = Self::MATCH_ANY_EXACT;
-
-            #[inline]
-            fn match_any_exact_type_index() -> i32 {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index()
-            }
-
-            #[inline]
-            unsafe fn is_undefined(field: *const Self) -> bool {
-                #tvm_ffi_crate::object::ObjectArc::is_null(::core::ptr::addr_of!((*field).#data_id))
-            }
-
-            fn type_str() -> std::string::String {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
-            }
-
-            #[inline(always)]
-            unsafe fn copy_to_any_view(
-                src: &Self,
-                data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_ptr(
-                    &src.#data_id
-                );
-                let object_ptr =
-                    data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
-                data.type_index = (*object_ptr).type_index;
-                // SAFETY: ObjectRefCore guarantees a live allocation whose header
-                // contains its registered object-range dynamic type index.
-                ::core::hint::assert_unchecked(
-                    data.type_index >=
-                        #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
-                );
-                data.small_str_len = 0;
-                data.data_union.v_obj = object_ptr;
-            }
-
-            #[inline(always)]
-            unsafe fn check_any_strict(
-                data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> bool {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                #tvm_ffi_crate::object::is_instance_of::<ContainerType>(data.type_index)
-            }
-
-            unsafe fn copy_from_any_view_after_check(
-                data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> Self {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let data_ptr = data.data_union.v_obj;
-                // need to increase ref because original weak ptr
-                // do not own the code
-                #tvm_ffi_crate::object::unsafe_::inc_ref(
-                    data_ptr as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject
-                );
-                Self {
-                    #data_id: #tvm_ffi_crate::object::ObjectArc::from_raw(
-                        data_ptr as *mut ContainerType
-                    )
-                }
-            }
-
-            #[inline(always)]
-            unsafe fn move_to_any(
-                src: Self,
-                data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let data_ptr = #tvm_ffi_crate::object::ObjectArc::into_raw(
-                    src.#data_id
-                );
-                let object_ptr =
-                    data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
-                data.type_index = (*object_ptr).type_index;
-                // SAFETY: ObjectRefCore guarantees a live allocation whose header
-                // contains its registered object-range dynamic type index.
-                ::core::hint::assert_unchecked(
-                    data.type_index >=
-                        #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
-                );
-                data.small_str_len = 0;
-                data.data_union.v_obj = object_ptr;
-            }
-
-            #[inline(always)]
-            unsafe fn move_from_any_after_check(
-                data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> Self {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let data_ptr = data.data_union.v_obj as *mut ContainerType;
-                Self {
-                    #data_id: #tvm_ffi_crate::object::ObjectArc::<ContainerType>::from_raw(data_ptr)
-                }
-            }
-
-            unsafe fn try_cast_from_any_view(
-                data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> Result<Self, ()> {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                if #tvm_ffi_crate::object::is_instance_of::<ContainerType>(data.type_index) {
-                    Ok(Self::copy_from_any_view_after_check(data))
-                } else {
-                    Err(())
-                }
-            }
+        // The default `AnyCompatible`: the object type check alone, which
+        // `match_any!` may route by.
+        unsafe impl #tvm_ffi_crate::object::ObjectRefAnyCompatible for #struct_name {
+            const MATCH_ANY_EXACT: bool = true;
         }
     };
     // The runtime type key and object address, so `Result<_, Self>` from
-    // `downcast` can be unwrapped. `#[custom_debug]` keeps a hand-written one.
-    let custom_debug = derive_input
-        .attrs
-        .iter()
-        .any(|attr| attr.path.is_ident("custom_debug"));
-    if !custom_debug {
+    // `downcast` can be unwrapped. `#[object_ref(skip_debug)]` keeps a
+    // hand-written one.
+    if !object_ref_options(derive_input).skip_debug {
         expanded.extend(quote! {
         impl ::core::fmt::Debug for #struct_name {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -776,4 +654,33 @@ pub(crate) fn expand_object_ref(
         });
     }
     expanded
+}
+
+/// The options of `#[object_ref(...)]` on an `ObjectRef` derive.
+#[derive(Default)]
+struct ObjectRefOptions {
+    skip_debug: bool,
+}
+
+fn object_ref_options(derive_input: &DeriveInput) -> ObjectRefOptions {
+    let mut options = ObjectRefOptions::default();
+    for attr in derive_input
+        .attrs
+        .iter()
+        .filter(|a| a.path.is_ident("object_ref"))
+    {
+        let nested = match attr.parse_meta() {
+            Ok(syn::Meta::List(list)) => list.nested,
+            _ => abort!(attr, "expected `#[object_ref(...)]`"),
+        };
+        for item in nested {
+            match item {
+                syn::NestedMeta::Meta(syn::Meta::Path(path)) if path.is_ident("skip_debug") => {
+                    options.skip_debug = true
+                }
+                other => abort!(other, "unknown `object_ref` option; expected `skip_debug`"),
+            }
+        }
+    }
+    options
 }

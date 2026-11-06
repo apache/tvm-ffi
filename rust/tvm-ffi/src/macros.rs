@@ -199,8 +199,8 @@ macro_rules! unsafe_impl_object_upcast {
 ///
 /// ```
 /// use tvm_ffi::object::{ObjectArc, ObjectRef};
-/// use tvm_ffi::{def_object_ref, rs_object, unsafe_impl_ref_downcast, Object, ObjectRefCore};
-/// # use tvm_ffi::{tvm_ffi_sys::TVMFFIAny, AnyCompatible};
+/// use tvm_ffi::{def_object_ref, rs_object, unsafe_impl_ref_downcast};
+/// use tvm_ffi::{Object, ObjectRefAnyCompatible, ObjectRefCore};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -211,37 +211,28 @@ macro_rules! unsafe_impl_object_upcast {
 /// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
 ///
 /// /// A `MyPair` whose `first` is positive.
-/// #[repr(transparent)]
 /// #[derive(Clone)]
+/// #[repr(transparent)]
 /// pub struct PositivePair(ObjectArc<MyPairObj>);
-/// # unsafe impl ObjectRefCore for PositivePair {
-/// #     type ContainerType = MyPairObj;
-/// #     fn data(this: &Self) -> &ObjectArc<MyPairObj> { &this.0 }
-/// #     fn into_data(this: Self) -> ObjectArc<MyPairObj> { this.0 }
-/// #     unsafe fn from_data(data: ObjectArc<MyPairObj>) -> Self { Self(data) }
-/// # }
-/// # unsafe impl AnyCompatible for PositivePair {
-/// #     fn type_str() -> String { "PositivePair".into() }
-/// #     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-/// #         MyPair::copy_to_any_view(std::mem::transmute::<&Self, &MyPair>(src), data)
-/// #     }
-/// #     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-/// #         MyPair::move_to_any(MyPair::from_data(src.0), data)
-/// #     }
-/// #     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-/// #         MyPair::check_any_strict(data) && (*data.data_union.v_obj.cast::<MyPairObj>()).first > 0
-/// #     }
-/// #     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-/// #         Self(MyPair::into_data(MyPair::copy_from_any_view_after_check(data)))
-/// #     }
-/// #     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-/// #         Self(MyPair::into_data(MyPair::move_from_any_after_check(data)))
-/// #     }
-/// #     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-/// #         if Self::check_any_strict(data) { Ok(Self::copy_from_any_view_after_check(data)) } else { Err(()) }
-/// #     }
-/// # }
-/// // (`ObjectRefCore` and `AnyCompatible` for `PositivePair` are written by hand.)
+///
+/// unsafe impl ObjectRefCore for PositivePair {
+///     type ContainerType = MyPairObj;
+///     fn data(this: &Self) -> &ObjectArc<MyPairObj> {
+///         &this.0
+///     }
+///     fn into_data(this: Self) -> ObjectArc<MyPairObj> {
+///         this.0
+///     }
+///     unsafe fn from_data(data: ObjectArc<MyPairObj>) -> Self {
+///         Self(data)
+///     }
+/// }
+///
+/// unsafe impl ObjectRefAnyCompatible for PositivePair {
+///     fn extra_check(pair: &MyPairObj) -> bool {
+///         pair.first > 0
+///     }
+/// }
 /// unsafe_impl_ref_downcast!(PositivePair);
 ///
 /// let pair: ObjectRef = MyPair::from(MyPairObj::new(Object::new(), 1, 2)).into();
