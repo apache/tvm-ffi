@@ -161,7 +161,7 @@ TEST(VisitErrorContext, MacroPreExistingPayloadWrap) {
   ASSERT_TRUE(err.extra_context().has_value());
 
   // First push: existing payload is not a VisitErrorContext → wrapped.
-  tvm::ffi::detail::UpdateVisitErrorContext(err, leaf);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, leaf);
 
   Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context.has_value());
@@ -171,7 +171,7 @@ TEST(VisitErrorContext, MacroPreExistingPayloadWrap) {
   EXPECT_TRUE(visit_context.value()->prev_error_context.value().same_as(existing_payload));
 
   // Second push: context already exists → node appended; prev_error_context unchanged.
-  tvm::ffi::detail::UpdateVisitErrorContext(err, root);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, root);
 
   Optional<VisitErrorContext> visit_context_after = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context_after.has_value());
@@ -190,11 +190,11 @@ TEST(VisitErrorContext, UpdateCopiesSharedError) {
   TPairRef leaf(empty, empty);
   TPairRef root(leaf, empty);
   Error err("RuntimeError", "test", "");
-  tvm::ffi::detail::UpdateVisitErrorContext(err, leaf);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, leaf);
   Error shared = err;
   VisitErrorContext context = VisitErrorContext::TryGetFromError(err).value();
 
-  tvm::ffi::detail::UpdateVisitErrorContext(err, root);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, root);
   EXPECT_FALSE(err.same_as(shared));
   EXPECT_EQ(err.kind(), "RuntimeError");
   EXPECT_EQ(err.message(), "test");
@@ -654,8 +654,8 @@ TEST(VisitErrorContext, TryGetFromError) {
   EXPECT_FALSE(no_context.has_value());
 
   // Attach context via UpdateVisitErrorContext.
-  tvm::ffi::detail::UpdateVisitErrorContext(err, leaf);
-  tvm::ffi::detail::UpdateVisitErrorContext(err, root);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, leaf);
+  tvm::ffi::detail::UpdateVisitErrorContext(&err, root);
 
   Optional<VisitErrorContext> visit_context = VisitErrorContext::TryGetFromError(err);
   ASSERT_TRUE(visit_context.has_value());
@@ -673,7 +673,7 @@ TEST(VisitErrorContext, EnrichmentLeavesContextFreeErrorsUnchanged) {
   Array<ObjectRef> root;
   EXPECT_TRUE(VisitErrorContext::EnrichVisitError(original, root).same_as(original));
   auto contextual = Error("ValueError", "contextual failure", "trace");
-  detail::UpdateVisitErrorContext(contextual, root);
+  detail::UpdateVisitErrorContext(&contextual, root);
   EXPECT_TRUE(VisitErrorContext::EnrichVisitError(contextual, root).same_as(contextual));
   EXPECT_TRUE(VisitErrorContext::EnrichVisitError(contextual, ObjectRef()).same_as(contextual));
 }

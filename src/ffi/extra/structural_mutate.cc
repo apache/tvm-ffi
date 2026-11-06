@@ -121,7 +121,7 @@ class StructuralMutateDynEngine : public StructuralMutatorEngineParent<Parent> {
     if (std::optional<Expected<Any>> matched = DispatchCallback(value, InplaceMode::kDisallow)) {
       Expected<Any> result = *std::move(matched);
       if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
-        Parent::UpdateVisitErrorContext(result, value);
+        Parent::UpdateVisitErrorContext(&result, value);
       }
       return ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
     }
@@ -132,7 +132,7 @@ class StructuralMutateDynEngine : public StructuralMutatorEngineParent<Parent> {
     if (std::optional<Expected<Any>> matched = DispatchCallback(value, InplaceMode::kAllow)) {
       Expected<Any> result = *std::move(matched);
       if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
-        Parent::UpdateVisitErrorContext(result, value);
+        Parent::UpdateVisitErrorContext(&result, value);
       }
       return ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
     }
