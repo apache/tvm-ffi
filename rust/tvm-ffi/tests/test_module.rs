@@ -76,60 +76,59 @@ fn call_getter(getter: TVMFFISafeCallType) -> String {
 #[test]
 fn test_module_implements_function() {
     let module = testing_module();
-    assert!(module.implements_function(SCHEMA_ID_INT, false).unwrap());
-    assert!(!module.implements_function(MISSING, false).unwrap());
+    assert!(module.implements_function(SCHEMA_ID_INT).unwrap());
+    assert!(!module.implements_function(MISSING).unwrap());
 }
 
 #[test]
 fn test_module_get_function_metadata() {
     let module = testing_module();
     let metadata = module
-        .get_function_metadata(SCHEMA_ID_INT, false)
+        .get_function_metadata(SCHEMA_ID_INT)
         .unwrap()
         .unwrap();
     let exported = call_getter(__tvm_ffi__metadata_testing_dll_schema_id_int);
     assert_eq!(metadata.as_str(), exported.as_str());
-    assert!(module
-        .get_function_metadata(MISSING, false)
-        .unwrap()
-        .is_none());
+    assert!(module.get_function_metadata(MISSING).unwrap().is_none());
 }
 
 #[test]
 fn test_module_get_function_doc() {
     let module = testing_module();
     let doc = module
-        .get_function_doc(ADD_WITH_DOCSTRING, false)
+        .get_function_doc(ADD_WITH_DOCSTRING)
         .unwrap()
         .unwrap();
     let exported = call_getter(__tvm_ffi__doc_testing_dll_test_add_with_docstring);
     assert_eq!(doc.as_str(), exported.as_str());
     // A function exported without a doc string has none.
-    assert!(module
-        .get_function_doc(SCHEMA_ID_INT, false)
-        .unwrap()
-        .is_none());
+    assert!(module.get_function_doc(SCHEMA_ID_INT).unwrap().is_none());
 }
 
 #[test]
-fn test_module_accessors_query_imports() {
+fn test_module_accessors_and_imports() {
+    // The function lives in an imported module, which the accessors do not
+    // search, as C++ `GetFunction(name)` and Python's default do not.
     let module = importing_module();
-    assert!(!module.implements_function(SCHEMA_ID_INT, false).unwrap());
-    assert!(module.implements_function(SCHEMA_ID_INT, true).unwrap());
+    assert!(!module.implements_function(SCHEMA_ID_INT).unwrap());
     assert!(module
-        .get_function_metadata(SCHEMA_ID_INT, false)
+        .get_function_metadata(SCHEMA_ID_INT)
         .unwrap()
         .is_none());
     assert!(module
-        .get_function_metadata(SCHEMA_ID_INT, true)
+        .get_function_doc(ADD_WITH_DOCSTRING)
+        .unwrap()
+        .is_none());
+    // The `_with_imports` lookups find it there.
+    assert!(module
+        .implements_function_with_imports(SCHEMA_ID_INT)
+        .unwrap());
+    assert!(module
+        .get_function_metadata_with_imports(SCHEMA_ID_INT)
         .unwrap()
         .is_some());
     assert!(module
-        .get_function_doc(ADD_WITH_DOCSTRING, false)
-        .unwrap()
-        .is_none());
-    assert!(module
-        .get_function_doc(ADD_WITH_DOCSTRING, true)
+        .get_function_doc_with_imports(ADD_WITH_DOCSTRING)
         .unwrap()
         .is_some());
 }

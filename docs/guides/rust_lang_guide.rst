@@ -152,7 +152,7 @@ Load a compiled TVM FFI module and call its functions:
        let module = Module::load_from_file("build/add_one_cpu.so")?;
 
        // Get function by name
-       let add_fn = module.get_function("add_one_cpu", false)?;
+       let add_fn = module.get_function("add_one_cpu")?;
 
        Ok(())
    }
@@ -166,10 +166,10 @@ also look in the modules it imports:
 .. code-block:: rust
 
    let module = Module::load_from_file("build/add_one_cpu.so")?;
-   if module.implements_function("add_one_cpu", false)? {
+   if module.implements_function("add_one_cpu")? {
        // A JSON object such as {"type_schema": "..."}, if it was exported
-       let metadata = module.get_function_metadata("add_one_cpu", false)?;
-       let doc = module.get_function_doc("add_one_cpu", false)?;
+       let metadata = module.get_function_metadata("add_one_cpu")?;
+       let doc = module.get_function_doc("add_one_cpu")?;
    }
 
 Working with Tensors
@@ -196,7 +196,7 @@ Call functions with tensors:
 
    fn run_example() -> Result<()> {
        let module = Module::load_from_file("build/add_one_cpu.so")?;
-       let func = module.get_function("add_one_cpu", false)?;
+       let func = module.get_function("add_one_cpu")?;
 
        // Create input and output tensors
        let input = Tensor::from_slice(&[1.0f32, 2.0, 3.0, 4.0], &[4])?;
