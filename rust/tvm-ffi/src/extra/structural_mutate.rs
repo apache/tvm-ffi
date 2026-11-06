@@ -90,7 +90,8 @@ struct StructuralMutatorVTable {
     var_remap_set: FStructuralVarRemapSet,
 }
 
-/// Exact C++ StructuralMutatorObj ABI prefix, with no Rust traversal state.
+/// The native mutator state, laid out as the prefix of the C++
+/// `StructuralMutatorObj`, with no Rust traversal state.
 #[repr(C)]
 pub struct StructuralMutatorObj {
     base: Object,

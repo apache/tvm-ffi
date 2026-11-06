@@ -16,16 +16,20 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! The device stream of the FFI environment: [`current_stream`] and [`with_stream`].
+
 use crate::error::Result;
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::dlpack::DLDevice;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFITypeIndex as TypeIndex};
 use tvm_ffi_sys::{TVMFFIEnvGetStream, TVMFFIEnvSetStream, TVMFFIStreamHandle};
 
-/// Get the current stream for a device
+/// The current stream of `device`, as the caller or [`with_stream`] set it;
+/// null if none is set.
 pub fn current_stream(device: &DLDevice) -> TVMFFIStreamHandle {
     unsafe { TVMFFIEnvGetStream(device.device_type as i32, device.device_id) }
 }
+
 /// Call `f` with the device stream temporarily set to `stream`.
 ///
 /// The previous stream is restored however `f` exits: when it returns a
@@ -92,7 +96,6 @@ impl Drop for RestoreStream {
     }
 }
 
-/// AnyCompatible for DLDevice
 unsafe impl AnyCompatible for DLDevice {
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {

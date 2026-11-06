@@ -20,8 +20,8 @@
 
 pub use tvm_ffi_macros::Object;
 
-/// Declare an object reference: the managed handle to an object type, as a
-/// C++ `ObjectRef` subclass is.
+/// Declare an object reference: the managed, reference-counted handle to an
+/// object type, as `Arc<FooObj>` is to `FooObj`.
 ///
 /// The struct holds one field, `ObjectArc<FooObj>`. The derive implements
 /// [`ObjectRefCore`](crate::ObjectRefCore), the default
@@ -52,37 +52,39 @@ pub use tvm_ffi_macros::Object;
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///
-/// #[rs_object("my_ext.Point")]
-/// pub struct PointObj {
+/// #[rs_object("my_ext.MyPair")]
+/// pub struct MyPairObj {
 ///     base: Object,
-///     pub x: i64,
+///     pub first: i64,
+///     pub second: i64,
 /// }
 ///
 /// #[derive(Clone, ObjectRef)]
-/// pub struct Point {
-///     data: ObjectArc<PointObj>,
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
 /// }
 ///
-/// #[rs_object("my_ext.Point3", final)]
-/// pub struct Point3Obj {
-///     base: PointObj,
-///     pub z: i64,
+/// #[rs_object("my_ext.MyTriple", final)]
+/// pub struct MyTripleObj {
+///     base: MyPairObj,
+///     pub third: i64,
 /// }
 ///
 /// #[derive(Clone, ObjectRef)]
-/// #[object_ref(parent = Point)]
-/// pub struct Point3 {
-///     data: ObjectArc<Point3Obj>,
+/// #[object_ref(parent = MyPair)]
+/// pub struct MyTriple {
+///     data: ObjectArc<MyTripleObj>,
 /// }
 ///
-/// impl Point3 {
-///     pub fn new(x: i64, z: i64) -> Self {
-///         Self::from_object(Point3Obj::new(PointObj::new(Object::new(), x), z))
+/// impl MyTriple {
+///     pub fn new(first: i64, second: i64, third: i64) -> Self {
+///         let pair = MyPairObj::new(Object::new(), first, second);
+///         Self::from_object(MyTripleObj::new(pair, third))
 ///     }
 /// }
 ///
-/// let p = Point3::new(1, 2);
-/// assert_eq!(p.x + p.z, 3);
-/// let _parent: Point = p.into();
+/// let triple = MyTriple::new(1, 2, 3);
+/// assert_eq!(triple.first + triple.third, 4);
+/// let _pair: MyPair = triple.into();
 /// ```
 pub use tvm_ffi_macros::ObjectRef;

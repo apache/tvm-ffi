@@ -16,22 +16,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! In-place mirror of C++ `ffi::Optional<T>` for non-object-pointer `T`
-//! (`include/tvm/ffi/optional.h`).
+//! [`Optional<T>`], an optional value that is not an object, such as a scalar
+//! or a string, stored in place.
 //!
-//! C++ `ffi::Optional<T>` is backed by one 16-byte `TVMFFIAny` for scalar,
-//! string, and other non-object-pointer values, with
-//! `type_index == kTVMFFINone` meaning `nullopt`. [`Optional<T>`] mirrors that
-//! representation.
-//!
-//! ObjectRef, ObjectPtr, and Arc cases are intentionally excluded. Their C++
-//! optional is one nullable object pointer, which Rust's niche-optimized
-//! [`std::option::Option<X>`] already mirrors. Using `Optional<X>` for an object
-//! class is rejected at compile time so the two ABI layouts cannot be confused.
-//!
-//! `Optional<T>` is `#[repr(transparent)]` over [`Any`] and decodes the cell in
-//! place. It is named `Optional` (not `Option`) to match the C++ type while
-//! keeping the pointer-backed object case visually distinct.
+//! It is one 16-byte `TVMFFIAny` cell holding the value or `None`, the ABI
+//! layout of an optional non-object value in every language. An optional
+//! object is one nullable pointer, which [`std::option::Option<X>`] already
+//! is, so `Optional<X>` of an object type is rejected at compile time.
 
 use crate::any::Any;
 use crate::string::{Bytes, String};
@@ -40,16 +31,15 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 
-/// Marker for values whose C++ `ffi::Optional<T>` uses the 16-byte
-/// `TVMFFIAny` representation.
+/// Marker for the types whose optional the ABI stores as one 16-byte
+/// `TVMFFIAny` cell, the types [`Optional<T>`] accepts.
 ///
-/// Object classes deliberately do not implement this trait. Use `Option<X>`
-/// for those values; it is the pointer-sized mirror of C++'s nullable
-/// `ObjectPtr`-backed optional.
+/// Object types deliberately do not implement it: use `Option<X>`, one
+/// nullable pointer, for those.
 ///
 /// # Safety
-/// Implement only for types whose C++ `ffi::Optional<T>` uses the `TVMFFIAny`
-/// representation; for an object class it would mismatch the C++ pointer layout.
+/// Implement only for types whose optional the ABI stores as a `TVMFFIAny`
+/// cell; for an object type it would mismatch the ABI's nullable pointer.
 ///
 /// ```compile_fail,E0277
 /// use tvm_ffi::{Array, Optional};
@@ -92,12 +82,8 @@ impl_optional_compatible!(
 
 unsafe impl<T: OptionalCompatible> OptionalCompatible for Option<T> {}
 
-/// In-place mirror of C++ `ffi::Optional<T>`: a single 16-byte `TVMFFIAny` cell
-/// (wrapped as [`Any`]) whose `type_index == kTVMFFINone` encodes `nullopt`.
-///
-/// Layout-compatible with the C++ type (`size_of == 16`); see the [module
-/// docs](self). Reuses [`Any`]'s reference-counting `Clone`/`Drop`, which are a
-/// no-op on the `nullopt` cell (`type_index` below `kTVMFFIStaticObjectBegin`).
+/// An optional value that is not an object, stored in place as one 16-byte
+/// cell holding the value or `None`. See the [module docs](self).
 #[repr(transparent)]
 pub struct Optional<T: OptionalCompatible> {
     // Holds either the value's `TVMFFIAny` representation or a `kTVMFFINone` cell.
@@ -114,7 +100,7 @@ const _: () = assert!(
 );
 
 impl<T: OptionalCompatible> Optional<T> {
-    /// An engaged optional holding `value`.
+    /// An optional holding `value`.
     #[inline]
     pub fn some(value: T) -> Self {
         Self {
@@ -123,7 +109,7 @@ impl<T: OptionalCompatible> Optional<T> {
         }
     }
 
-    /// A disengaged optional (`nullopt`, a `kTVMFFINone` cell).
+    /// An empty optional, holding `None`.
     #[inline]
     pub fn none() -> Self {
         Self {
@@ -138,14 +124,13 @@ impl<T: OptionalCompatible> Optional<T> {
         self.data.type_index() != TypeIndex::kTVMFFINone as i32
     }
 
-    /// Whether the optional is `nullopt`.
+    /// Whether the optional is empty.
     #[inline]
     pub fn is_none(&self) -> bool {
         !self.is_some()
     }
 
-    /// Decodes the value in place, cloning it out (ref-counted `inc_ref` for
-    /// object payloads). Returns `None` when `nullopt`. No FFI call.
+    /// Returns a clone of the value, or `None` when empty.
     #[inline]
     pub fn get(&self) -> Option<T> {
         // Strict: the value comes back exactly as stored, never converted.
@@ -155,7 +140,7 @@ impl<T: OptionalCompatible> Optional<T> {
         unsafe { T::check_any_strict(cell).then(|| T::copy_from_any_view_after_check(cell)) }
     }
 
-    /// Takes the value out, consuming self (moves the payload, no `inc_ref`).
+    /// Takes the value out, without cloning it.
     #[inline]
     pub fn into_option(self) -> Option<T> {
         if self.is_some() {
@@ -168,8 +153,7 @@ impl<T: OptionalCompatible> Optional<T> {
         }
     }
 
-    /// Overwrites the value in place, dropping the previous one first (dec-ref'd
-    /// if it was an object payload).
+    /// Replaces the value, dropping the previous one.
     #[inline]
     pub fn set(&mut self, value: Option<T>) {
         // Assignment drops the old `Any` (dec_ref if object) before storing the new.
@@ -188,7 +172,7 @@ impl<T: OptionalCompatible + crate::type_traits::RefFromAnyUnchecked> Optional<T
     ///
     /// # Returns
     ///
-    /// The borrowed value, or `None` when `nullopt`.
+    /// The borrowed value, or `None` when empty.
     ///
     /// ```
     /// use tvm_ffi::Optional;
@@ -208,11 +192,7 @@ impl<T: OptionalCompatible + crate::type_traits::RefFromAnyUnchecked> Optional<T
 }
 
 impl Optional<String> {
-    /// Borrows the engaged string as `&str`, or `None` when `nullopt`.
-    ///
-    /// Reinterprets the in-cell string without cloning: an engaged cell holds a
-    /// `String`'s exact 16-byte representation, so `&Any` can be viewed as
-    /// `&String`.
+    /// Borrows the string as `&str`, or `None` when empty.
     #[inline]
     pub fn as_str(&self) -> Option<&str> {
         if self.is_some() {
@@ -228,7 +208,7 @@ impl Optional<String> {
 }
 
 impl<T: OptionalCompatible> Default for Optional<T> {
-    /// `nullopt`, matching the C++ default constructor.
+    /// The empty optional, holding `None`.
     #[inline]
     fn default() -> Self {
         Self::none()

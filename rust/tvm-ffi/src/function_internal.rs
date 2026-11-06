@@ -39,12 +39,11 @@ pub trait AsPackedCallable<I, O> {
     // Call the function in packed convention
     fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>;
 
-    /// The type schema of the function, as C++ `FunctionInfo::TypeSchema`
-    /// writes it.
+    /// The type schema of the function, a JSON description of its signature.
     ///
     /// A typed function lists its return and parameter types. The default,
     /// for a callable whose signature is not known, is the schema of an
-    /// untyped function, as C++ `refl::GlobalDef().def_packed` records it.
+    /// untyped function.
     fn type_schema() -> std::string::String
     where
         Self: Sized,

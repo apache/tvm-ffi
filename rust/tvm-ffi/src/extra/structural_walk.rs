@@ -44,11 +44,10 @@ pub enum WalkResult {
     InterruptWith(Any),
 }
 
-/// Convert either an infallible or fallible typed handler result.
-///
-/// This keeps simple handlers terse while allowing a handler to return
-/// `tvm_ffi::Result<WalkResult>` and use `?`.
+/// The result of a walk callback: a [`WalkResult`], or a `Result<WalkResult>`
+/// for a callback that uses `?`.
 pub trait IntoWalkResult {
+    /// The result as a `Result<WalkResult>`.
     fn into_walk_result(self) -> Result<WalkResult>;
 }
 
@@ -180,15 +179,14 @@ where
     }
 }
 
-/// Walk `root` with an observer, the Rust analog of C++
-/// `StructuralWalk<order>(root, callbacks...)`.
+/// Walk `root` with an observer, calling it on every reachable value in
+/// `order`.
 ///
 /// `walker` is anything implementing [`IntoDispatcher`]: a `&mut` reference to a
 /// stateful [`Dispatcher`] walker (declared with `#[dispatch]`), a bare closure
 /// in any [`crate::IntoDispatcher`] callback shape (catch-all `AnyView<'_>`, typed, or node,
 /// with an optional trailing [`DefRegionKind`]), or a tuple of such
-/// callbacks tried in order — the C++ callback overloads and variadic
-/// chain.
+/// callbacks tried in order until one matches.
 /// Callback views cannot escape their invocation; retain an [`Any`] explicitly
 /// when a value must outlive the callback:
 ///

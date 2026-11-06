@@ -38,12 +38,13 @@ use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMask
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
-/// ABI stable arbitrary-precision signed integer for ffi.
+/// An arbitrary-precision signed integer.
 ///
-/// Mirrors C++ `tvm::ffi::BigInt`: a value that fits `i64` is stored inline as
-/// `kTVMFFIInt`, and any wider value owns a `kTVMFFIBigInt` object holding its
-/// minimal two's-complement `i64` words, least-significant word first. Every
-/// operation returns that canonical form, so word-wise comparison decides equality.
+/// Its layout is part of the stable FFI ABI, so a `BigInt` passes across
+/// languages without conversion. A value that fits `i64` is stored inline, and
+/// a wider value uses a heap object of its minimal two's-complement `i64`
+/// words, least-significant word first. Results are always in that canonical
+/// form, so equality is word-wise.
 ///
 /// Arithmetic is unbounded and signed. `/` and `%` truncate toward zero;
 /// [`floor_div`](Self::floor_div) and [`floor_mod`](Self::floor_mod) round down.
@@ -89,8 +90,8 @@ extern "C" {
     fn free(ptr: *mut c_void);
 }
 
-/// Release an object from `BigInt::try_build` like C++ `ArrayHandler::Deleter_`;
-/// the words need no destructor.
+/// Release an object from `BigInt::try_build`: free the allocation; the words
+/// need no destructor.
 unsafe extern "C" fn delete_obj(ptr: *mut c_void, flags: i32) {
     if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
         free(ptr);
@@ -157,8 +158,8 @@ impl BigInt {
     }
 
     /// Build from `len` words, word `i` being `word(i)` called in increasing order,
-    /// written straight into a fresh object that is then pruned in place like C++
-    /// `Normalize`; `None` when the object cannot be allocated.
+    /// written straight into a fresh object whose redundant sign words are then
+    /// pruned in place; `None` when the object cannot be allocated.
     #[inline]
     fn try_build(len: usize, mut word: impl FnMut(usize) -> i64) -> Option<Self> {
         let layout = obj_layout(len)?;
@@ -724,7 +725,7 @@ define_op_or_panic!(
 );
 
 /// Forward an operator to its implementation for owned and borrowed operands,
-/// with `i64` accepted on either side as C++ does.
+/// with `i64` accepted on either side.
 macro_rules! forward_binop {
     ($Trait:ident::$method:ident, $Assign:ident::$assign:ident, $imp:ident) => {
         impl $Trait<&BigInt> for &BigInt {

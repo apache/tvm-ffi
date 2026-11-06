@@ -16,6 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! Objects: reference-counted values shared with C++ and Python, and the
+//! traits that define object types ([`ObjectCore`]) and their managed
+//! references ([`ObjectRefCore`]).
+
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::atomic::AtomicU64;
@@ -24,7 +28,6 @@ use crate::any::AnyView;
 use crate::derive::ObjectRef;
 use crate::type_traits::AnyCompatible;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-/// Object related ABI handling
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
 /// Held while `#[derive(Object)]` with `#[type_register]` registers a type, so
@@ -33,14 +36,17 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT
 #[doc(hidden)]
 pub static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Object type is by default the TVMFFIObject
+/// The root object type, `ffi.Object`: just the object header.
+///
+/// An object type defined in Rust starts with its parent's object, which for
+/// a direct subtype is `base: Object`.
 #[repr(C)]
 pub struct Object {
-    /// example implementation of the object
     header: TVMFFIObject,
 }
 
 impl Object {
+    /// A new object header, for the `base` field of a new object.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
@@ -62,9 +68,8 @@ unsafe impl ObjectCore for Object {
     }
 }
 
-/// Arc-like wrapper for Object that allows shared ownership
-///
-/// \tparam T The type of the object to be wrapped
+/// A reference-counted pointer to an object `T`, as `Arc<T>`, counting with
+/// the object header so that every language shares the count.
 #[repr(C)]
 pub struct ObjectArc<T: ObjectCore> {
     ptr: std::ptr::NonNull<T>,
@@ -153,13 +158,13 @@ impl<T: ObjectCore> ObjectArc<T> {
         (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
     }
 
-    /// Move a previously allocated object into the ObjectArc
+    /// Take ownership of a raw object pointer, as `Arc::from_raw`.
     ///
     /// # Arguments
-    /// * `ptr` - The raw pointer to move into the ObjectArc
+    /// * `ptr` - A pointer that owns one strong reference.
     ///
     /// # Returns
-    /// * `ObjectArc<T>` - The ObjectArc
+    /// The handle that owns that reference.
     ///
     /// # Safety
     /// `ptr` must own one strong reference to a live, stable managed allocation
@@ -173,58 +178,51 @@ impl<T: ObjectCore> ObjectArc<T> {
         }
     }
 
-    /// Move the ObjectArc into a raw pointer
+    /// Turn the handle into a raw pointer, as `Arc::into_raw`.
     ///
     /// # Arguments
-    /// * `this` - The ObjectArc to move into a raw pointer
+    /// * `this` - The handle.
     ///
     /// # Returns
-    /// * `*const T` - The raw pointer, which owns the strong reference; pass it
-    ///   back to [`ObjectArc::from_raw`] to release it, as std `Arc::into_raw`.
+    /// The pointer, which owns the strong reference; pass it back to
+    /// [`ObjectArc::from_raw`] to release it.
     #[inline(always)]
     pub fn into_raw(this: Self) -> *const T {
         let droped_this = std::mem::ManuallyDrop::new(this);
         droped_this.ptr.as_ptr() as *const T
     }
 
-    /// Get the raw pointer from the ObjectArc
-    ///
-    /// Caller should view this as a non-owning reference
+    /// The raw pointer, without giving up ownership, as `Arc::as_ptr`.
     ///
     /// # Arguments
-    /// * `this` - The ObjectArc to get the raw pointer
+    /// * `this` - The handle.
     ///
     /// # Returns
-    /// * `*const T` - The raw pointer, as std `Arc::as_ptr`. Dereferencing it
-    ///   must respect existing borrows, and it cannot outlive an owning handle.
+    /// The non-owning pointer. Dereferencing it must respect existing borrows,
+    /// and it cannot outlive an owning handle.
     #[inline]
     pub fn as_ptr(this: &Self) -> *const T {
         this.ptr.as_ptr() as *const T
     }
 
-    /// Get the raw mutable pointer from the ObjectArc
-    ///
-    /// Caller should view this as a non-owning reference
+    /// The raw mutable pointer, without giving up ownership.
     ///
     /// # Arguments
-    /// * `this` - The ObjectArc to get the raw pointer
+    /// * `this` - The handle.
     ///
     /// # Returns
-    /// * `*mut T` - The raw pointer. The handle need not be unique: writing
-    ///   through it needs exclusive access to the object, and must not move or
-    ///   replace the object or its header.
+    /// The non-owning pointer. The handle need not be unique: writing through
+    /// it needs exclusive access to the object, and must not move or replace
+    /// the object or its header.
     #[inline]
     pub fn as_mut_ptr(this: &mut Self) -> *mut T {
         this.ptr.as_ptr()
     }
 
-    /// Get the strong reference count of the ObjectArc
+    /// The number of strong references, as `Arc::strong_count`.
     ///
     /// # Arguments
-    /// * `this` - The ObjectArc to get the strong reference count
-    ///
-    /// # Returns
-    /// * `usize` - The strong reference count
+    /// * `this` - The handle.
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
         unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
@@ -236,13 +234,10 @@ impl<T: ObjectCore> ObjectArc<T> {
         unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
-    /// Get the weak reference count of the ObjectArc
+    /// The number of weak references, as `Arc::weak_count`.
     ///
     /// # Arguments
-    /// * `this` - The ObjectArc to get the weak reference count
-    ///
-    /// # Returns
-    /// * `usize` - The weak reference count
+    /// * `this` - The handle.
     #[inline]
     pub fn weak_count(this: &Self) -> usize {
         unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
@@ -284,8 +279,9 @@ impl<T: ObjectCore> Clone for ObjectArc<T> {
 /// # Safety
 ///
 /// No code may mutate an instance while it is shared: changes go through
-/// copy-on-write, in place only on a uniquely held instance, as for C++ classes
-/// that are not `_type_mutable`.
+/// copy-on-write, in place only on a uniquely held instance (one strong
+/// reference, no weak ones). This holds for every type not registered as
+/// mutable (`_type_mutable`), in any language.
 pub unsafe trait ImmutableObject: ObjectCore {}
 
 // SAFETY: `T` is never mutated while shared, its fields are thread-safe, and the
@@ -294,10 +290,9 @@ unsafe impl<T: ImmutableObject + Send + Sync> Send for ObjectArc<T> {}
 // SAFETY: as for `Send`.
 unsafe impl<T: ImmutableObject + Send + Sync> Sync for ObjectArc<T> {}
 
-/// A generic managed reference to a TVM-FFI object.
-///
-/// Holds an `ObjectArc<Object>` that manages the underlying object's lifetime
-/// through reference counting.
+/// A managed reference to an object of any type, the root of every object
+/// reference; downcast it to a concrete reference with
+/// [`ObjectRefCore::downcast`].
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
 #[object_ref(skip_deref)]
@@ -318,7 +313,7 @@ pub struct ObjectRef {
 /// invariants. Preallocation builders and values moved out during destruction
 /// are not live managed objects and cannot be borrowed as `AnyView`.
 pub unsafe trait ObjectCore: Sized + 'static {
-    /// the type key of the object
+    /// The type key, such as `"ffi.Array"`.
     const TYPE_KEY: &'static str;
     /// Depth of this type in the object inheritance tree.
     ///
@@ -331,16 +326,12 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// A final type has no separately registered object-system subtype.
     #[doc(hidden)]
     const TYPE_FINAL: bool = false;
-    // return the type index of the object
+    /// The runtime type index of this type.
     fn type_index() -> i32;
-    /// Return the object header
-    /// This function is implemented as a static function so
+    /// The object header, mutably.
     ///
     /// # Arguments
-    /// * `this` - The object to get the header
-    ///
-    /// # Returns
-    /// * `&mut TVMFFIObject` - The object header
+    /// * `this` - The object.
     ///
     /// # Safety
     /// The caller must have exclusive access to the header and preserve the
@@ -348,19 +339,18 @@ pub unsafe trait ObjectCore: Sized + 'static {
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject;
 }
 
-/// Traits for objects with extra items that follows the object
-///
-/// This extra trait can be helpful to implement array types and string types
+/// An object type whose allocation is followed by a run of extra items, such
+/// as the dimensions of a [`Shape`](crate::Shape).
 ///
 /// # Safety
 /// Every allocation of `Self` must be followed by `extra_items_count` initialized
 /// `ExtraItem`s, as `ObjectArc::new_with_extra_items` lays them out.
 pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
-    /// type of extra items storage that follows the object
+    /// The type of the items that follow the object.
     type ExtraItem;
-    /// Return the number of extra items
+    /// The number of extra items.
     fn extra_items_count(this: &Self) -> usize;
-    /// Return the extra items data pointer
+    /// The extra items.
     ///
     /// # Safety
     /// `this` must be an allocation that carries its extra items.
@@ -371,7 +361,7 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
             Self::extra_items_count(this),
         )
     }
-    /// Return the extra items data pointer
+    /// The extra items, mutably.
     ///
     /// # Safety
     /// `this` must be an allocation that carries its extra items.
@@ -394,8 +384,7 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
 /// * [`downcast_ref`](Self::downcast_ref) borrows, strictly, as std's
 ///   `dyn Any::downcast_ref` does.
 /// * [`downcast`](Self::downcast) takes the value, strictly, and hands it back
-///   on a mismatch, as `Box<dyn Any>::downcast` does; the counterpart of C++
-///   `as<T>()`.
+///   on a mismatch, as `Box<dyn Any>::downcast` does.
 /// * `TryFrom` takes the value and returns a `TypeError`, for `?`. Between
 ///   references it only checks; from an [`Any`](crate::Any) it converts by
 ///   the FFI rules, such as an integer into a float.
@@ -414,21 +403,25 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
 /// `check_any_strict` result must guarantee that both after-check constructors
 /// are valid for it.
 pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
+    /// The object type the reference points to.
     type ContainerType: ObjectCore;
+    /// Borrow the object's handle.
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
+    /// Take the object's handle.
     fn into_data(this: Self) -> ObjectArc<Self::ContainerType>;
 
-    /// Construct a reference view from an owning container handle.
+    /// Make a reference from the object's handle.
     ///
     /// # Safety
     ///
     /// In addition to containing a valid `ContainerType` allocation, `data`
     /// must satisfy every semantic invariant imposed by `Self`. This matters
     /// for zero-state views that share a container type but accept only a
-    /// subset of its values, such as a typed expression view.
+    /// subset of its values, such as a reference whose
+    /// [`ObjectRefAnyCompatible::extra_check`] rejects some objects.
     unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
 
-    /// Return whether two object references point to the same allocation.
+    /// Whether two references point to the same object.
     #[inline]
     fn same_as<Other: ObjectRefCore>(&self, other: &Other) -> bool {
         ObjectArc::as_ptr(Self::data(self)).cast::<()>()
@@ -437,9 +430,9 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 
     /// Borrow the underlying object as `T` when it is one.
     ///
-    /// `T` is an object type such as `FooObj`, or a managed reference such as
-    /// `Foo`: `&Expr` borrows as `&Add` when the expression is an `Add`.
-    /// Unrelated types return `None`. Unlike [`downcast`](Self::downcast), this
+    /// `T` is an object type such as `MyPairObj`, or a managed reference such
+    /// as `MyPair`: `&ObjectRef` borrows as `&MyPair` when its object is a
+    /// `MyPairObj`. Unrelated types return `None`. Unlike [`downcast`](Self::downcast), this
     /// method neither consumes the reference nor changes the object's reference
     /// count. The returned borrow cannot outlive `self`.
     /// See [`crate::Any::downcast_ref`] for an example.
@@ -495,13 +488,13 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 }
 
 /// The [`AnyCompatible`] implementation of an object reference, with every
-/// hook defaulted, as C++ `TypeTraits<T>` derives from
-/// `ObjectRefTypeTraitsBase<T>`: every implementer is `AnyCompatible`.
+/// hook defaulted: every implementer is `AnyCompatible`.
 ///
 /// `#[derive(ObjectRef)]` implements it with the defaults. A typed reference
 /// that accepts only some objects of its type, or converts other values,
-/// implements it by hand and overrides only what differs, as C++ `IntExpr`
-/// overrides `CheckAnyStrict` and `ConvertFallbackValue`. A type with another
+/// implements it by hand and overrides only what differs, such as
+/// [`extra_check`](Self::extra_check) and
+/// [`convert_fallback`](Self::convert_fallback) below. A type with another
 /// representation, such as [`Array`](crate::Array), implements
 /// `AnyCompatible` instead.
 ///
@@ -568,8 +561,8 @@ pub unsafe trait ObjectRefAnyCompatible: ObjectRefCore {
         true
     }
 
-    /// Convert a value that is not a `Self` object, as C++
-    /// `ConvertFallbackValue` does. Only converting casts (`TryFrom<Any>`,
+    /// Convert a value that is not a `Self` object, such as an integer that
+    /// stands for a constant; `None` rejects it. Only converting casts (`TryFrom<Any>`,
     /// typed function arguments) call it; `downcast_ref`, `downcast` and
     /// `match_any!` never do.
     #[inline]
@@ -786,7 +779,7 @@ impl std::fmt::Debug for ObjectIdentity {
 }
 
 /// Whether the runtime type index of an object is `Target` or one of its
-/// subtypes, as C++ `Object::IsInstance<T>()` checks.
+/// subtypes, by walking the registered type hierarchy.
 ///
 /// Use it in the strict check of a reference type implemented by hand; the
 /// casts of [`ObjectRefCore`] call it already. An index in the object range
@@ -947,7 +940,7 @@ unsafe fn allocate_object<T>(data: T, type_index: i32) -> NonNull<T> {
     NonNull::new_unchecked(ptr)
 }
 
-/// Unsafe operations on object
+/// Unsafe reference-count operations on raw object headers.
 #[doc(hidden)]
 pub mod unsafe_ {
     use tvm_ffi_sys::{
@@ -1018,7 +1011,9 @@ pub mod unsafe_ {
         (obj.combined_ref_count.load(Ordering::Relaxed) & COMBINED_REF_COUNT_MASK_U32) as usize
     }
 
-    /// Whether `handle` is the only reference, so it may be mutated in place (C++ `unique()`).
+    /// Whether `handle` is the only strong reference, so it may be mutated in
+    /// place. Any weak reference rejects it, as a weak handle could upgrade and
+    /// observe the write.
     #[inline]
     pub(crate) unsafe fn is_unique(handle: *mut TVMFFIObject) -> bool {
         // Acquire pairs with the releasing decrement: other owners' accesses precede an in-place write.

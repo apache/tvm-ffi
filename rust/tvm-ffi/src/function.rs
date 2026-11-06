@@ -16,6 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`Function`], a callable shared with C++ and Python, and the global function
+//! registry.
+
 use crate::any::{Any, AnyView};
 use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
@@ -28,7 +31,7 @@ use tvm_ffi_sys::{
     TVMFFISafeCallType, TVMFFITypeIndex,
 };
 
-/// function object
+/// The object behind a [`Function`].
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Function"]
@@ -58,9 +61,8 @@ pub struct FunctionObj {
 /// ```
 ///
 /// A `Function` may be called from any thread, so a Rust callback must be
-/// `Send + Sync`; a callback holding an `Rc` is rejected. The callee's own
-/// thread safety, for C++ functions and the objects they touch, is that of its
-/// implementation.
+/// `Send + Sync`; a callback holding an `Rc` is rejected. A function written
+/// in another language is as thread-safe as its implementation.
 ///
 /// ```compile_fail
 /// use std::rc::Rc;
@@ -206,14 +208,6 @@ impl Function {
     ///
     /// Returns the error that the function raises.
     ///
-    /// ```
-    /// use tvm_ffi::{Function, Result};
-    /// let add = Function::from_typed(|x: i64, y: i64| -> Result<i64> { Ok(x + y) });
-    /// let result = add.call_tuple((1_i64, 2_i64))?;
-    /// assert_eq!(i64::try_from(result)?, 3);
-    /// # Ok::<(), tvm_ffi::Error>(())
-    /// ```
-    ///
     /// See also [`Function`].
     pub fn call_tuple<TupleType>(&self, tuple_args: TupleType) -> Result<Any>
     where
@@ -284,9 +278,8 @@ impl Function {
     ///
     /// # Errors
     ///
-    /// Returns an error if no function is registered as `name`, as C++
-    /// `Function::GetGlobalRequired` throws and Python `get_global_func` raises by
-    /// default. Probe with `.ok()` where a missing function is expected.
+    /// Returns an error if no function is registered as `name`. Probe with
+    /// `.ok()` where a missing function is expected.
     ///
     /// ```
     /// use tvm_ffi::Function;
@@ -315,10 +308,9 @@ impl Function {
     /// Register a function as a global function, which every language can then
     /// look up by name.
     ///
-    /// The function's metadata records the type schema of an untyped function, as
-    /// C++ `refl::GlobalDef().def_packed` does. Use
-    /// [`Function::register_global_typed`] to record the parameter and return types
-    /// of a typed function, and a doc string.
+    /// The function's metadata records only that it is a function, with no
+    /// parameter types. Use [`Function::register_global_typed`] to record the
+    /// parameter and return types of a typed function, and a doc string.
     ///
     /// # Arguments
     ///
@@ -341,9 +333,9 @@ impl Function {
 
     /// Register a typed function as a global function, with a doc string.
     ///
-    /// As C++ `refl::GlobalDef().def` does, the function's metadata records its
-    /// type schema, which `tvm_ffi.get_global_func_metadata` and the stub generator
-    /// read. An empty `doc` records no doc string.
+    /// The function's metadata records its type schema, the parameter and
+    /// return types, which `tvm_ffi.get_global_func_metadata` and the stub
+    /// generator read. An empty `doc` records no doc string.
     ///
     /// # Arguments
     ///

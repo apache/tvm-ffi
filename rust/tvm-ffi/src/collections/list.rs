@@ -16,28 +16,29 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! Mutable [`List`] container sharing the `ffi.List` object layout with C++.
+//! [`List`], a mutable sequence whose handles all see each change.
 //!
-//! `ListObj` mirrors C++ `ListObj` (`Object` followed by `TVMFFISeqCell`), so
-//! Rust reads and edits the element cells in place: reads, [`List::set`],
-//! [`List::insert`], [`List::remove`], [`List::remove_range`],
-//! [`List::truncate`], [`List::reverse`], [`List::clear`] and iteration touch
-//! the buffer directly, with no FFI call. The object and its element buffer
-//! are allocated by the C++ runtime (`ffi.List`), because the buffer is a
-//! separate allocation that `data_deleter` has to free with the allocator that
-//! produced it. For the same reason, growing a full buffer is left to C++
-//! (`ffi.ListReserve`), which the mutators call only when there is no spare
-//! capacity; the elements themselves are then written in place.
+//! A `List` is a shared handle, like `Rc<RefCell<Vec<T>>>`: cloning it bumps
+//! the reference count, and a mutation through one handle is seen through all
+//! of them. That is why the mutating methods take `&self`, and why elements
+//! are returned by value rather than by reference. It is not synchronized, so
+//! it is neither `Send` nor `Sync`.
 //!
-//! A `List` is a shared handle, as in C++ and Python: cloning it bumps the
-//! refcount, and a mutation through one handle is seen through all of them.
-//! That is why the mutating methods take `&self`, and why elements are
-//! returned by value rather than by reference. Like its C++ counterpart it is
-//! not synchronized; the raw buffer pointer keeps it `!Send` and `!Sync`.
-//!
-//! `Any` conversions follow C++ `SeqTypeTraitsBase` (seq_base.h): an `ffi.List`
-//! whose elements all match `T` is shared; an `ffi.Array`, or a list whose
-//! elements need converting, is copied into a new list.
+//! Converting an `Any` into a `List<T>` shares an `ffi.List` whose elements
+//! are all `T`; an `ffi.Array`, or a list whose elements need converting, is
+//! copied into a new list.
+
+// `ListObj` mirrors C++ `ListObj` (`Object` followed by `TVMFFISeqCell`), so
+// Rust reads and edits the element cells in place: reads, `List::set`,
+// `List::insert`, `List::remove`, `List::remove_range`,
+// `List::truncate`, `List::reverse`, `List::clear` and iteration touch
+// the buffer directly, with no FFI call. The object and its element buffer
+// are allocated by the C++ runtime (`ffi.List`), because the buffer is a
+// separate allocation that `data_deleter` has to free with the allocator that
+// produced it. For the same reason, growing a full buffer is left to C++
+// (`ffi.ListReserve`), which the mutators call only when there is no spare
+// capacity; the elements themselves are then written in place.
+
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -52,9 +53,9 @@ use crate::{Any, AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 
-/// Container object for [`List`], laid out as C++ `ListObj`. Unlike
+/// The object behind a [`List`], laid out as the C++ `ListObj`. Unlike
 /// `ffi.Array`, the element buffer `data` is a separate allocation that the
-/// C++ runtime replaces when the list grows.
+/// runtime replaces when the list grows.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.List"]
@@ -100,7 +101,7 @@ impl ListObj {
         ((*(*this).data.get()) as *mut TVMFFIAny).add(index)
     }
 
-    /// Drops the elements from the back down to `len`, like C++ `ShrinkBy`.
+    /// Drops the elements from the back down to `len`.
     unsafe fn truncate(this: *mut ListObj, len: usize) {
         while (*(*this).size.get()) as usize > len {
             (*(*this).size.get()) -= 1;
@@ -145,8 +146,8 @@ fn type_error<T: ContainerElement>(index: usize) -> Result<T> {
     )
 }
 
-/// A mutable, reference-counted sequence of `T`, shared with C++ and Python
-/// as `ffi.List`.
+/// A mutable, reference-counted sequence of `T`, passed across languages as
+/// `ffi.List`.
 ///
 /// Cloning a `List` is cheap and yields a handle to the same list, so a change
 /// through one handle is seen through every other. Methods take `&self`.
@@ -240,12 +241,12 @@ pub(crate) unsafe fn seq_cells(data: &TVMFFIAny) -> &[TVMFFIAny] {
 }
 
 impl<T: ContainerElement> List<T> {
-    /// Creates a new, empty list (via an `ffi.List()` call to the C++ runtime).
+    /// Creates an empty list.
     pub fn new() -> Self {
         Self::from_items(&[]).expect("ffi.List() failed to construct an empty list")
     }
 
-    /// Builds a list by calling the C++ `ffi.List` constructor.
+    /// Builds a list by calling the runtime's `ffi.List` constructor.
     fn from_items(items: &[T]) -> Result<Self> {
         let args: Vec<AnyView<'_>> = items.iter().map(element_view).collect();
         let result = crate::cached_global_func!("ffi.List").call_packed(&args)?;
@@ -410,7 +411,7 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Shortens the list to `len` elements, dropping the rest; a no-op when it
-    /// is already that short. C++ `resize` when shrinking.
+    /// is already that short.
     pub fn truncate(&self, len: usize) {
         unsafe { ListObj::truncate(self.obj(), len) }
     }
@@ -436,7 +437,7 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Inserts every item of `iter`, in order, at `index`, shifting the
-    /// elements after it. C++ `insert(position, first, last)`.
+    /// elements after it.
     pub fn insert_many<I: IntoIterator<Item = T>>(&self, index: usize, iter: I) -> Result<()> {
         // Drain the iterator first: it may reach this same list through
         // another handle, so the length is only read once it is done.
@@ -463,8 +464,7 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Makes room for at least `additional` more elements without
-    /// reallocating again, like `Vec::reserve`. C++ `reserve(n)` takes the
-    /// absolute capacity instead.
+    /// reallocating again, like `Vec::reserve`.
     pub fn reserve(&self, additional: usize) -> Result<()> {
         let total = self.len() + additional;
         if total > self.capacity() {
@@ -473,8 +473,8 @@ impl<T: ContainerElement> List<T> {
         Ok(())
     }
 
-    /// Makes room for `extra` more elements, growing geometrically like C++
-    /// `List::EnsureCapacity`.
+    /// Makes room for `extra` more elements, growing geometrically so that
+    /// repeated pushes take amortized constant time.
     #[inline]
     fn reserve_for(&self, extra: usize) -> Result<()> {
         let (size, capacity) = (self.len(), self.capacity());
@@ -484,7 +484,7 @@ impl<T: ContainerElement> List<T> {
         Ok(())
     }
 
-    /// Has the C++ runtime grow the buffer to hold `capacity` elements, with
+    /// Has the runtime grow the buffer to hold `capacity` elements, with
     /// the allocator that owns it (`ffi.ListReserve`).
     #[cold]
     #[inline(never)]
@@ -501,7 +501,7 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Resizes the list to `new_len` elements, dropping the tail or appending
-    /// clones of `value`. C++ `resize`.
+    /// clones of `value`.
     pub fn resize(&self, new_len: usize, value: T) -> Result<()>
     where
         T: Clone,
@@ -514,7 +514,7 @@ impl<T: ContainerElement> List<T> {
         self.extend(std::iter::repeat_n(value, new_len - len))
     }
 
-    /// Reverses the elements in place. C++ `Reverse`.
+    /// Reverses the elements in place.
     pub fn reverse(&self) {
         let obj = self.obj();
         unsafe {

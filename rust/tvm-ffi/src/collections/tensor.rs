@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`Tensor`], an owned n-dimensional array, and [`TensorView`], a borrowed one.
+
 use crate::any::AnyView;
 use crate::collections::shape::Shape;
 use crate::derive::{Object, ObjectRef};
@@ -31,32 +33,31 @@ use tvm_ffi_sys::{TVMFFIEnvTensorAlloc, TVMFFIObjectHandle};
 //-----------------------------------------------------
 // NDAllocator Trait
 //-----------------------------------------------------
-/// Trait for n-dimensional array allocators
+/// Allocates the data buffer of a tensor made by [`Tensor::from_nd_alloc`].
 ///
 /// # Safety
 /// `alloc_data` must return a pointer aligned to `MIN_ALIGN` and valid for
 /// `numel() * item_size()` bytes of the prototype, and `free_data` must release
 /// exactly what `alloc_data` returned.
 pub unsafe trait NDAllocator: 'static {
-    /// The minimum alignment of the data allocated by the allocator
+    /// The minimum alignment of the allocated data, in bytes.
     const MIN_ALIGN: usize;
-    /// Allocate data for the given DLTensor
+    /// Allocate the data of a tensor.
     ///
     /// # Arguments
-    /// * `tensor` - The DLTensor to allocate data for
+    /// * `prototype` - The tensor to allocate for; its data pointer is still null.
     ///
-    /// This method should fill in the data pointer of the DLTensor.
+    /// # Returns
+    /// The data pointer, which the tensor stores.
     ///
     /// # Safety
     /// `prototype` must have a valid shape and dtype.
     unsafe fn alloc_data(&mut self, prototype: &DLTensor) -> *mut core::ffi::c_void;
 
-    /// Free data for the given DLTensor
+    /// Free the data of a tensor, when the tensor is dropped.
     ///
     /// # Arguments
-    /// * `tensor` - The DLTensor to free data for
-    ///
-    /// This method should free the data pointer of the DLTensor.
+    /// * `tensor` - The tensor whose `data` to free.
     ///
     /// # Safety
     /// `tensor.data` must come from `alloc_data` on this allocator with the same
@@ -64,10 +65,11 @@ pub unsafe trait NDAllocator: 'static {
     unsafe fn free_data(&mut self, tensor: &DLTensor);
 }
 
-/// DLTensorExt trait
-/// This trait provides methods to get the number of elements and the item size of a DLTensor
+/// Size queries on a `DLTensor`.
 pub trait DLTensorExt {
+    /// The number of elements: the product of the shape, 1 for a scalar.
     fn numel(&self) -> usize;
+    /// The bytes of one element: `bits * lanes`, rounded up to whole bytes.
     fn item_size(&self) -> usize;
 }
 
@@ -90,9 +92,9 @@ impl DLTensorExt for DLTensor {
 }
 
 //-----------------------------------------------------
-// Shape
+// Tensor
 //-----------------------------------------------------
-// ShapeObj for heap-allocated shape
+/// The object behind a [`Tensor`]: an object header followed by a `DLTensor`.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Tensor"]
@@ -102,8 +104,8 @@ pub struct TensorObj {
     dltensor: DLTensor,
 }
 
-/// A reference-counted n-dimensional array, shared with C++ and Python and
-/// exchanged with other frameworks through DLPack.
+/// A reference-counted n-dimensional array, passed across languages as
+/// `ffi.Tensor` and exchanged with other frameworks through DLPack.
 ///
 /// # Examples
 ///
@@ -138,12 +140,17 @@ impl Tensor {
     pub fn data_ptr_mut(&self) -> *mut core::ffi::c_void {
         self.data.dltensor.data
     }
-    /// Whether the elements are laid out in row-major order without gaps, as
-    /// C++ `tvm::ffi::IsContiguous` decides; see [`TensorView::is_contiguous`].
+    /// Whether the elements are laid out in row-major order without gaps; see
+    /// [`TensorView::is_contiguous`].
     pub fn is_contiguous(&self) -> bool {
         TensorView::from(self).is_contiguous()
     }
 
+    /// The elements as a slice.
+    ///
+    /// # Errors
+    /// A `TypeError` if `T` is not the tensor's dtype, and a `RuntimeError`
+    /// if the tensor is not on the CPU or not contiguous.
     pub fn data_as_slice<T: AsDLDataType>(&self) -> Result<&[T]> {
         let dtype = T::DL_DATA_TYPE;
         if self.dtype() != dtype {
@@ -174,16 +181,14 @@ impl Tensor {
             ))
         }
     }
-    /// Returns the tensor data as a mutable slice.
+    /// The elements as a mutable slice.
     ///
-    /// This method takes `&self` rather than `&mut self` by design: like
-    /// `std::fs::File::write`, the *metadata* of a Tensor (shape, dtype,
-    /// device) is governed by Rust's ownership rules, but writing to the
-    /// underlying data buffer (CPU memory or a GPU pointer) is a side-effect
-    /// outside Rust's aliasing model.  Most C/CUDA kernel APIs accept a
-    /// non-mut Tensor and mutate its data content, so requiring `&mut self`
-    /// here would force artificial mutability annotations throughout the
-    /// deep-learning stack with no real safety benefit.
+    /// It takes `&self`: a tensor is a shared handle, and kernels write the
+    /// data of tensors they receive by shared reference, so `&mut self` would
+    /// not make the write exclusive.
+    ///
+    /// # Errors
+    /// As [`data_as_slice`](Self::data_as_slice).
     ///
     /// # Safety
     ///
@@ -222,6 +227,7 @@ impl Tensor {
         }
     }
 
+    /// The extent of each dimension.
     pub fn shape(&self) -> &[i64] {
         let t = &self.data.dltensor;
         // A scalar may have a null shape, which a slice cannot.
@@ -231,10 +237,12 @@ impl Tensor {
         unsafe { std::slice::from_raw_parts(t.shape, t.ndim as usize) }
     }
 
+    /// The number of dimensions.
     pub fn ndim(&self) -> usize {
         self.data.dltensor.ndim as usize
     }
 
+    /// The number of elements.
     pub fn numel(&self) -> usize {
         self.data.dltensor.numel()
     }
@@ -256,10 +264,12 @@ impl Tensor {
         unsafe { std::slice::from_raw_parts(t.strides, t.ndim as usize) }
     }
 
+    /// The element type.
     pub fn dtype(&self) -> DLDataType {
         self.data.dltensor.dtype
     }
 
+    /// The device that holds the data.
     pub fn device(&self) -> DLDevice {
         self.data.dltensor.device
     }
@@ -300,16 +310,16 @@ impl<TNDAlloc: NDAllocator> Drop for TensorObjFromNDAlloc<TNDAlloc> {
 }
 
 impl Tensor {
-    // Create a Tensor from a NDAllocator
+    /// Create a contiguous tensor whose data `alloc` allocates and frees.
     ///
     /// # Arguments
-    /// * `alloc` - The NDAllocator
-    /// * `shape` - The shape of the Tensor
-    /// * `dtype` - The data type of the Tensor
-    /// * `device` - The device of the Tensor
+    /// * `alloc` - The allocator, kept by the tensor until it is dropped.
+    /// * `shape` - The shape of the tensor.
+    /// * `dtype` - The element type.
+    /// * `device` - The device of the data.
     ///
     /// # Returns
-    /// * `Tensor` - The created Tensor
+    /// The new tensor, with row-major strides.
     pub fn from_nd_alloc<TNDAlloc>(
         alloc: TNDAlloc,
         shape: &[i64],
@@ -351,21 +361,23 @@ impl Tensor {
             }
         }
     }
-    /// Create a Tensor with the environment allocator of this thread, as C++
-    /// `Tensor::FromEnvAlloc(TVMFFIEnvTensorAlloc, ...)` does.
+    /// Create a contiguous tensor with this thread's environment allocator.
     ///
     /// Kernel libraries allocate intermediate tensors this way, so that they
     /// come from the caller's allocator, such as the one a framework sets
     /// with `TVMFFIEnvSetDLPackManagedTensorAllocator`.
     ///
     /// # Arguments
-    /// * `shape` - The shape of the Tensor
-    /// * `dtype` - The data type of the Tensor
-    /// * `device` - The device of the Tensor
+    /// * `shape` - The shape of the tensor.
+    /// * `dtype` - The element type.
+    /// * `device` - The device of the data.
     ///
     /// # Returns
-    /// * `Result<Tensor>` - The created Tensor, or the error the allocator
-    ///   raised, which is a `RuntimeError` when no allocator is set
+    /// The new tensor.
+    ///
+    /// # Errors
+    /// The error the allocator raises, or a `RuntimeError` when no allocator
+    /// is set.
     pub fn from_env_alloc(shape: &[i64], dtype: DLDataType, device: DLDevice) -> Result<Self> {
         let mut prototype = DLTensor {
             data: std::ptr::null_mut(),
@@ -387,18 +399,21 @@ impl Tensor {
         }
     }
 
-    /// Create a Tensor from a slice
+    /// Create a CPU tensor holding a copy of `slice`.
     ///
     /// # Arguments
-    /// * `slice` - The slice to create the Tensor from
-    /// * `shape` - The shape of the Tensor
+    /// * `slice` - The elements, in row-major order.
+    /// * `shape` - The shape of the tensor.
     ///
     /// # Returns
-    /// * `Tensor` - The created Tensor
+    /// The new tensor, allocated with [`CPUNDAlloc`].
+    ///
+    /// # Errors
+    /// A `ValueError` if `slice` does not have as many elements as `shape`.
     pub fn from_slice<T: AsDLDataType>(slice: &[T], shape: &[i64]) -> Result<Self> {
         let dtype = T::DL_DATA_TYPE;
         let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
-        let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, shape, dtype, device);
+        let tensor = Tensor::from_nd_alloc(CPUNDAlloc, shape, dtype, device);
         if tensor.numel() != slice.len() {
             crate::bail!(crate::error::VALUE_ERROR, "Slice length mismatch");
         }
@@ -408,9 +423,10 @@ impl Tensor {
     }
 }
 
-/// Example CPU NDAllocator
-/// This allocator allocates data on the CPU
-pub struct CPUNDAlloc {}
+/// An [`NDAllocator`] for CPU memory from the Rust global allocator, aligned
+/// to 64 bytes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CPUNDAlloc;
 
 unsafe impl NDAllocator for CPUNDAlloc {
     const MIN_ALIGN: usize = 64;
@@ -446,22 +462,16 @@ unsafe impl NDAllocator for CPUNDAlloc {
 
 /// A non-owning view of a tensor: a pointer to a `DLTensor`.
 ///
-/// This mirrors `tvm::ffi::TensorView` in C++. A function argument of this
-/// type accepts both a borrowed `DLTensor*` (type index `kTVMFFIDLTensorPtr`,
-/// how C and C++ callers pass tensors) and a `Tensor` object (type index
-/// `kTVMFFITensor`), and is passed on as a `DLTensor*`. Prefer it over
-/// [`Tensor`] for arguments of exported functions that only read a tensor's
-/// metadata and data.
+/// A function argument of this type accepts both a borrowed `DLTensor*` (type
+/// index `kTVMFFIDLTensorPtr`, how C callers pass tensors) and a `Tensor`
+/// object (type index `kTVMFFITensor`), and is passed on as a `DLTensor*`.
+/// Prefer it over [`Tensor`] for arguments of exported functions that only
+/// read a tensor's metadata and data.
 ///
-/// The view does not keep anything alive. The caller must ensure that the
-/// `DLTensor` it points to, and the memory that the `DLTensor` points to
-/// (data, shape and strides), outlive every use of the view. For an argument
-/// of an exported function, that is the duration of the call. For the same
-/// reason, as in C++, a view cannot be moved into an owned [`Any`](crate::Any);
-/// use [`Tensor`] instead.
-///
-/// The lifetime ties a view to what it borrows, so it cannot outlive its
-/// tensor, and a view cannot be held in an owned `Any`:
+/// The view does not keep anything alive: its lifetime `'a` ties it to what
+/// it borrows, which for an argument of an exported function is the call. For
+/// the same reason, a view cannot be moved into an owned [`Any`](crate::Any),
+/// which could outlive it; use [`Tensor`] instead. Neither misuse compiles:
 ///
 /// ```compile_fail
 /// use tvm_ffi::{Tensor, TensorView};
@@ -511,18 +521,22 @@ impl<'a> TensorView<'a> {
         self.dltensor().data
     }
 
+    /// The device that holds the data.
     pub fn device(&self) -> DLDevice {
         self.dltensor().device
     }
 
+    /// The element type.
     pub fn dtype(&self) -> DLDataType {
         self.dltensor().dtype
     }
 
+    /// The number of dimensions.
     pub fn ndim(&self) -> usize {
         self.dltensor().ndim as usize
     }
 
+    /// The extent of each dimension.
     pub fn shape(&self) -> &'a [i64] {
         let t = self.dltensor();
         if t.ndim == 0 {
@@ -531,6 +545,7 @@ impl<'a> TensorView<'a> {
         unsafe { std::slice::from_raw_parts(t.shape, t.ndim as usize) }
     }
 
+    /// The number of elements.
     pub fn numel(&self) -> usize {
         self.shape().iter().product::<i64>() as usize
     }
@@ -539,7 +554,7 @@ impl<'a> TensorView<'a> {
     ///
     /// # Panics
     /// If the `DLTensor` has null strides and at least one dimension, which
-    /// DLPack forbids since v1.2, as C++ `TensorView::strides` checks.
+    /// DLPack forbids since v1.2.
     pub fn strides(&self) -> &'a [i64] {
         let t = self.dltensor();
         if t.ndim == 0 {
@@ -552,10 +567,9 @@ impl<'a> TensorView<'a> {
         unsafe { std::slice::from_raw_parts(t.strides, t.ndim as usize) }
     }
 
-    /// Whether the elements are laid out in row-major order without gaps, as
-    /// C++ `tvm::ffi::IsContiguous` decides: a `DLTensor` with null strides
-    /// or no elements is contiguous, and a dimension of extent 1 may have any
-    /// stride.
+    /// Whether the elements are laid out in row-major order without gaps: a
+    /// `DLTensor` with null strides or no elements is contiguous, and a
+    /// dimension of extent 1 may have any stride.
     pub fn is_contiguous(&self) -> bool {
         if self.dltensor().strides.is_null() {
             return true;

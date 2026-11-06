@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`Any`] and [`AnyView`]: owned and borrowed type-erased FFI values.
+
 use crate::error::Error;
 use crate::object;
 use crate::type_traits::AnyCompatible;
@@ -177,9 +179,8 @@ impl<'a> AnyView<'a> {
         unsafe { T::downcast_ref_from_any(&self.data) }
     }
 
-    /// Get the strong count of the underlying object for testing/debugging purposes
-    ///
-    /// If the underlying object is not ref counted, return None
+    /// The strong reference count of the held object, for tests and debugging;
+    /// `None` if the value is not an object.
     pub fn debug_strong_count(&self) -> Option<usize> {
         unsafe {
             if self.data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
@@ -311,7 +312,7 @@ impl Any {
     }
 
     /// Return a pointer to the raw ABI representation, for a runtime call that
-    /// writes an owned result into it, as C++ `Any` out-parameters are filled.
+    /// writes an owned result into it as an out-parameter.
     ///
     /// Writing through the pointer is unsafe: the cell must afterwards hold a
     /// value this `Any` may own and release, and the previous value must have
@@ -342,9 +343,8 @@ impl Any {
         Self { data }
     }
 
-    /// Get the strong count of the underlying object for testing/debugging purposes
-    ///
-    /// If the underlying object is not ref counted, return None
+    /// The strong reference count of the held object, for tests and debugging;
+    /// `None` if the value is not an object.
     pub fn debug_strong_count(&self) -> Option<usize> {
         unsafe {
             if self.data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
@@ -394,7 +394,7 @@ impl<'a> From<&'a Any> for AnyView<'a> {
 }
 
 /// Whether a `TVMFFIAny` cell owns everything it holds, so its owning form is a
-/// bitwise copy. Mirrors C++ `detail::InplaceConvertAnyViewToAny`.
+/// bitwise copy.
 #[inline]
 pub(crate) fn is_plain_inline(type_index: i32) -> bool {
     type_index < TypeIndex::kTVMFFIRawStr as i32
@@ -529,9 +529,8 @@ crate::impl_try_from_any!(*mut core::ffi::c_void, crate::object::ObjectRef);
 
 crate::impl_try_from_any_for_parametric!(Option<T>);
 
-//------------------------------------------------------------
-/// ArgTryFromAnyView: Helper for function argument passing
-///-----------------------------------------------------------
+/// The conversion of a typed function argument, whose error names the
+/// argument's index.
 pub(crate) trait ArgTryFromAnyView: Sized + crate::type_traits::TypeSchema {
     fn try_from_any_view(value: &AnyView, arg_index: usize) -> Result<Self, Error>;
 }

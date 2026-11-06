@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`String`] and [`Bytes`], immutable reference-counted strings.
+
 use crate::derive::Object;
 use crate::object::{unsafe_, Object, ObjectArc, ObjectCoreWithExtraItems};
 use crate::type_traits::AnyCompatible;
@@ -29,8 +31,8 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIByteArray, TVMFFIObject};
 //-----------------------------------------------------
 // Bytes
 //-----------------------------------------------------
-/// An immutable byte string, shared with C++ as `ffi.Bytes` and with Python
-/// as `bytes`.
+/// An immutable byte string, passed across languages as `ffi.Bytes` (Python
+/// `bytes`).
 ///
 /// # Examples
 ///
@@ -60,7 +62,7 @@ pub(crate) struct BytesObj {
 }
 
 impl Bytes {
-    /// Create a new empty Bytes container
+    /// An empty byte string.
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny {
@@ -71,17 +73,17 @@ impl Bytes {
         }
     }
 
-    /// Get the length of the bytes
+    /// The number of bytes.
     pub fn len(&self) -> usize {
         self.as_slice().len()
     }
 
-    /// Return `true` if there are no bytes.
+    /// Whether there are no bytes.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Get the bytes as a slice
+    /// The bytes as a slice.
     pub fn as_slice(&self) -> &[u8] {
         unsafe {
             if self.data.type_index == TypeIndex::kTVMFFISmallBytes as i32 {
@@ -106,9 +108,8 @@ impl Default for Bytes {
 
 unsafe impl ObjectCoreWithExtraItems for BytesObj {
     type ExtraItem = u8;
-    // extra item is the trailing \0 for ffi compatibility
+    /// The bytes plus a trailing NUL, so the data is also a C string.
     #[inline]
-    /// Get the count of extra items (trailing null byte for FFI compatibility)
     fn extra_items_count(this: &Self) -> usize {
         this.data.size + 1
     }
@@ -119,7 +120,7 @@ where
     T: AsRef<[u8]>,
 {
     #[inline]
-    /// Create Bytes from any type that can be converted to a byte slice
+    /// Copy the bytes of `src`.
     fn from(src: T) -> Self {
         let value: &[u8] = src.as_ref();
         // to be compatible with normal c++
@@ -243,8 +244,8 @@ impl Debug for Bytes {
 // String
 //-----------------------------------------------------
 
-/// An immutable UTF-8 string, shared with C++ as `ffi.String` and with
-/// Python as `str`.
+/// An immutable UTF-8 string, passed across languages as `ffi.String`
+/// (Python `str`).
 ///
 /// Short strings are stored inline in an [`Any`](crate::Any) without an
 /// allocation.
@@ -280,16 +281,15 @@ pub(crate) struct StringObj {
 
 unsafe impl ObjectCoreWithExtraItems for StringObj {
     type ExtraItem = u8;
+    /// The bytes plus a trailing NUL, so the data is also a C string.
     #[inline]
-    /// Get the count of extra items (trailing null byte for FFI compatibility)
     fn extra_items_count(this: &Self) -> usize {
-        // extra item is the trailing \0 for ffi compatibility
         this.data.size + 1
     }
 }
 
 impl String {
-    /// Create a new empty String container
+    /// An empty string.
     pub fn new() -> Self {
         Self {
             data: TVMFFIAny {
@@ -300,17 +300,17 @@ impl String {
         }
     }
 
-    /// Get the length of the string in bytes
+    /// The length in bytes.
     pub fn len(&self) -> usize {
         self.as_bytes().len()
     }
 
-    /// Return `true` if the string is empty.
+    /// Whether the string is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Get the string as a byte slice
+    /// The string as bytes.
     pub fn as_bytes(&self) -> &[u8] {
         unsafe {
             if self.data.type_index == TypeIndex::kTVMFFISmallStr as i32 {
@@ -325,7 +325,7 @@ impl String {
         }
     }
 
-    /// Get the string as a str slice
+    /// The string as a `str`.
     pub fn as_str(&self) -> &str {
         unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
     }
@@ -336,7 +336,7 @@ where
     T: AsRef<str>,
 {
     #[inline]
-    /// Create String from any type that can be converted to a string slice
+    /// Copy the string `src`.
     fn from(src: T) -> Self {
         unsafe {
             let value: &str = src.as_ref();

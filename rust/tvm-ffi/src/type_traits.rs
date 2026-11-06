@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`AnyCompatible`], how a Rust type converts to and from FFI values.
+
 use crate::any::{Any, AnyView};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
@@ -23,8 +25,11 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
 //-----------------------------------------------------
 // AnyCompatible
 //-----------------------------------------------------
-/// Trait to enable a value to be compatible with Any
-/// Enables TryFrom/Into AnyView/Any
+/// A type that an [`Any`] can hold: how its values are stored in, and read
+/// from, a `TVMFFIAny` cell.
+///
+/// `#[derive(ObjectRef)]` implements it for object references; other types
+/// implement it by hand.
 ///
 /// # Safety
 /// Implementations must encode and decode `TVMFFIAny` cells in the layout of
@@ -59,9 +64,8 @@ pub unsafe trait AnyCompatible: Sized {
     /// Whether `field`, which holds a value of this type or all-zero bytes,
     /// holds all-zero bytes that are no value of this type, as a null object
     /// reference, a string of type index None or a zero device type: a field
-    /// that a creator left undefined for reflection to set, as C++ `UnsafeInit`
-    /// leaves a reference undefined (null). Unlike a C++ undefined reference,
-    /// it is no value; a nullable reference is `Option<T>`, whose `None` is a
+    /// that a creator left undefined for reflection to set. An undefined field
+    /// is no value; a nullable reference is `Option<T>`, whose `None` is a
     /// defined value.
     ///
     /// The field setter writes an undefined field without dropping it, the
@@ -80,19 +84,19 @@ pub unsafe trait AnyCompatible: Sized {
         false
     }
 
-    /// the value to copy to TVMFFIAny
+    /// Write a cell that borrows `src` into `data`.
     ///
     /// # Safety
     /// The written cell borrows `src` without a reference and must not be used
     /// after `src` is dropped.
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
-    /// consume the value to move to Any
+    /// Write a cell that owns `src` into `data`.
     ///
     /// # Safety
     /// The previous content of `data` is overwritten without release; the
     /// caller owns the written cell and must release it exactly once.
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny);
-    /// check if the value is compatible with the type
+    /// Whether `data` holds a `Self` as is, without conversion.
     ///
     /// # Safety
     /// `data` must be a valid `TVMFFIAny` cell.
@@ -108,35 +112,35 @@ pub unsafe trait AnyCompatible: Sized {
         true
     }
 
-    /// Copy value from TVMFFIAny after checking
+    /// Copy a `Self` out of a cell that holds one, retaining any object.
     ///
     /// # Safety
     /// `data` must have passed `Self::check_any_strict`.
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self;
-    /// the value to move from TVMFFIAny
-    /// NOTE: pay very careful attention to avoid memory leak!
-    /// - When calling from managed Any, remember to use std::mem::ManuallyDrop
+    /// Move a `Self` out of an owning cell that holds one.
     ///
     /// # Safety
     /// `data` must have passed `Self::check_any_strict`. Its ownership moves
     /// into the result, so the caller must not release `data` again.
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
-    /// try to cast the value from AnyView
+    /// Convert `data` into a `Self` by the FFI rules, such as an integer into a
+    /// float; `Err` if it does not convert.
     ///
     /// # Safety
     /// `data` must be a valid `TVMFFIAny` cell.
     #[allow(clippy::result_unit_err)]
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
-    /// Get the type key of a type when TryCastFromAnyView fails.
+    /// The name of the mismatched value `data` in conversion errors; by
+    /// default its runtime type key.
     fn get_mismatch_type_info(data: &TVMFFIAny) -> String {
         runtime_type_key(data.type_index)
     }
-    /// the type string of the type
+    /// The type name in conversion errors and type schemas, such as `int`,
+    /// `ffi.String` or `Array<int>`.
     fn type_str() -> String;
 
-    /// The type schema of the type: the JSON object C++
-    /// `TypeTraits<T>::TypeSchema` writes, which the type schemas of functions
-    /// and fields embed.
+    /// The type schema of the type: the JSON object that describes it, which
+    /// the type schemas of functions and fields embed.
     ///
     /// The default, `{"type":"<type_str>"}`, fits a type whose type string is
     /// its type key, as for object references.
@@ -167,7 +171,7 @@ pub(crate) fn runtime_type_key(type_index: i32) -> String {
 }
 
 /// Writes a type schema, `{"type":"<origin>"}` or, with type arguments,
-/// `{"type":"<origin>","args":[...]}`, as C++ `TypeTraits<T>::TypeSchema` does.
+/// `{"type":"<origin>","args":[...]}`.
 pub(crate) fn type_schema(origin: &str, args: &[String]) -> String {
     if args.is_empty() {
         format!(r#"{{"type":"{origin}"}}"#)
@@ -176,14 +180,14 @@ pub(crate) fn type_schema(origin: &str, args: &[String]) -> String {
     }
 }
 
-/// The metadata C++ records for a function or field of type schema
+/// The metadata recorded for a function or field of type schema
 /// `type_schema`: `{"type_schema":<type_schema as a JSON string>}`.
 pub(crate) fn type_schema_metadata(type_schema: &str) -> String {
     format!(r#"{{"type_schema":{}}}"#, escape_string_json(type_schema))
 }
 
-/// `text` as a JSON string literal, escaped as C++ `EscapeStringJSON`
-/// (`string.h`) escapes it, so that metadata matches the C++ one byte for byte.
+/// `text` as a JSON string literal, escaped so that the metadata matches the
+/// C++ runtime's byte for byte.
 fn escape_string_json(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('"');
@@ -210,8 +214,7 @@ fn escape_string_json(text: &str) -> String {
 /// The type schema of a function parameter or return type.
 ///
 /// This is [`AnyCompatible::type_schema`] for a type that converts through
-/// [`Any`], and `{"type":"Any"}` for `Any` and `AnyView` themselves, as C++
-/// `details::TypeSchema<T>` writes them.
+/// [`Any`], and `{"type":"Any"}` for `Any` and `AnyView` themselves.
 pub(crate) trait TypeSchema {
     fn type_schema() -> String;
 }
@@ -646,7 +649,6 @@ mod container_element_ops {
     }
 }
 
-/// AnyCompatible for bool
 unsafe impl AnyCompatible for bool {
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIBool as i32;
@@ -686,7 +688,6 @@ unsafe impl AnyCompatible for bool {
     }
 }
 
-/// Macro to implement AnyCompatible for integer types
 macro_rules! impl_any_compatible_for_int {
     ($($int_type:ty),* $(,)?) => {
         $(
@@ -815,7 +816,6 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     }
 }
 
-/// AnyCompatible for void*
 unsafe impl AnyCompatible for *mut core::ffi::c_void {
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIOpaquePtr as i32;
@@ -855,7 +855,6 @@ unsafe impl AnyCompatible for *mut core::ffi::c_void {
     }
 }
 
-/// Macro to implement AnyCompatible for integer types
 macro_rules! impl_any_compatible_for_float {
     ($($float_type:ty),* $(,)?) => {
         $(

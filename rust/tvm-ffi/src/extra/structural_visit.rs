@@ -19,7 +19,7 @@
 
 //! Native Rust structural visiting.
 //!
-//! Two public layers mirror the C++ API split:
+//! Two public layers:
 //!
 //! * [`Dispatcher`](crate::Dispatcher) + [`structural_visit`] — handlers drive
 //!   recursion through an explicit [`StructuralVisitorView`] context. Pass state belongs on
@@ -90,13 +90,14 @@ type StructuralVisitorHandle = *mut StructuralVisitorObj;
 type FStructuralVisit =
     unsafe extern "C" fn(StructuralVisitorHandle, AnyView<'static>) -> TVMFFIAny;
 
-/// Exact C++ visitor vtable ABI.
+/// The visitor vtable, laid out as the C++ one.
 #[repr(C)]
 struct StructuralVisitorVTable {
     visit: FStructuralVisit,
 }
 
-/// Exact C++ StructuralVisitorObj ABI prefix.
+/// The native visitor state, laid out as the prefix of the C++
+/// `StructuralVisitorObj`.
 #[repr(C)]
 pub struct StructuralVisitorObj {
     base: Object,
@@ -168,7 +169,7 @@ const _: () = {
     assert!(DefRegionKind::Simple as i32 == TVMFFIDefRegionKind::kTVMFFIDefRegionKindSimple as i32);
 };
 
-/// Interrupt state of a traversal, mirroring C++ `ffi.VisitInterrupt`.
+/// Interrupt state of a traversal, an `ffi.VisitInterrupt` object.
 ///
 /// Entry points and visitor-layer calls return
 /// `Result<Option<VisitInterrupt>>`: `Ok(None)` means the (sub)graph was

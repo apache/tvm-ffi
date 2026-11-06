@@ -16,6 +16,30 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! Rust bindings of TVM FFI, the open ABI and FFI for machine learning
+//! systems.
+//!
+//! Values cross the boundary as [`Any`] and [`AnyView`]. Objects, such as
+//! [`Array`], [`Map`], [`Tensor`] and types defined with [`rs_object`], are
+//! reference counted and shared with C++ and Python. A [`Function`] is
+//! callable from every language, and an [`Error`] raised in one arrives in
+//! the others.
+//!
+//! # Examples
+//!
+//! ```
+//! use tvm_ffi::{Array, Function, Result};
+//!
+//! let sum = |xs: Array<i64>| -> Result<i64> { Ok(xs.iter().sum()) };
+//! Function::register_global_typed("my_ext.sum", sum, "Sum the elements.")?;
+//!
+//! let sum = Function::get_global("my_ext.sum")?;
+//! let total = sum.call_tuple((Array::from_vec(vec![1_i64, 2, 3]),))?;
+//! assert_eq!(i64::try_from(total)?, 6);
+//! # Ok::<(), tvm_ffi::Error>(())
+//! ```
+#![warn(missing_docs)]
+
 // Lets macro-generated `::tvm_ffi` paths resolve inside this crate too.
 extern crate self as tvm_ffi;
 
@@ -107,7 +131,7 @@ pub use crate::type_traits::AnyCompatible;
 /// * `Ret` - The result type. A handler's result is converted with
 ///   `Into<Ret>`. When both the handler's result and `Ret` are written
 ///   `Result<..>`, the success value is converted instead, so a
-///   `Result<UnchangedOr<Expr>>` handler fits a `Result<UnchangedOr<Any>>`
+///   `Result<UnchangedOr<MyPair>>` handler fits a `Result<UnchangedOr<Any>>`
 ///   dispatcher.
 ///
 /// # Handlers
@@ -200,12 +224,12 @@ pub use tvm_ffi_macros::dispatch;
 /// ```
 pub use tvm_ffi_macros::match_any;
 
-/// Define an object type in Rust, as Python's `py_class` does.
+/// Define an object type in Rust that every language can use.
 ///
 /// `#[rs_object("type.Key", options...)]` registers the struct as an object
-/// type with the reflection of every field, so that C++ structural equality
-/// and hashing, `repr`, deep copy and Python see the fields. The first field,
-/// `base`, is the parent's object, as the base class of a C++ object is:
+/// type with the reflection of every field, so that structural equality and
+/// hashing, `repr`, deep copy and Python see the fields. The first field,
+/// `base`, is the parent type's object, embedded at the start of the struct:
 /// `base: Object` for a type under `ffi.Object`. Declare the managed reference
 /// with [`#[derive(ObjectRef)]`](derive::ObjectRef).
 ///
@@ -240,7 +264,7 @@ pub use tvm_ffi_macros::match_any;
 /// A field's type must implement `AnyCompatible` and `Clone`; an `init_off`
 /// field's type must take all-zero bytes as a value. The parent's object must
 /// implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and non-final
-/// C++ types bound by `tvm-ffi-stubgen` do. The type registers on its first
+/// types bound by `tvm-ffi-stubgen` do. The type registers on its first
 /// `type_index()`, with its fields, methods, `__ffi_new__` and, unless the
 /// methods define it, `__ffi_init__`.
 ///

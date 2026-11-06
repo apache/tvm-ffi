@@ -184,8 +184,8 @@ pub(super) fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind
 
 /// A simple definition applies to a FreeVar value itself, but not to
 /// the FreeVar's own reflected children: nested free vars there must resolve
-/// against an outer binding instead of rebinding. Mirrors C++
-/// `VisitReflectedFieldsExpected`.
+/// against an outer binding instead of rebinding.
+// Mirrors C++ `VisitReflectedFieldsExpected`.
 #[inline(always)]
 pub(super) fn free_var_child_region(
     inherited: DefRegionKind,
@@ -200,8 +200,8 @@ pub(super) fn free_var_child_region(
     }
 }
 
-/// Visit every reflected field described by `info` and its ancestors in the
-/// same parent-to-child order as C++ `ForEachFieldInfoWithEarlyStop`.
+/// Visit every reflected field described by `info` and its ancestors, from
+/// the outermost parent's fields to the type's own.
 ///
 /// # Safety
 ///

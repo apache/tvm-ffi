@@ -19,14 +19,14 @@
 
 //! Registration of the reflection of an object type defined in Rust.
 //!
-//! [`ObjectDef`] fills the same type table entries as C++ `refl::ObjectDef<T>`
-//! and Python `_register_py_class`: the type metadata, one record per field
-//! with C ABI getter and setter, one record per method, and the
-//! `__ffi_shallow_copy__` and `__ffi_type_final__` type attributes; for an
-//! `#[rs_object]` type also the creator, and from it the `__ffi_new__` and
-//! `__ffi_init__` type attributes. Through them the C++ structural equality,
-//! hashing and mutation, `repr`, deep copy, JSON graphs and Python's generated
-//! classes reach the fields and methods of a Rust type, and construct it.
+//! [`ObjectDef`] fills the type table entries that every language reads: the
+//! type metadata, one record per field with C ABI getter and setter, one
+//! record per method, and the `__ffi_shallow_copy__` and `__ffi_type_final__`
+//! type attributes; for an `#[rs_object]` type also the creator, and from it
+//! the `__ffi_new__` and `__ffi_init__` type attributes. Through them
+//! structural equality, hashing and mutation, `repr`, deep copy, JSON graphs
+//! and Python's generated classes reach the fields and methods of a Rust type,
+//! and construct it.
 //!
 //! Only `#[derive(Object)]` creates an [`ObjectDef`], for a `#[type_register]`
 //! type with `#[reflect]` fields or a `#[type_reflection]` function; the
@@ -51,13 +51,16 @@ use crate::tvm_ffi_sys::{
 use crate::type_traits::{type_schema_metadata, AnyCompatible};
 use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR, VALUE_ERROR};
 
-/// A copy of an object's own fields under a fresh object header (the C++ copy
-/// constructor), which `__ffi_shallow_copy__` returns.
+/// A copy of an object's own fields under a fresh object header, which
+/// `__ffi_shallow_copy__` returns; fields that are references share their
+/// objects, as `Clone` of an `Arc` does.
 ///
 /// `#[derive(Object)]` implements it for a type with `#[reflect]` fields by
 /// copying the parent with its `ShallowCopy` and cloning every other field. A
-/// Rust type whose parent is bound from C++ needs that parent to implement it.
+/// Rust type whose parent is defined in another language needs that parent to
+/// implement it.
 pub trait ShallowCopy {
+    /// The copy, under a fresh object header.
     fn shallow_copy(&self) -> Self;
 }
 
@@ -67,10 +70,10 @@ impl ShallowCopy for Object {
     }
 }
 
-/// How the structural engines treat instances of a type (C++ `_type_s_eq_hash_kind`).
+/// How the structural engines treat instances of a type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SEqHashKind {
-    /// Rejected by structural equality and hashing; the C++ default.
+    /// Rejected by structural equality and hashing; the default.
     Unsupported,
     /// Compared and hashed field by field.
     TreeNode,
@@ -98,7 +101,7 @@ impl SEqHashKind {
     }
 }
 
-/// The reflection flags of one field (C++ `refl::AttachFieldFlag` and friends), combined with `|`.
+/// The reflection flags of one field, combined with `|`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FieldFlags(i64);
 
@@ -145,30 +148,48 @@ impl BitOr for FieldFlags {
     }
 }
 
-/// Registers the reflection of the object type `N`, as C++ `refl::ObjectDef<N>`
-/// does: the metadata, each `#[reflect]` field, the methods and the type
-/// attributes.
+/// Registers the reflection of the object type `N`: the metadata, each
+/// `#[reflect]` field, the methods and the type attributes.
 ///
 /// `#[derive(Object)]` creates one while it registers a `#[type_register]`
-/// type and passes it to the function `#[type_reflection(path)]` names, which
-/// registers methods with [`ObjectDef::def`] and [`ObjectDef::def_static`]:
-///
-/// ```ignore
-/// #[type_reflection(PointObj::reflect_methods)]
-/// struct PointObj { /* ... */ }
-///
-/// impl PointObj {
-///     fn reflect_methods(def: &mut ObjectDef<Self>) {
-///         def.def("norm1", |p: Point| -> Result<i64> { Ok(p.x.abs() + p.y.abs()) }, "The L1 norm.")
-///             .def_static("origin", || -> Result<Point> { Ok(origin()) }, "");
-///     }
-/// }
-/// ```
+/// type and passes it to the function that `#[type_reflection(path)]`, or the
+/// `reflection = path` option of [`rs_object`](crate::rs_object), names, which
+/// registers methods with [`ObjectDef::def`] and [`ObjectDef::def_static`].
 ///
 /// That function runs under the registration lock, before `N::type_index()`
 /// returns, so it must not call `type_index()` of `N` or of another Rust type
 /// that is not registered yet. When `N` already has metadata in the type
 /// table, every call is a no-op.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::derive::ObjectRef;
+/// use tvm_ffi::{reflection, rs_object, Object, ObjectArc, ObjectDef, Result};
+///
+/// #[rs_object("my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
+/// pub struct MyPairObj {
+///     base: Object,
+///     pub first: i64,
+///     pub second: i64,
+/// }
+///
+/// #[derive(Clone, ObjectRef)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
+///
+/// impl MyPairObj {
+///     fn reflect_methods(def: &mut ObjectDef<Self>) {
+///         def.def("sum", |p: MyPair| -> Result<i64> { Ok(p.first + p.second) }, "The sum.");
+///     }
+/// }
+///
+/// let pair = MyPair::from_object(MyPairObj::new(Object::new(), 1, 2));
+/// let sum = reflection::get_method("my_ext.MyPair", "sum")?;
+/// assert_eq!(i64::try_from(sum.call_tuple((&pair,))?)?, 3);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
 pub struct ObjectDef<N: ObjectCore> {
     type_index: i32,
     fresh: bool,
@@ -185,10 +206,9 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// Registers `N`'s metadata, unless the type already has some, while the
     /// derive registers `N`'s type index, before `N::type_index()` returns.
     ///
-    /// `kind` of `None` takes the nearest ancestor's kind, as a C++ subclass
-    /// inherits `_type_s_eq_hash_kind`. `creator`, as C++ `ObjectDef` takes
-    /// the default or `UnsafeInit` constructor, makes an object of `N` for
-    /// reflection to fill (`unsafe_init_creator::<N>` for an `#[rs_object]`).
+    /// `kind` of `None` takes the nearest ancestor's kind. `creator` makes an
+    /// object of `N` for reflection to fill (`unsafe_init_creator::<N>` for an
+    /// `#[rs_object]`).
     ///
     /// # Safety
     ///
@@ -282,9 +302,8 @@ impl<N: ObjectCore> ObjectDef<N> {
         Ok(self)
     }
 
-    /// Registers `__ffi_shallow_copy__`, which reflected mutation (copy on
-    /// write through the field setters) needs; C++ `ObjectDef` registers the
-    /// copy constructor.
+    /// Registers `__ffi_shallow_copy__` from [`ShallowCopy`], which reflected
+    /// mutation (copy on write through the field setters) needs.
     #[doc(hidden)]
     pub fn shallow_copy(self) -> Result<Self>
     where
@@ -304,9 +323,8 @@ impl<N: ObjectCore> ObjectDef<N> {
 
     /// Registers `func`, a typed function as for [`Function::from_typed`]
     /// whose first parameter is the object, as the method `name` of `N`,
-    /// which must be unique in `N`, with its type schema and `doc`, as C++
-    /// `ObjectDef::def` does. A failed registration is reported when the
-    /// type's registration finishes.
+    /// which must be unique in `N`, with its type schema and `doc`. A failed
+    /// registration is reported when the type's registration finishes.
     pub fn def<F, I, O>(&mut self, name: &str, func: F, doc: &str) -> &mut Self
     where
         F: AsPackedCallable<I, O> + Send + Sync + 'static,
@@ -314,8 +332,8 @@ impl<N: ObjectCore> ObjectDef<N> {
         self.method(name, func, doc, false)
     }
 
-    /// Registers `func` as the static method `name` of `N`, as C++
-    /// `ObjectDef::def_static` does; otherwise as [`ObjectDef::def`].
+    /// Registers `func` as the static method `name` of `N`, which takes no
+    /// object; otherwise as [`ObjectDef::def`].
     pub fn def_static<F, I, O>(&mut self, name: &str, func: F, doc: &str) -> &mut Self
     where
         F: AsPackedCallable<I, O> + Send + Sync + 'static,
@@ -370,7 +388,7 @@ impl<N: ObjectCore> ObjectDef<N> {
         self
     }
 
-    /// Registers, as C++ `ObjectDef` does, `__ffi_new__` from the creator and
+    /// Registers `__ffi_new__` from the creator and
     /// `__ffi_init__` from the fields unless the type defines its own, then
     /// `__ffi_type_final__`, which no other registered metadata exposes; and
     /// reports the first failed method registration.
@@ -455,8 +473,8 @@ fn register_type_attr(type_index: i32, name: &str, mut value: Any) -> Result<()>
     crate::check_safe_call!(unsafe { TVMFFITypeRegisterAttr(type_index, &name, value) })
 }
 
-/// Reflection getter of a field of type `F`: an owned `Any` of the field's value, as the C++
-/// `FieldGetter<T>` returns. `field` is the field's address inside the object.
+/// Reflection getter of a field of type `F`: writes an owned `Any` of the field's value.
+/// `field` is the field's address inside the object.
 unsafe extern "C" fn field_getter<F: AnyCompatible>(
     field: *mut c_void,
     result: *mut TVMFFIAny,
@@ -481,8 +499,8 @@ unsafe extern "C" fn field_getter<F: AnyCompatible>(
     }
 }
 
-/// Reflection setter of a field of type `F`: replaces the field with `value` converted to `F`,
-/// as the C++ `FieldSetter<T>` does. `field` is the field's address inside the object.
+/// Reflection setter of a field of type `F`: replaces the field with `value` converted to `F`.
+/// `field` is the field's address inside the object.
 unsafe extern "C" fn field_setter<F: AnyCompatible>(
     field: *mut c_void,
     value: *const TVMFFIAny,
@@ -524,11 +542,11 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
 }
 
 /// The static type index of a field, from the Rust type's `type_str()` (the names
-/// `AnyCompatible` reports, such as `int`, `ffi.String`, `Array<my.Node>`), as C++
-/// `TypeTraits<T>::field_static_type_index` states it.
+/// `AnyCompatible` reports, such as `int`, `ffi.String`, `Array<my.Node>`).
+// As C++ `TypeTraits<T>::field_static_type_index` states it.
 fn field_static_type_index(type_str: &str) -> i32 {
     use TVMFFITypeIndex::*;
-    /// C++ `TypeIndex::kTVMFFIAny`, the static index of a field holding any value.
+    /// The static index of a field holding any value (`kTVMFFIAny`).
     const ANY: i32 = -1;
     let origin = type_str.split('<').next().unwrap_or(type_str).trim();
     match origin {
