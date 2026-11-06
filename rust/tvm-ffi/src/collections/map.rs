@@ -16,19 +16,19 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! Immutable [`Map`] container backed by the C++ `ffi.Map` object.
+//! [`Map`], an immutable hash map whose lookups run in the FFI runtime.
 //!
-//! The `MapObj` header mirrors C++ `MapBaseObj`, so [`Map::len`] reads `size`
-//! directly (no FFI). The hash-table storage itself is an implementation detail,
-//! so lookups and iteration are delegated to the global functions the C++ runtime
-//! registers (`ffi.MapGetItem`, `ffi.MapForwardIterFunctor`, ...): there is no
-//! Map-specific C ABI, and a Rust re-implementation would have to replicate the
-//! hashing (`AnyHash`/`AnyEqual`) and dense/small probing, just as the Python
-//! bindings also delegate.
-//!
-//! `Any` conversions follow C++ `MapTypeTraitsBase` (map_base.h): the strict
-//! check walks every entry, and a failed strict `try_from` falls back to
-//! converting the entries one by one into a new map.
+//! Converting an `Any` into a `Map<K, V>` checks every entry; when an entry
+//! is not a `K`/`V` as is, the entries are converted one by one into a new map.
+
+// The `MapObj` header mirrors C++ `MapBaseObj`, so `Map::len` reads `size`
+// directly (no FFI). The hash-table storage itself is an implementation detail,
+// so lookups and iteration are delegated to the global functions the C++ runtime
+// registers (`ffi.MapGetItem`, `ffi.MapForwardIterFunctor`, ...): there is no
+// Map-specific C ABI, and a Rust re-implementation would have to replicate the
+// hashing (`AnyHash`/`AnyEqual`) and dense/small probing, just as the Python
+// bindings also delegate.
+
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -70,18 +70,18 @@ fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
     }
 }
 
-/// Container object for [`Map`]. The header fields mirror C++ `MapBaseObj`
-/// (`include/tvm/ffi/container/map_base.h`) so [`Map::len`] can read `size`
-/// without an FFI call; the storage `data` points to stays opaque.
-///
-/// This is a partial mirror by design: `MapBaseObj` has one more trailing field
-/// after `slots_` (a `data_deleter_` function pointer), omitted here because this
-/// binding is read-only — it only reads fields up to `size`, which precede it,
-/// and never allocates a `MapObj` itself (the C++ runtime allocates the larger
-/// `Small`/`DenseMapBaseObj` subclass), so the trailing field is never touched.
-/// The layout also assumes `TVM_FFI_DEBUG_WITH_ABI_CHANGE` is off (the default):
-/// with that debug flag set, `MapBaseObj` gains a *leading* `state_marker` field
-/// that would shift every offset below.
+/// The object behind a [`Map`]. The header fields are laid out as the C++
+/// `MapBaseObj`, so [`Map::len`] reads `size` without an FFI call; the storage
+/// `data` points to stays opaque.
+//
+// This is a partial mirror by design: `MapBaseObj` has one more trailing field
+// after `slots_` (a `data_deleter_` function pointer), omitted here because this
+// binding is read-only — it only reads fields up to `size`, which precede it,
+// and never allocates a `MapObj` itself (the C++ runtime allocates the larger
+// `Small`/`DenseMapBaseObj` subclass), so the trailing field is never touched.
+// The layout also assumes `TVM_FFI_DEBUG_WITH_ABI_CHANGE` is off (the default):
+// with that debug flag set, `MapBaseObj` gains a *leading* `state_marker` field
+// that would shift every offset below.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Map"]
@@ -96,8 +96,8 @@ pub struct MapObj {
     pub slots: u64,
 }
 
-/// An immutable, reference-counted map from `K` to `V`, shared with C++ and
-/// Python as `ffi.Map`.
+/// An immutable, reference-counted map from `K` to `V`, passed across
+/// languages as `ffi.Map`.
 ///
 /// Cloning a `Map` is cheap: it shares the same entries.
 ///
@@ -204,12 +204,12 @@ where
     K: ContainerElement,
     V: ContainerElement,
 {
-    /// Creates a new, empty map (via an `ffi.Map()` call to the C++ runtime).
+    /// Creates an empty map.
     pub fn new() -> Self {
         Self::from_pairs(&[]).expect("ffi.Map() failed to construct an empty map")
     }
 
-    /// Builds a map by calling the C++ `ffi.Map` constructor with a flattened
+    /// Builds a map by calling the runtime's `ffi.Map` constructor with a flattened
     /// `[k0, v0, k1, v1, ...]` argument list.
     fn from_pairs(pairs: &[(K, V)]) -> Result<Self> {
         let mut args: Vec<AnyView<'_>> = Vec::with_capacity(pairs.len() * 2);
@@ -221,8 +221,7 @@ where
         Self::try_from(result)
     }
 
-    /// Returns the number of entries in the map by reading the `MapObj` header
-    /// directly (no FFI call), like [`Array::len`](crate::Array).
+    /// Returns the number of entries.
     pub fn len(&self) -> usize {
         self.size as usize
     }
@@ -233,7 +232,7 @@ where
     }
 
     /// Returns whether `key` is present, propagating any FFI error (e.g. a key
-    /// the C++ runtime cannot hash) rather than panicking. Backs both
+    /// the runtime cannot hash) rather than panicking. Backs both
     /// [`Map::contains_key`] and [`Map::get`].
     fn try_contains_key(&self, key: &K) -> Result<bool> {
         let result = crate::cached_global_func!("ffi.MapCount")
@@ -268,12 +267,15 @@ where
         }
     }
 
-    /// Returns `Ok(true)` if `key` is present in the map, or `Err` if the lookup
-    /// fails in the C++ runtime (e.g. `key` is not hashable), like
-    /// [`Map::get`].
-    /// Passing a `key` whose *type* does not match the map's key type is
-    /// **undefined** (currently reads as `Ok(false)`; see [`Map::get`]); debug
-    /// builds assert against it.
+    /// Returns whether `key` is present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot look `key` up, such as when it
+    /// is not hashable.
+    ///
+    /// The result for a `key` of another type than the map's keys is
+    /// unspecified, as for [`Map::get`].
     pub fn contains_key(&self, key: &K) -> Result<bool> {
         let present = self.try_contains_key(key)?;
         if !present {
@@ -282,18 +284,19 @@ where
         Ok(present)
     }
 
-    /// Looks up `key`, returning `Ok(None)` if absent, or `Err` if the lookup
-    /// fails in the C++ runtime (e.g. `key` is not hashable) or the stored value
-    /// cannot be converted to `V`. The map is immutable, so the lookup
-    /// (existence check then `ffi.MapGetItem`) cannot race with itself.
+    /// Looks up `key`, returning `Ok(None)` if it is absent.
     ///
-    /// Passing a `key` whose *type* does not match the map's key type is
-    /// **undefined**: the result is unspecified — it currently reads as absent
-    /// (`Ok(None)`) because a pure lookup hashes the key rather than retrieving
-    /// one, so the mismatch cannot be surfaced as an `Err` the way a value
-    /// mismatch (or [`Map::iter`], which retrieves keys) is. Debug builds assert
-    /// against this misuse.
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot look `key` up, such as when it
+    /// is not hashable, or if the value is not a `V`.
+    ///
+    /// The result for a `key` of another type than the map's keys is
+    /// unspecified: it currently reads as absent, since a lookup hashes the key
+    /// instead of reading a stored one. Debug builds assert against it.
     pub fn get(&self, key: &K) -> Result<Option<V>> {
+        // The map is immutable, so the existence check and `ffi.MapGetItem`
+        // cannot race.
         if !self.try_contains_key(key)? {
             self.debug_assert_key_type();
             return Ok(None);
@@ -332,7 +335,7 @@ where
         }
     }
 
-    /// Obtains a fresh stateful forward-iteration functor from the C++ runtime.
+    /// Obtains a fresh stateful forward-iteration functor from the runtime.
     fn iter_functor(&self) -> Function {
         let result = crate::cached_global_func!("ffi.MapForwardIterFunctor")
             .call_packed(&[AnyView::from(self)])
@@ -401,8 +404,8 @@ where
     K: ContainerElement,
     V: ContainerElement,
 {
-    /// Duplicate keys follow C++ `ffi.Map` semantics: a later pair overwrites an
-    /// earlier one, so the resulting map may be smaller than the iterator.
+    /// For duplicate keys, a later pair overwrites an earlier one, as in
+    /// `HashMap`, so the resulting map may be smaller than the iterator.
     fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
         let pairs: Vec<(K, V)> = iter.into_iter().collect();
         Self::from_pairs(&pairs).expect("ffi.Map() failed to construct a map")
@@ -446,16 +449,15 @@ fn iter_advance(functor: &Function, remaining: &mut usize) {
     }
 }
 
-/// Forward iterator over a [`Map`], yielding `T` per entry. The `read` fn pulls
-/// the current entry (key, value, or both) from the C++ functor, so each variant
-/// touches only the command(s) it needs — `keys()` never reads values, and vice
-/// versa. Created via the [`MapItems`] / [`MapKeys`] / [`MapValues`] aliases.
+/// Forward iterator over a [`Map`], yielding `T` per entry; see the
+/// [`MapItems`], [`MapKeys`] and [`MapValues`] aliases.
 pub struct MapIter<T> {
     /// `None` for an empty map (no functor is requested); `Some` while at least
     /// one entry remains to be yielded.
     functor: Option<Function>,
     remaining: usize,
     _keepalive: ObjectArc<MapObj>,
+    /// Reads the current entry, only the key or value the iterator yields.
     read: fn(&Function) -> T,
 }
 

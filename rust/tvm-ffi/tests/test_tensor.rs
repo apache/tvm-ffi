@@ -28,7 +28,7 @@ fn test_tensor_basic() {
     let shape = [2, 3, 4];
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
-    let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, &shape, dtype, device);
+    let tensor = Tensor::from_nd_alloc(CPUNDAlloc, &shape, dtype, device);
 
     // Test accessor methods
     assert_eq!(tensor.shape(), &shape);
@@ -52,7 +52,7 @@ fn test_tensor_data_as_slice_f32() {
     let shape = [2, 3, 4];
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
-    let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, &shape, dtype, device);
+    let tensor = Tensor::from_nd_alloc(CPUNDAlloc, &shape, dtype, device);
 
     // Test data_as_slice for f32
     let data_slice = tensor.data_as_slice::<f32>().unwrap();
@@ -81,7 +81,7 @@ fn test_tensor_data_as_slice_type_mismatch() {
     let shape = [2, 3];
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
-    let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, &shape, dtype, device);
+    let tensor = Tensor::from_nd_alloc(CPUNDAlloc, &shape, dtype, device);
 
     // Test that trying to access as f64 (wrong type) fails
     let result = tensor.data_as_slice::<f64>();
@@ -97,7 +97,7 @@ fn test_any_tensor() {
     let shape = [2, 3, 4];
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
-    let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, &shape, dtype, device);
+    let tensor = Tensor::from_nd_alloc(CPUNDAlloc, &shape, dtype, device);
     let any = Any::from(tensor.clone());
     let any_view = AnyView::from(&tensor);
 

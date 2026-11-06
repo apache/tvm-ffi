@@ -238,7 +238,7 @@ macro_rules! attach_context {
 /// name: `target` must be a registered base of `source`, and every `source`
 /// must satisfy the target reference invariants. An incorrect declaration makes
 /// the generated safe conversions unsound. The Rust stub generator writes these
-/// from the C++ type hierarchy.
+/// from the registered type hierarchy.
 #[macro_export]
 macro_rules! unsafe_impl_object_ref_upcast {
     ($($source:ty => $target:ty),+ $(,)?) => {
@@ -596,11 +596,12 @@ macro_rules! impl_arg_into_ref {
 /// With the `export-metadata` feature, the counterpart of C++
 /// `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the macro also exports the
 /// function's metadata, `{"type_schema":...}`, as `__tvm_ffi__metadata_<name>`,
-/// which `Module::GetFunctionMetadata` and the stub generator read. A
+/// which [`Module::get_function_metadata`](crate::Module::get_function_metadata)
+/// and the stub generator read. A
 /// function's schema lists its parameter and return types; a callable whose
 /// signature is not known, such as a custom [`AsPackedCallable`], has the
-/// schema of an untyped function. As in C++, the feature is off by default,
-/// so exports are minimal.
+/// schema of an untyped function. The feature is off by default, so exports
+/// are minimal.
 ///
 /// [`AsPackedCallable`]: crate::function_internal::AsPackedCallable
 ///
@@ -663,9 +664,9 @@ macro_rules! tvm_ffi_dll_export_typed_func {
 /// does
 ///
 /// With the `export-metadata` feature, the doc string is exported as
-/// `__tvm_ffi__doc_<name>`, which `Module::GetFunctionDoc` and the stub
-/// generator read. Without it, as C++ without
-/// `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the macro exports nothing, but
+/// `__tvm_ffi__doc_<name>`, which
+/// [`Module::get_function_doc`](crate::Module::get_function_doc) and the stub
+/// generator read. Without it, the macro exports nothing, but
 /// still checks that the doc string is a string constant. The macro never
 /// exports the function itself.
 ///

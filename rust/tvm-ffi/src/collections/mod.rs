@@ -16,7 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-/// Collection types
+//! Containers shared across languages: [`Array`](crate::Array),
+//! [`List`](crate::List), [`Map`](crate::Map), [`Shape`](crate::Shape) and
+//! [`Tensor`](crate::Tensor).
+
 pub mod array;
 pub mod list;
 pub mod map;

@@ -104,24 +104,21 @@ pub mod marker {
     pub struct Mutation<T = crate::Any>(PhantomData<fn() -> T>);
 }
 
-/// Convert an input to a reusable [`Dispatcher`].
+/// Convert a dispatcher, a callback, or a tuple of them, into a [`Dispatcher`]
+/// for the argument tuple `Args` and result `Ret`; the traversals take any of
+/// these inputs.
 ///
-/// `Args` is the complete target argument tuple, `Ret` its complete result, and
-/// `M` the inferred input-form marker. `Target` is the actual dispatcher type;
-/// `Output` owns or borrows it and provides `BorrowMut<Target>`. Owned `D` and
-/// borrowed `&mut D` inputs both preserve target `D`; callbacks and tuples use an
-/// adapter as their target. This keeps recursive view types tied to the dispatcher.
+/// * An owned `D` or a borrowed `&mut D` keeps `D` as the
+///   [`Target`](Self::Target), and must have exactly that signature.
+/// * A callback takes a leading prefix of one to four of the arguments, and
+///   its first parameter selects what it matches, as for a `#[dispatch]`
+///   handler: an FFI value, a borrowed object node or `AnyView`, or a typed
+///   `MutationView` for mutation. It is passed by value, `&` or `&mut`.
+/// * A tuple, possibly nested, tries its links in order. Only an outer `None`
+///   moves on to the next link; an error or an inner `None` stops.
 ///
-/// Inputs may be owned dispatchers, mutable dispatcher borrows, callbacks, or
-/// nested tuples mixing these forms. Dispatchers require the exact argument and
-/// result signature. Callbacks may accept a leading prefix of one to four
-/// arguments; structural callbacks match an FFI value, an object-node borrow, or
-/// `AnyView`; mutation callbacks match a typed `MutationView`. Callable values
-/// and their shared or mutable borrows are stored as supplied, subject to their `FnMut` implementation. Only an outer `None` tries
-/// the next tuple link; a matched error or inner `None` stops the chain.
-///
-/// Supply the target argument and result types when calling the conversion directly;
-/// the input-form marker remains inferred.
+/// `M` marks the input form and is inferred; when calling `into_dispatcher`
+/// directly, give `Args` and `Ret`. See also [`#[dispatch]`](crate::dispatch).
 ///
 /// ```
 /// use tvm_ffi::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
@@ -137,6 +134,7 @@ pub trait IntoDispatcher<Args, Ret, M> {
     type Target;
     /// Storage normalized once at entry, retaining the target's identity.
     type Output: BorrowMut<Self::Target>;
+    /// Convert the input, once, before the traversal starts.
     fn into_dispatcher(self) -> Self::Output;
 }
 

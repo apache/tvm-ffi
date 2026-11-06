@@ -17,8 +17,10 @@
  * under the License.
  */
 
-//! Rust side of C++ `tvm/ffi/extra/visit_error_context.h`: the context an error
-//! carries to name the nodes a failed visit unwound through.
+//! The context an error carries to name the nodes a failed visit unwound
+//! through.
+
+// The Rust side of C++ `tvm/ffi/extra/visit_error_context.h`.
 
 use crate::any::AnyView;
 use crate::collections::array::Array;
@@ -27,22 +29,22 @@ use crate::error::Error;
 use crate::object::{self, Object, ObjectArc, ObjectRef, ObjectRefCore};
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex};
 
-/// Rust binding of C++ `VisitErrorContextObj`, the payload that
-/// `Error::extra_context` carries to name the nodes a failed visit unwound through.
+/// The payload that `Error::extra_context` carries to name the nodes a failed
+/// visit unwound through, laid out as the C++ `VisitErrorContextObj`.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.VisitErrorContext"]
 #[type_final]
 pub(crate) struct VisitErrorContextObj {
     base: Object,
-    /// Visited nodes, innermost first; C++ `ObjectRef` is nullable.
+    /// Visited nodes, innermost first; an entry may be `None`.
     reverse_visit_pattern: Array<Option<ObjectRef>>,
     /// The `extra_context` the error carried before this context replaced it.
     prev_error_context: Option<ObjectRef>,
 }
 
-/// Name the visited object in `raw` in the error's visit context, as C++
-/// `detail::UpdateVisitErrorContext`.
+/// Name the visited object in `raw` in the error's visit context.
+// As C++ `detail::UpdateVisitErrorContext`.
 #[cold]
 pub(crate) fn update_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Error {
     // Copy-on-write at each level: the Error, its context and the context's pattern

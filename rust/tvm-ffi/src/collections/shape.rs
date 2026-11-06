@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`Shape`], the immutable dimensions of a tensor.
+
 use crate::derive::{Object, ObjectRef};
 use crate::object::{Object, ObjectArc, ObjectCoreWithExtraItems};
 use std::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
@@ -26,7 +28,7 @@ use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 //-----------------------------------------------------
 // Shape
 //-----------------------------------------------------
-// ShapeObj for heap-allocated shape
+/// The object behind a [`Shape`].
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Shape"]
@@ -36,7 +38,7 @@ pub struct ShapeObj {
     data: TVMFFIShapeCell,
 }
 
-/// An immutable sequence of `i64` dimensions, shared with C++ as
+/// An immutable sequence of `i64` dimensions, passed across languages as
 /// `ffi.Shape`.
 ///
 /// # Examples
@@ -68,7 +70,7 @@ impl Default for Shape {
 }
 
 impl Shape {
-    /// Create a new empty Shape
+    /// An empty shape.
     pub fn new() -> Self {
         let shape_obj = ShapeObj {
             object: Object::new(),
@@ -82,7 +84,7 @@ impl Shape {
         }
     }
 
-    /// Get the shape as a slice
+    /// The dimensions as a slice.
     pub fn as_slice(&self) -> &[i64] {
         // An empty shape may have a null data pointer, which a slice cannot.
         if self.data.data.size == 0 {
@@ -91,7 +93,7 @@ impl Shape {
         unsafe { std::slice::from_raw_parts(self.data.data.data, self.data.data.size) }
     }
 
-    /// Fill the strides from the shape
+    /// Fill `strides` with the row-major strides of `shape`.
     pub(crate) fn fill_strides_from_shape<T>(shape: T, strides: &mut [i64])
     where
         T: AsRef<[i64]>,

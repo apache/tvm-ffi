@@ -18,11 +18,10 @@
  */
 
 //! Objects made with every field undefined, for reflection to set the fields,
-//! as C++ makes an object with `UnsafeInit`.
+//! such as when a JSON graph is read back or `__ffi_init__` runs.
 //!
-//! A C++ object made with `UnsafeInit` holds undefined (null) references, which
-//! the field setters overwrite and the destructor skips. A Rust reference is
-//! never null, so a Rust object cannot hold one; instead [`unsafe_init`]
+//! A Rust reference is never null, so an object cannot hold a null reference
+//! for its setters to overwrite later; instead [`unsafe_init`]
 //! allocates the object zeroed, and a field holding all-zero bytes that are no
 //! value of its type ([`AnyCompatible::is_undefined`]) is undefined. The field
 //! setter writes an undefined field without dropping it, the field getter reads
@@ -43,13 +42,13 @@ use crate::type_traits::AnyCompatible;
 use crate::{Error, INTERNAL_ERROR};
 
 /// An object type whose object can start with every field undefined, for
-/// reflection to set the fields: C++ `UnsafeInit`.
+/// reflection to set the fields.
 ///
 /// The creator that `#[rs_object]` registers for its type makes the object with
 /// [`unsafe_init`], which a JSON graph read back, `__ffi_init__` and
 /// `__ffi_new__` then fill. `#[rs_object]` implements it for its object, so the
 /// parent's object must implement it too: [`Object`] does, and so does the
-/// object of a non-final C++ type bound by `tvm-ffi-stubgen`.
+/// object of a non-final type bound by `tvm-ffi-stubgen`.
 ///
 /// `__ffi_init__` leaves an `init_off` field as the creator made it, so such a
 /// field's type must take all-zero bytes as a value, as a scalar, `Option<T>`
@@ -92,9 +91,8 @@ pub unsafe fn drop_if_defined<F: AnyCompatible>(field: *mut F) {
     }
 }
 
-/// An object of `T` with every field undefined, as C++
-/// `make_object<T>(UnsafeInit{})` makes one, for reflection to set the fields
-/// through their setters.
+/// An object of `T` with every field undefined, zero-filled, for reflection
+/// to set the fields through their setters.
 ///
 /// The [`ObjectRef`] views only the object's header, which is valid all along.
 ///
@@ -139,8 +137,8 @@ unsafe extern "C" fn unsafe_init_deleter<T: UnsafeInit>(ptr: *mut c_void, flags:
 }
 
 /// The creator of `T` (`TVMFFITypeMetadata::creator`) that `#[rs_object]`
-/// registers, as C++ `ObjectCreatorUnsafeInit<T>`: the owned handle of an
-/// object that [`unsafe_init`] made.
+/// registers: it writes the owned handle of an object that [`unsafe_init`]
+/// made to `result`.
 ///
 /// # Safety
 ///

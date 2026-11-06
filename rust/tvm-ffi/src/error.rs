@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`Error`], the error that crosses the FFI boundary, and its [`ErrorKind`]s.
+
 use crate::derive::{Object, ObjectRef};
 use crate::object::{self, Object, ObjectArc, ObjectRefCore};
 use crate::type_traits::AnyCompatible;
@@ -39,7 +41,7 @@ pub struct ErrorObj {
 /// An error that crosses the FFI boundary, with a kind, a message and a
 /// backtrace.
 ///
-/// An `Error` raised in C++ or Python arrives in Rust as an `Err`, and one
+/// An `Error` raised in another language arrives in Rust as an `Err`, and one
 /// returned from a Rust [`Function`](crate::Function) is raised in the caller's
 /// language. Create one with [`bail!`](crate::bail) or
 /// [`ensure!`](crate::ensure), which also record the source location.
@@ -113,14 +115,23 @@ impl<'a> std::fmt::Display for ErrorKind<'a> {
     }
 }
 
+/// `ValueError`: an argument has the right type but a bad value.
 pub const VALUE_ERROR: ErrorKind = ErrorKind::new("ValueError");
+/// `TypeError`: a value has the wrong type.
 pub const TYPE_ERROR: ErrorKind = ErrorKind::new("TypeError");
+/// `RuntimeError`: an operation failed for another reason.
 pub const RUNTIME_ERROR: ErrorKind = ErrorKind::new("RuntimeError");
+/// `AttributeError`: a field, method or attribute does not exist.
 pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind::new("AttributeError");
+/// `KeyError`: a map has no such key.
 pub const KEY_ERROR: ErrorKind = ErrorKind::new("KeyError");
+/// `IndexError`: an index is out of range.
 pub const INDEX_ERROR: ErrorKind = ErrorKind::new("IndexError");
+/// `InternalError`: a bug, such as a broken invariant or a caught panic.
 pub const INTERNAL_ERROR: ErrorKind = ErrorKind::new("InternalError");
+/// `OverflowError`: a result does not fit its type.
 pub const OVERFLOW_ERROR: ErrorKind = ErrorKind::new("OverflowError");
+/// `ZeroDivisionError`: a division or remainder by zero.
 pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind::new("ZeroDivisionError");
 
 impl Error {
@@ -291,8 +302,8 @@ impl Error {
         self.data.cell.backtrace.as_str()
     }
 
-    /// The error that caused this one, the next link of the cause chain, as C++
-    /// `cause_chain()`. See also `source`.
+    /// The error that caused this one, the next link of the cause chain; the
+    /// same error that `std::error::Error::source` returns.
     pub fn cause_chain(&self) -> Option<&Error> {
         let handle = &self.data.cell.cause_chain;
         if handle.is_null() {

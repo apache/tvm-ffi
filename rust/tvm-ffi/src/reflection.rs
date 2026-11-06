@@ -17,13 +17,14 @@
  * under the License.
  */
 
-//! Safe access to object reflection metadata.
+//! Object reflection: look up the methods, fields and type attributes of
+//! registered types, and register Rust object types with [`ObjectDef`].
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use crate::derive::{Object, ObjectRef};
-use crate::object::{Object, ObjectArc};
+use crate::object::{Object, ObjectArc, ObjectRef};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
     TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
@@ -60,7 +61,7 @@ impl TypeAttrColumn {
         }
     }
 
-    /// Return an owning copy of this attribute for `type_index`.
+    /// The attribute of `type_index`, as an owned value, or `None` if unset.
     pub fn get(self, type_index: i32) -> Option<Any> {
         let raw = self.get_raw_ffi_any(type_index)?;
         if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
@@ -69,17 +70,14 @@ impl TypeAttrColumn {
         Some(Any::from(unsafe { AnyView::from_raw_ffi_any(raw) }))
     }
 
-    /// Copy the borrowed raw carrier for this attribute and `type_index`.
+    /// The raw cell of `type_index`'s attribute, borrowed from the registry.
     ///
-    /// This does not retain the value or transfer ownership. The registry-owned
-    /// value must remain valid while the returned carrier is used, and registration
-    /// must not race with reads. Passing the carrier to unsafe APIs still requires
-    /// satisfying their lifetime and ownership contracts. Use [`Self::get`] for an
-    /// owning [`Any`].
+    /// The cell does not retain its value: the value must stay registered while
+    /// the cell is used, and registration must not race with reads. Use
+    /// [`Self::get`] for an owned [`Any`].
     ///
-    /// Returns `None` when the index is outside the column or the column has no data.
-    /// An in-range cell with the `kTVMFFINone` tag is returned as `Some`, unlike
-    /// [`Self::get`], which filters it out.
+    /// Returns `None` when the index is outside the column or the column has no
+    /// data. Unlike [`Self::get`], it returns a `None`-valued cell as `Some`.
     #[inline(always)]
     pub fn get_raw_ffi_any(self, type_index: i32) -> Option<TVMFFIAny> {
         unsafe {
@@ -94,8 +92,7 @@ impl TypeAttrColumn {
     }
 }
 
-/// Look up a reflected method of a type by type key and method name (C++
-/// `reflection::GetMethod`).
+/// Look up a reflected method of a type by type key and method name.
 ///
 /// Same as [`get_method_by_index`], but resolves `type_key` to a type index
 /// first.
@@ -124,11 +121,11 @@ pub fn get_method(type_key: &str, method_name: &str) -> Result<Function> {
 /// Look up a reflected method of a type by type index and method name, as
 /// [`get_method`] does by type key.
 ///
-/// Methods registered through the C++ reflection registry
-/// (`refl::ObjectDef<T>().def(...)`) live in the per-type method table rather
-/// than the global function table. Constructors registered via `refl::init` are
-/// reachable under the reserved name `__ffi_init__`. For instance methods, the
-/// first argument is the object itself.
+/// Reflected methods, registered in any language (such as with
+/// [`ObjectDef::def`]), live in the type's method table rather than the global
+/// function table. The constructor is reachable under the reserved name
+/// `__ffi_init__`. For instance methods, the first argument is the object
+/// itself.
 ///
 /// `type_index` must be a registered type index, obtained for example from a
 /// live object via `Any::type_index` or from a type key; the C API treats an
@@ -185,34 +182,66 @@ pub fn get_method_by_index(type_index: i32, method_name: &str) -> Result<Functio
     }
 }
 
-/// One step of an [`AccessPath`]: an attribute, array index or map key (`ffi.reflection.AccessStep`).
+/// What an [`AccessStep`] accesses: an attribute, an array item or a map
+/// item, or one of those that is missing.
+///
+/// A closed set: the values are part of the ABI.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AccessKind {
+    /// An object attribute; the key is its name.
+    Attr = 0,
+    /// An array item; the key is its index.
+    ArrayItem = 1,
+    /// A map item; the key is the map key.
+    MapItem = 2,
+    /// An attribute that does not exist, in an error report.
+    AttrMissing = 3,
+    /// An array index out of range, in an error report.
+    ArrayItemMissing = 4,
+    /// A map key that is absent, in an error report.
+    MapItemMissing = 5,
+}
+
+/// The object behind an [`AccessStep`], laid out as the C++ `AccessStepObj`.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.reflection.AccessStep"]
 #[type_final]
 pub struct AccessStepObj {
     object: Object,
+    /// What the step accesses.
+    pub kind: AccessKind,
+    /// The attribute name, array index or map key.
+    pub key: Any,
 }
 
+/// One step of an [`AccessPath`]: an attribute, array index or map key.
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
-#[object_ref(skip_deref)]
 pub struct AccessStep {
     data: ObjectArc<AccessStepObj>,
 }
 
-/// A path from a root value to a nested one (`ffi.reflection.AccessPath`).
+/// The object behind an [`AccessPath`], laid out as the C++ `AccessPathObj`.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.reflection.AccessPath"]
 #[type_final]
 pub struct AccessPathObj {
     object: Object,
+    /// The path without its last step; `None` at the root.
+    pub parent: Option<ObjectRef>,
+    /// The last step; `None` at the root.
+    pub step: Option<AccessStep>,
+    /// The number of steps; 0 at the root.
+    pub depth: i32,
 }
 
+/// A path from a root value to a nested one, such as `root.field[0]`, as a
+/// chain of parents; its methods are reached with `reflection::get_method`.
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
-#[object_ref(skip_deref)]
 pub struct AccessPath {
     data: ObjectArc<AccessPathObj>,
 }

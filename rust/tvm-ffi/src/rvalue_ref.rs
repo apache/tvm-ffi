@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Move-aware object arguments compatible with C++ `ffi::RValueRef<T>`.
+//! [`RValueRef`], an object argument whose reference the callee may take over.
 
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
@@ -27,7 +27,8 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex as TypeIndex};
 use crate::any::ArgTryFromAnyView;
 use crate::{AnyView, Error, ObjectRefCore, Result};
 
-/// A move-aware object argument compatible with C++ `ffi::RValueRef<T>`.
+/// An object argument that the callee may move out of, as `ffi::RValueRef<T>`
+/// in the ABI.
 ///
 /// The callee may take the stored strong reference without incrementing its
 /// count; otherwise this wrapper retains and releases it.

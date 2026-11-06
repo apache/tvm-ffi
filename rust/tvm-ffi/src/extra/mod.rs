@@ -16,6 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! Runtime type dispatch, structural traversals ([`structural_walk`],
+//! [`structural_visit`], [`structural_mutate`], [`structural_map`]) and
+//! modules.
+//!
+//! [`structural_walk`]: crate::structural_walk
+//! [`structural_visit`]: crate::structural_visit
+//! [`structural_mutate`]: crate::structural_mutate
+//! [`structural_map`]: crate::structural_map
+
 pub mod cold_init_lazy_lock;
 pub mod dispatch;
 pub mod module;

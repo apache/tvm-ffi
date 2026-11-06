@@ -17,12 +17,11 @@
  * under the License.
  */
 
-//! Static init blocks: code that runs when the program or library that holds it loads, as a C++
-//! `TVM_FFI_STATIC_INIT_BLOCK` does. The blocks of a program or library are gathered at link
-//! time, wherever in it they are, and a constructor runs them when it loads. Once Python loads a
-//! library built on this crate, by any means, it sees what the blocks registered, as it sees the
-//! registrations of a C++ library. A block that several libraries of a process have, as each
-//! links its own copy of a crate they share, runs once. See
+//! Static init blocks: code that runs when the program or library that holds it loads. The
+//! blocks of a program or library are gathered at link time, wherever in it they are, and a
+//! constructor runs them when it loads. Once Python loads a library built on this crate, by any
+//! means, it sees what the blocks registered, such as global functions. A block that several
+//! libraries of a process have, as each links its own copy of a crate they share, runs once. See
 //! [`static_init_block!`](crate::static_init_block).
 
 use std::ffi::c_void;
@@ -35,8 +34,8 @@ use crate::{Any, Error, Function, Result, INTERNAL_ERROR};
 #[doc(hidden)]
 pub use linkme;
 
-/// Run code when the program or library that holds it loads, as a C++
-/// `TVM_FFI_STATIC_INIT_BLOCK` does. The body is the body of a function that returns
+/// Run code when the program or library that holds it loads, the Rust form of
+/// `TVM_FFI_STATIC_INIT_BLOCK`. The body is the body of a function that returns
 /// [`Result<()>`](crate::Result): it registers what the library defines, such as global functions,
 /// and stops at its first error, which `?` returns. A body whose statements all end in `;` returns
 /// `Ok(())`; one that ends in an expression returns it, a `Result<()>`.

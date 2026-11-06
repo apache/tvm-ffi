@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! [`Array`], an immutable sequence with copy-on-write updates.
+
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -29,15 +31,18 @@ use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 
+/// The object behind an [`Array`], laid out as the C++ `ArrayObj`.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Array"]
 #[type_index(TypeIndex::kTVMFFIArray)]
 pub struct ArrayObj {
     pub(crate) object: Object,
-    /// Pointer to the start of the element buffer (AddressOf(0)).
+    /// The element buffer, `capacity` `TVMFFIAny` cells.
     pub data: *mut core::ffi::c_void,
+    /// The number of initialized elements.
     pub size: i64,
+    /// The number of cells in the buffer.
     pub capacity: i64,
     /// Optional custom deleter for the data pointer.
     pub data_deleter: Option<unsafe extern "C" fn(*mut core::ffi::c_void)>,
@@ -64,8 +69,8 @@ impl Drop for ArrayObj {
     }
 }
 
-/// A reference-counted sequence of `T` with value semantics, shared with C++
-/// and Python as `ffi.Array`.
+/// A reference-counted sequence of `T` with value semantics, passed across
+/// languages as `ffi.Array`.
 ///
 /// Cloning an `Array` is cheap: it shares the same elements. The mutators
 /// ([`push`], [`insert`], [`pop`], [`truncate`], [`set`]) are copy-on-write:
@@ -364,7 +369,7 @@ impl<T: ContainerElement + Clone> Array<T> {
         }
     }
 
-    /// Internal helper to allocate an ArrayObj with specific headroom.
+    /// An array of `items` with room for `capacity` elements.
     fn new_with_capacity(items: Vec<T>, capacity: usize) -> Self {
         let size = items.len();
 
