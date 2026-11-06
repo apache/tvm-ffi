@@ -52,6 +52,13 @@ unsafe impl ObjectCoreWithExtraItems for ArrayObj {
     }
 }
 
+/// Move `value` into the uninitialized `cell`.
+unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
+    let mut raw = TVMFFIAny::new();
+    T::container_move_to_any(value, &mut raw);
+    std::ptr::write(cell, raw);
+}
+
 // Runs only for a Rust-allocated array; one allocated in C++ is released by its
 // own deleter.
 impl Drop for ArrayObj {
@@ -64,26 +71,39 @@ impl Drop for ArrayObj {
     }
 }
 
-/// An immutable, reference-counted sequence of `T`, shared with C++ and
-/// Python as `ffi.Array`.
+/// A reference-counted sequence of `T` with value semantics, shared with C++
+/// and Python as `ffi.Array`.
 ///
-/// Cloning an `Array` is cheap: it shares the same elements. Use [`List`]
-/// for a sequence that changes in place.
+/// Cloning an `Array` is cheap: it shares the same elements. The mutators
+/// ([`push`], [`insert`], [`pop`], [`truncate`], [`set`]) are copy-on-write:
+/// they copy the elements when the array is shared, and write in place when
+/// this handle is the only reference, so other handles never see the change.
+/// Use [`List`] for a sequence whose changes all handles see.
 ///
 /// [`List`]: crate::List
+/// [`push`]: Array::push
+/// [`insert`]: Array::insert
+/// [`pop`]: Array::pop
+/// [`truncate`]: Array::truncate
+/// [`set`]: Array::set
 ///
 /// # Examples
 ///
 /// ```
 /// use tvm_ffi::Array;
 ///
-/// let array = Array::from_vec(vec![1_i64, 2, 3]);
+/// let mut array = Array::from_vec(vec![1_i64, 2, 3]);
 /// assert_eq!(array.len(), 3);
 /// assert_eq!(array.get(1)?, 2);
 /// assert!(array.get(3).is_err());
 ///
+/// let snapshot = array.clone();
+/// array.push(4);
+/// assert_eq!(array.len(), 4);
+/// assert_eq!(snapshot.len(), 3);
+///
 /// let doubled: Array<i64> = array.iter().map(|x| x * 2).collect();
-/// assert_eq!(doubled.iter().copied().collect::<Vec<_>>(), vec![2, 4, 6]);
+/// assert_eq!(doubled.iter().copied().collect::<Vec<_>>(), vec![2, 4, 6, 8]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[repr(C)]
@@ -93,7 +113,8 @@ pub struct Array<T> {
     _marker: PhantomData<T>,
 }
 
-// SAFETY: an `Array` is immutable, so sharing it is as safe as sharing its elements.
+// SAFETY: a shared `Array` is never mutated (mutators copy unless this handle
+// is unique), so sharing it is as safe as sharing its elements.
 unsafe impl<T: Send + Sync> Send for Array<T> {}
 unsafe impl<T: Send + Sync> Sync for Array<T> {}
 
@@ -226,48 +247,149 @@ impl<T: ContainerElement + Clone> Array<T> {
         unsafe { Self::from_data(arc) }
     }
 
-    /// Append `value`, copy-on-write like C++ `Array::push_back`: in place when
-    /// this handle is the only reference and the buffer has room, otherwise into
-    /// a new buffer that grows geometrically when full.
-    pub(crate) fn push(&mut self, value: T) {
+    /// Append `value` to the end.
+    ///
+    /// See also [`List::push`](crate::List::push).
+    pub fn push(&mut self, value: T) {
         let size = self.len();
-        let capacity = self.data.capacity as usize;
-        let unique = ObjectArc::strong_count(&self.data) == 1;
-        if !unique || size == capacity {
-            let capacity = if size == capacity {
-                (capacity * 2).max(size + 1)
-            } else {
-                capacity
-            };
-            let mut grown = Self::new_with_capacity(Vec::new(), capacity);
-            let source = self.as_container().data as *const TVMFFIAny;
-            // SAFETY: `grown` is fresh with room for `size` cells. A unique source
-            // moves its cells and forgets them; a shared one keeps its cells, so each
-            // copy takes its own reference.
-            unsafe {
-                let target = ObjectArc::as_mut_ptr(&mut grown.data);
-                let cells = (*target).data as *mut TVMFFIAny;
-                if unique {
-                    std::ptr::copy_nonoverlapping(source, cells, size);
-                    (*ObjectArc::as_mut_ptr(&mut self.data)).size = 0;
-                } else {
-                    for i in 0..size {
-                        let copy = Any::from(AnyView::from_raw_ffi_any(*source.add(i)));
-                        std::ptr::write(cells.add(i), Any::into_raw_ffi_any(copy));
-                    }
-                }
-                (*target).size = size as i64;
-            }
-            *self = grown;
+        let container = self.make_mut(size + 1);
+        // SAFETY: `make_mut` left room for one more cell past `size`.
+        unsafe { write_cell((container.data as *mut TVMFFIAny).add(size), value) };
+        container.size += 1;
+    }
+
+    /// Insert `value` at `index`, shifting the elements after it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `IndexError` if `index > len`.
+    ///
+    /// See also [`List::insert`](crate::List::insert).
+    pub fn insert(&mut self, index: usize, value: T) -> Result<(), crate::Error> {
+        let size = self.len();
+        if index > size {
+            crate::bail!(crate::error::INDEX_ERROR, "Array insert index out of bound");
         }
-        // SAFETY: this handle is now the only reference, with room for one more cell.
+        let container = self.make_mut(size + 1);
+        // SAFETY: `make_mut` left room for one more cell; the tail moves up by one.
         unsafe {
-            let container = ObjectArc::as_mut_ptr(&mut self.data);
-            let mut cell = TVMFFIAny::new();
-            T::container_move_to_any(value, &mut cell);
-            std::ptr::write(((*container).data as *mut TVMFFIAny).add(size), cell);
-            (*container).size += 1;
+            let cell = (container.data as *mut TVMFFIAny).add(index);
+            std::ptr::copy(cell, cell.add(1), size - index);
+            write_cell(cell, value);
         }
+        container.size += 1;
+        Ok(())
+    }
+
+    /// Remove and return the last element.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `IndexError` if the array is empty.
+    ///
+    /// See also [`List::pop`](crate::List::pop).
+    pub fn pop(&mut self) -> Result<T, crate::Error> {
+        let size = self.len();
+        if size == 0 {
+            crate::bail!(crate::error::INDEX_ERROR, "Array pop on an empty array");
+        }
+        let container = self.make_mut(size);
+        container.size -= 1;
+        // SAFETY: the last cell is initialized, holds a `T`, and is no longer
+        // counted by `size`, so it is moved out exactly once.
+        unsafe {
+            let mut cell = std::ptr::read((container.data as *const TVMFFIAny).add(size - 1));
+            debug_assert!(T::container_check_any_strict(&cell));
+            Ok(T::container_move_from_any_after_check(&mut cell))
+        }
+    }
+
+    /// Shorten the array to `len` elements, dropping the rest; a no-op when it
+    /// is already that short.
+    ///
+    /// See also [`List::truncate`](crate::List::truncate).
+    pub fn truncate(&mut self, len: usize) {
+        let size = self.len();
+        if len >= size {
+            return;
+        }
+        let container = self.make_mut(size);
+        // Shrink `size` first, so a panicking element drop leaks rather than
+        // double-frees the remaining cells.
+        container.size = len as i64;
+        let cells = container.data as *const TVMFFIAny;
+        for i in len..size {
+            // SAFETY: cells `len..size` are initialized and no longer counted.
+            drop(unsafe { Any::from_raw_ffi_any(*cells.add(i)) });
+        }
+    }
+
+    /// Replace the element at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `IndexError` if `index >= len`.
+    ///
+    /// See also [`List::set`](crate::List::set).
+    pub fn set(&mut self, index: usize, value: T) -> Result<(), crate::Error> {
+        let size = self.len();
+        if index >= size {
+            crate::bail!(crate::error::INDEX_ERROR, "Array set index out of bound");
+        }
+        let container = self.make_mut(size);
+        // SAFETY: the cell at `index` is initialized; its old value is dropped
+        // after the new one is written.
+        unsafe {
+            let cell = (container.data as *mut TVMFFIAny).add(index);
+            let old = Any::from_raw_ffi_any(std::ptr::read(cell));
+            write_cell(cell, value);
+            drop(old);
+        }
+        Ok(())
+    }
+
+    /// Make this handle the only reference to its cells, with room for at least
+    /// `capacity` of them, and return the container to edit in place.
+    fn make_mut(&mut self, capacity: usize) -> &mut ArrayObj {
+        // As C++ `Array::CopyOnWrite(reserve)`.
+        let unique = ObjectArc::is_unique(&self.data);
+        let current = self.data.capacity as usize;
+        if !unique || capacity > current {
+            let capacity = if capacity > current {
+                (current * 2).max(capacity)
+            } else {
+                current
+            };
+            self.copy_to_new_buffer(capacity, unique);
+        }
+        // SAFETY: this handle is now the only reference, so no one else observes
+        // the container while it is mutably borrowed.
+        unsafe { &mut *ObjectArc::as_mut_ptr(&mut self.data) }
+    }
+
+    /// Replace `self` with a unique array of `capacity` cells holding the same
+    /// elements: moved out of a `unique` source, otherwise each re-referenced.
+    fn copy_to_new_buffer(&mut self, capacity: usize, unique: bool) {
+        let size = self.len();
+        let mut grown = Self::new_with_capacity(Vec::new(), capacity);
+        let source = self.as_container().data as *const TVMFFIAny;
+        // SAFETY: `grown` is fresh with room for `size` cells. A unique source
+        // forgets the cells it moved; a shared one keeps its own references.
+        unsafe {
+            let target = ObjectArc::as_mut_ptr(&mut grown.data);
+            let cells = (*target).data as *mut TVMFFIAny;
+            if unique {
+                std::ptr::copy_nonoverlapping(source, cells, size);
+                (*ObjectArc::as_mut_ptr(&mut self.data)).size = 0;
+            } else {
+                for i in 0..size {
+                    let copy = Any::from(AnyView::from_raw_ffi_any(*source.add(i)));
+                    std::ptr::write(cells.add(i), Any::into_raw_ffi_any(copy));
+                }
+            }
+            (*target).size = size as i64;
+        }
+        *self = grown;
     }
 
     /// Return the number of elements.

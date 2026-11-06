@@ -72,7 +72,8 @@ pub struct Function {
     data: ObjectArc<FunctionObj>,
 }
 
-// SAFETY: a `Function` is immutable, and every Rust callback it wraps is `Send + Sync`.
+// SAFETY: a `Function` is immutable, every Rust callback it wraps is `Send + Sync`,
+// and `from_extern_c` requires the same of foreign callbacks.
 unsafe impl Send for Function {}
 unsafe impl Sync for Function {}
 
@@ -467,11 +468,12 @@ impl Function {
         Self::from_packed(closure)
     }
 
+    /// Wrap a C callback as a Function.
+    ///
     /// # Safety
     ///
-    /// `handle` must be a valid pointer (or null) that is compatible with
-    /// `safe_call` and `deleter`. The caller must ensure the handle outlives
-    /// the returned `Function` (or that `deleter` properly frees it).
+    /// `handle` (may be null) is the state `safe_call` receives; `deleter` frees it
+    /// when the Function drops. All three must be safe to use from any thread.
     ///
     /// # Errors
     ///

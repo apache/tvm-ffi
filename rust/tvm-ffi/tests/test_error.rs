@@ -73,6 +73,7 @@ fn test_error_with_context() {
         let output = Error::with_appended_backtrace(error, " frame");
         assert_eq!(output.backtrace(), "origin frame");
         assert!(output.cause_chain().unwrap().same_as(&error0));
+        assert!(std::error::Error::source(&output).is_some());
         assert!(output.extra_context().unwrap().same_as(&payload));
         if let Some(retained) = retained {
             assert_eq!(retained.backtrace(), "origin");

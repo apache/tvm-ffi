@@ -124,7 +124,7 @@ where
                 return mutator.default_mutate(self, value).map(Into::into);
             };
             let mapped: Any = callback_result
-                .map_err(|error| with_mutation_error_context(error, raw))?
+                .map_err(|error| with_mutation_error_context(error, raw, "map"))?
                 .into();
             if is_unchanged(&mapped) || raw_ffi_any_same_as(raw, *mapped.as_raw_ffi_any()) {
                 // Drop temporary ownership before default descent checks uniqueness.
@@ -150,9 +150,9 @@ where
             };
             match self.dispatch.dispatch_tuple((current, kind)) {
                 Some(Ok(result)) if result.is_unchanged() => Ok(mapped),
-                Some(result) => result
-                    .map(Any::from)
-                    .map_err(|error| with_mutation_error_context(error, *current.as_raw_ffi_any())),
+                Some(result) => result.map(Any::from).map_err(|error| {
+                    with_mutation_error_context(error, *current.as_raw_ffi_any(), "map")
+                }),
                 None => Ok(mapped),
             }
         }

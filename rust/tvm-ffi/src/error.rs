@@ -108,8 +108,7 @@ pub struct ErrorObj {
 /// assert_eq!(error.message(), "not a digit: 'x'");
 /// ```
 ///
-/// An `Error` is `Send + Sync`, so a `Result` can cross threads; its attached
-/// context is treated as immutable diagnostic data.
+/// An `Error` is `Send + Sync`, so a `Result` can cross threads.
 #[repr(C)]
 #[derive(Clone, ObjectRef)]
 #[custom_debug]
@@ -117,8 +116,7 @@ pub struct Error {
     data: ObjectArc<ErrorObj>,
 }
 
-// SAFETY: an `Error` is immutable once built; `extra_context` is diagnostic data.
-// Deliberately thread-safe so a `Result` can cross threads.
+// SAFETY: a shared Error is never mutated: updates copy unless this handle is unique.
 unsafe impl Send for Error {}
 unsafe impl Sync for Error {}
 
@@ -179,13 +177,13 @@ impl Error {
     ///
     /// * `kind` - The kind of the error, such as [`VALUE_ERROR`].
     /// * `message` - The message of the error.
-    /// * `traceback` - The backtrace of the error, which may be empty.
+    /// * `backtrace` - The backtrace of the error, which may be empty.
     ///
     /// # Returns
     ///
     /// The error.
-    pub fn new(kind: ErrorKind<'_>, message: &str, traceback: &str) -> Self {
-        Self::new_with_cause_and_extra_context(kind, message, traceback, None, None)
+    pub fn new(kind: ErrorKind<'_>, message: &str, backtrace: &str) -> Self {
+        Self::new_with_cause_and_extra_context(kind, message, backtrace, None, None)
     }
 
     /// Create an error retaining its cause and any application-specific context.
@@ -194,7 +192,7 @@ impl Error {
     ///
     /// * `kind` - The kind of the error.
     /// * `message` - The message of the error.
-    /// * `traceback` - The backtrace of the error, which may be empty.
+    /// * `backtrace` - The backtrace of the error, which may be empty.
     /// * `cause_chain` - The error that caused this one, if any.
     /// * `extra_context` - An object of application-specific context, if any.
     ///
@@ -204,19 +202,19 @@ impl Error {
     pub fn new_with_cause_and_extra_context(
         kind: ErrorKind<'_>,
         message: &str,
-        traceback: &str,
+        backtrace: &str,
         cause_chain: Option<&Error>,
         extra_context: Option<&object::ObjectRef>,
     ) -> Self {
         unsafe {
             let kind_data = TVMFFIByteArray::from_str(kind.as_str());
             let message_data = TVMFFIByteArray::from_str(message);
-            let traceback_data = TVMFFIByteArray::from_str(traceback);
+            let backtrace_data = TVMFFIByteArray::from_str(backtrace);
             let mut error_handle: TVMFFIObjectHandle = std::ptr::null_mut();
             let ret = TVMFFIErrorCreateWithCauseAndExtraContext(
                 &kind_data,
                 &message_data,
-                &traceback_data,
+                &backtrace_data,
                 cause_chain.map_or(std::ptr::null_mut(), |cause| {
                     ObjectArc::as_ptr(&cause.data) as TVMFFIObjectHandle
                 }),
@@ -323,10 +321,21 @@ impl Error {
         Some(unsafe { &*(handle as *const _ as *const object::ObjectRef) })
     }
 
-    /// The `extra_context` slot, to update in place. A shared error is first
-    /// replaced by a shallow copy, so the update reaches no other holder.
+    /// The `extra_context` slot, to update in place.
     pub(crate) fn extra_context_mut(&mut self) -> &mut Option<object::ObjectRef> {
-        if ObjectArc::strong_count(&self.data) != 1 {
+        let error = self.make_mut();
+        // SAFETY: this handle is the only reference, and the slot owns a nullable
+        // object handle, which is exactly an `Option<ObjectRef>`.
+        unsafe {
+            &mut *std::ptr::addr_of_mut!((*error).cell.extra_context)
+                .cast::<Option<object::ObjectRef>>()
+        }
+    }
+
+    /// Make this handle the only reference to its error, copying a shared one, as
+    /// `Arc::make_mut`.
+    fn make_mut(&mut self) -> *mut ErrorObj {
+        if !ObjectArc::is_unique(&self.data) {
             *self = Self::new_with_cause_and_extra_context(
                 self.kind(),
                 self.message(),
@@ -335,13 +344,7 @@ impl Error {
                 self.extra_context(),
             );
         }
-        // SAFETY: this handle is the only reference, and the slot owns a nullable
-        // object handle, which is exactly an `Option<ObjectRef>`.
-        unsafe {
-            let error = ObjectArc::as_mut_ptr(&mut self.data);
-            &mut *std::ptr::addr_of_mut!((*error).cell.extra_context)
-                .cast::<Option<object::ObjectRef>>()
-        }
+        ObjectArc::as_mut_ptr(&mut self.data)
     }
 
     /// Get the traceback of the error in the order of most recent call last, as
@@ -375,33 +378,18 @@ impl Error {
     /// # Returns
     ///
     /// The error with the appended backtrace.
-    pub fn with_appended_backtrace(this: Self, backtrace: &str) -> Self {
-        if ObjectArc::strong_count(&this.data) == 1 {
-            // this is the only reference to the error
-            // we can safely mutate the error
-            unsafe {
-                let backtrace_data = TVMFFIByteArray::from_str(backtrace);
-                (this.data.cell.update_backtrace)(
-                    ObjectArc::as_ptr(&this.data) as *mut ErrorObj as *mut c_void,
-                    &backtrace_data,
-                    kTVMFFIBacktraceUpdateModeAppend as i32,
-                );
-                this
-            }
-        } else {
-            // we need to create a new error because there is more than one unique reference
-            // to the error
-            let mut new_backtrace = String::new();
-            new_backtrace.push_str(this.backtrace());
-            new_backtrace.push_str(backtrace);
-            Self::new_with_cause_and_extra_context(
-                this.kind(),
-                this.message(),
-                &new_backtrace,
-                this.cause_chain(),
-                this.extra_context(),
-            )
+    pub fn with_appended_backtrace(mut this: Self, backtrace: &str) -> Self {
+        let error = this.make_mut();
+        // SAFETY: `make_mut` made this handle the only reference to `error`.
+        unsafe {
+            let backtrace_data = TVMFFIByteArray::from_str(backtrace);
+            ((*error).cell.update_backtrace)(
+                error.cast::<c_void>(),
+                &backtrace_data,
+                kTVMFFIBacktraceUpdateModeAppend as i32,
+            );
         }
+        this
     }
 }
 
@@ -423,4 +411,8 @@ impl std::fmt::Debug for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause_chain().map(|cause| cause as _)
+    }
+}

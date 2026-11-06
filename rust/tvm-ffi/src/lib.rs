@@ -30,6 +30,7 @@ pub mod extra;
 pub mod function;
 #[doc(hidden)]
 pub mod function_internal;
+#[doc(hidden)]
 pub mod macros;
 #[doc(hidden)]
 pub mod match_any_internal;
@@ -59,8 +60,6 @@ pub use crate::error::{
 pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_map::structural_map;
-#[doc(hidden)]
-pub use crate::extra::structural_mutate::StructuralVarRemap;
 pub use crate::extra::structural_mutate::{
     structural_mutate, InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase,
     StructuralMutatorObj, StructuralMutatorView,

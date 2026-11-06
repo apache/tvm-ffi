@@ -290,6 +290,14 @@ inline VisitErrorContext MakeVisitErrorContext(const ObjectRef& node) {
  */
 TVM_FFI_COLD_CODE
 inline void UpdateVisitErrorContext(Error* err, const ObjectRef& node) {  // NOLINT(*)
+  // Callback, policy and default descent can report the same frame.
+  const Object* current = static_cast<const Object*>(
+      static_cast<ErrorObj*>(detail::ObjectUnsafe::RawObjectPtrFromObjectRef(*err))->extra_context);
+  if (current != nullptr && current->IsInstance<VisitErrorContextObj>()) {
+    const Array<ObjectRef>& pattern =
+        static_cast<const VisitErrorContextObj*>(current)->reverse_visit_pattern;
+    if (!pattern.empty() && pattern.back().same_as(node)) return;
+  }
   // Copy-on-write at each level: the Error is replaced by a shallow copy when shared, and its
   // VisitErrorContext likewise. Each level is borrowed through its parent's field, so an Error
   // owned only by the unwinding frame is updated in place.

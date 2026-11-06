@@ -27,8 +27,8 @@ use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
     Array, DefRegionKind, Dispatcher, Error, FieldGetter, Function, InplaceMode, IntoDispatcher,
     Map, MutationView, Object, ObjectArc, Result, String as FfiString, StructuralMutatorView,
-    StructuralVarRemap, StructuralVisitorView, TypeIndex, Unchanged, UnchangedOr, VisitInterrupt,
-    WalkOrder, WalkResult, RUNTIME_ERROR,
+    StructuralVisitorView, TypeIndex, Unchanged, UnchangedOr, VisitInterrupt, WalkOrder,
+    WalkResult, RUNTIME_ERROR,
 };
 
 /// The value when it is stored as a `bool`, not converted from an integer.
@@ -55,7 +55,7 @@ impl<'value> Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<Unchange
 
 #[derive(Default)]
 struct ManualIncrement {
-    remap: StructuralVarRemap,
+    remapped: Option<Any>,
     remap_probe: Option<Any>,
 }
 
@@ -118,7 +118,7 @@ impl<'v, 'c, 'r>
                 })?;
                 assert_eq!(mutator.def_region_kind(), initial);
                 let replacement = mutator.var_remap_get(self, AnyView::from(&key))?.unwrap();
-                self.remap.set(AnyView::from(&key), &replacement)?;
+                self.remapped = Some(replacement.clone());
                 Ok(UnchangedOr::changed(replacement))
             })()
         } else if let Some(integer) = value.as_any_view().downcast_ref::<i64>().copied() {
@@ -404,12 +404,10 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
             41
         );
         assert_eq!(
-            i64::try_from(dispatch.remap.get(AnyView::from(&key)).unwrap().unwrap()).unwrap(),
+            i64::try_from(dispatch.remapped.take().unwrap()).unwrap(),
             41
         );
     }
-    dispatch.remap.clear();
-    assert!(dispatch.remap.get(AnyView::from(&key)).unwrap().is_none());
 }
 
 #[test]
