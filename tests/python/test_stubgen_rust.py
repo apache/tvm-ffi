@@ -446,8 +446,8 @@ def test_render_object_without_fields_has_no_impl() -> None:
 
 
 def test_render_thread_safe_only_when_not_mutable() -> None:
-    """A class C++ declares not ``_type_mutable`` is ``ThreadSafeObject``; others are not."""
-    marker = "unsafe impl tvm_ffi::object::ThreadSafeObject for MarkerObj {}"
+    """A class C++ declares not ``_type_mutable`` is ``ImmutableObject``; others are not."""
+    marker = "unsafe impl tvm_ffi::object::ImmutableObject for MarkerObj {}"
     assert marker in _render(_info("demo.Marker", is_final=True, is_mutable=False))[0]
     assert marker not in _render(_info("demo.Marker", is_final=True, is_mutable=True))[0]
     assert marker not in _render(_info("demo.Marker", is_final=True))[0]

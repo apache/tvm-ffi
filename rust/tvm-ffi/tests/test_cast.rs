@@ -252,7 +252,7 @@ fn test_any_conversion_preserves_runtime_subtype() {
 
 // `TestBaseObj` opts in; `TestDerivedObj` does not, so only `TestBase` crosses threads.
 // SAFETY: test objects are never mutated after construction.
-unsafe impl tvm_ffi::ThreadSafeObject for TestBaseObj {}
+unsafe impl tvm_ffi::ImmutableObject for TestBaseObj {}
 
 #[test]
 fn test_thread_safe_object_handles() {

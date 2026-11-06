@@ -50,13 +50,13 @@ pub struct ObjectArc<T: ObjectCore> {
 
 // Not `Send`/`Sync` by default: an object's thread safety is that of its (often
 // C++) implementation, which the handle cannot see. An object type opts in with
-// `ThreadSafeObject`; tvm-ffi's own immutable handles opt in explicitly.
+// `ImmutableObject`; tvm-ffi's own immutable handles opt in explicitly.
 
 /// An object type whose shared instances are never mutated, so handles to it may
 /// cross threads.
 ///
 /// A handle `ObjectArc<T>`, and every reference built on it, is `Send + Sync`
-/// when `T: ThreadSafeObject` and `T`'s fields are themselves `Send + Sync`, so
+/// when `T: ImmutableObject` and `T`'s fields are themselves `Send + Sync`, so
 /// a field such as `Any`, which may hold a mutable object, keeps the handle
 /// single-threaded. The stub generator implements it for each class whose C++
 /// declaration is not `_type_mutable`. An erased `ObjectRef` may point at any
@@ -67,13 +67,13 @@ pub struct ObjectArc<T: ObjectCore> {
 /// No code may mutate an instance while it is shared: changes go through
 /// copy-on-write, in place only on a uniquely held instance, as for C++ classes
 /// that are not `_type_mutable`.
-pub unsafe trait ThreadSafeObject: ObjectCore {}
+pub unsafe trait ImmutableObject: ObjectCore {}
 
 // SAFETY: `T` is never mutated while shared, its fields are thread-safe, and the
 // reference count is atomic.
-unsafe impl<T: ThreadSafeObject + Send + Sync> Send for ObjectArc<T> {}
+unsafe impl<T: ImmutableObject + Send + Sync> Send for ObjectArc<T> {}
 // SAFETY: as for `Send`.
-unsafe impl<T: ThreadSafeObject + Send + Sync> Sync for ObjectArc<T> {}
+unsafe impl<T: ImmutableObject + Send + Sync> Sync for ObjectArc<T> {}
 
 /// The native representation of an object-system type.
 ///

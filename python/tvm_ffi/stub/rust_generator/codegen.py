@@ -574,8 +574,8 @@ class _ObjectRenderer:
         )
         return sections
 
-    def _thread_safe_lines(self) -> list[str] | None:
-        """``ThreadSafeObject`` for a class that C++ declares not ``_type_mutable``.
+    def _immutable_object_lines(self) -> list[str] | None:
+        """``ImmutableObject`` for a class that C++ declares not ``_type_mutable``.
 
         Such a class only hands out const access and changes through copy-on-write,
         so its handles may cross threads when its fields can. A mutable class, or one
@@ -586,7 +586,7 @@ class _ObjectRenderer:
         return [
             f"// SAFETY: `{self.type_key}` is not `_type_mutable`: a shared instance is never",
             "// mutated, as C++ changes it only through copy-on-write.",
-            f"unsafe impl tvm_ffi::object::ThreadSafeObject for {self.obj_struct} {{}}",
+            f"unsafe impl tvm_ffi::object::ImmutableObject for {self.obj_struct} {{}}",
         ]
 
     def _shallow_copy_lines(self) -> list[str] | None:
@@ -708,7 +708,7 @@ class _ObjectRenderer:
             if shallow_copy:
                 sections.append(shallow_copy)
                 sections.append(self._unsafe_init_lines())
-        thread_safe = self._thread_safe_lines()
+        thread_safe = self._immutable_object_lines()
         if thread_safe:
             sections.append(thread_safe)
         upcasts = self._upcast_lines()
