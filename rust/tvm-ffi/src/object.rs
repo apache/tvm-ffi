@@ -160,7 +160,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 ///
 /// An owned reference converts into an owned `T`, and a borrowed one borrows
 /// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
-/// `Vec` but borrows from a `&Vec`. [`impl_object_upcast!`](crate::impl_object_upcast)
+/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast)
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes
@@ -334,7 +334,7 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
 /// borrows in place, and [`downcast`](Self::downcast) takes the reference, as
 /// std's `dyn Any::downcast_ref` and `Box<dyn Any>::downcast` do. Upcasts are
 /// `From`/`Into`, which `#[derive(ObjectRef)]` and
-/// [`impl_object_upcast!`](crate::impl_object_upcast) generate.
+/// [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast) generate.
 pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
     /// Return whether two object references point to the same allocation.
     #[inline]

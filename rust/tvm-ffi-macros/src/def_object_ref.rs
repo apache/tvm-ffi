@@ -103,7 +103,7 @@ fn expand(args: &DefObjectRefArgs) -> syn::Result<TokenStream2> {
     let parent_upcast = if parent_is_root {
         None
     } else {
-        Some(quote!(#tvm_ffi::impl_object_upcast!(#type_name => #parent_type);))
+        Some(quote!(#tvm_ffi::unsafe_impl_object_upcast!(#type_name => #parent_type);))
     };
     let doc = if attrs.iter().any(|a| a.path.is_ident("doc")) {
         None

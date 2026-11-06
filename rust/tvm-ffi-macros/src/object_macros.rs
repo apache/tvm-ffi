@@ -772,7 +772,7 @@ pub(crate) fn expand_object_ref(
             #tvm_ffi_crate::impl_arg_into_ref!(#struct_name);
             #tvm_ffi_crate::impl_into_arg_holder_default!(#struct_name);
             // Every object reference upcasts to the root `ObjectRef`.
-            #tvm_ffi_crate::impl_object_upcast!(#struct_name => #tvm_ffi_crate::object::ObjectRef);
+            #tvm_ffi_crate::unsafe_impl_object_upcast!(#struct_name => #tvm_ffi_crate::object::ObjectRef);
         });
     }
     expanded

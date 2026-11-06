@@ -69,11 +69,13 @@ macro_rules! cached_global_func {
 ///
 /// # Safety
 ///
-/// Generated bindings must ensure that `target` is a registered base of
-/// `source` and that every `source` satisfies the target reference invariants.
-/// An incorrect declaration makes the generated safe conversion unsound.
+/// The declaration is trusted, as an `unsafe impl` is, hence the `unsafe_`
+/// name: `target` must be a registered base of `source`, and every `source`
+/// must satisfy the target reference invariants. An incorrect declaration makes
+/// the generated safe conversions unsound. The Rust stub generator writes these
+/// from the C++ type hierarchy.
 #[macro_export]
-macro_rules! impl_object_upcast {
+macro_rules! unsafe_impl_object_upcast {
     ($($source:ty => $target:ty),+ $(,)?) => {
         $(
             impl ::std::convert::From<$source> for $target {

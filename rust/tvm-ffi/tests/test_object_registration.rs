@@ -58,7 +58,7 @@ struct RegisteredLeaf {
     data: ObjectArc<RegisteredLeafObj>,
 }
 
-tvm_ffi::impl_object_upcast!(RegisteredLeaf => RegisteredBase);
+tvm_ffi::unsafe_impl_object_upcast!(RegisteredLeaf => RegisteredBase);
 
 fn registered_index(type_key: &str) -> i32 {
     let key = unsafe { TVMFFIByteArray::from_str(type_key) };

@@ -279,9 +279,9 @@ pub use tvm_ffi_macros::rs_object;
 ///   before it go on the struct.
 /// * `ParentType` - The reference to the parent's object, `ObjectRef` for a
 ///   type under `ffi.Object`. `TypeName` converts into it by
-///   `impl_object_upcast!`, and `&TypeName` borrows as `&ParentType` through
+///   `unsafe_impl_object_upcast!`, and `&TypeName` borrows as `&ParentType` through
 ///   `AsRef`; a conversion into a further ancestor takes its own
-///   `impl_object_upcast!`.
+///   `unsafe_impl_object_upcast!`.
 /// * `ObjectName` - The object type.
 /// * `crate = path` - Optional, after `ObjectName`: where the generated code
 ///   finds tvm-ffi, as for [`rs_object`](macro@rs_object).

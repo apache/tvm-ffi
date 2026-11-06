@@ -274,7 +274,7 @@ def test_check_tokens_ignores_spelling() -> None:
         "#[derive(tvm_ffi::derive::Object)]",
         "pub struct AddObj { base: ExprObj, pub a: i64, pub b: i64 }",
         "const _: () = assert!(::core::mem::size_of::<AddObj>() == 40);",
-        "tvm_ffi::impl_object_upcast!(Add => super::super::ir::Expr);",
+        "tvm_ffi::unsafe_impl_object_upcast!(Add => super::super::ir::Expr);",
     ]
     respelled = [
         "use crate::ir::Expr;",
@@ -285,7 +285,7 @@ def test_check_tokens_ignores_spelling() -> None:
         "    pub b: i64,",
         "}",
         "const _: () = assert!(core::mem::size_of::<AddObj>() == 40);",
-        "impl_object_upcast!(Add => Expr);",
+        "unsafe_impl_object_upcast!(Add => Expr);",
     ]
     assert check_tokens(generated) == check_tokens(respelled)
     for drift in [("a: i64", "a: i32"), ("40", "48"), ("ExprObj,", "StmtObj,"), ("Expr)", "Stmt)")]:
@@ -456,7 +456,7 @@ def test_render_derived_object_same_module() -> None:
     assert "#[type_final]\npub struct AddObj {\n    base: ExprObj,\n}" in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
     assert "pub fn a(&self) -> Result<Expr> {" in text
-    assert text.endswith("tvm_ffi::impl_object_upcast!(Add => BaseExpr, Add => Expr);")
+    assert text.endswith("tvm_ffi::unsafe_impl_object_upcast!(Add => BaseExpr, Add => Expr);")
     # Same-module names are local items: nothing to `use`.
     assert not any(path.startswith("demo") for path in _uses(imports))
 
@@ -466,7 +466,7 @@ def test_render_derived_object_cross_module() -> None:
     info = _info("tirx.Add", parent="ir.Expr", ancestors=["ffi.Object", "ir.Expr"])
     text, imports = _render(info)
     assert "    base: ExprObj," in text
-    assert text.endswith("tvm_ffi::impl_object_upcast!(Add => Expr);")
+    assert text.endswith("tvm_ffi::unsafe_impl_object_upcast!(Add => Expr);")
     assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
 
 
@@ -485,7 +485,7 @@ def test_render_object_under_builtin_parent() -> None:
     assert "tvm_ffi::Object" in _uses(imports)
     # No Deref, upcast or crate import for the stand-ins.
     assert "impl Deref for ColorObj" not in text
-    assert "impl_object_upcast" not in text
+    assert "unsafe_impl_object_upcast" not in text
     assert not any("Enum" in path for path in _uses(imports))
     # A child of `ffi.Object` embeds the crate's header.
     text, imports = _render(_info("demo.Root"))
@@ -636,7 +636,7 @@ impl IterVarObj {{
     }}
 }}
 
-tvm_ffi::impl_object_upcast!(IterVar => PrimExprConvertible);"""
+tvm_ffi::unsafe_impl_object_upcast!(IterVar => PrimExprConvertible);"""
 
 
 def test_render_iter_var_golden() -> None:
@@ -848,7 +848,7 @@ impl Add {
     }
 }
 
-tvm_ffi::impl_object_upcast!(Add => Expr, Add => PrimExpr);"""
+tvm_ffi::unsafe_impl_object_upcast!(Add => Expr, Add => PrimExpr);"""
 
 
 def test_render_complete_expr_golden() -> None:
@@ -1227,7 +1227,7 @@ def test_upcast_directive_adds_typed_views() -> None:
     RUST.add_directive(imports, "upcast", "demo.Leaf -> Other", 2)
     text, imports = _render(info, imports)
     assert text.endswith(
-        "tvm_ffi::impl_object_upcast!(Leaf => Base, Leaf => LeafView, Leaf => Other);"
+        "tvm_ffi::unsafe_impl_object_upcast!(Leaf => Base, Leaf => LeafView, Leaf => Other);"
     )
     assert "crate::typed::LeafView" in _uses(imports)
     assert "fn new(" not in text
@@ -1398,7 +1398,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "}"
     ) in dd
     assert dd.endswith(
-        "tvm_ffi::impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
+        "tvm_ffi::unsafe_impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     )
     assert {"tvm_ffi::String", "tvm_ffi::ShallowCopy"} <= _uses(imports)
@@ -1465,7 +1465,7 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
     assert "    base: TestCxxClassDerivedObj,\n    pub v_str: String," in text
     assert (
-        "tvm_ffi::impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
+        "tvm_ffi::unsafe_impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     ) in text
     # Builtin ancestors are mirrored once, in the import section; enum fixtures embed the last one.
@@ -1687,7 +1687,7 @@ def test_blocks_are_named_by_the_module_of_their_file(
     text = nested.read_text(encoding="utf-8")
     assert "use crate::TestCxxClassBase;\nuse crate::TestCxxClassBaseObj;\n" in text
     assert "    base: TestCxxClassBaseObj," in text
-    assert "tvm_ffi::impl_object_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
+    assert "tvm_ffi::unsafe_impl_object_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
     assert "super::" not in text
     # Moving the parent's block moves the path, not the type key.
     lib.write_text("", encoding="utf-8")
@@ -1710,7 +1710,7 @@ def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
     text = "\n".join(block.lines[1:-1])
     assert "    base: ExprObj," in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
-    assert text.endswith("tvm_ffi::impl_object_upcast!(Add => Expr);")
+    assert text.endswith("tvm_ffi::unsafe_impl_object_upcast!(Add => Expr);")
     assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
     assert not any(path.startswith("super::") for path in _uses(imports))
 
@@ -1810,7 +1810,7 @@ def test_parent_with_the_objects_own_name_is_spelled_in_full() -> None:
     parent = "crate::demo::t::Frame"
     assert f"    base: {parent}Obj," in text
     assert f"    type Target = {parent}Obj;" in text
-    assert text.endswith(f"tvm_ffi::impl_object_upcast!(Frame => {parent});")
+    assert text.endswith(f"tvm_ffi::unsafe_impl_object_upcast!(Frame => {parent});")
     assert not any(path.startswith(f"{parent}") for path in _uses(imports))
 
 
@@ -1849,7 +1849,7 @@ def test_ty_map_target_in_the_files_own_module_is_not_imported() -> None:
     assert "crate::ir::Op" not in _uses(imports)
     text, imports = render(_info("ir.Special", parent="ir.Op", ancestors=["ffi.Object", "ir.Op"]))
     assert "    base: OpObj," in text
-    assert text.endswith("tvm_ffi::impl_object_upcast!(Special => Op);")
+    assert text.endswith("tvm_ffi::unsafe_impl_object_upcast!(Special => Op);")
     assert not any(path.startswith("crate::") for path in _uses(imports))
     # Elsewhere the target is imported as written.
     text, imports = render(_info("tirx.Call", (_field("op", "ir.Op"),)))

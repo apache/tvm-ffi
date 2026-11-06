@@ -399,7 +399,7 @@ and any other field from anything that converts into it, as the ``new`` of a typ
 bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object, and
 the object converts into it. The reference also converts into ``ParentType``, the
 reference to its parent, and every reference converts into ``ObjectRef``;
-``impl_object_upcast!`` converts it into the references to further ancestors.
+``unsafe_impl_object_upcast!`` converts it into the references to further ancestors.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads
