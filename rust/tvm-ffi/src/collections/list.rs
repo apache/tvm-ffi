@@ -74,6 +74,26 @@ pub struct ListObj {
 }
 
 impl ListObj {
+    /// The number of elements.
+    #[inline]
+    pub fn len(&self) -> usize {
+        // SAFETY: a read of the length, which no call mutates concurrently.
+        unsafe { *self.size.get() as usize }
+    }
+
+    /// Whether the list has no elements.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The number of elements the buffer holds before it is reallocated.
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        // SAFETY: as for `len`.
+        unsafe { *self.capacity.get() as usize }
+    }
+
     /// Cell `index` of the buffer; the caller keeps `index` below `capacity`.
     #[inline]
     unsafe fn cell(this: *mut ListObj, index: usize) -> *mut TVMFFIAny {

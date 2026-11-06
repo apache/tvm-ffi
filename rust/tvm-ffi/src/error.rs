@@ -107,6 +107,7 @@ pub struct ErrorObj {
 /// assert_eq!(error.kind(), VALUE_ERROR);
 /// assert_eq!(error.message(), "not a digit: 'x'");
 /// ```
+#[repr(C)]
 #[derive(Clone, ObjectRef)]
 #[custom_debug]
 pub struct Error {

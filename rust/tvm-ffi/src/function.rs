@@ -455,6 +455,12 @@ impl Function {
     /// `handle` must be a valid pointer (or null) that is compatible with
     /// `safe_call` and `deleter`. The caller must ensure the handle outlives
     /// the returned `Function` (or that `deleter` properly frees it).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot allocate the function. The
+    /// function then does not take `handle`: `deleter` is not called, and the
+    /// caller still owns `handle`.
     pub unsafe fn from_extern_c(
         handle: *mut std::ffi::c_void,
         safe_call: TVMFFISafeCallType,

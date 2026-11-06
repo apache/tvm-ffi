@@ -151,6 +151,10 @@ impl Tensor {
         );
 
         unsafe {
+            // An empty tensor may have a null data pointer, which a slice cannot.
+            if self.numel() == 0 {
+                return Ok(&[]);
+            }
             Ok(std::slice::from_raw_parts(
                 self.data.dltensor.data as *const T,
                 self.numel(),
@@ -195,6 +199,9 @@ impl Tensor {
             "Tensor is not contiguous"
         );
         unsafe {
+            if self.numel() == 0 {
+                return Ok(&mut []);
+            }
             Ok(std::slice::from_raw_parts_mut(
                 self.data.dltensor.data as *mut T,
                 self.numel(),
@@ -611,7 +618,9 @@ impl<'a> TryFrom<AnyView<'a>> for TensorView<'a> {
 }
 
 // A typed function argument. A closure `|t: TensorView| ..` is generic over
-// the view's lifetime, so the view cannot be kept past the call.
+// the view's lifetime, so the view cannot be kept past the call. Annotating the
+// parameter `TensorView<'static>` defeats that and must not be done; ruling it
+// out needs higher-ranked typed arguments.
 impl crate::type_traits::TypeSchema for TensorView<'_> {
     fn type_schema() -> String {
         crate::type_traits::type_schema("DLTensor*", &[])

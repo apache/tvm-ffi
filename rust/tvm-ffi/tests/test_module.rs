@@ -120,6 +120,8 @@ fn test_module_accessors_and_imports() {
         .unwrap()
         .is_none());
     // The `_with_imports` lookups find it there.
+    assert!(module.get_function(SCHEMA_ID_INT).is_err());
+    assert!(module.get_function_with_imports(SCHEMA_ID_INT).is_ok());
     assert!(module
         .implements_function_with_imports(SCHEMA_ID_INT)
         .unwrap());
