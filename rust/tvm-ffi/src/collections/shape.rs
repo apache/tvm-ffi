@@ -75,7 +75,7 @@ impl Shape {
     }
 
     /// Fill the strides from the shape
-    pub fn fill_strides_from_shape<T>(shape: T, strides: &mut [i64])
+    pub(crate) fn fill_strides_from_shape<T>(shape: T, strides: &mut [i64])
     where
         T: AsRef<[i64]>,
     {
