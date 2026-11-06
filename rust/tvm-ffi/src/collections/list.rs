@@ -38,6 +38,7 @@
 //! `Any` conversions follow C++ `SeqTypeTraitsBase` (seq_base.h): an `ffi.List`
 //! whose elements all match `T` is shared; an `ffi.Array`, or a list whose
 //! elements need converting, is copied into a new list.
+use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ptr;
@@ -60,26 +61,50 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 #[type_index(TypeIndex::kTVMFFIList)]
 pub struct ListObj {
     pub(crate) object: Object,
+    // `List` mutates these through `&self` (`push`, `set`, growth), so they are
+    // `UnsafeCell`s: a `&ListObj` borrowed by `downcast_ref` stays sound while
+    // the list changes. `UnsafeCell` is `repr(transparent)`, so the layout is
+    // C++ `ListObj`'s.
     /// Pointer to the start of the element buffer.
-    pub data: *mut core::ffi::c_void,
-    pub size: i64,
-    pub capacity: i64,
+    data: UnsafeCell<*mut core::ffi::c_void>,
+    size: UnsafeCell<i64>,
+    capacity: UnsafeCell<i64>,
     /// Deleter for the element buffer.
     pub data_deleter: Option<unsafe extern "C" fn(*mut core::ffi::c_void)>,
 }
 
 impl ListObj {
+    /// The number of elements.
+    #[inline]
+    pub fn len(&self) -> usize {
+        // SAFETY: a read of the length, which no call mutates concurrently.
+        unsafe { *self.size.get() as usize }
+    }
+
+    /// Whether the list has no elements.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The number of elements the buffer holds before it is reallocated.
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        // SAFETY: as for `len`.
+        unsafe { *self.capacity.get() as usize }
+    }
+
     /// Cell `index` of the buffer; the caller keeps `index` below `capacity`.
     #[inline]
     unsafe fn cell(this: *mut ListObj, index: usize) -> *mut TVMFFIAny {
-        ((*this).data as *mut TVMFFIAny).add(index)
+        ((*(*this).data.get()) as *mut TVMFFIAny).add(index)
     }
 
     /// Drops the elements from the back down to `len`, like C++ `ShrinkBy`.
     unsafe fn truncate(this: *mut ListObj, len: usize) {
-        while (*this).size as usize > len {
-            (*this).size -= 1;
-            drop(take_cell(Self::cell(this, (*this).size as usize)));
+        while (*(*this).size.get()) as usize > len {
+            (*(*this).size.get()) -= 1;
+            drop(take_cell(Self::cell(this, (*(*this).size.get()) as usize)));
         }
     }
 }
@@ -153,6 +178,14 @@ impl<T> Clone for List<T> {
     }
 }
 
+/// A list upcasts to the root [`ObjectRef`](crate::object::ObjectRef).
+impl<T: ContainerElement> From<List<T>> for crate::object::ObjectRef {
+    #[inline]
+    fn from(value: List<T>) -> Self {
+        crate::object::into_root_object_ref(value)
+    }
+}
+
 unsafe impl<T> ObjectRefCore for List<T> {
     type ContainerType = ListObj;
 
@@ -180,10 +213,13 @@ unsafe impl<T> ObjectRefCore for List<T> {
 /// mutated while the slice is alive.
 pub(crate) unsafe fn seq_cells(data: &TVMFFIAny) -> &[TVMFFIAny] {
     let seq = &*(data.data_union.v_obj as *const ListObj);
-    if seq.size == 0 {
+    if *seq.size.get() == 0 {
         return &[];
     }
-    std::slice::from_raw_parts(seq.data as *const TVMFFIAny, seq.size as usize)
+    std::slice::from_raw_parts(
+        *seq.data.get() as *const TVMFFIAny,
+        *seq.size.get() as usize,
+    )
 }
 
 impl<T: ContainerElement> List<T> {
@@ -204,20 +240,22 @@ impl<T: ContainerElement> List<T> {
                 TypeIndex::kTVMFFIList as i32
             );
             let mut result = std::mem::ManuallyDrop::new(result);
-            Ok(Self::move_from_any_after_check(&mut *result.as_data_ptr()))
+            Ok(Self::move_from_any_after_check(
+                &mut *result.as_raw_ffi_any_mut(),
+            ))
         }
     }
 
     #[inline]
     fn obj(&self) -> *mut ListObj {
-        // SAFETY: `self.data` keeps the object alive for as long as the pointer is used.
-        unsafe { ObjectArc::as_raw(&self.data) as *mut ListObj }
+        ObjectArc::as_ptr(&self.data) as *mut ListObj
     }
 
     /// Returns the number of elements.
     #[inline]
     pub fn len(&self) -> usize {
-        self.data.size as usize
+        // SAFETY: a read of the length; nothing mutates it during the call.
+        unsafe { *self.data.size.get() as usize }
     }
 
     /// Returns `true` if the list contains no elements.
@@ -228,7 +266,7 @@ impl<T: ContainerElement> List<T> {
 
     /// Returns the number of elements the buffer holds before it is reallocated.
     pub fn capacity(&self) -> usize {
-        self.data.capacity as usize
+        unsafe { *self.data.capacity.get() as usize }
     }
 
     /// Returns the element at `index`.
@@ -236,7 +274,7 @@ impl<T: ContainerElement> List<T> {
     pub fn get(&self, index: usize) -> Result<T> {
         let obj = self.obj();
         unsafe {
-            if index >= (*obj).size as usize {
+            if index >= (*(*obj).size.get()) as usize {
                 return index_error("get");
             }
             match T::container_try_cast_from_any_view(&*ListObj::cell(obj, index)) {
@@ -251,7 +289,7 @@ impl<T: ContainerElement> List<T> {
     pub fn set(&self, index: usize, value: T) -> Result<()> {
         let obj = self.obj();
         unsafe {
-            if index >= (*obj).size as usize {
+            if index >= (*(*obj).size.get()) as usize {
                 return index_error("set");
             }
             let cell = ListObj::cell(obj, index);
@@ -268,8 +306,8 @@ impl<T: ContainerElement> List<T> {
         self.reserve_for(1)?;
         let obj = self.obj();
         unsafe {
-            write_cell(ListObj::cell(obj, (*obj).size as usize), value);
-            (*obj).size += 1;
+            write_cell(ListObj::cell(obj, (*(*obj).size.get()) as usize), value);
+            (*(*obj).size.get()) += 1;
         }
         Ok(())
     }
@@ -286,7 +324,7 @@ impl<T: ContainerElement> List<T> {
             let cell = ListObj::cell(obj, index);
             ptr::copy(cell, cell.add(1), size - index);
             write_cell(cell, value);
-            (*obj).size += 1;
+            (*(*obj).size.get()) += 1;
         }
         Ok(())
     }
@@ -297,7 +335,7 @@ impl<T: ContainerElement> List<T> {
     pub fn remove(&self, index: usize) -> Result<T> {
         let obj = self.obj();
         unsafe {
-            let size = (*obj).size as usize;
+            let size = (*(*obj).size.get()) as usize;
             if index >= size {
                 return index_error("remove");
             }
@@ -318,7 +356,7 @@ impl<T: ContainerElement> List<T> {
             if index + 1 < size {
                 ptr::copy(cell.add(1), cell, size - index - 1);
             }
-            (*obj).size -= 1;
+            (*(*obj).size.get()) -= 1;
             Ok(value)
         }
     }
@@ -364,7 +402,7 @@ impl<T: ContainerElement> List<T> {
     pub fn remove_range(&self, start: usize, end: usize) -> Result<()> {
         let obj = self.obj();
         unsafe {
-            let size = (*obj).size as usize;
+            let size = (*(*obj).size.get()) as usize;
             if start > end || end > size {
                 return index_error("remove_range");
             }
@@ -402,7 +440,7 @@ impl<T: ContainerElement> List<T> {
             for (offset, item) in items.into_iter().enumerate() {
                 write_cell(cell.add(offset), item);
             }
-            (*obj).size += count as i64;
+            (*(*obj).size.get()) += count as i64;
         }
         Ok(())
     }
@@ -463,7 +501,7 @@ impl<T: ContainerElement> List<T> {
     pub fn reverse(&self) {
         let obj = self.obj();
         unsafe {
-            let size = (*obj).size as usize;
+            let size = (*(*obj).size.get()) as usize;
             if size > 1 {
                 std::slice::from_raw_parts_mut(ListObj::cell(obj, 0), size).reverse();
             }
@@ -491,7 +529,9 @@ impl<T> Debug for List<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let full_name = std::any::type_name::<T>();
         let short_name = full_name.split("::").last().unwrap_or(full_name);
-        write!(f, "List<{}>[{}]", short_name, self.data.size)
+        write!(f, "List<{}>[{}]", short_name, unsafe {
+            *self.data.size.get()
+        })
     }
 }
 
@@ -607,7 +647,7 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIList as i32;
-        data.data_union.v_obj = ObjectArc::as_raw(Self::data(src)) as *mut TVMFFIObject;
+        data.data_union.v_obj = ObjectArc::as_ptr(Self::data(src)) as *mut TVMFFIObject;
         data.small_str_len = 0;
     }
 
@@ -684,6 +724,15 @@ where
     #[inline(always)]
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
         crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
+    }
+}
+
+impl<'b, T: ContainerElement> TryFrom<&'b Any> for List<T> {
+    type Error = Error;
+
+    fn try_from(value: &'b Any) -> Result<Self> {
+        let temp: TryFromTemp<Self> = TryFromTemp::try_from(value)?;
+        Ok(TryFromTemp::into_value(temp))
     }
 }
 

@@ -58,10 +58,10 @@ impl RecordingVisitor {
         visitor: &mut StructuralVisitorView<'_, Self>,
     ) -> Result<Option<VisitInterrupt>> {
         let def_region_kind = visitor.def_region_kind();
-        let integer = value.try_as::<i64>();
+        let integer = value.downcast_ref::<i64>().copied();
         let label = match integer {
             Some(integer) => integer.to_string(),
-            None if value.try_as::<Array<i64>>().is_some() => "array".to_string(),
+            None if value.downcast_ref::<Array<i64>>().cloned().is_some() => "array".to_string(),
             None => "obj".to_string(),
         };
         // C++: visited.push_back(value_ref);
@@ -72,13 +72,13 @@ impl RecordingVisitor {
         // C++: if (value_ref.same_as(interrupt_on))
         //          return VisitInterrupt(String("stop"));
         if self.interrupt_on.is_some() && integer == self.interrupt_on {
-            return Ok(Some(VisitInterrupt::with(FfiString::from("stop"))));
+            return Ok(Some(VisitInterrupt::new(FfiString::from("stop"))));
         }
 
         // C++ analog: `TFuncObj::StructuralVisit` — visit "params"
         // (element 0) under a pattern definition region, then the "body"
         // (element 1) under the inherited state.
-        if let Some(array) = value.try_as::<Array<i64>>() {
+        if let Some(array) = value.downcast_ref::<Array<i64>>().cloned() {
             // C++: visitor->WithDefRegionKind(kTVMFFIDefRegionKindPattern,
             //          [&] { return visitor->VisitExpected(self->params); })
             let params = array.get(0).unwrap();
@@ -139,7 +139,12 @@ fn stops_on_interrupt_with_payload() {
         panic!("traversal unexpectedly completed");
     };
     assert_eq!(
-        interrupt.value.try_as::<FfiString>().unwrap().as_str(),
+        interrupt
+            .value
+            .downcast_ref::<FfiString>()
+            .cloned()
+            .unwrap()
+            .as_str(),
         "stop"
     );
     assert_eq!(visitor.visited, vec!["array", "10", "20"]);

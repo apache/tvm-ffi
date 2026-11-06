@@ -59,14 +59,31 @@ impl Module {
             .try_into()
     }
 
-    /// Get a function from the module by name.
+    /// Get a function from the module by name (C++ `Module::GetFunction`).
+    ///
+    /// Only this module is searched, not the modules it imports, as C++
+    /// `GetFunction(name)` and Python's default do.
     ///
     /// # Arguments
     /// * `name` - The name of the function to retrieve
     ///
     /// # Returns
     /// * `Result<Function>` - A `Function` instance on success
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the module has no function `name`, as Python's
+    /// `Module.get_function` raises.
     pub fn get_function<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
+        let name = crate::string::String::from(name);
+        crate::cached_global_func!("ffi.ModuleGetFunction")
+            .call_tuple_with_len::<3, _>((self, name, false))?
+            .try_into()
+    }
+
+    /// [`get_function`](Self::get_function), searching this module and then the modules it
+    /// imports, as C++ and Python do with `query_imports`.
+    pub fn get_function_with_imports<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
         let name = crate::string::String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunction")
             .call_tuple_with_len::<3, _>((self, name, true))?
@@ -75,24 +92,32 @@ impl Module {
 
     /// Check whether the module implements a function.
     ///
+    /// Only this module is searched, not the modules it imports.
+    ///
     /// # Arguments
     /// * `name` - The name of the function
-    /// * `query_imports` - Whether to also check the modules this module imports
     ///
     /// # Returns
     /// * `Result<bool>` - Whether the function exists
-    pub fn implements_function<Str: AsRef<str>>(
-        &self,
-        name: Str,
-        query_imports: bool,
-    ) -> Result<bool> {
+    pub fn implements_function<Str: AsRef<str>>(&self, name: Str) -> Result<bool> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleImplementsFunction")
-            .call_tuple_with_len::<3, _>((self, name, query_imports))?
+            .call_tuple_with_len::<3, _>((self, name, false))?
+            .try_into()
+    }
+
+    /// [`implements_function`](Self::implements_function), searching this module and then the modules it
+    /// imports, as C++ and Python do with `query_imports`.
+    pub fn implements_function_with_imports<Str: AsRef<str>>(&self, name: Str) -> Result<bool> {
+        let name = String::from(name);
+        crate::cached_global_func!("ffi.ModuleImplementsFunction")
+            .call_tuple_with_len::<3, _>((self, name, true))?
             .try_into()
     }
 
     /// Get the metadata of a function the module exports.
+    ///
+    /// Only this module is searched, not the modules it imports.
     ///
     /// The metadata is a JSON object whose `type_schema` entry is the
     /// function's type schema, as C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports
@@ -100,42 +125,58 @@ impl Module {
     ///
     /// # Arguments
     /// * `name` - The name of the function
-    /// * `query_imports` - Whether to also check the modules this module imports
     ///
     /// # Returns
     /// * `Result<Option<String>>` - The metadata as a JSON string, or `None`
     ///   if the function has no metadata
-    pub fn get_function_metadata<Str: AsRef<str>>(
+    pub fn get_function_metadata<Str: AsRef<str>>(&self, name: Str) -> Result<Option<String>> {
+        let name = String::from(name);
+        crate::cached_global_func!("ffi.ModuleGetFunctionMetadata")
+            .call_tuple_with_len::<3, _>((self, name, false))?
+            .try_into()
+    }
+
+    /// [`get_function_metadata`](Self::get_function_metadata), searching this module and then the modules it
+    /// imports, as C++ and Python do with `query_imports`.
+    pub fn get_function_metadata_with_imports<Str: AsRef<str>>(
         &self,
         name: Str,
-        query_imports: bool,
     ) -> Result<Option<String>> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunctionMetadata")
-            .call_tuple_with_len::<3, _>((self, name, query_imports))?
+            .call_tuple_with_len::<3, _>((self, name, true))?
             .try_into()
     }
 
     /// Get the doc string of a function the module exports.
+    ///
+    /// Only this module is searched, not the modules it imports.
     ///
     /// The doc string is the one C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`
     /// exports.
     ///
     /// # Arguments
     /// * `name` - The name of the function
-    /// * `query_imports` - Whether to also check the modules this module imports
     ///
     /// # Returns
     /// * `Result<Option<String>>` - The doc string, or `None` if the function
     ///   has none
-    pub fn get_function_doc<Str: AsRef<str>>(
+    pub fn get_function_doc<Str: AsRef<str>>(&self, name: Str) -> Result<Option<String>> {
+        let name = String::from(name);
+        crate::cached_global_func!("ffi.ModuleGetFunctionDoc")
+            .call_tuple_with_len::<3, _>((self, name, false))?
+            .try_into()
+    }
+
+    /// [`get_function_doc`](Self::get_function_doc), searching this module and then the modules it
+    /// imports, as C++ and Python do with `query_imports`.
+    pub fn get_function_doc_with_imports<Str: AsRef<str>>(
         &self,
         name: Str,
-        query_imports: bool,
     ) -> Result<Option<String>> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunctionDoc")
-            .call_tuple_with_len::<3, _>((self, name, query_imports))?
+            .call_tuple_with_len::<3, _>((self, name, true))?
             .try_into()
     }
 }

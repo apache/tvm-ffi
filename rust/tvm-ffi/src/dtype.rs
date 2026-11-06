@@ -25,11 +25,16 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFIDataTypeFromString, TVMFFIDa
 
 /// Extra methods for DLDataType
 pub trait DLDataTypeExt: Sized {
-    /// Convert the DLDataType to a string representation
+    /// Return the runtime's name for the data type, such as `"int32"`, `"float64"`
+    /// or `"int8x4"`, as C++ `DLDataTypeToString` and Python `str(dtype)` give it.
     ///
-    /// # Returns
-    /// A string representation of the data type (e.g., "int32", "float64", "bool")
-    fn to_string(&self) -> crate::string::String;
+    /// ```
+    /// use tvm_ffi::{DLDataType, DLDataTypeExt};
+    /// let dtype = DLDataType::try_from_str("float16")?;
+    /// assert_eq!(dtype.to_string(), "float16");
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    fn to_string(&self) -> std::string::String;
 
     /// Parse a string representation into a DLDataType
     ///
@@ -50,13 +55,14 @@ pub trait DLDataTypeExt: Sized {
 }
 
 impl DLDataTypeExt for DLDataType {
-    fn to_string(&self) -> crate::string::String {
+    fn to_string(&self) -> std::string::String {
         unsafe {
             let mut ffi_any = TVMFFIAny::new();
             crate::check_safe_call!(TVMFFIDataTypeToString(&*self, &mut ffi_any)).unwrap();
-            crate::any::Any::from_raw_ffi_any(ffi_any)
+            let name: crate::string::String = crate::any::Any::from_raw_ffi_any(ffi_any)
                 .try_into()
-                .unwrap()
+                .unwrap();
+            name.as_str().to_owned()
         }
     }
 

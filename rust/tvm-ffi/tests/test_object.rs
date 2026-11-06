@@ -121,7 +121,7 @@ fn test_object_arc_with_extra_items() {
     assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     unsafe {
-        let raw = ObjectArc::as_raw_mut(&mut obj_arc);
+        let raw = ObjectArc::as_mut_ptr(&mut obj_arc);
         // layout check of extra items
         assert_eq!(TestIntObj::extra_items_count(&obj_arc), 10);
         assert_eq!(TestIntObj::extra_items(&obj_arc).len(), 10);
@@ -167,7 +167,7 @@ fn release_outlived_by_weak_ref<T: ObjectCore>(
     use std::sync::atomic::fence;
     use tvm_ffi_sys::COMBINED_REF_COUNT_WEAK_ONE as WEAK_ONE;
     unsafe {
-        let header = ObjectArc::as_raw_mut(&mut obj_arc) as *mut TVMFFIObject;
+        let header = ObjectArc::as_mut_ptr(&mut obj_arc) as *mut TVMFFIObject;
         (*header)
             .combined_ref_count
             .fetch_add(WEAK_ONE, Ordering::Relaxed);

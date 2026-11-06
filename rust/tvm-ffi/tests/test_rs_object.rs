@@ -18,6 +18,7 @@
  */
 use tvm_ffi::derive::Object;
 use tvm_ffi::object::{ObjectArc, ObjectRef, ObjectRefCore};
+use tvm_ffi::reflection::TypeAttrColumn;
 use tvm_ffi::reflection::{drop_if_defined, FieldFlags, ObjectDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFITypeInfo};
@@ -322,7 +323,7 @@ fn test_reflection_registers_methods() {
     let method = unsafe { &*info.methods };
     assert_eq!(method.name.as_str(), "with_label");
     assert_eq!(method.doc.as_str(), "The point with another label.");
-    let with_label = Function::from_type_key_method("testing.rust.RsPoint", "with_label").unwrap();
+    let with_label = tvm_ffi::reflection::get_method("testing.rust.RsPoint", "with_label").unwrap();
     let relabeled = with_label
         .call_tuple((point(4, "a"), tvm_ffi::String::from("b")))
         .unwrap();
@@ -400,7 +401,11 @@ fn test_cpp_structural_equality_and_deep_copy_see_the_fields() {
 #[test]
 fn test_shallow_copy_and_finality_are_type_attributes() {
     register_types();
-    let attr = |type_index, name| get_type_attr(type_index, name).unwrap();
+    let attr = |type_index, name| {
+        TypeAttrColumn::new(name)
+            .and_then(|column| column.get(type_index))
+            .unwrap()
+    };
     let is_final = |type_index| bool::try_from(attr(type_index, "__ffi_type_final__")).unwrap();
     assert!(!is_final(RsPointObj::type_index()));
     assert!(is_final(RsPoint3Obj::type_index()));
@@ -415,7 +420,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
 
     // C++ generates `__ffi_init__` from the fields as a type attribute, not a method.
     assert!(Function::try_from(attr(RsPointObj::type_index(), "__ffi_init__")).is_ok());
-    assert!(Function::from_type_key_method("testing.rust.RsPoint", "__ffi_init__").is_err());
+    assert!(tvm_ffi::reflection::get_method("testing.rust.RsPoint", "__ffi_init__").is_err());
 }
 
 #[test]
@@ -450,7 +455,12 @@ fn test_crate_path_names_a_reexported_tvm_ffi() {
 }
 
 fn type_attr_function(type_index: i32, name: &str) -> Function {
-    Function::try_from(get_type_attr(type_index, name).unwrap()).unwrap()
+    Function::try_from(
+        TypeAttrColumn::new(name)
+            .and_then(|column| column.get(type_index))
+            .unwrap(),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -509,9 +519,11 @@ fn test_init_constructs_the_type_from_its_fields() {
     assert_eq!(tags_count(), 1);
 
     // A type's own `__ffi_init__` is a method, which C++ generates none over.
-    assert!(get_type_attr(RsOwnInitObj::type_index(), "__ffi_init__").is_none());
+    assert!(TypeAttrColumn::new("__ffi_init__")
+        .and_then(|column| column.get(RsOwnInitObj::type_index()))
+        .is_none());
     let own_init =
-        Function::from_type_key_method("testing.rust.RsOwnInit", "__ffi_init__").unwrap();
+        tvm_ffi::reflection::get_method("testing.rust.RsOwnInit", "__ffi_init__").unwrap();
     let own = RsOwnInit::try_from(own_init.call_tuple((3_i64,)).unwrap()).unwrap();
     assert_eq!(own.v, 6);
 }

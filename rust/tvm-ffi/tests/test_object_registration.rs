@@ -58,7 +58,7 @@ struct RegisteredLeaf {
     data: ObjectArc<RegisteredLeafObj>,
 }
 
-tvm_ffi::impl_object_upcast!(RegisteredLeaf => RegisteredBase);
+tvm_ffi::unsafe_impl_object_upcast!(RegisteredLeaf => RegisteredBase);
 
 fn registered_index(type_key: &str) -> i32 {
     let key = unsafe { TVMFFIByteArray::from_str(type_key) };
@@ -105,8 +105,8 @@ fn test_registered_object_types_round_trip_through_any() {
     assert_eq!(any.type_index(), RegisteredLeafObj::type_index());
     let base = RegisteredBase::try_from(any).unwrap();
     assert_eq!(base.data.value, 7);
-    let obj: ObjectRef = base.try_cast().unwrap();
-    let leaf: RegisteredLeaf = obj.try_cast().unwrap();
+    let obj: ObjectRef = base.into();
+    let leaf: RegisteredLeaf = obj.downcast().unwrap();
     assert_eq!(leaf.data.extra, 8);
 }
 

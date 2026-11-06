@@ -227,7 +227,7 @@ impl<'a, 'b, T: crate::type_traits::ContainerElement> MatchPattern<&'b mut Capab
     fn try_match(
         source: &'b mut CapabilitySource<'a>,
     ) -> Result<Matched<Self, Self::Recovery>, ()> {
-        match source.0.take().unwrap().try_cast::<T>() {
+        match source.0.take().unwrap().downcast::<T>() {
             Ok(value) => {
                 if unsafe { T::container_match_constraints(value.as_any_view().as_raw_ffi_any()) } {
                     Ok(Matched {

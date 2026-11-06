@@ -17,6 +17,7 @@
  * under the License.
  */
 use tvm_ffi::derive::{Object, ObjectRef};
+use tvm_ffi::reflection::TypeAttrColumn;
 use tvm_ffi::reflection::{FieldFlags, ObjectDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{
@@ -99,7 +100,7 @@ struct Point3 {
     data: ObjectArc<Point3Obj>,
 }
 
-tvm_ffi::impl_object_upcast!(Point3 => Point);
+tvm_ffi::unsafe_impl_object_upcast!(Point3 => Point);
 
 fn point_obj(x: i64, y: f64, label: &str) -> PointObj {
     PointObj {
@@ -280,19 +281,20 @@ fn test_methods_are_registered_with_the_type() {
 #[test]
 fn test_methods_are_called_through_the_type_table() {
     register_types();
-    let norm1 = Function::from_type_key_method("testing.rust.ReflectedPoint", "norm1").unwrap();
+    let norm1 = tvm_ffi::reflection::get_method("testing.rust.ReflectedPoint", "norm1").unwrap();
     let norm = f64::try_from(norm1.call_tuple((point(3, -4.5, "p"),)).unwrap()).unwrap();
     assert_eq!(norm, 7.5);
     // An object of a subtype is an object of the type.
     let norm = f64::try_from(norm1.call_tuple((point3(2, 9),)).unwrap()).unwrap();
     assert_eq!(norm, 2.5);
-    let shifted = Function::from_type_method(PointObj::type_index(), "shifted").unwrap();
+    let shifted =
+        tvm_ffi::reflection::get_method_by_index(PointObj::type_index(), "shifted").unwrap();
     let moved = Point::try_from(shifted.call_tuple((point(3, 1.0, "p"), 4i64)).unwrap()).unwrap();
     assert_eq!(
         (moved.data.x, moved.data.y, moved.data.label.as_str()),
         (7, 1.0, "p")
     );
-    let origin = Function::from_type_key_method("testing.rust.ReflectedPoint", "origin").unwrap();
+    let origin = tvm_ffi::reflection::get_method("testing.rust.ReflectedPoint", "origin").unwrap();
     let origin = Point::try_from(origin.call_tuple(()).unwrap()).unwrap();
     assert_eq!((origin.data.x, origin.data.label.as_str()), (0, "origin"));
     // A wrong argument is a type error, not a panic.
@@ -332,11 +334,13 @@ fn test_types_with_only_methods_register_their_reflection() {
     assert_eq!(info.num_fields, 0);
     assert!(!info.metadata.is_null());
     assert_eq!(methods(info).len(), 1);
-    assert!(
-        bool::try_from(get_type_attr(TallyObj::type_index(), "__ffi_type_final__").unwrap())
+    assert!(bool::try_from(
+        TypeAttrColumn::new("__ffi_type_final__")
+            .and_then(|column| column.get(TallyObj::type_index()))
             .unwrap()
-    );
-    let count = Function::from_type_method(TallyObj::type_index(), "count").unwrap();
+    )
+    .unwrap());
+    let count = tvm_ffi::reflection::get_method_by_index(TallyObj::type_index(), "count").unwrap();
     let tally = Tally {
         data: ObjectArc::new(TallyObj {
             base: Object::new(),
@@ -362,7 +366,7 @@ fn test_reflected_fields_read_and_write_through_the_c_abi() {
     let y = &fields(type_info::<PointObj>())[1];
     let setter: TVMFFIFieldSetter = unsafe { std::mem::transmute(y.setter) };
     let field = unsafe {
-        ObjectArc::as_raw(&p.data)
+        ObjectArc::as_ptr(&p.data)
             .cast::<u8>()
             .add(y.offset as usize)
             .cast_mut()
@@ -444,9 +448,12 @@ fn test_repr_and_deep_copy_see_reflected_fields() {
 fn test_shallow_copy_and_finality_are_type_attributes() {
     register_types();
     let original = point(1, 2.0, "p");
-    let shallow_copy =
-        Function::try_from(get_type_attr(PointObj::type_index(), "__ffi_shallow_copy__").unwrap())
-            .unwrap();
+    let shallow_copy = Function::try_from(
+        TypeAttrColumn::new("__ffi_shallow_copy__")
+            .and_then(|column| column.get(PointObj::type_index()))
+            .unwrap(),
+    )
+    .unwrap();
     let copy = Point::try_from(shallow_copy.call_tuple((original.clone(),)).unwrap()).unwrap();
     assert!(!copy.same_as(&original));
     assert_eq!(
@@ -469,7 +476,12 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
     assert_eq!(error.kind(), TYPE_ERROR);
 
     let is_final = |type_index| {
-        bool::try_from(get_type_attr(type_index, "__ffi_type_final__").unwrap()).unwrap()
+        bool::try_from(
+            TypeAttrColumn::new("__ffi_type_final__")
+                .and_then(|column| column.get(type_index))
+                .unwrap(),
+        )
+        .unwrap()
     };
     assert!(!is_final(PointObj::type_index()));
     assert!(is_final(Point3Obj::type_index()));
@@ -499,7 +511,9 @@ fn test_types_without_reflect_register_no_reflection() {
     let info = type_info::<CounterObj>();
     assert_eq!(info.num_fields, 0);
     assert!(info.metadata.is_null());
-    assert!(get_type_attr(CounterObj::type_index(), "__ffi_shallow_copy__").is_none());
+    assert!(TypeAttrColumn::new("__ffi_shallow_copy__")
+        .and_then(|column| column.get(CounterObj::type_index()))
+        .is_none());
 }
 
 // The derives name every item by path, so they need nothing in scope.

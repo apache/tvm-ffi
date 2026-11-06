@@ -659,7 +659,7 @@ pub(crate) fn expand_object_ref(
             ) {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_raw(
+                let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_ptr(
                     &src.#data_id
                 );
                 let object_ptr =
@@ -750,12 +750,29 @@ pub(crate) fn expand_object_ref(
             }
         }
     };
+    // The runtime type key and object address, so `Result<_, Self>` from
+    // `downcast` can be unwrapped. `#[custom_debug]` keeps a hand-written one.
+    let custom_debug = derive_input
+        .attrs
+        .iter()
+        .any(|attr| attr.path.is_ident("custom_debug"));
+    if !custom_debug {
+        expanded.extend(quote! {
+        impl ::core::fmt::Debug for #struct_name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    #tvm_ffi_crate::object::fmt_object_ref(self, f)
+                }
+            }
+        });
+    }
     // skip ObjectRef since it can create circular dependency with any.rs
     if struct_name != "ObjectRef" {
         expanded.extend(quote! {
             #tvm_ffi_crate::impl_try_from_any!(#struct_name);
             #tvm_ffi_crate::impl_arg_into_ref!(#struct_name);
             #tvm_ffi_crate::impl_into_arg_holder_default!(#struct_name);
+            // Every object reference upcasts to the root `ObjectRef`.
+            #tvm_ffi_crate::unsafe_impl_object_upcast!(#struct_name => #tvm_ffi_crate::object::ObjectRef);
         });
     }
     expanded

@@ -18,10 +18,11 @@
  */
 use crate::derive::{Object, ObjectRef};
 use crate::object::{self, Object, ObjectArc, ObjectRefCore};
+use crate::type_traits::AnyCompatible;
 use std::ffi::c_void;
 use tvm_ffi_sys::TVMFFIBacktraceUpdateMode::kTVMFFIBacktraceUpdateModeAppend;
 use tvm_ffi_sys::{
-    TVMFFIByteArray, TVMFFIErrorCell, TVMFFIErrorCreateWithCauseAndExtraContext,
+    TVMFFIAny, TVMFFIByteArray, TVMFFIErrorCell, TVMFFIErrorCreateWithCauseAndExtraContext,
     TVMFFIErrorMoveFromRaised, TVMFFIErrorSetRaised, TVMFFIObjectHandle, TVMFFITypeIndex,
 };
 
@@ -29,11 +30,23 @@ use tvm_ffi_sys::{
 /// type that Python raises.
 ///
 /// Use the constants such as [`VALUE_ERROR`] and [`TYPE_ERROR`], or
-/// `ErrorKind("MyError")` for a custom kind.
+/// [`ErrorKind::new("MyError")`](ErrorKind::new) for a custom kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorKind<'a>(&'a str);
 
 impl<'a> ErrorKind<'a> {
+    /// The kind named `name`, which Python raises as that exception type.
+    ///
+    /// ```
+    /// use tvm_ffi::{Error, ErrorKind};
+    /// const MY_ERROR: ErrorKind = ErrorKind::new("MyError");
+    /// let error = Error::new(MY_ERROR, "bad input", "");
+    /// assert_eq!(error.kind().as_str(), "MyError");
+    /// ```
+    pub const fn new(name: &'a str) -> Self {
+        Self(name)
+    }
+
     /// Get the name of the kind.
     ///
     /// # Returns
@@ -50,15 +63,15 @@ impl<'a> std::fmt::Display for ErrorKind<'a> {
     }
 }
 
-pub const VALUE_ERROR: ErrorKind = ErrorKind("ValueError");
-pub const TYPE_ERROR: ErrorKind = ErrorKind("TypeError");
-pub const RUNTIME_ERROR: ErrorKind = ErrorKind("RuntimeError");
-pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind("AttributeError");
-pub const KEY_ERROR: ErrorKind = ErrorKind("KeyError");
-pub const INDEX_ERROR: ErrorKind = ErrorKind("IndexError");
-pub const INTERNAL_ERROR: ErrorKind = ErrorKind("InternalError");
-pub const OVERFLOW_ERROR: ErrorKind = ErrorKind("OverflowError");
-pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind("ZeroDivisionError");
+pub const VALUE_ERROR: ErrorKind = ErrorKind::new("ValueError");
+pub const TYPE_ERROR: ErrorKind = ErrorKind::new("TypeError");
+pub const RUNTIME_ERROR: ErrorKind = ErrorKind::new("RuntimeError");
+pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind::new("AttributeError");
+pub const KEY_ERROR: ErrorKind = ErrorKind::new("KeyError");
+pub const INDEX_ERROR: ErrorKind = ErrorKind::new("IndexError");
+pub const INTERNAL_ERROR: ErrorKind = ErrorKind::new("InternalError");
+pub const OVERFLOW_ERROR: ErrorKind = ErrorKind::new("OverflowError");
+pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind::new("ZeroDivisionError");
 
 /// error object
 #[repr(C)]
@@ -94,7 +107,9 @@ pub struct ErrorObj {
 /// assert_eq!(error.kind(), VALUE_ERROR);
 /// assert_eq!(error.message(), "not a digit: 'x'");
 /// ```
+#[repr(C)]
 #[derive(Clone, ObjectRef)]
+#[custom_debug]
 pub struct Error {
     data: ObjectArc<ErrorObj>,
 }
@@ -103,6 +118,53 @@ pub struct Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl Error {
+    /// The `InternalError` for a panic caught at an FFI boundary, where unwinding
+    /// into the caller would abort the process. The message is the panic's, when it
+    /// is a string.
+    ///
+    /// ```
+    /// use tvm_ffi::{Error, INTERNAL_ERROR};
+    /// let payload = std::panic::catch_unwind(|| panic!("bad state")).unwrap_err();
+    /// let error = Error::from_panic(payload);
+    /// assert_eq!(error.kind(), INTERNAL_ERROR);
+    /// assert_eq!(error.message(), "panicked: bad state");
+    /// ```
+    pub fn from_panic(payload: Box<dyn std::any::Any + Send>) -> Self {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| {
+                payload
+                    .downcast_ref::<std::string::String>()
+                    .map(|s| s.as_str())
+            })
+            .unwrap_or("unknown payload");
+        Self::new(INTERNAL_ERROR, &format!("panicked: {message}"), "")
+    }
+
+    /// The `TypeError` for a reference that [`downcast`](crate::ObjectRefCore::downcast)
+    /// handed back because it is not a `B`, naming both types.
+    ///
+    /// ```
+    /// use tvm_ffi::{object::ObjectRef, Array, Error, ObjectRefCore, TYPE_ERROR};
+    /// let object: ObjectRef = Array::from_vec(vec![1_i64]).into();
+    /// let error = object.downcast::<Array<f64>>().map_err(Error::downcast_failed::<Array<f64>>);
+    /// assert_eq!(error.unwrap_err().kind(), TYPE_ERROR);
+    /// ```
+    pub fn downcast_failed<B: AnyCompatible>(
+        source: impl object::ObjectRefCore + AnyCompatible,
+    ) -> Self {
+        let mut cell = TVMFFIAny::new();
+        // SAFETY: `source` stays alive while its borrowed cell is inspected.
+        unsafe { AnyCompatible::copy_to_any_view(&source, &mut cell) };
+        let message = format!(
+            "Cannot convert from type `{}` to `{}`",
+            B::get_mismatch_type_info(&cell),
+            B::type_str()
+        );
+        Self::new(TYPE_ERROR, &message, "")
+    }
+
     /// Create an error.
     ///
     /// Prefer [`bail!`](crate::bail), which also records the source location.
@@ -150,10 +212,10 @@ impl Error {
                 &message_data,
                 &traceback_data,
                 cause_chain.map_or(std::ptr::null_mut(), |cause| {
-                    ObjectArc::as_raw(&cause.data) as TVMFFIObjectHandle
+                    ObjectArc::as_ptr(&cause.data) as TVMFFIObjectHandle
                 }),
                 extra_context.map_or(std::ptr::null_mut(), |context| {
-                    ObjectArc::as_raw(object::ObjectRef::data(context)) as TVMFFIObjectHandle
+                    ObjectArc::as_ptr(object::ObjectRef::data(context)) as TVMFFIObjectHandle
                 }),
                 &mut error_handle,
             );
@@ -194,7 +256,7 @@ impl Error {
     /// * `error` - The error to set as raised.
     pub fn set_raised(error: &Self) {
         unsafe {
-            TVMFFIErrorSetRaised(ObjectArc::as_raw(&error.data) as TVMFFIObjectHandle);
+            TVMFFIErrorSetRaised(ObjectArc::as_ptr(&error.data) as TVMFFIObjectHandle);
         }
     }
 
@@ -230,18 +292,14 @@ impl Error {
     /// # Returns
     ///
     /// The error that caused this one, or `None`.
-    pub fn cause_chain(&self) -> Option<Error> {
-        let handle = self.data.cell.cause_chain;
+    pub fn cause_chain(&self) -> Option<&Error> {
+        let handle = &self.data.cell.cause_chain;
         if handle.is_null() {
             return None;
         }
-        // The cell owns the handle; acquire a reference for the returned wrapper.
-        unsafe {
-            object::unsafe_::inc_ref(handle.cast());
-            Some(Self {
-                data: ObjectArc::from_raw(handle.cast()),
-            })
-        }
+        // SAFETY: the cell owns a non-null handle to an error object, and an
+        // `Error` is exactly that one object pointer.
+        Some(unsafe { &*(handle as *const _ as *const Error) })
     }
 
     /// Return the application-specific context, if present.
@@ -249,17 +307,14 @@ impl Error {
     /// # Returns
     ///
     /// The context object, or `None`.
-    pub fn extra_context(&self) -> Option<object::ObjectRef> {
-        let handle = self.data.cell.extra_context;
+    pub fn extra_context(&self) -> Option<&object::ObjectRef> {
+        let handle = &self.data.cell.extra_context;
         if handle.is_null() {
             return None;
         }
-        unsafe {
-            object::unsafe_::inc_ref(handle.cast());
-            Some(object::ObjectRef::from_data(ObjectArc::from_raw(
-                handle.cast(),
-            )))
-        }
+        // SAFETY: the cell owns a non-null object handle, and an `ObjectRef`
+        // is exactly that one object pointer.
+        Some(unsafe { &*(handle as *const _ as *const object::ObjectRef) })
     }
 
     /// Get the traceback of the error in the order of most recent call last, as
@@ -300,7 +355,7 @@ impl Error {
             unsafe {
                 let backtrace_data = TVMFFIByteArray::from_str(backtrace);
                 (this.data.cell.update_backtrace)(
-                    ObjectArc::as_raw(&this.data) as *mut ErrorObj as *mut c_void,
+                    ObjectArc::as_ptr(&this.data) as *mut ErrorObj as *mut c_void,
                     &backtrace_data,
                     kTVMFFIBacktraceUpdateModeAppend as i32,
                 );
@@ -316,8 +371,8 @@ impl Error {
                 this.kind(),
                 this.message(),
                 &new_backtrace,
-                this.cause_chain().as_ref(),
-                this.extra_context().as_ref(),
+                this.cause_chain(),
+                this.extra_context(),
             )
         }
     }

@@ -151,11 +151,11 @@ where
             }
             WalkResult::Interrupt => {
                 core::hint::cold_path();
-                Ok(Some(VisitInterrupt::with(Any::new())))
+                Ok(Some(VisitInterrupt::new(Any::new())))
             }
             WalkResult::InterruptWith(payload) => {
                 core::hint::cold_path();
-                Ok(Some(VisitInterrupt::with(payload)))
+                Ok(Some(VisitInterrupt::new(payload)))
             }
         }
     }

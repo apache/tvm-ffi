@@ -225,6 +225,9 @@ impl Default for StructuralMutatorObj {
 
 /// Identity substitutions for structural mutation within one invocation.
 ///
+/// Internal to the engine: handlers reach the remap through
+/// [`StructuralMutatorView::var_remap_get`] and [`StructuralMutatorView::var_remap_set`].
+///
 /// Each pointer key owns one strong reference to its original object, preventing
 /// address reuse until removal. Values are owning replacements, including
 /// [`Unchanged`] markers. Replacing a value does not acquire another key reference;
@@ -232,6 +235,7 @@ impl Default for StructuralMutatorObj {
 // Perf note: Store only the replacement Any; raw identity keys avoid a second
 // Any payload, but still own one retained reference per distinct key. Replacing
 // a value does not retain the key again; clear/Drop release each key exactly once.
+#[doc(hidden)]
 #[derive(Default)]
 pub struct StructuralVarRemap {
     entries: HashMap<NonNull<TVMFFIObject>, Any>,
@@ -567,7 +571,7 @@ impl<'a, T> MutationView<'a, T> {
 
     /// Narrow the matched type without acquiring an owning reference.
     ///
-    /// The check is the strict one of [`Any::try_as`], and the view keeps its
+    /// The check is the strict one of [`Any::downcast_ref`], and the view keeps its
     /// permission.
     ///
     /// # Returns
@@ -579,7 +583,7 @@ impl<'a, T> MutationView<'a, T> {
     /// Returns the view unchanged when the value is not a `U`, so another type can
     /// be tried.
     #[inline(always)]
-    pub fn try_cast<U: crate::type_traits::ContainerElement>(
+    pub fn downcast<U: crate::type_traits::ContainerElement>(
         self,
     ) -> std::result::Result<MutationView<'a, U>, Self> {
         // SAFETY: the input owner keeps the borrowed value live for this handle's
@@ -1077,8 +1081,14 @@ fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {
     // The registry owns this function throughout the call; borrowing it avoids
     // an atomic retain/release for every reflected node.
     let mut result = Any::new();
-    let status =
-        unsafe { TVMFFIFunctionCall(function.cast(), &raw, 1, Any::as_data_ptr(&mut result)) };
+    let status = unsafe {
+        TVMFFIFunctionCall(
+            function.cast(),
+            &raw,
+            1,
+            Any::as_raw_ffi_any_mut(&mut result),
+        )
+    };
     if status != 0 {
         return Err(Error::from_raised());
     }
@@ -1119,7 +1129,7 @@ fn call_field_setter(
                 field.setter as TVMFFIObjectHandle,
                 args.as_ptr(),
                 2,
-                Any::as_data_ptr(&mut result),
+                Any::as_raw_ffi_any_mut(&mut result),
             )
         }
     };
@@ -1188,7 +1198,7 @@ fn raw_ffi_any_to_owned_any(raw: TVMFFIAny) -> Result<Any> {
     // move) rather than a bitwise copy; keep the generic C ABI conversion for
     // those uncommon representations.
     let mut owned = Any::new();
-    let return_code = unsafe { TVMFFIAnyViewToOwnedAny(&raw, Any::as_data_ptr(&mut owned)) };
+    let return_code = unsafe { TVMFFIAnyViewToOwnedAny(&raw, Any::as_raw_ffi_any_mut(&mut owned)) };
     if return_code == 0 {
         Ok(owned)
     } else {
@@ -1456,7 +1466,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
                 type_index,
             )
         };
-        let handle = unsafe { ObjectArc::as_raw_mut(&mut engine).cast::<StructuralMutatorObj>() };
+        let handle = ObjectArc::as_mut_ptr(&mut engine).cast::<StructuralMutatorObj>();
         unsafe { (*handle).vtable = Self::vtable::<D, CALLBACK_CONTEXT>() };
         let result =
             StructuralMutatorObj::call_mutator(handle, *root.as_raw_ffi_any(), InplaceMode::Allow);
@@ -1620,7 +1630,7 @@ impl StructuralMutatorObj {
         // Own the output slot before entering foreign code. A getter may
         // populate an owning result and still report an error.
         let mut child = Any::new();
-        if getter(source_address, Any::as_data_ptr(&mut child)) != 0 {
+        if getter(source_address, Any::as_raw_ffi_any_mut(&mut child)) != 0 {
             return Err(with_structural_field_error_context(
                 Error::from_raised(),
                 "map",
@@ -2061,7 +2071,7 @@ impl StructuralMutatorObj {
 ///
 /// let root = Array::from_vec(vec![Array::from_vec(vec![1_i64, 2]), Array::from_vec(vec![3_i64])]);
 /// let result = Array::<Array<i64>>::try_from(structural_mutate(root, Double)?)?;
-/// assert_eq!(result.get(0)?.iter().collect::<Vec<_>>(), vec![2, 4]);
+/// assert_eq!(result.get(0)?.iter().copied().collect::<Vec<_>>(), vec![2, 4]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 pub fn structural_mutate<R, H, M, D, O>(root: R, dispatcher: H) -> Result<Any>

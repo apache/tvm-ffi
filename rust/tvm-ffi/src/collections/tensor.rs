@@ -16,14 +16,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use crate::any::{AnyView, TryFromTemp};
+use crate::any::AnyView;
 use crate::collections::shape::Shape;
 use crate::derive::{Object, ObjectRef};
 use crate::dtype::AsDLDataType;
 use crate::dtype::DLDataTypeExt;
 use crate::error::Result;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems};
-use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::dlpack::{DLDataType, DLDevice, DLDeviceType, DLTensor};
 use tvm_ffi_sys::TVMFFIAny;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
@@ -62,6 +61,10 @@ pub trait DLTensorExt {
 
 impl DLTensorExt for DLTensor {
     fn numel(&self) -> usize {
+        // A scalar (`ndim == 0`) has one element and may have a null shape.
+        if self.ndim <= 0 {
+            return 1;
+        }
         unsafe {
             std::slice::from_raw_parts(self.shape, self.ndim as usize)
                 .iter()
@@ -108,35 +111,24 @@ pub struct Tensor {
 }
 
 impl Tensor {
-    /// Get the data pointer of the Tensor
-    ///
-    /// # Returns
-    /// * `*mut core::ffi::c_void` - The data pointer of the Tensor
+    /// The data pointer, as in the `DLTensor`; `byte_offset` is not applied.
     pub fn data_ptr(&self) -> *const core::ffi::c_void {
         self.data.dltensor.data
     }
-    /// Get the data pointer of the Tensor
+
+    /// The data pointer for writing, as in the `DLTensor`.
     ///
-    /// # Returns
-    /// * `*mut core::ffi::c_void` - The data pointer of the Tensor
-    pub fn data_ptr_mut(&mut self) -> *mut core::ffi::c_void {
+    /// A tensor is a shared handle, so `&mut self` would not make writes
+    /// exclusive; getting the pointer is safe, and writing through it is the
+    /// caller's `unsafe` responsibility, as for
+    /// [`data_as_slice_mut`](Self::data_as_slice_mut).
+    pub fn data_ptr_mut(&self) -> *mut core::ffi::c_void {
         self.data.dltensor.data
     }
-    /// Check if the Tensor is contiguous
-    ///
-    /// # Returns
-    /// * `bool` - True if the Tensor is contiguous, false otherwise
+    /// Whether the elements are laid out in row-major order without gaps, as
+    /// C++ `tvm::ffi::IsContiguous` decides; see [`TensorView::is_contiguous`].
     pub fn is_contiguous(&self) -> bool {
-        let strides = self.strides();
-        let shape = self.shape();
-        let mut expected_stride = 1;
-        for i in (0..self.ndim()).rev() {
-            if strides[i] != expected_stride {
-                return false;
-            }
-            expected_stride *= shape[i];
-        }
-        true
+        TensorView::from(self).is_contiguous()
     }
 
     pub fn data_as_slice<T: AsDLDataType>(&self) -> Result<&[T]> {
@@ -159,6 +151,10 @@ impl Tensor {
         );
 
         unsafe {
+            // An empty tensor may have a null data pointer, which a slice cannot.
+            if self.numel() == 0 {
+                return Ok(&[]);
+            }
             Ok(std::slice::from_raw_parts(
                 self.data.dltensor.data as *const T,
                 self.numel(),
@@ -176,11 +172,15 @@ impl Tensor {
     /// here would force artificial mutability annotations throughout the
     /// deep-learning stack with no real safety benefit.
     ///
-    /// # Safety contract (caller responsibility)
-    /// If the `Tensor` has been cloned (via `ObjectArc`), the caller must
-    /// ensure no other clone is concurrently reading the data.
+    /// # Safety
+    ///
+    /// While the returned slice is alive, nothing else may access the data:
+    /// no other slice from this method or [`data_as_slice`](Self::data_as_slice)
+    /// on this tensor or a clone of it, and no kernel or foreign caller writing
+    /// the buffer. Rust cannot check this because the method takes `&self`, as
+    /// `std::slice::from_raw_parts_mut` cannot check it for a raw pointer.
     #[allow(clippy::wrong_self_convention, clippy::mut_from_ref)]
-    pub fn data_as_slice_mut<T: AsDLDataType>(&self) -> Result<&mut [T]> {
+    pub unsafe fn data_as_slice_mut<T: AsDLDataType>(&self) -> Result<&mut [T]> {
         let dtype = T::DL_DATA_TYPE;
         if self.dtype() != dtype {
             crate::bail!(
@@ -199,6 +199,9 @@ impl Tensor {
             "Tensor is not contiguous"
         );
         unsafe {
+            if self.numel() == 0 {
+                return Ok(&mut []);
+            }
             Ok(std::slice::from_raw_parts_mut(
                 self.data.dltensor.data as *mut T,
                 self.numel(),
@@ -207,7 +210,12 @@ impl Tensor {
     }
 
     pub fn shape(&self) -> &[i64] {
-        unsafe { std::slice::from_raw_parts(self.data.dltensor.shape, self.ndim()) }
+        let t = &self.data.dltensor;
+        // A scalar may have a null shape, which a slice cannot.
+        if t.ndim == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(t.shape, t.ndim as usize) }
     }
 
     pub fn ndim(&self) -> usize {
@@ -218,8 +226,21 @@ impl Tensor {
         self.data.dltensor.numel()
     }
 
+    /// The strides, in elements.
+    ///
+    /// # Panics
+    /// If the tensor has null strides and at least one dimension, as
+    /// [`TensorView::strides`] does.
     pub fn strides(&self) -> &[i64] {
-        unsafe { std::slice::from_raw_parts(self.data.dltensor.strides, self.ndim()) }
+        let t = &self.data.dltensor;
+        if t.ndim == 0 {
+            return &[];
+        }
+        assert!(
+            !t.strides.is_null(),
+            "Tensor::strides of a DLTensor with null strides"
+        );
+        unsafe { std::slice::from_raw_parts(t.strides, t.ndim as usize) }
     }
 
     pub fn dtype(&self) -> DLDataType {
@@ -303,7 +324,7 @@ impl Tensor {
         unsafe {
             let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
             // The fresh allocation is unique and has not been exposed.
-            let object = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+            let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
             object.base.dltensor.shape =
                 TensorObjFromNDAlloc::extra_items(object).as_ptr() as *mut i64;
             object.base.dltensor.strides = object.base.dltensor.shape.add(shape.len());
@@ -368,7 +389,8 @@ impl Tensor {
         if tensor.numel() != slice.len() {
             crate::bail!(crate::error::VALUE_ERROR, "Slice length mismatch");
         }
-        tensor.data_as_slice_mut::<T>()?.copy_from_slice(slice);
+        // SAFETY: the tensor was just allocated, so nothing else can access it.
+        unsafe { tensor.data_as_slice_mut::<T>()? }.copy_from_slice(slice);
         Ok(tensor)
     }
 }
@@ -384,8 +406,16 @@ unsafe impl NDAllocator for CPUNDAlloc {
         let numel = prototype.numel() as usize;
         let item_size = prototype.item_size();
         let size = numel * item_size as usize;
+        // A zero-size allocation is undefined behavior; an empty tensor gets an
+        // aligned dangling pointer, which `free_data` does not release.
+        if size == 0 {
+            return Self::MIN_ALIGN as *mut core::ffi::c_void;
+        }
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
         let ptr = std::alloc::alloc(layout);
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
         ptr as *mut core::ffi::c_void
     }
 
@@ -393,6 +423,9 @@ unsafe impl NDAllocator for CPUNDAlloc {
         let numel = tensor.numel() as usize;
         let item_size = tensor.item_size();
         let size = numel * item_size;
+        if size == 0 {
+            return;
+        }
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
         std::alloc::dealloc(tensor.data as *mut u8, layout);
     }
@@ -413,19 +446,41 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// of an exported function, that is the duration of the call. For the same
 /// reason, as in C++, a view cannot be moved into an owned [`Any`](crate::Any);
 /// use [`Tensor`] instead.
+///
+/// The lifetime ties a view to what it borrows, so it cannot outlive its
+/// tensor, and a view cannot be held in an owned `Any`:
+///
+/// ```compile_fail
+/// use tvm_ffi::{Tensor, TensorView};
+/// let view = {
+///     let tensor = Tensor::from_slice(&[1.0_f32], &[1]).unwrap();
+///     TensorView::from(&tensor)
+/// };
+/// view.ndim();
+/// ```
+///
+/// ```compile_fail
+/// use tvm_ffi::{Any, Tensor, TensorView};
+/// let tensor = Tensor::from_slice(&[1.0_f32], &[1]).unwrap();
+/// let _ = Any::from(TensorView::from(&tensor));
+/// ```
 #[derive(Clone, Copy, Debug)]
-pub struct TensorView {
+pub struct TensorView<'a> {
     tensor: *const DLTensor,
+    _borrow: std::marker::PhantomData<&'a DLTensor>,
 }
 
-impl TensorView {
+impl<'a> TensorView<'a> {
     /// Creates a view of a `DLTensor`.
     ///
     /// # Safety
     /// `tensor` must be non-null and valid for every use of the view.
     pub unsafe fn from_raw(tensor: *const DLTensor) -> Self {
         assert!(!tensor.is_null(), "TensorView of a null DLTensor");
-        Self { tensor }
+        Self {
+            tensor,
+            _borrow: std::marker::PhantomData,
+        }
     }
 
     /// The viewed `DLTensor`.
@@ -433,7 +488,8 @@ impl TensorView {
         self.tensor
     }
 
-    fn dltensor(&self) -> &DLTensor {
+    fn dltensor(&self) -> &'a DLTensor {
+        // SAFETY: the view borrows a live `DLTensor` for `'a`.
         unsafe { &*self.tensor }
     }
 
@@ -454,7 +510,7 @@ impl TensorView {
         self.dltensor().ndim as usize
     }
 
-    pub fn shape(&self) -> &[i64] {
+    pub fn shape(&self) -> &'a [i64] {
         let t = self.dltensor();
         if t.ndim == 0 {
             return &[];
@@ -471,7 +527,7 @@ impl TensorView {
     /// # Panics
     /// If the `DLTensor` has null strides and at least one dimension, which
     /// DLPack forbids since v1.2, as C++ `TensorView::strides` checks.
-    pub fn strides(&self) -> &[i64] {
+    pub fn strides(&self) -> &'a [i64] {
         let t = self.dltensor();
         if t.ndim == 0 {
             return &[];
@@ -509,73 +565,116 @@ impl TensorView {
     }
 }
 
-impl From<&Tensor> for TensorView {
-    fn from(tensor: &Tensor) -> Self {
+impl<'a> From<&'a Tensor> for TensorView<'a> {
+    fn from(tensor: &'a Tensor) -> Self {
         Self {
             tensor: &tensor.data.dltensor as *const DLTensor,
+            _borrow: std::marker::PhantomData,
         }
     }
 }
 
-// A borrowed `AnyView` converts as C++ `AnyView::cast<TensorView>` does: from
-// a `DLTensor*` or from a tensor object. `try_as`, like C++ `as`, accepts only
-// a `DLTensor*`. There is no conversion from an owned `Any`, which would leave
-// the view pointing into a value the conversion drops.
-impl<'a> TryFrom<AnyView<'a>> for TensorView {
+impl<'a> TensorView<'a> {
+    /// The view of `value`'s cell, when it holds a `DLTensor*` or a tensor object.
+    fn from_cell(value: &TVMFFIAny) -> Option<Self> {
+        let tensor = if value.type_index == TypeIndex::kTVMFFIDLTensorPtr as i32 {
+            unsafe { value.data_union.v_ptr as *const DLTensor }
+        } else if value.type_index == TypeIndex::kTVMFFITensor as i32 {
+            // A tensor object's DLTensor follows its object header.
+            unsafe { &(*(value.data_union.v_obj as *const TensorObj)).dltensor as *const DLTensor }
+        } else {
+            return None;
+        };
+        Some(Self {
+            tensor,
+            _borrow: std::marker::PhantomData,
+        })
+    }
+
+    /// The `TypeError` for a value that is not a tensor.
+    fn mismatch(value: &TVMFFIAny, context: &str) -> crate::error::Error {
+        let message = format!(
+            "{context}Cannot convert from type `{}` to `DLTensor*`",
+            crate::object::type_key_of_index(value.type_index)
+        );
+        crate::error::Error::new(crate::error::TYPE_ERROR, &message, "")
+    }
+}
+
+// A view is not `AnyCompatible`: that trait builds values from a cell without
+// a lifetime, so a view could outlive what it borrows, and a view cannot be
+// held in an owned `Any` (C++ `TypeTraits<DLTensor*>::MoveToAny` throws). It
+// instead converts from an `AnyView` with that view's lifetime, is a typed
+// function argument, and passes as a `DLTensor*` argument.
+
+// As C++ `AnyView::cast<TensorView>`: from a `DLTensor*` or a tensor object.
+impl<'a> TryFrom<AnyView<'a>> for TensorView<'a> {
     type Error = crate::error::Error;
     #[inline]
     fn try_from(value: AnyView<'a>) -> Result<Self> {
-        TryFromTemp::<Self>::try_from(value).map(TryFromTemp::into_value)
+        let cell = value.as_raw_ffi_any();
+        Self::from_cell(cell).ok_or_else(|| Self::mismatch(cell, ""))
     }
 }
 
-// As in C++, where `TypeTraits<DLTensor*>::MoveToAny` throws this, and
-// `TypeTraits<TensorView>` does not support moves.
-const NOT_OWNED: &str =
-    "DLTensor* cannot be held in Any as it does not retain ownership, use Tensor instead";
-
-unsafe impl AnyCompatible for TensorView {
-    fn type_str() -> String {
-        // make it consistent with c++ representation
-        "DLTensor*".to_string()
+// A typed function argument. A closure `|t: TensorView| ..` is generic over
+// the view's lifetime, so the view cannot be kept past the call.
+impl crate::type_traits::TypeSchema for TensorView<'_> {
+    fn type_schema() -> String {
+        crate::type_traits::type_schema("DLTensor*", &[])
     }
+}
 
-    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-        data.type_index = TypeIndex::kTVMFFIDLTensorPtr as i32;
-        data.small_str_len = 0;
-        data.data_union.v_uint64 = 0;
-        data.data_union.v_ptr = src.tensor as *mut core::ffi::c_void;
+impl crate::any::ArgTryFromAnyView for TensorView<'_> {
+    fn try_from_any_view(value: &AnyView, arg_index: usize) -> Result<Self> {
+        let cell = value.as_raw_ffi_any();
+        Self::from_cell(cell)
+            .ok_or_else(|| Self::mismatch(cell, &format!("Argument #{arg_index}: ")))
     }
+}
 
-    unsafe fn move_to_any(_src: Self, _data: &mut TVMFFIAny) {
-        panic!("{}", NOT_OWNED);
+// A view of the `DLTensor*`, for `call_packed` and other `AnyView` APIs.
+impl<'a> From<&TensorView<'a>> for AnyView<'a> {
+    fn from(view: &TensorView<'a>) -> Self {
+        let mut cell = TVMFFIAny::new();
+        cell.type_index = TypeIndex::kTVMFFIDLTensorPtr as i32;
+        cell.data_union.v_ptr = view.tensor as *mut core::ffi::c_void;
+        // SAFETY: the view keeps its `DLTensor` alive for `'a`.
+        unsafe { AnyView::from_raw_ffi_any(cell) }
     }
+}
 
-    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        data.type_index == TypeIndex::kTVMFFIDLTensorPtr as i32
+// Passed to a function as a `DLTensor*`.
+impl<'a> crate::function_internal::IntoArgHolder for TensorView<'a> {
+    type Target = TensorView<'a>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
     }
+}
 
-    unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        Self {
-            tensor: data.data_union.v_ptr as *const DLTensor,
-        }
+impl<'a, 'b> crate::function_internal::IntoArgHolder for &'b TensorView<'a> {
+    type Target = &'b TensorView<'a>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
     }
+}
 
-    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {
-        panic!("{}", NOT_OWNED);
+impl<'a> crate::function_internal::ArgIntoRef for TensorView<'a> {
+    type Target = TensorView<'a>;
+    fn to_ref(&self) -> &Self::Target {
+        self
     }
+}
 
-    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
-        if data.type_index == TypeIndex::kTVMFFIDLTensorPtr as i32 {
-            Ok(Self::copy_from_any_view_after_check(data))
-        } else if data.type_index == TypeIndex::kTVMFFITensor as i32 {
-            // A tensor object's DLTensor follows its object header.
-            let obj = data.data_union.v_obj as *const TensorObj;
-            Ok(Self {
-                tensor: &(*obj).dltensor as *const DLTensor,
-            })
-        } else {
-            Err(())
-        }
+impl<'a> crate::function_internal::ArgIntoRef for &TensorView<'a> {
+    type Target = TensorView<'a>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl crate::function_internal::PackedArg for TensorView<'_> {
+    fn as_packed_arg(&self) -> AnyView<'_> {
+        AnyView::from(self)
     }
 }

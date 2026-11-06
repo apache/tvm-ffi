@@ -27,7 +27,7 @@ fn into_dispatcher_supports_owned_borrowed_and_callbacks() -> Result<()> {
     }
     impl<'v> Dispatcher<(AnyView<'v>, i64), Outcome> for &mut Add {
         fn dispatch_tuple(self, (value, offset): (AnyView<'v>, i64)) -> Outcome {
-            value.try_as::<i64>().map(|value| {
+            value.downcast_ref::<i64>().copied().map(|value| {
                 self.calls += 1;
                 Ok(Any::from(value + offset))
             })
@@ -41,7 +41,8 @@ fn into_dispatcher_supports_owned_borrowed_and_callbacks() -> Result<()> {
         owned
             .dispatch_tuple((AnyView::from(&40_i64), 2))
             .unwrap()?
-            .try_as::<i64>(),
+            .downcast_ref::<i64>()
+            .copied(),
         Some(42)
     );
 
@@ -54,7 +55,8 @@ fn into_dispatcher_supports_owned_borrowed_and_callbacks() -> Result<()> {
             borrowed
                 .dispatch_tuple((AnyView::from(&40_i64), 3))
                 .unwrap()?
-                .try_as::<i64>(),
+                .downcast_ref::<i64>()
+                .copied(),
             Some(43)
         );
     }
@@ -71,13 +73,15 @@ fn into_dispatcher_supports_owned_borrowed_and_callbacks() -> Result<()> {
     assert_eq!(
         Dispatcher::<_, Outcome>::dispatch_tuple(&mut tuple, (AnyView::from(&40_i64), 4, "unused"))
             .unwrap()?
-            .try_as::<i64>(),
+            .downcast_ref::<i64>()
+            .copied(),
         Some(44)
     );
     assert_eq!(
         Dispatcher::<_, Outcome>::dispatch_tuple(&mut tuple, (AnyView::from(&true), 4, "unused"))
             .unwrap()?
-            .try_as::<i64>(),
+            .downcast_ref::<i64>()
+            .copied(),
         Some(-1)
     );
     Ok(())

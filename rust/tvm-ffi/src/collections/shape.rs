@@ -71,11 +71,15 @@ impl Shape {
 
     /// Get the shape as a slice
     pub fn as_slice(&self) -> &[i64] {
+        // An empty shape may have a null data pointer, which a slice cannot.
+        if self.data.data.size == 0 {
+            return &[];
+        }
         unsafe { std::slice::from_raw_parts(self.data.data.data, self.data.data.size) }
     }
 
     /// Fill the strides from the shape
-    pub fn fill_strides_from_shape<T>(shape: T, strides: &mut [i64])
+    pub(crate) fn fill_strides_from_shape<T>(shape: T, strides: &mut [i64])
     where
         T: AsRef<[i64]>,
     {
@@ -111,7 +115,7 @@ where
             });
             // reset the data ptr correctly after Arc is created
             // The fresh allocation is unique and has not been exposed.
-            let object = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+            let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
             object.data.data = ShapeObj::extra_items(object).as_ptr();
             let extra_items = ShapeObj::extra_items_mut(object);
             extra_items.copy_from_slice(value_slice);

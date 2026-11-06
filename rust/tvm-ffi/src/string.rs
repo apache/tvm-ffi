@@ -138,7 +138,7 @@ where
                 });
                 // reset the data ptr correctly after Arc is created
                 // The fresh allocation is unique and has not been exposed.
-                let object = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+                let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
                 object.data.data = BytesObj::extra_items(object).as_ptr();
                 let extra_items = BytesObj::extra_items_mut(object);
                 extra_items[..value.len()].copy_from_slice(value);
@@ -343,7 +343,7 @@ where
                     },
                 });
                 // The fresh allocation is unique and has not been exposed.
-                let object = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+                let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
                 object.data.data = StringObj::extra_items(object).as_ptr();
                 let extra_items = StringObj::extra_items_mut(object);
                 extra_items[..bytes.len()].copy_from_slice(bytes);

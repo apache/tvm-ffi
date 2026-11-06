@@ -28,6 +28,7 @@ pub mod dtype;
 pub mod error;
 pub mod extra;
 pub mod function;
+#[doc(hidden)]
 pub mod function_internal;
 pub mod macros;
 #[doc(hidden)]
@@ -58,9 +59,11 @@ pub use crate::error::{
 pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_map::structural_map;
+#[doc(hidden)]
+pub use crate::extra::structural_mutate::StructuralVarRemap;
 pub use crate::extra::structural_mutate::{
     structural_mutate, InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase,
-    StructuralMutatorObj, StructuralMutatorView, StructuralVarRemap,
+    StructuralMutatorObj, StructuralMutatorView,
 };
 pub use crate::extra::structural_visit::{
     structural_visit, DefRegionKind, StructuralVisitEngine, StructuralVisitorBase,
@@ -69,15 +72,14 @@ pub use crate::extra::structural_visit::{
 pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
-pub use crate::object::ObjectRefCast;
+pub use crate::function_internal::AsPackedCallable;
 pub use crate::object::{
     IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity,
     ObjectRefCore,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{
-    get_type_attr, FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn,
-    UnsafeInit,
+    FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn, UnsafeInit,
 };
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::static_init::run_static_init_blocks;
@@ -276,9 +278,9 @@ pub use tvm_ffi_macros::rs_object;
 ///   before it go on the struct.
 /// * `ParentType` - The reference to the parent's object, `ObjectRef` for a
 ///   type under `ffi.Object`. `TypeName` converts into it by
-///   `impl_object_upcast!`, and `&TypeName` borrows as `&ParentType` through
+///   `unsafe_impl_object_upcast!`, and `&TypeName` borrows as `&ParentType` through
 ///   `AsRef`; a conversion into a further ancestor takes its own
-///   `impl_object_upcast!`.
+///   `unsafe_impl_object_upcast!`.
 /// * `ObjectName` - The object type.
 /// * `crate = path` - Optional, after `ObjectName`: where the generated code
 ///   finds tvm-ffi, as for [`rs_object`](macro@rs_object).

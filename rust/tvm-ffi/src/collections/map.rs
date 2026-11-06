@@ -56,7 +56,7 @@ fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
         if T::container_check_any_strict(value.as_raw_ffi_any()) {
             let mut value = std::mem::ManuallyDrop::new(value);
             return Ok(T::container_move_from_any_after_check(
-                &mut *value.as_data_ptr(),
+                &mut *value.as_raw_ffi_any_mut(),
             ));
         }
         T::container_try_cast_from_any_view(value.as_raw_ffi_any()).map_err(|()| {
@@ -128,6 +128,17 @@ impl<K, V> Clone for Map<K, V> {
             data: self.data.clone(),
             _marker: PhantomData,
         }
+    }
+}
+
+/// A map upcasts to the root [`ObjectRef`](crate::object::ObjectRef).
+impl<K, V> From<Map<K, V>> for crate::object::ObjectRef
+where
+    Map<K, V>: ObjectRefCore,
+{
+    #[inline]
+    fn from(value: Map<K, V>) -> Self {
+        crate::object::into_root_object_ref(value)
     }
 }
 
@@ -522,7 +533,7 @@ where
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIMap as i32;
-        data.data_union.v_obj = ObjectArc::as_raw(Self::data(src)) as *mut TVMFFIObject;
+        data.data_union.v_obj = ObjectArc::as_ptr(Self::data(src)) as *mut TVMFFIObject;
         data.small_str_len = 0;
     }
 
@@ -602,6 +613,19 @@ where
     #[inline(always)]
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
         crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
+    }
+}
+
+impl<'b, K, V> TryFrom<&'b Any> for Map<K, V>
+where
+    K: ContainerElement,
+    V: ContainerElement,
+{
+    type Error = Error;
+
+    fn try_from(value: &'b Any) -> Result<Self> {
+        let temp: TryFromTemp<Self> = TryFromTemp::try_from(value)?;
+        Ok(TryFromTemp::into_value(temp))
     }
 }
 

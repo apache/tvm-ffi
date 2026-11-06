@@ -440,7 +440,7 @@ fn shallow_copy_any<N: ObjectCore + ShallowCopy>(object: &ObjectRef) -> Result<A
 
 fn object_type_key(object: &ObjectRef) -> String {
     let type_index =
-        unsafe { (*ObjectArc::as_raw(ObjectRef::data(object)).cast::<TVMFFIObject>()).type_index };
+        unsafe { (*ObjectArc::as_ptr(ObjectRef::data(object)).cast::<TVMFFIObject>()).type_index };
     let info = unsafe { TVMFFIGetTypeInfo(type_index) };
     if info.is_null() {
         return format!("type index {type_index}");
@@ -451,7 +451,7 @@ fn object_type_key(object: &ObjectRef) -> String {
 fn register_type_attr(type_index: i32, name: &str, mut value: Any) -> Result<()> {
     let name = unsafe { TVMFFIByteArray::from_str(name) };
     // The table takes its own reference to the value.
-    let value = unsafe { Any::as_data_ptr(&mut value) };
+    let value = Any::as_raw_ffi_any_mut(&mut value);
     crate::check_safe_call!(unsafe { TVMFFITypeRegisterAttr(type_index, &name, value) })
 }
 

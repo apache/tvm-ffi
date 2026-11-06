@@ -23,7 +23,8 @@ fn create_tensor(val: f32, shape: &[i64]) -> Tensor {
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
     let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, shape, dtype, device);
-    if let Ok(slice) = tensor.data_as_slice_mut::<f32>() {
+    // SAFETY: nothing else accesses the tensor's data meanwhile.
+    if let Ok(slice) = unsafe { tensor.data_as_slice_mut::<f32>() } {
         slice[0] = val;
     }
     tensor
@@ -95,6 +96,7 @@ fn test_array_with_any_elements() {
         Array::<i64>::try_from(array.get(2).unwrap())
             .unwrap()
             .iter()
+            .copied()
             .collect::<Vec<_>>(),
         vec![1, 2]
     );
@@ -111,7 +113,7 @@ fn test_array_with_any_elements() {
     assert_eq!(
         widened
             .iter()
-            .map(|value| i64::try_from(value).unwrap())
+            .map(|value| value.downcast_ref::<i64>().copied().unwrap())
             .collect::<Vec<_>>(),
         vec![3, 4]
     );

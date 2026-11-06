@@ -121,11 +121,19 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
     }
 }
 
-/// Traits to specify core operations of ObjectRef
+/// A managed object reference: the category of types such as [`ObjectRef`](struct@ObjectRef),
+/// `Array<T>` and every `#[derive(ObjectRef)]` type, with the operations every
+/// reference supports: identity ([`same_as`](Self::same_as)) and strict casts
+/// between reference types, which check the object's runtime type and never
+/// convert. [`downcast_ref`](Self::downcast_ref) borrows in place, and
+/// [`downcast`](Self::downcast) takes the reference, as std's
+/// `dyn Any::downcast_ref` and `Box<dyn Any>::downcast` do. Upcasts are
+/// `From`/`Into`, which `#[derive(ObjectRef)]` and
+/// [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast) generate.
 ///
-/// used by the ffi Any system and not user facing
-///
-/// We mark as unsafe since it moves out the internal of the ObjectRef
+/// The derive implements it. `data`, `into_data` and `from_data` are the
+/// handle plumbing the FFI uses, called as associated functions; the trait is
+/// `unsafe` to implement because they move the reference's internals.
 ///
 /// # Safety
 ///
@@ -158,17 +166,15 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     /// Return whether two object references point to the same allocation.
     #[inline]
     fn same_as<Other: ObjectRefCore>(&self, other: &Other) -> bool {
-        unsafe {
-            ObjectArc::as_raw(Self::data(self)).cast::<()>()
-                == ObjectArc::as_raw(Other::data(other)).cast::<()>()
-        }
+        ObjectArc::as_ptr(Self::data(self)).cast::<()>()
+            == ObjectArc::as_ptr(Other::data(other)).cast::<()>()
     }
 
     /// Borrow the underlying object as `T` when it is one.
     ///
     /// `T` is an object type such as `FooObj`, or a managed reference such as
     /// `Foo`: `&Expr` borrows as `&Add` when the expression is an `Add`.
-    /// Unrelated types return `None`. Unlike [`ObjectRefCast::try_cast`], this
+    /// Unrelated types return `None`. Unlike [`downcast`](Self::downcast), this
     /// method neither consumes the reference nor changes the object's reference
     /// count. The returned borrow cannot outlive `self`.
     /// See [`crate::Any::downcast_ref`] for an example.
@@ -182,13 +188,58 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
             T::downcast_ref_from_object(place)
         }
     }
+
+    /// Take `self` as the reference type `B` when its object is one, without
+    /// copying the object or changing its reference count.
+    ///
+    /// `B` is a subtype, or a parameterized container such as `Array<i64>`,
+    /// whose elements are checked too. On a mismatch the reference is returned
+    /// unchanged, so another type can be tried;
+    /// [`Error::downcast_failed`](crate::Error::downcast_failed) turns it into a
+    /// `TypeError` for `?`.
+    ///
+    /// ```
+    /// use tvm_ffi::{object::ObjectRef, Array, Error, ObjectRefCore};
+    /// let object: ObjectRef = Array::from_vec(vec![1_i64]).into();
+    /// let object = object.downcast::<Array<f64>>().unwrap_err();
+    /// let array: Array<i64> = object.downcast().map_err(Error::downcast_failed::<Array<i64>>)?;
+    /// assert_eq!(array.len(), 1);
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    #[inline(always)]
+    fn downcast<B>(self) -> std::result::Result<B, Self>
+    where
+        Self: AnyCompatible,
+        B: ObjectRefCore + AnyCompatible,
+    {
+        let mut any_data = TVMFFIAny::new();
+        unsafe {
+            // Keep ownership in `self` while the target check runs, so a
+            // mismatch can hand it back and a panic unwinds normally.
+            Self::copy_to_any_view(&self, &mut any_data);
+            debug_assert!(any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+            // SAFETY: ObjectRefCore's contract requires its AnyCompatible
+            // representation to contain a valid object-range type index.
+            std::hint::assert_unchecked(
+                any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
+            );
+            if B::check_any_strict(&any_data) {
+                // Transfer ownership only after the borrowed representation has
+                // passed the target's complete hierarchy/container check.
+                Self::move_to_any(self, &mut any_data);
+                Ok(B::move_from_any_after_check(&mut any_data))
+            } else {
+                Err(self)
+            }
+        }
+    }
 }
 
 /// A value that converts into the object reference `T`, owned or borrowed.
 ///
 /// An owned reference converts into an owned `T`, and a borrowed one borrows
 /// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
-/// `Vec` but borrows from a `&Vec`. [`impl_object_upcast!`](crate::impl_object_upcast)
+/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast)
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes
@@ -265,7 +316,7 @@ impl ObjectIdentity {
     /// Retain the allocation referenced by `value` as an identity key.
     pub fn of<T: ObjectRefCore>(value: &T) -> Self {
         unsafe {
-            let ptr = ObjectArc::as_raw(T::data(value)) as *mut TVMFFIObject;
+            let ptr = ObjectArc::as_ptr(T::data(value)) as *mut TVMFFIObject;
             unsafe_::inc_ref(ptr);
             Self {
                 data: ObjectArc::from_raw(ptr.cast::<Object>()),
@@ -275,7 +326,7 @@ impl ObjectIdentity {
 
     #[inline]
     fn as_ptr(&self) -> *const TVMFFIObject {
-        unsafe { ObjectArc::as_raw(&self.data).cast::<TVMFFIObject>() }
+        ObjectArc::as_ptr(&self.data).cast::<TVMFFIObject>()
     }
 }
 
@@ -354,64 +405,43 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     }
 }
 
-/// Runtime-checked casts between managed reference types, like C++
-/// `ObjectRef::as<T>`.
-///
-/// Every managed reference implements this trait, so any reference can be
-/// cast to its parent, back to its own type, or to a parameterized container
-/// such as `Array<i64>`.
-pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
-    /// Cast `self` to the reference type `B`, without copying the object.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TypeError` when the object is not a `B`.
-    ///
-    /// ```
-    /// use tvm_ffi::{object::ObjectRef, Array, ObjectRefCast};
-    /// let object: ObjectRef = Array::from_vec(vec![1_i64]).try_cast()?;
-    /// let array: Array<i64> = object.try_cast()?;
-    /// assert_eq!(array.len(), 1);
-    /// # Ok::<(), tvm_ffi::Error>(())
-    /// ```
-    ///
-    /// See also [`Any::try_as`](crate::Any::try_as).
-    #[inline(always)]
-    fn try_cast<B>(self) -> crate::error::Result<B>
-    where
-        B: ObjectRefCore + AnyCompatible,
-    {
-        let mut any_data = TVMFFIAny::new();
-        unsafe {
-            // Keep ownership in `self` while the target check runs. This makes
-            // the failure and panic paths unwind normally instead of stranding
-            // an owned object inside a raw TVMFFIAny.
-            Self::copy_to_any_view(&self, &mut any_data);
-            debug_assert!(any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
-            // SAFETY: ObjectRefCore's contract requires its AnyCompatible
-            // representation to contain a valid object-range type index.
-            std::hint::assert_unchecked(
-                any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
-            );
-
-            if B::check_any_strict(&any_data) {
-                // Transfer ownership only after the borrowed representation has
-                // passed the target's complete hierarchy/container check.
-                Self::move_to_any(self, &mut any_data);
-                Ok(B::move_from_any_after_check(&mut any_data))
-            } else {
-                let msg = format!(
-                    "Cannot convert from type `{}` to `{}`",
-                    B::get_mismatch_type_info(&any_data),
-                    B::type_str()
-                );
-                Err(crate::error::Error::new(crate::error::TYPE_ERROR, &msg, ""))
-            }
-        }
+/// Upcast a managed reference to the root [`ObjectRef`], keeping its allocation.
+#[inline(always)]
+pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
+    let data = S::into_data(value);
+    // SAFETY: every object starts with the root `Object` header, and an
+    // `ObjectRef` imposes no further invariant.
+    unsafe {
+        ObjectRef::from_data(ObjectArc::from_raw(
+            ObjectArc::into_raw(data).cast::<Object>(),
+        ))
     }
 }
 
-impl<T: ObjectRefCore + AnyCompatible> ObjectRefCast for T {}
+/// Format a managed reference as its runtime type key and object address, as
+/// the `Debug` implementation of `#[derive(ObjectRef)]` does.
+#[doc(hidden)]
+pub fn fmt_object_ref<T: ObjectRefCore>(
+    this: &T,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    let object = ObjectArc::as_ptr(T::data(this)).cast::<TVMFFIObject>();
+    // SAFETY: `this` keeps the object, and so its header, alive.
+    let type_index = unsafe { (*object).type_index };
+    write!(f, "{}@{:p}", type_key_of_index(type_index), object)
+}
+
+/// The registered type key of `type_index`, or `<type_index N>` when it has none.
+pub(crate) fn type_key_of_index(type_index: i32) -> String {
+    unsafe {
+        let info = TVMFFIGetTypeInfo(type_index);
+        if info.is_null() {
+            format!("<type_index {type_index}>")
+        } else {
+            (*info).type_key.as_str().to_string()
+        }
+    }
+}
 
 /// A generic managed reference to a TVM-FFI object.
 ///
@@ -721,9 +751,10 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `this` - The ObjectArc to move into a raw pointer
     ///
     /// # Returns
-    /// * `*const T` - The raw pointer
+    /// * `*const T` - The raw pointer, which owns the strong reference; pass it
+    ///   back to [`ObjectArc::from_raw`] to release it, as std `Arc::into_raw`.
     #[inline(always)]
-    pub unsafe fn into_raw(this: Self) -> *const T {
+    pub fn into_raw(this: Self) -> *const T {
         let droped_this = std::mem::ManuallyDrop::new(this);
         droped_this.ptr.as_ptr() as *const T
     }
@@ -736,14 +767,10 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `this` - The ObjectArc to get the raw pointer
     ///
     /// # Returns
-    /// * `*const T` - The raw pointer
-    /// \return The raw pointer
-    ///
-    /// # Safety
-    /// Access must respect existing borrows, and the pointer cannot outlive an
-    /// owning handle. The object and header must not be moved or replaced.
+    /// * `*const T` - The raw pointer, as std `Arc::as_ptr`. Dereferencing it
+    ///   must respect existing borrows, and it cannot outlive an owning handle.
     #[inline]
-    pub unsafe fn as_raw(this: &Self) -> *const T {
+    pub fn as_ptr(this: &Self) -> *const T {
         this.ptr.as_ptr() as *const T
     }
 
@@ -755,13 +782,11 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `this` - The ObjectArc to get the raw pointer
     ///
     /// # Returns
-    /// * `*mut T` - The raw pointer
-    ///
-    /// # Safety
-    /// The handle need not be unique. The caller must establish exclusive access
-    /// for each mutation and must not move or replace the object or its header.
+    /// * `*mut T` - The raw pointer. The handle need not be unique: writing
+    ///   through it needs exclusive access to the object, and must not move or
+    ///   replace the object or its header.
     #[inline]
-    pub unsafe fn as_raw_mut(this: &mut Self) -> *mut T {
+    pub fn as_mut_ptr(this: &mut Self) -> *mut T {
         this.ptr.as_ptr()
     }
 

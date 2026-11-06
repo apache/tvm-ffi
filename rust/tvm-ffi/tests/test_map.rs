@@ -23,7 +23,8 @@ fn create_tensor(val: f32, shape: &[i64]) -> Tensor {
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
     let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, shape, dtype, device);
-    if let Ok(slice) = tensor.data_as_slice_mut::<f32>() {
+    // SAFETY: nothing else accesses the tensor's data meanwhile.
+    if let Ok(slice) = unsafe { tensor.data_as_slice_mut::<f32>() } {
         slice[0] = val;
     }
     tensor
@@ -159,7 +160,10 @@ fn test_map_with_any_values() {
 
     let fetched_array =
         Array::<i64>::try_from(map.get(&String::from("array")).unwrap().unwrap()).unwrap();
-    assert_eq!(fetched_array.iter().collect::<Vec<_>>(), vec![1, 2, 3]);
+    assert_eq!(
+        fetched_array.iter().copied().collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
     assert_eq!(AnyView::from(&array).debug_strong_count().unwrap(), 3);
     drop(fetched_array);
 
@@ -315,7 +319,7 @@ where
     V: AnyCompatible,
 {
     assert_eq!(any.type_index(), TypeIndex::kTVMFFIMap as i32);
-    unsafe { Map::copy_from_any_view_after_check(&*any.as_data_ptr()) }
+    unsafe { Map::copy_from_any_view_after_check(&*any.as_raw_ffi_any_mut()) }
 }
 
 /// Builds an `i64`-valued map but views it as `Map<_, String>`, bypassing the

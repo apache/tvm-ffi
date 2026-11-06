@@ -26,6 +26,7 @@ pub use paste;
 ///
 /// # Usage
 /// Usage: function_name!()
+#[doc(hidden)]
 #[macro_export]
 macro_rules! function_name {
     () => {{
@@ -68,11 +69,13 @@ macro_rules! cached_global_func {
 ///
 /// # Safety
 ///
-/// Generated bindings must ensure that `target` is a registered base of
-/// `source` and that every `source` satisfies the target reference invariants.
-/// An incorrect declaration makes the generated safe conversion unsound.
+/// The declaration is trusted, as an `unsafe impl` is, hence the `unsafe_`
+/// name: `target` must be a registered base of `source`, and every `source`
+/// must satisfy the target reference invariants. An incorrect declaration makes
+/// the generated safe conversions unsound. The Rust stub generator writes these
+/// from the C++ type hierarchy.
 #[macro_export]
-macro_rules! impl_object_upcast {
+macro_rules! unsafe_impl_object_upcast {
     ($($source:ty => $target:ty),+ $(,)?) => {
         $(
             impl ::std::convert::From<$source> for $target {
@@ -150,6 +153,7 @@ macro_rules! impl_object_upcast {
 /// Macro to check safe calls and automatically update traceback with file/line info
 ///
 /// Usage: check_safe_call!(function(args))?;
+#[doc(hidden)]
 #[macro_export]
 macro_rules! check_safe_call {
     ($expr:expr) => {{
@@ -300,7 +304,14 @@ macro_rules! attach_context {
 // ----------------------------------------------------------------------------
 
 // implements try from any for all integer types
-/// Macro to implement `TryFrom<AnyView>` and `TryFrom<Any>` for a list of types
+/// Implement `TryFrom<AnyView>`, `TryFrom<Any>` and `TryFrom<&Any>` for each listed
+/// [`AnyCompatible`](crate::type_traits::AnyCompatible) type, so it converts out of
+/// FFI values.
+///
+/// `#[derive(ObjectRef)]` calls this. Call it yourself for a reference type you
+/// implement by hand, such as a typed view over another reference, together with
+/// [`impl_arg_into_ref!`](crate::impl_arg_into_ref) and
+/// [`impl_into_arg_holder_default!`](crate::impl_into_arg_holder_default).
 #[macro_export]
 macro_rules! impl_try_from_any {
     ($($t:ty),* $(,)?) => {
@@ -326,11 +337,23 @@ macro_rules! impl_try_from_any {
                     return TryFromTemp::try_from(value).map(TryFromTemp::into_value);
                 }
             }
+
+            impl<'a> TryFrom<&'a $crate::any::Any> for $t {
+                type Error = $crate::error::Error;
+                #[inline(always)]
+                fn try_from(
+                    value: &'a $crate::any::Any
+                ) -> Result<Self, Self::Error> {
+                    type TryFromTemp = $crate::any::TryFromTemp<$t>;
+                    return TryFromTemp::try_from(value).map(TryFromTemp::into_value);
+                }
+            }
         )*
     };
 }
 
 /// Macro to implement `TryFrom<AnyView>` and `TryFrom<Any>` for generic types like `Option<T>`
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_try_from_any_for_parametric {
     ($generic_type:ident<$param:ident>) => {
@@ -353,10 +376,25 @@ macro_rules! impl_try_from_any_for_parametric {
                 return TryFromTemp::<T>::try_from(value).map(TryFromTemp::<T>::into_value);
             }
         }
+
+        impl<'a, $param: AnyCompatible> TryFrom<&'a $crate::any::Any> for $generic_type<$param> {
+            type Error = $crate::error::Error;
+            #[inline(always)]
+            fn try_from(value: &'a $crate::any::Any) -> Result<Self, Self::Error> {
+                type TryFromTemp<T> = $crate::any::TryFromTemp<$generic_type<$param>>;
+                return TryFromTemp::<T>::try_from(value).map(TryFromTemp::<T>::into_value);
+            }
+        }
     };
 }
 
-/// Macro to implement IntoArgHolder for a list of types
+/// Implement `IntoArgHolder` for each listed type, so it can be passed to a
+/// [`Function`](crate::Function) call.
+///
+/// `#[derive(ObjectRef)]` calls this. Call it yourself for a reference type you
+/// implement by hand, such as a typed view over another reference, together with
+/// [`impl_try_from_any!`](crate::impl_try_from_any) and
+/// [`impl_arg_into_ref!`](crate::impl_arg_into_ref).
 #[macro_export]
 macro_rules! impl_into_arg_holder_default {
     ($($t:ty),*) => {
@@ -377,7 +415,13 @@ macro_rules! impl_into_arg_holder_default {
     };
 }
 
-/// Macro to implement ArgIntoRef for a list of types
+/// Implement `ArgIntoRef` for each listed type, so a typed function can take it
+/// as an argument by reference.
+///
+/// `#[derive(ObjectRef)]` calls this. Call it yourself for a reference type you
+/// implement by hand, such as a typed view over another reference, together with
+/// [`impl_try_from_any!`](crate::impl_try_from_any) and
+/// [`impl_into_arg_holder_default!`](crate::impl_into_arg_holder_default).
 #[macro_export]
 macro_rules! impl_arg_into_ref {
     ($($t:ty),*) => {

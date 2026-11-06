@@ -26,9 +26,10 @@ use crate::derive::{Object, ObjectRef};
 use crate::object::{Object, ObjectArc};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
-    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
+    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
-use crate::{Any, AnyView, Error, ObjectCore, Result, TYPE_ERROR};
+use crate::type_traits::AnyCompatible;
+use crate::{Any, AnyView, Error, Function, ObjectCore, Result, TYPE_ERROR};
 
 mod registry;
 mod unsafe_init;
@@ -93,9 +94,95 @@ impl TypeAttrColumn {
     }
 }
 
-/// Look up one type attribute and copy it into an owning value.
-pub fn get_type_attr(type_index: i32, attr_name: &str) -> Option<Any> {
-    TypeAttrColumn::new(attr_name)?.get(type_index)
+/// Look up a reflected method of a type by type key and method name (C++
+/// `reflection::GetMethod`).
+///
+/// Same as [`get_method_by_index`], but resolves `type_key` to a type index
+/// first.
+///
+/// # Arguments
+///
+/// * `type_key` - The type key of the type that owns the method.
+/// * `method_name` - The name of the method.
+///
+/// # Returns
+///
+/// The reflected method.
+///
+/// # Errors
+///
+/// Returns an error if the type or the method does not exist.
+pub fn get_method(type_key: &str, method_name: &str) -> Result<Function> {
+    unsafe {
+        let type_key_arg = TVMFFIByteArray::from_str(type_key);
+        let mut type_index: i32 = 0;
+        crate::check_safe_call!(TVMFFITypeKeyToIndex(&type_key_arg, &mut type_index))?;
+        get_method_by_index(type_index, method_name)
+    }
+}
+
+/// Look up a reflected method of a type by type index and method name, as
+/// [`get_method`] does by type key.
+///
+/// Methods registered through the C++ reflection registry
+/// (`refl::ObjectDef<T>().def(...)`) live in the per-type method table rather
+/// than the global function table. Constructors registered via `refl::init` are
+/// reachable under the reserved name `__ffi_init__`. For instance methods, the
+/// first argument is the object itself.
+///
+/// `type_index` must be a registered type index, obtained for example from a
+/// live object via `Any::type_index` or from a type key; the C API treats an
+/// unregistered index as a fatal error.
+///
+/// # Arguments
+///
+/// * `type_index` - The type index of the type that owns the method.
+/// * `method_name` - The name of the method.
+///
+/// # Returns
+///
+/// The reflected method.
+///
+/// # Errors
+///
+/// Returns an error if the type has no method `method_name`.
+pub fn get_method_by_index(type_index: i32, method_name: &str) -> Result<Function> {
+    unsafe {
+        let type_info = TVMFFIGetTypeInfo(type_index);
+        if type_info.is_null() {
+            crate::bail!(
+                crate::error::TYPE_ERROR,
+                "Cannot find type info for type_index={}",
+                type_index
+            );
+        }
+        let type_info = &*type_info;
+        for i in 0..type_info.num_methods as usize {
+            let method_info = &*type_info.methods.add(i);
+            if method_info.name.as_str() != method_name {
+                continue;
+            }
+            if !<Function as AnyCompatible>::check_any_strict(&method_info.method) {
+                crate::bail!(
+                    crate::error::TYPE_ERROR,
+                    "Method `{}` of type `{}` is not a Function",
+                    method_name,
+                    type_info.type_key.as_str()
+                );
+            }
+            // the table entry stores the method as a non-owning AnyView;
+            // copy out a strong reference
+            return Ok(<Function as AnyCompatible>::copy_from_any_view_after_check(
+                &method_info.method,
+            ));
+        }
+        crate::bail!(
+            crate::error::TYPE_ERROR,
+            "Cannot find method `{}` of type `{}`",
+            method_name,
+            type_info.type_key.as_str()
+        );
+    }
 }
 
 /// One step of an [`AccessPath`]: an attribute, array index or map key (`ffi.reflection.AccessStep`).
@@ -205,7 +292,7 @@ impl FieldGetter {
                 .cast::<c_void>()
         };
         let mut result = Any::new();
-        if unsafe { (self.getter)(field_address, Any::as_data_ptr(&mut result)) } != 0 {
+        if unsafe { (self.getter)(field_address, Any::as_raw_ffi_any_mut(&mut result)) } != 0 {
             return Err(Error::from_raised());
         }
         Ok(result)

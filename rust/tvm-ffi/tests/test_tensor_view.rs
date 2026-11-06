@@ -115,16 +115,8 @@ fn test_tensor_view_null_strides() {
 }
 
 #[test]
-#[should_panic(expected = "does not retain ownership")]
-fn test_tensor_view_cannot_move_to_any() {
-    let tensor = Tensor::from_slice(&[0.0f32; 6], &[2, 3]).unwrap();
-    let _ = Any::from(TensorView::from(&tensor));
-}
-
-#[test]
 fn test_tensor_view_try_from_any_view() {
-    // From a tensor object, as C++ `AnyView::cast<TensorView>` converts it; the
-    // strict `try_as`, like C++ `as`, does not.
+    // From a tensor object, as C++ `AnyView::cast<TensorView>` converts it.
     let tensor = Tensor::from_slice(&[5.0f32, 1., 2., 3., 4., 5.], &[2, 3]).unwrap();
     let object = AnyView::from(&tensor);
     let view = TensorView::try_from(object).unwrap();
@@ -133,19 +125,14 @@ fn test_tensor_view_try_from_any_view() {
         tensor.data_ptr()
     );
     assert_eq!(view.shape(), tensor.shape());
-    assert!(object.try_as::<TensorView>().is_none());
 
-    // From a DLTensor*, which both accept.
+    // From a DLTensor*.
     let (mut data, mut shape, mut strides) = ([7.0f32, 1., 2., 3., 4., 5.], [2, 3], [3i64, 1]);
     let raw = dltensor(&mut data, &mut shape, strides.as_mut_ptr());
     let borrowed = unsafe { TensorView::from_raw(&raw) };
     let pointer = AnyView::from(&borrowed);
     assert_eq!(
         TensorView::try_from(pointer).unwrap().as_raw(),
-        &raw as *const DLTensor
-    );
-    assert_eq!(
-        pointer.try_as::<TensorView>().unwrap().as_raw(),
         &raw as *const DLTensor
     );
 

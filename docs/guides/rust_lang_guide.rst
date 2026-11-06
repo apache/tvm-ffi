@@ -86,24 +86,28 @@ the value it borrows. A number and a built-in array illustrate owning and borrow
    use tvm_ffi::{Any, AnyView, Array};
 
    let number = Any::from(3_i64);
-   assert_eq!(number.try_as::<i64>(), Some(3));
+   assert_eq!(number.downcast_ref::<i64>(), Some(&3)); // Strict: an i64 is stored.
+   assert_eq!(f64::try_from(&number).unwrap(), 3.0); // Converting, as C++ `Any::cast`.
 
    let value = Any::from(Array::from_vec(vec![1_i64, 2, 3]));
    let view = AnyView::from(&value); // Borrow the value without a new reference.
    let borrowed: &Array<i64> = view.downcast_ref::<Array<i64>>().unwrap();
    assert_eq!(borrowed.len(), 3);
 
-   let array = value.try_as::<Array<i64>>().unwrap(); // Acquire another strong reference.
+   let array = Array::<i64>::try_from(&value).unwrap(); // Acquire another strong reference.
    assert_eq!(array.len(), 3);
 
 Both ``Any`` and ``AnyView`` provide ``downcast_ref::<T>() -> Option<&T>``, which borrows
 the value in place as a managed reference such as ``Array<i64>``, a value such as
 ``tvm_ffi::String`` or ``i64``, or an object type such as ``ArrayObj``. The check is
-strict, as in ``try_as``, and never converts; it returns ``None`` for other types. The
-returned reference borrows its source without consuming it or incrementing the
-reference count.
-In contrast, ``try_as::<Array<i64>>()`` returns an owned managed reference, which retains
-the object independently of the source ``Any`` or ``AnyView``.
+strict and never converts; it returns ``None`` for other types. The returned
+reference borrows its source without consuming it or incrementing the reference
+count.
+In contrast, ``TryFrom`` (``T::try_from(&value)`` or ``value.try_into()``) returns an
+owned value and converts as C++ ``Any::cast`` does: an integer reads as a float or a
+boolean. For a managed reference such as ``Array<i64>`` it retains the object
+independently of the source ``Any`` or ``AnyView``; from an owned ``Any`` it moves the
+object out instead.
 
 Object and ObjectRef
 ~~~~~~~~~~~~~~~~~~~~
@@ -129,7 +133,10 @@ element type to ``T``. Named reference types implement |rs-objectrefcore|_ for s
    assert_eq!(array.get(1).unwrap(), 2); // A method of the named type.
 
 Managed references provide ``downcast_ref::<T>()`` with the same inheritance and
-borrowing rules as ``Any`` and ``AnyView``.
+borrowing rules as ``Any`` and ``AnyView``, and ``downcast::<T>()``, which takes the
+reference and hands it back unchanged as ``Err`` when the object is not a ``T``, as
+std's ``Box<dyn Any>::downcast`` does. ``.map_err(Error::downcast_failed::<T>)?``
+turns that into a ``TypeError``. Upcasts are ``From``/``Into``.
 
 Loading a Module
 ~~~~~~~~~~~~~~~~
@@ -159,10 +166,10 @@ also look in the modules it imports:
 .. code-block:: rust
 
    let module = Module::load_from_file("build/add_one_cpu.so")?;
-   if module.implements_function("add_one_cpu", false)? {
+   if module.implements_function("add_one_cpu")? {
        // A JSON object such as {"type_schema": "..."}, if it was exported
-       let metadata = module.get_function_metadata("add_one_cpu", false)?;
-       let doc = module.get_function_doc("add_one_cpu", false)?;
+       let metadata = module.get_function_metadata("add_one_cpu")?;
+       let doc = module.get_function_doc("add_one_cpu")?;
    }
 
 Working with Tensors
@@ -274,18 +281,20 @@ reserved name ``__ffi_init__``:
 
 .. code-block:: rust
 
-   use tvm_ffi::{AnyView, Function};
+   use tvm_ffi::reflection;
+   use tvm_ffi::AnyView;
 
    // Resolve the reflected constructor and construct an instance
-   let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__")?;
+   let ctor = reflection::get_method("testing.TestIntPair", "__ffi_init__")?;
    let pair = ctor.call_tuple((1i64, 2i64))?;
 
    // Resolve an instance method; the first packed argument is the object itself
-   let sum = Function::from_type_key_method("testing.TestIntPair", "sum")?;
+   let sum = reflection::get_method("testing.TestIntPair", "sum")?;
    let result = sum.call_packed(&[AnyView::from(&pair)])?;
    assert_eq!(i64::try_from(result)?, 3);
 
-``Function::from_type_method(type_index, name)`` performs the same lookup when
+``reflection::get_method`` mirrors C++ ``reflection::GetMethod``;
+``reflection::get_method_by_index(type_index, name)`` performs the same lookup when
 the type index is already known (e.g. from ``Any::type_index``).
 
 Defining Reflected Object Types
@@ -342,7 +351,7 @@ implement ``ShallowCopy`` and the other fields to be ``Clone``.
 ``#[type_reflection(path)]`` names a function that registers the type's
 methods with ``def`` (the object is the first parameter) and ``def_static``,
 each with its type schema and doc
-string, where ``Function::from_type_method`` and Python find them. It runs
+string, where ``reflection::get_method`` and Python find them. It runs
 while the type registers, so it must not call ``type_index()`` of the type or
 of another Rust type that is not registered yet. Method names, like
 reflected field names, must be unique in the type.
@@ -389,8 +398,8 @@ is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
 and any other field from anything that converts into it, as the ``new`` of a type
 bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object, and
 the object converts into it. The reference also converts into ``ParentType``, the
-reference to its parent (``ObjectRef`` for a type under ``ffi.Object``);
-``impl_object_upcast!`` converts it into the references to further ancestors.
+reference to its parent, and every reference converts into ``ObjectRef``;
+``unsafe_impl_object_upcast!`` converts it into the references to further ancestors.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads
@@ -830,7 +839,7 @@ mutation dispatch consumes ``MutationView<'_>`` instead. Copying an ``AnyView``
 preserves a borrow without incrementing a reference count. Bind the view
 before calling ``downcast_ref::<Node>()`` when the node
 reference is used across statements; that reference borrows the view.
-Use ``try_as::<Handle>()`` for an owned typed handle or ``Any::from(value)`` to
+Use ``Handle::try_from(value)`` for an owned typed handle or ``Any::from(value)`` to
 retain an erased value beyond the callback. Mapping callbacks return
 replacement values; their input view does not grant in-place mutation
 permission.
@@ -1053,8 +1062,7 @@ while retaining typed scalar replacements:
 The context's ``var_remap_get`` and ``var_remap_set`` methods use state local to one
 invocation, preserving completed ``FreeVar`` and ``DAGNode`` substitutions without
 adding a field to the dispatcher. Explicit recursion and default descent share
-that invocation state. A dispatcher can also keep an explicit ``StructuralVarRemap``
-when substitutions must persist across invocations.
+that invocation state.
 
 Examples
 --------

@@ -245,7 +245,8 @@ impl<T: ContainerElement> UnchangedOr<T> {
     /// Check a replacement's FFI type without cloning it.
     ///
     /// An unchanged result is compatible with every replacement type. Erased and
-    /// narrowing conversions retain the strict type check of [`Any::try_as`]. For a
+    /// narrowing conversions retain the strict type check of
+    /// [`Any::downcast_ref`]. For a
     /// known typed conversion, use `map(Into::into)`.
     ///
     /// # Returns
@@ -322,6 +323,14 @@ impl<T: ContainerElement> Clone for UnchangedOr<T> {
             data: self.data.clone(),
             _marker: PhantomData,
         }
+    }
+}
+
+impl<'b, T: ContainerElement> TryFrom<&'b Any> for UnchangedOr<T> {
+    type Error = Error;
+    #[inline]
+    fn try_from(value: &'b Any) -> Result<Self> {
+        TryFromTemp::<Self>::try_from(value).map(TryFromTemp::into_value)
     }
 }
 

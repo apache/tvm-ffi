@@ -303,6 +303,32 @@ unsafe impl RefFromAnyUnchecked for tvm_ffi_sys::dlpack::DLDevice {
     }
 }
 
+// An optional object reference is one nullable object pointer (`None` is null,
+// as `OptionalCompatible` relies on), which is the payload word of a `None` or
+// object cell, so `&Option<T>` borrows that word.
+unsafe impl<T: crate::object::ObjectRefCore + AnyCompatible> RefFromAnyUnchecked for Option<T> {
+    #[inline(always)]
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
+        const {
+            assert!(std::mem::size_of::<Option<T>>() == std::mem::size_of::<*mut TVMFFIObject>());
+            assert!(std::mem::align_of::<Option<T>>() == std::mem::align_of::<*mut TVMFFIObject>());
+        };
+        if cell.type_index == TypeIndex::kTVMFFINone as i32 {
+            // A `None` cell's payload is zero by convention (C++ `Any()`), but
+            // do not rely on a producer for it.
+            return &None;
+        }
+        &*(&cell.data_union.v_obj as *const *mut TVMFFIObject as *const Option<T>)
+    }
+}
+
+unsafe impl<T: crate::object::ObjectRefCore + AnyCompatible> DowncastRefFromAny for Option<T> {
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        downcast_ref_from_any_in_place::<Self>(cell)
+    }
+}
+
 /// Types that [`crate::Any::downcast_ref`] and [`crate::AnyView::downcast_ref`]
 /// can borrow from an FFI cell in place: object types (`ArrayObj`), and the
 /// [`RefFromAnyUnchecked`] types (managed references such as `Array<T>`, `String`,
@@ -431,8 +457,27 @@ macro_rules! impl_downcast_ref_from_any {
     };
 }
 
+// An `&Any` must own what it points at, as an `Any` does: a view's cell may
+// instead borrow a C string, byte array, `DLTensor` or rvalue slot, whose
+// `&Any` would clone into an owner of a borrowed resource. Those are refused;
+// an `Any` or container cell never holds them.
+unsafe impl DowncastRefFromAny for Any {
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        let index = cell.type_index;
+        let borrowed = index == TypeIndex::kTVMFFIRawStr as i32
+            || index == TypeIndex::kTVMFFIByteArrayPtr as i32
+            || index == TypeIndex::kTVMFFIDLTensorPtr as i32
+            || index == TypeIndex::kTVMFFIObjectRValueRef as i32;
+        if borrowed {
+            None
+        } else {
+            Some(Any::ref_from_any_unchecked(cell))
+        }
+    }
+}
+
 impl_downcast_ref_from_any!(
-    Any,
     crate::String,
     crate::string::Bytes,
     i64,
