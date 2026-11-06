@@ -724,12 +724,26 @@ impl StructuralVisitorObj {
     /// Consume `result`, naming the borrowed `value` in it when it is an Error.
     #[inline(always)]
     fn with_visit_context_raw(result: TVMFFIAny, value: TVMFFIAny) -> TVMFFIAny {
+        if result.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
+            result
+        } else {
+            Self::with_visit_stop_context_raw(result, value)
+        }
+    }
+
+    // Continuing visits need no owning conversion or input inspection. Keep
+    // interrupt/error handling out of their recursive frames.
+    #[cold]
+    #[inline(never)]
+    extern "C-unwind" fn with_visit_stop_context_raw(
+        result: TVMFFIAny,
+        value: TVMFFIAny,
+    ) -> TVMFFIAny {
         if result.type_index != TVMFFITypeIndex::kTVMFFIError as i32
             || value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
         {
             result
         } else {
-            core::hint::cold_path();
             // SAFETY: the Error tag establishes the owned object's representation.
             unsafe {
                 let error = take_error(Any::from_raw_ffi_any(result));
