@@ -177,23 +177,6 @@ impl<'a> AnyView<'a> {
         unsafe { T::downcast_ref_from_any(&self.data) }
     }
 
-    /// The value as a `T` when it is stored as exactly `T`, never converting:
-    /// the strict check that dispatch and `Optional` rely on. Public code
-    /// converts with `TryFrom` or borrows with [`downcast_ref`](Self::downcast_ref).
-    #[inline(always)]
-    pub(crate) fn as_strict<T>(&self) -> Option<T>
-    where
-        T: AnyCompatible,
-    {
-        unsafe {
-            if T::check_any_strict(&self.data) {
-                Some(T::copy_from_any_view_after_check(&self.data))
-            } else {
-                None
-            }
-        }
-    }
-
     /// Get the strong count of the underlying object for testing/debugging purposes
     ///
     /// If the underlying object is not ref counted, return None
@@ -325,23 +308,6 @@ impl Any {
     pub fn downcast_ref<T: crate::type_traits::DowncastRefFromAny>(&self) -> Option<&T> {
         // SAFETY: the owned cell stays valid for as long as `self` is borrowed.
         unsafe { T::downcast_ref_from_any(&self.data) }
-    }
-
-    /// The value as a `T` when it is stored as exactly `T`, never converting:
-    /// the strict check that dispatch and `Optional` rely on. Public code
-    /// converts with `TryFrom` or borrows with [`downcast_ref`](Self::downcast_ref).
-    #[inline(always)]
-    pub(crate) fn as_strict<T>(&self) -> Option<T>
-    where
-        T: AnyCompatible,
-    {
-        unsafe {
-            if T::check_any_strict(&self.data) {
-                Some(T::copy_from_any_view_after_check(&self.data))
-            } else {
-                None
-            }
-        }
     }
 
     /// Return a pointer to the raw ABI representation, for a runtime call that

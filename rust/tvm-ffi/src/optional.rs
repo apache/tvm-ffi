@@ -144,7 +144,11 @@ impl<T: OptionalCompatible> Optional<T> {
     /// object payloads). Returns `None` when `nullopt`. No FFI call.
     #[inline]
     pub fn get(&self) -> Option<T> {
-        self.data.as_strict::<T>()
+        // Strict: the value comes back exactly as stored, never converted.
+        let cell = self.data.as_raw_ffi_any();
+        // SAFETY: the cell is valid while `self` is borrowed, and the copy
+        // runs only after the strict check.
+        unsafe { T::check_any_strict(cell).then(|| T::copy_from_any_view_after_check(cell)) }
     }
 
     /// Takes the value out, consuming self (moves the payload, no `inc_ref`).

@@ -255,7 +255,15 @@ macro_rules! callback_prefix {
             #[inline(always)]
             fn dispatch_link(&mut self, (value, $($a,)*): (AnyView<'v>, $($A,)*)) -> Option<R> {
                 $(let _ = &$a;)*
-                value.as_strict::<T>().map(|typed| self(typed, $($b,)*).callback_result())
+                // Strict: a handler matches only its exact type (a `bool` handler
+                // never catches an int), so this does not convert.
+                let cell = value.as_raw_ffi_any();
+                // SAFETY: the view's cell is valid for the call, and the copy runs
+                // only after the strict check.
+                let typed = unsafe {
+                    T::check_any_strict(cell).then(|| T::copy_from_any_view_after_check(cell))
+                };
+                typed.map(|typed| self(typed, $($b,)*).callback_result())
             }
         }
         impl<'v, F, T, O, R, $($A,)*>

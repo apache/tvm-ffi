@@ -406,7 +406,7 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
 }
 
 /// Upcast a managed reference to the root [`ObjectRef`], keeping its allocation.
-#[inline]
+#[inline(always)]
 pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
     let data = S::into_data(value);
     // SAFETY: every object starts with the root `Object` header, and an
