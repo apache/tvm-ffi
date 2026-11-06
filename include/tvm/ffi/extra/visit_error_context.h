@@ -328,15 +328,15 @@ inline void UpdateVisitErrorContext(Error* err, const ObjectRef& node) {  // NOL
  * \brief Name \p node in a raw failed result's visit error context.
  *
  * The overload the visit and mutate engines use at a hook boundary: hooks propagate errors
- * untouched, and the engine, which knows the node it dispatched on, adds that frame. The Error
- * is borrowed out of \p result and stored back, so an Error owned only by \p result is
- * updated in place.
+ * untouched, and the engine, which knows the node it dispatched on, adds that frame.
  *
  * \param result A raw result already known to hold an Error.
  * \param node The node to name; a non-object node has no frame to add.
  */
 TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(TVMFFIAny* result, AnyView node) noexcept {
   if (node.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
+    // Take the Error out of the result and store it back, so one owned only by the result is
+    // updated in place.
     Error err = detail::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
         detail::ObjectUnsafe::ObjectPtrFromOwned<Object>(result->v_obj));
     UpdateVisitErrorContext(&err, node.cast<ObjectRef>());
@@ -366,14 +366,12 @@ TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(Error* err,
 /*!
  * \brief Name \p node in a failed Expected result's visit error context.
  *
- * The Error is moved out of \p result and back, so an Error owned only by \p result is
- * updated in place.
- *
  * \param result A result already known to hold an Error.
  * \param node The node to name; skipped when it is not object-backed.
  */
 template <typename T>
 TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(Expected<T>* result, AnyView node) noexcept {
+  // Move the Error out and back, so one owned only by the result is updated in place.
   Error err = std::move(*result).error();
   UpdateVisitErrorContext(&err, node);
   *result = Unexpected<Error>(std::move(err));
