@@ -69,6 +69,49 @@ struct RecursiveEntryMutator {
     owned_value_pointer: Option<usize>,
 }
 
+fn probe_remap(
+    dispatch: &mut ManualIncrement,
+    mutator: &mut StructuralMutatorView<'_, ManualIncrement>,
+    key: Any,
+) -> Result<UnchangedOr<Any>> {
+    assert!(mutator
+        .var_remap_get(dispatch, AnyView::from(&key))?
+        .is_none());
+    assert!(mutator
+        .var_remap_get(dispatch, AnyView::from(&1_i64))
+        .is_err());
+    assert!(mutator
+        .var_remap_set(dispatch, AnyView::from(&1_i64), &Any::new())
+        .is_err());
+    let initial = mutator.def_region_kind();
+    mutator.with_def_region_kind(DefRegionKind::Pattern, |mutator| {
+        assert_eq!(mutator.def_region_kind(), DefRegionKind::Pattern);
+        mutator.var_remap_set(dispatch, AnyView::from(&key), &Any::new())?;
+        assert_eq!(
+            mutator
+                .var_remap_get(dispatch, AnyView::from(&key))?
+                .unwrap()
+                .type_index(),
+            TypeIndex::kTVMFFINone as i32
+        );
+        // A None replacement does not suppress reflected descent.
+        let result = mutator.mutate(dispatch, MutationView::borrowed(AnyView::from(&key)))?;
+        assert_eq!(
+            RemapNode::try_from(result.into_option().unwrap_or_else(|| key.clone()))?
+                .data
+                .value,
+            8
+        );
+        mutator.var_remap_set(dispatch, AnyView::from(&key), &Any::from(41i64))
+    })?;
+    assert_eq!(mutator.def_region_kind(), initial);
+    let replacement = mutator
+        .var_remap_get(dispatch, AnyView::from(&key))?
+        .unwrap();
+    dispatch.remapped = Some(replacement.clone());
+    Ok(UnchangedOr::changed(replacement))
+}
+
 impl<'v, 'c, 'r>
     Dispatcher<
         (
@@ -88,39 +131,7 @@ impl<'v, 'c, 'r>
     ) -> Option<Result<UnchangedOr<Any>>> {
         Some(if strict_bool(value.as_any_view()) == Some(true) {
             let key = self.remap_probe.as_ref().unwrap().clone();
-            (|| {
-                assert!(mutator.var_remap_get(self, AnyView::from(&key))?.is_none());
-                assert!(mutator.var_remap_get(self, AnyView::from(&1_i64)).is_err());
-                assert!(mutator
-                    .var_remap_set(self, AnyView::from(&1_i64), &Any::new())
-                    .is_err());
-                let initial = mutator.def_region_kind();
-                mutator.with_def_region_kind(DefRegionKind::Pattern, |mutator| {
-                    assert_eq!(mutator.def_region_kind(), DefRegionKind::Pattern);
-                    mutator.var_remap_set(self, AnyView::from(&key), &Any::new())?;
-                    assert_eq!(
-                        mutator
-                            .var_remap_get(self, AnyView::from(&key))?
-                            .unwrap()
-                            .type_index(),
-                        TypeIndex::kTVMFFINone as i32
-                    );
-                    // A None replacement does not suppress reflected descent.
-                    let result =
-                        mutator.mutate(self, MutationView::borrowed(AnyView::from(&key)))?;
-                    assert_eq!(
-                        RemapNode::try_from(result.into_option().unwrap_or_else(|| key.clone()))?
-                            .data
-                            .value,
-                        8
-                    );
-                    mutator.var_remap_set(self, AnyView::from(&key), &Any::from(41i64))
-                })?;
-                assert_eq!(mutator.def_region_kind(), initial);
-                let replacement = mutator.var_remap_get(self, AnyView::from(&key))?.unwrap();
-                self.remapped = Some(replacement.clone());
-                Ok(UnchangedOr::changed(replacement))
-            })()
+            probe_remap(self, mutator, key)
         } else if let Some(integer) = value.as_any_view().downcast_ref::<i64>().copied() {
             Ok((integer + 1).into())
         } else {
@@ -1209,8 +1220,11 @@ fn callback_errors_preserve_message_and_add_object_context() {
             any_object_pointer(expected)
         );
     }
+}
 
-    // The failing node may be a pre-order replacement or a post-order rebuilt parent.
+// The failing node may be a pre-order replacement or a post-order rebuilt parent.
+#[test]
+fn map_errors_name_the_replaced_or_rebuilt_node() {
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let root = Array::from_vec(vec![0i64]);
         let mut failed_node = None;

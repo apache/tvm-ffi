@@ -222,7 +222,7 @@ impl<T: ContainerElement + Clone> Array<T> {
         let size = items.len();
 
         // Allocate with capacity
-        let arc = ObjectArc::<ArrayObj>::new_with_extra_items(ArrayObj {
+        let mut arc = ObjectArc::<ArrayObj>::new_with_extra_items(ArrayObj {
             object: Object::new(),
             data: core::ptr::null_mut(),
             size: size as i64,
@@ -231,16 +231,13 @@ impl<T: ContainerElement + Clone> Array<T> {
         });
 
         unsafe {
-            let raw_ptr = ObjectArc::as_ptr(&arc) as *mut ArrayObj;
-            let container = &mut *raw_ptr;
+            let container = &mut *ObjectArc::as_mut_ptr(&mut arc);
 
             let base_ptr = ArrayObj::extra_items_mut(container).as_mut_ptr();
             container.data = base_ptr as *mut _;
 
             for (i, item) in items.into_iter().enumerate() {
-                let mut raw = TVMFFIAny::new();
-                T::container_move_to_any(item, &mut raw);
-                core::ptr::write(base_ptr.add(i), raw);
+                write_cell(base_ptr.add(i), item);
             }
         }
         // SAFETY: `arc` was allocated and initialized above as an `Array<T>`.
@@ -466,8 +463,6 @@ impl<T: ContainerElement + Clone> Array<T> {
     }
 }
 
-// --- Index Implementation ---
-
 /// Lends `&T` from the array's cell in place. Every cell of an `Array<T>`
 /// holds a `T` (checked when the array is built), so only a debug check runs.
 impl<T: ContainerElement + Clone + RefFromAnyUnchecked> std::ops::Index<usize> for Array<T> {
@@ -489,8 +484,6 @@ impl<T: ContainerElement + Clone + RefFromAnyUnchecked> std::ops::Index<usize> f
         }
     }
 }
-
-// --- Iterator Implementations ---
 
 impl<T: ContainerElement + Clone + RefFromAnyUnchecked> Array<T> {
     /// Return an iterator that borrows each element in place, without a
@@ -608,8 +601,6 @@ impl<T: ContainerElement + Clone> FromIterator<T> for Array<T> {
         Self::from_vec(items)
     }
 }
-
-// --- Any Type System Conversions ---
 
 unsafe impl<T> AnyCompatible for Array<T>
 where

@@ -17,12 +17,18 @@
  * under the License.
  */
 
-use crate::any::{Any, AnyView};
-use crate::collections::array::Array;
-use crate::derive::Object;
+use super::structural_visit::DefRegionKind;
+use crate::any::Any;
 use crate::error::{Error, Result, RUNTIME_ERROR};
-use crate::object::{self, Object, ObjectArc, ObjectRef, ObjectRefCore};
-use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject, TVMFFITypeIndex};
+use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
+    kTVMFFIFieldFlagBitMaskSEqHashDefPattern, kTVMFFIFieldFlagBitMaskSEqHashDefSimple,
+    kTVMFFIFieldFlagBitMaskSEqHashIgnore, kTVMFFIFieldFlagBitSetterIsFunctionObj,
+};
+use crate::tvm_ffi_sys::{
+    TVMFFIAny, TVMFFIByteArray, TVMFFIFieldInfo, TVMFFISEqHashKind, TVMFFITypeIndex,
+    TVMFFITypeInfo, TVMFFITypeKeyToIndex,
+};
+use std::ops::ControlFlow;
 
 // -----------------------------------------------------------------------------
 // Shared outlined errors
@@ -34,6 +40,12 @@ use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject, TVMFFIType
 #[inline(never)]
 pub(super) fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
+}
+
+#[cold]
+#[inline(never)]
+pub(super) fn wrong_dispatcher() -> ! {
+    panic!("structural traversal view used with a different dispatcher instance")
 }
 
 #[cold]
@@ -58,21 +70,13 @@ pub(super) fn with_structural_field_error_context(
 /// inside the cold path instead of successful recursive traversal frames.
 ///
 /// # Safety
-/// The fields must describe one owning TVMFFIAny that has not been consumed.
+/// `raw` is one owning TVMFFIAny that has not been consumed.
 // Perf note: Construct the addressable Any and perform checked Error conversion
 // inside this outline boundary, not in the successful recursive caller's frame.
 #[cold]
 #[inline(never)]
-pub(super) unsafe fn structural_error_from_raw(
-    type_index: i32,
-    small_str_len: u32,
-    data_union: TVMFFIAnyDataUnion,
-) -> Error {
-    let value = Any::from_raw_ffi_any(TVMFFIAny {
-        type_index,
-        small_str_len,
-        data_union,
-    });
+pub(super) unsafe fn structural_error_from_raw(raw: TVMFFIAny) -> Error {
+    let value = Any::from_raw_ffi_any(raw);
     match Error::try_from(value) {
         Ok(error) | Err(error) => error,
     }
@@ -86,134 +90,6 @@ pub(super) unsafe fn structural_error_from_raw(
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
 }
-
-/// Rust binding of C++ `VisitErrorContextObj`, the payload that
-/// `Error::extra_context` carries to name the nodes a failed visit unwound through.
-#[repr(C)]
-#[derive(Object)]
-#[type_key = "ffi.VisitErrorContext"]
-#[type_final]
-pub(crate) struct VisitErrorContextObj {
-    base: Object,
-    /// Visited nodes, innermost first; C++ `ObjectRef` is nullable.
-    reverse_visit_pattern: Array<Option<ObjectRef>>,
-    /// The `extra_context` the error carried before this context replaced it.
-    prev_error_context: Option<ObjectRef>,
-}
-
-/// Name the visited object in `raw` in the error's visit context, like C++
-/// `detail::UpdateVisitErrorContext`. Copy-on-write at each level: the Error, its
-/// context and the context's pattern are each copied only when shared, so an error
-/// owned by the unwinding frame is appended in place.
-#[cold]
-pub(crate) fn with_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Error {
-    if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-        return error;
-    }
-    // SAFETY: the traversal input remains live during annotation. Conversion
-    // acquires ownership before the temporary view ends; raw is an object tag.
-    let Ok(node) = ObjectRef::try_from(unsafe { AnyView::from_raw_ffi_any(raw) }) else {
-        return error;
-    };
-    let as_context = |context: &ObjectRef| {
-        let object = ObjectArc::as_ptr(ObjectRef::data(context));
-        // SAFETY: `context` keeps its object alive; the type is checked first.
-        unsafe {
-            object::is_instance_of::<VisitErrorContextObj>(
-                (*object.cast::<TVMFFIObject>()).type_index,
-            )
-            .then(|| &*object.cast::<VisitErrorContextObj>())
-        }
-    };
-    // Callback, policy and default descent can report the same frame.
-    if let Some(context) = error.extra_context().and_then(as_context) {
-        if context
-            .reverse_visit_pattern
-            .iter()
-            .next_back()
-            .and_then(Option::as_ref)
-            .is_some_and(|last| last.same_as(&node))
-        {
-            return error;
-        }
-    }
-    let slot = error.extra_context_mut();
-    let previous = slot.take();
-    let context = match previous {
-        Some(previous) if as_context(&previous).is_some() => {
-            // SAFETY: `previous` was checked to be a `VisitErrorContextObj`.
-            let mut context = unsafe {
-                ObjectArc::from_raw(
-                    ObjectArc::into_raw(ObjectRef::into_data(previous))
-                        .cast::<VisitErrorContextObj>(),
-                )
-            };
-            if !ObjectArc::is_unique(&context) {
-                context = ObjectArc::new(VisitErrorContextObj {
-                    base: Object::new(),
-                    reverse_visit_pattern: context.reverse_visit_pattern.clone(),
-                    prev_error_context: context.prev_error_context.clone(),
-                });
-            }
-            // SAFETY: this handle is the context's only reference.
-            unsafe {
-                (*ObjectArc::as_mut_ptr(&mut context))
-                    .reverse_visit_pattern
-                    .push(Some(node))
-            };
-            context
-        }
-        previous => ObjectArc::new(VisitErrorContextObj {
-            base: Object::new(),
-            reverse_visit_pattern: Array::from_vec(vec![Some(node)]),
-            prev_error_context: previous,
-        }),
-    };
-    // SAFETY: every object starts with the root `Object` header.
-    *slot = Some(unsafe {
-        ObjectRef::from_data(ObjectArc::from_raw(
-            ObjectArc::into_raw(context).cast::<Object>(),
-        ))
-    });
-    error
-}
-
-// Generate the tuple arities supported by the standard library (1 through 12).
-macro_rules! impl_callback_chain_tuple_arities {
-    ($impl_chain:ident) => {
-        impl_callback_chain_tuple_arities!(
-            @prefixes $impl_chain;
-            [];
-            (F0, M0, 0),
-            (F1, M1, 1),
-            (F2, M2, 2),
-            (F3, M3, 3),
-            (F4, M4, 4),
-            (F5, M5, 5),
-            (F6, M6, 6),
-            (F7, M7, 7),
-            (F8, M8, 8),
-            (F9, M9, 9),
-            (F10, M10, 10),
-            (F11, M11, 11)
-        );
-    };
-    (@prefixes $impl_chain:ident; [$($prefix:tt)*];) => {};
-    (
-        @prefixes $impl_chain:ident;
-        [$($prefix:tt)*];
-        $next:tt $(, $rest:tt)*
-    ) => {
-        $impl_chain!($($prefix)* $next);
-        impl_callback_chain_tuple_arities!(
-            @prefixes $impl_chain;
-            [$($prefix)* $next,];
-            $($rest),*
-        );
-    };
-}
-
-pub(crate) use impl_callback_chain_tuple_arities;
 
 // -----------------------------------------------------------------------------
 // Raw carrier utilities
@@ -258,49 +134,107 @@ pub(crate) unsafe fn raw_ffi_any_into_result(raw: TVMFFIAny) -> Result<Any> {
         return Ok(Any::from_raw_ffi_any(raw));
     }
     core::hint::cold_path();
-    Err(structural_error_from_raw(
-        raw.type_index,
-        raw.small_str_len,
-        raw.data_union,
-    ))
+    Err(structural_error_from_raw(raw))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::VisitErrorContextObj;
-    use crate::object::ObjectCore;
+pub(super) const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
+pub(super) const FLAG_SEQ_HASH_DEF_PATTERN: i64 = kTVMFFIFieldFlagBitMaskSEqHashDefPattern as i64;
+pub(super) const FLAG_SEQ_HASH_DEF_SIMPLE: i64 = kTVMFFIFieldFlagBitMaskSEqHashDefSimple as i64;
+pub(super) const FLAG_SETTER_IS_FUNCTION: i64 = kTVMFFIFieldFlagBitSetterIsFunctionObj as i64;
 
-    // The binding must match the layout C++ registers for `ffi.VisitErrorContext`.
-    #[test]
-    fn visit_error_context_layout_matches_registered_fields() {
-        let expected = [
-            (
-                "reverse_visit_pattern",
-                std::mem::offset_of!(VisitErrorContextObj, reverse_visit_pattern),
-            ),
-            (
-                "prev_error_context",
-                std::mem::offset_of!(VisitErrorContextObj, prev_error_context),
-            ),
-        ];
-        // SAFETY: the type is registered by the runtime; its field table lives as long.
-        let fields = unsafe {
-            let info = crate::tvm_ffi_sys::TVMFFIGetTypeInfo(VisitErrorContextObj::type_index());
-            assert!(!info.is_null());
-            std::slice::from_raw_parts((*info).fields, (*info).num_fields as usize)
-        };
-        assert_eq!(fields.len(), expected.len());
-        for (name, offset) in expected {
-            let field = fields
-                .iter()
-                .find(|field| field.name.as_str() == name)
-                .unwrap_or_else(|| panic!("`{name}` is not a registered field"));
-            assert_eq!(field.offset as usize, offset, "offset of `{name}`");
-            assert_eq!(
-                field.size as usize,
-                std::mem::size_of::<usize>(),
-                "size of `{name}`"
-            );
+/// The runtime type index of the native type `key`; panics when it is unregistered.
+#[cold]
+pub(super) fn registered_type_index(key: &str) -> i32 {
+    let mut type_index = 0;
+    // SAFETY: `key` outlives the lookup.
+    if unsafe { TVMFFITypeKeyToIndex(&TVMFFIByteArray::from_str(key), &mut type_index) } != 0 {
+        panic!("{key} is not registered: {}", Error::from_raised());
+    }
+    type_index
+}
+
+/// The registered `structural_eq_hash_kind` of `info`, `Unsupported` without metadata.
+///
+/// # Safety
+///
+/// `info` is a registered type-info record.
+#[inline(always)]
+pub(super) unsafe fn seq_hash_kind(info: *const TVMFFITypeInfo) -> i32 {
+    let metadata = (*info).metadata;
+    if metadata.is_null() {
+        TVMFFISEqHashKind::kTVMFFISEqHashKindUnsupported as i32
+    } else {
+        (*metadata).structural_eq_hash_kind
+    }
+}
+
+#[inline(always)]
+pub(super) fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefRegionKind {
+    // Precedence: a pattern region propagates; entering any kind inside it has no effect.
+    if inherited == DefRegionKind::Pattern {
+        DefRegionKind::Pattern
+    } else if field.flags & FLAG_SEQ_HASH_DEF_SIMPLE != 0 {
+        DefRegionKind::Simple
+    } else if field.flags & FLAG_SEQ_HASH_DEF_PATTERN != 0 {
+        DefRegionKind::Pattern
+    } else {
+        inherited
+    }
+}
+
+/// A simple definition applies to a FreeVar value itself, but not to
+/// the FreeVar's own reflected children: nested free vars there must resolve
+/// against an outer binding instead of rebinding. Mirrors C++
+/// `VisitReflectedFieldsExpected`.
+#[inline(always)]
+pub(super) fn free_var_child_region(
+    inherited: DefRegionKind,
+    structural_eq_hash_kind: i32,
+) -> DefRegionKind {
+    if inherited == DefRegionKind::Simple
+        && structural_eq_hash_kind == TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32
+    {
+        DefRegionKind::None
+    } else {
+        inherited
+    }
+}
+
+/// Visit every reflected field described by `info` and its ancestors in the
+/// same parent-to-child order as C++ `ForEachFieldInfoWithEarlyStop`.
+///
+/// # Safety
+///
+/// `info` must point to an immortal registered type-info record.
+pub(super) unsafe fn for_each_field_info<B>(
+    info: *const TVMFFITypeInfo,
+    callback: &mut impl FnMut(&'static TVMFFIFieldInfo) -> ControlFlow<B>,
+) -> Option<B> {
+    // Ancestor slot 0 is the root Object. C++ starts at slot 1, walks toward
+    // the immediate parent, then visits the concrete type's own fields.
+    for depth in 1..(*info).type_depth {
+        let ancestor = *(*info).type_acenstors.offset(depth as isize);
+        if let Some(value) = visit_field_level(ancestor, callback) {
+            return Some(value);
         }
     }
+    visit_field_level(info, callback)
+}
+
+unsafe fn visit_field_level<B>(
+    info: *const TVMFFITypeInfo,
+    callback: &mut impl FnMut(&'static TVMFFIFieldInfo) -> ControlFlow<B>,
+) -> Option<B> {
+    if info.is_null() || (*info).fields.is_null() {
+        return None;
+    }
+    let fields = std::slice::from_raw_parts((*info).fields, (*info).num_fields as usize);
+    for field in fields {
+        // C reflection tables are immortal once registered.
+        let field: &'static TVMFFIFieldInfo = &*(field as *const TVMFFIFieldInfo);
+        if let ControlFlow::Break(value) = callback(field) {
+            return Some(value);
+        }
+    }
+    None
 }

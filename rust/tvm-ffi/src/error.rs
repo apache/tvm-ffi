@@ -73,7 +73,7 @@ pub const INTERNAL_ERROR: ErrorKind = ErrorKind::new("InternalError");
 pub const OVERFLOW_ERROR: ErrorKind = ErrorKind::new("OverflowError");
 pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind::new("ZeroDivisionError");
 
-/// error object
+/// The object behind an [`Error`]: its kind, message, backtrace, cause and context.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Error"]
@@ -177,7 +177,7 @@ impl Error {
     ///
     /// * `kind` - The kind of the error, such as [`VALUE_ERROR`].
     /// * `message` - The message of the error.
-    /// * `backtrace` - The backtrace of the error, which may be empty.
+    /// * `backtrace` - The backtrace of the error, most recent call first; may be empty.
     ///
     /// # Returns
     ///
@@ -192,7 +192,7 @@ impl Error {
     ///
     /// * `kind` - The kind of the error.
     /// * `message` - The message of the error.
-    /// * `backtrace` - The backtrace of the error, which may be empty.
+    /// * `backtrace` - The backtrace of the error, most recent call first; may be empty.
     /// * `cause_chain` - The error that caused this one, if any.
     /// * `extra_context` - An object of application-specific context, if any.
     ///
@@ -291,11 +291,8 @@ impl Error {
         self.data.cell.backtrace.as_str()
     }
 
-    /// Return the cause, if one was attached to this error.
-    ///
-    /// # Returns
-    ///
-    /// The error that caused this one, or `None`.
+    /// The error that caused this one, the next link of the cause chain, as C++
+    /// `cause_chain()`. See also `source`.
     pub fn cause_chain(&self) -> Option<&Error> {
         let handle = &self.data.cell.cause_chain;
         if handle.is_null() {
@@ -306,11 +303,7 @@ impl Error {
         Some(unsafe { &*(handle as *const _ as *const Error) })
     }
 
-    /// Return the application-specific context, if present.
-    ///
-    /// # Returns
-    ///
-    /// The context object, or `None`.
+    /// The application-specific context object, if present.
     pub fn extra_context(&self) -> Option<&object::ObjectRef> {
         let handle = &self.data.cell.extra_context;
         if handle.is_null() {
