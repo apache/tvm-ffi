@@ -68,6 +68,7 @@ pub struct FunctionObj {
 /// tvm_ffi::Function::from_typed(move || -> tvm_ffi::Result<i64> { Ok(*count) });
 /// ```
 #[derive(Clone, ObjectRef)]
+#[object_ref(skip_deref)]
 pub struct Function {
     data: ObjectArc<FunctionObj>,
 }

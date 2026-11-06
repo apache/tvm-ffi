@@ -118,6 +118,7 @@ pub struct TensorObj {
 /// ```
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
+#[object_ref(skip_deref)]
 pub struct Tensor {
     data: ObjectArc<TensorObj>,
 }

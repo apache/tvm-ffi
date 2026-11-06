@@ -20,7 +20,6 @@
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 
-mod def_object_ref;
 mod dispatch;
 mod match_any;
 mod object_macros;
@@ -105,8 +104,10 @@ pub fn derive_object(input: TokenStream) -> TokenStream {
     object_macros::derive_object(input)
 }
 
+// Documented on the `tvm_ffi::derive::ObjectRef` re-export, whose examples
+// run as tvm-ffi doctests.
 #[proc_macro_error]
-#[proc_macro_derive(ObjectRef, attributes(type_key, type_index, custom_debug))]
+#[proc_macro_derive(ObjectRef, attributes(object_ref))]
 pub fn derive_object_ref(input: TokenStream) -> TokenStream {
     object_macros::derive_object_ref(input)
 }
@@ -117,12 +118,4 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
     rs_object::rs_object(args, item)
-}
-
-// Documented on the `tvm_ffi::def_object_ref` re-export, whose examples run as
-// tvm-ffi doctests.
-#[proc_macro_error]
-#[proc_macro]
-pub fn def_object_ref(input: TokenStream) -> TokenStream {
-    def_object_ref::def_object_ref(input)
 }

@@ -24,7 +24,6 @@
 // tvm-ffi-stubgen(prefix): rust_stubgen
 
 // tvm-ffi-stubgen(begin): import-section
-use std::ops::Deref;
 use tvm_ffi::Error;
 use tvm_ffi::Object;
 use tvm_ffi::ObjectArc;
@@ -85,13 +84,6 @@ const _: () = {
 #[derive(tvm_ffi::derive::ObjectRef, Clone)]
 pub struct IntPair {
     base: ObjectArc<IntPairObj>,
-}
-
-impl Deref for IntPair {
-    type Target = IntPairObj;
-    fn deref(&self) -> &IntPairObj {
-        &self.base
-    }
 }
 
 impl IntPairObj {

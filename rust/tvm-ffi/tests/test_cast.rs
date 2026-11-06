@@ -66,7 +66,7 @@ struct TestDerived {
     data: ObjectArc<TestDerivedObj>,
 }
 
-tvm_ffi::unsafe_impl_object_upcast!(TestDerived => TestBase);
+tvm_ffi::unsafe_impl_object_ref_upcast!(TestDerived => TestBase);
 
 // unwrap_err() requires the Ok type to implement Debug, which ObjectRef types do not
 fn expect_err<T>(res: Result<T>) -> Error {

@@ -90,7 +90,7 @@ macro_rules! cached_global_func {
 /// the generated safe conversions unsound. The Rust stub generator writes these
 /// from the C++ type hierarchy.
 #[macro_export]
-macro_rules! unsafe_impl_object_upcast {
+macro_rules! unsafe_impl_object_ref_upcast {
     ($($source:ty => $target:ty),+ $(,)?) => {
         $(
             impl ::std::convert::From<$source> for $target {
@@ -185,9 +185,10 @@ macro_rules! unsafe_impl_object_upcast {
     };
 }
 
-/// Implement the in-place reference downcasts (`array[i]`, `Any::downcast_ref`,
+/// Implement the in-place `downcast_ref` borrows (`array[i]`, `Any::downcast_ref`,
 /// [`ObjectRefCore::downcast_ref`](crate::ObjectRefCore::downcast_ref)) for each
-/// listed reference type implemented by hand, as `#[derive(ObjectRef)]` does.
+/// listed object reference type. [`#[derive(ObjectRef)]`](crate::derive::ObjectRef)
+/// emits it; a reference that implements `ObjectRefCore` by hand calls it.
 ///
 /// # Safety
 ///
@@ -198,9 +199,9 @@ macro_rules! unsafe_impl_object_upcast {
 /// # Examples
 ///
 /// ```
-/// use tvm_ffi::object::{ObjectArc, ObjectRef};
-/// use tvm_ffi::{def_object_ref, rs_object, unsafe_impl_ref_downcast, Object, ObjectRefCore};
-/// # use tvm_ffi::{tvm_ffi_sys::TVMFFIAny, AnyCompatible};
+/// use tvm_ffi::derive::ObjectRef;
+/// use tvm_ffi::{rs_object, unsafe_impl_object_ref_downcast_ref, Any};
+/// use tvm_ffi::{Object, ObjectArc, ObjectRefAnyCompatible, ObjectRefCore};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -208,47 +209,42 @@ macro_rules! unsafe_impl_object_upcast {
 ///     pub first: i64,
 ///     pub second: i64,
 /// }
-/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+///
+/// #[derive(Clone, ObjectRef)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
 ///
 /// /// A `MyPair` whose `first` is positive.
-/// #[repr(transparent)]
 /// #[derive(Clone)]
+/// #[repr(transparent)]
 /// pub struct PositivePair(ObjectArc<MyPairObj>);
-/// # unsafe impl ObjectRefCore for PositivePair {
-/// #     type ContainerType = MyPairObj;
-/// #     fn data(this: &Self) -> &ObjectArc<MyPairObj> { &this.0 }
-/// #     fn into_data(this: Self) -> ObjectArc<MyPairObj> { this.0 }
-/// #     unsafe fn from_data(data: ObjectArc<MyPairObj>) -> Self { Self(data) }
-/// # }
-/// # unsafe impl AnyCompatible for PositivePair {
-/// #     fn type_str() -> String { "PositivePair".into() }
-/// #     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-/// #         MyPair::copy_to_any_view(std::mem::transmute::<&Self, &MyPair>(src), data)
-/// #     }
-/// #     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-/// #         MyPair::move_to_any(MyPair::from_data(src.0), data)
-/// #     }
-/// #     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-/// #         MyPair::check_any_strict(data) && (*data.data_union.v_obj.cast::<MyPairObj>()).first > 0
-/// #     }
-/// #     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-/// #         Self(MyPair::into_data(MyPair::copy_from_any_view_after_check(data)))
-/// #     }
-/// #     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-/// #         Self(MyPair::into_data(MyPair::move_from_any_after_check(data)))
-/// #     }
-/// #     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-/// #         if Self::check_any_strict(data) { Ok(Self::copy_from_any_view_after_check(data)) } else { Err(()) }
-/// #     }
-/// # }
-/// // (`ObjectRefCore` and `AnyCompatible` for `PositivePair` are written by hand.)
-/// unsafe_impl_ref_downcast!(PositivePair);
 ///
-/// let pair: ObjectRef = MyPair::from(MyPairObj::new(Object::new(), 1, 2)).into();
+/// unsafe impl ObjectRefCore for PositivePair {
+///     type ContainerType = MyPairObj;
+///     fn data(this: &Self) -> &ObjectArc<MyPairObj> {
+///         &this.0
+///     }
+///     fn into_data(this: Self) -> ObjectArc<MyPairObj> {
+///         this.0
+///     }
+///     unsafe fn from_data(data: ObjectArc<MyPairObj>) -> Self {
+///         Self(data)
+///     }
+/// }
+///
+/// unsafe impl ObjectRefAnyCompatible for PositivePair {
+///     fn extra_check(pair: &MyPairObj) -> bool {
+///         pair.first > 0
+///     }
+/// }
+/// unsafe_impl_object_ref_downcast_ref!(PositivePair);
+///
+/// let pair = Any::from(MyPair::from_object(MyPairObj::new(Object::new(), 1, 2)));
 /// assert!(pair.downcast_ref::<PositivePair>().is_some());
 /// ```
 #[macro_export]
-macro_rules! unsafe_impl_ref_downcast {
+macro_rules! unsafe_impl_object_ref_downcast_ref {
     ($($name:ty),+ $(,)?) => {
         $(
             // SAFETY: the macro declaration promises that `$name` is one object
@@ -452,15 +448,26 @@ macro_rules! attach_context {
 // Macros for any definitions
 // ----------------------------------------------------------------------------
 
-/// Implement `TryFrom<AnyView>`, `TryFrom<Any>` and `TryFrom<&Any>` for each listed
-/// [`AnyCompatible`](crate::AnyCompatible) type, so it converts out of FFI values
-/// by its `AnyCompatible` checks.
+/// Implement the conversions between each listed [`AnyCompatible`](crate::AnyCompatible)
+/// type and FFI values: `TryFrom<AnyView>`, `TryFrom<Any>` and `TryFrom<&Any>`,
+/// and use as an argument of [`Function::call_tuple`](crate::Function::call_tuple)
+/// and of functions from [`into_typed_fn!`](crate::into_typed_fn).
 ///
-/// `#[derive(ObjectRef)]` calls it. A reference type implemented by hand, such
-/// as a typed view over another reference, calls it with
-/// [`impl_arg_into_ref!`](crate::impl_arg_into_ref),
-/// [`impl_into_arg_holder_default!`](crate::impl_into_arg_holder_default) and
-/// [`unsafe_impl_ref_downcast!`](crate::unsafe_impl_ref_downcast).
+/// `#[derive(ObjectRef)]` calls it; a type that implements `AnyCompatible` by hand
+/// calls it after that impl. See also
+/// [`unsafe_impl_object_ref_downcast_ref!`](crate::unsafe_impl_object_ref_downcast_ref)
+/// for an object reference implemented by hand.
+#[macro_export]
+macro_rules! impl_any_compatible_conversions {
+    ($($t:ty),* $(,)?) => {
+        $crate::impl_try_from_any!($($t),*);
+        $crate::impl_arg_into_ref!($($t),*);
+        $crate::impl_into_arg_holder_default!($($t),*);
+    };
+}
+
+/// `TryFrom` from FFI values; part of [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions).
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_try_from_any {
     ($($t:ty),* $(,)?) => {
@@ -537,13 +544,8 @@ macro_rules! impl_try_from_any_for_parametric {
     };
 }
 
-/// Let each listed [`AnyCompatible`](crate::AnyCompatible) type, owned or
-/// borrowed, be an argument of a function from
-/// [`into_typed_fn!`](crate::into_typed_fn).
-///
-/// A reference type implemented by hand calls it with
-/// [`impl_try_from_any!`](crate::impl_try_from_any) and
-/// [`impl_arg_into_ref!`](crate::impl_arg_into_ref).
+/// Typed-function arguments; part of [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions).
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_into_arg_holder_default {
     ($($t:ty),*) => {
@@ -564,13 +566,8 @@ macro_rules! impl_into_arg_holder_default {
     };
 }
 
-/// Let each listed [`AnyCompatible`](crate::AnyCompatible) type, owned or
-/// borrowed, be an element of the arguments of
-/// [`Function::call_tuple`](crate::Function::call_tuple).
-///
-/// A reference type implemented by hand calls it with
-/// [`impl_try_from_any!`](crate::impl_try_from_any) and
-/// [`impl_into_arg_holder_default!`](crate::impl_into_arg_holder_default).
+/// `call_tuple` arguments; part of [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions).
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_arg_into_ref {
     ($($t:ty),*) => {

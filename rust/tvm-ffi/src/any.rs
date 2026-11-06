@@ -503,7 +503,8 @@ impl<T: AnyCompatible> TryFrom<Any> for TryFromTemp<T> {
     }
 }
 
-crate::impl_try_from_any!(
+crate::impl_any_compatible_conversions!(
+    (),
     bool,
     i8,
     i16,
@@ -517,15 +518,14 @@ crate::impl_try_from_any!(
     usize,
     f32,
     f64,
-    (),
-    *mut core::ffi::c_void,
     crate::string::String,
     crate::string::Bytes,
     crate::big_int::BigInt,
-    crate::object::ObjectRef,
     tvm_ffi_sys::dlpack::DLDataType,
     tvm_ffi_sys::dlpack::DLDevice,
 );
+// Only out of `Any`: a raw pointer and the root reference are not call arguments.
+crate::impl_try_from_any!(*mut core::ffi::c_void, crate::object::ObjectRef);
 
 crate::impl_try_from_any_for_parametric!(Option<T>);
 

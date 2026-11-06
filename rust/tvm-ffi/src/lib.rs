@@ -74,7 +74,7 @@ pub use crate::function::Function;
 pub use crate::function_internal::AsPackedCallable;
 pub use crate::object::{
     ImmutableObject, IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems,
-    ObjectIdentity, ObjectRefCore,
+    ObjectIdentity, ObjectRefAnyCompatible, ObjectRefCore,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{
@@ -205,8 +205,8 @@ pub use tvm_ffi_macros::match_any;
 /// type with the reflection of every field, so that C++ structural equality
 /// and hashing, `repr`, deep copy and Python see the fields. The first field,
 /// `base`, is the parent's object, as the base class of a C++ object is:
-/// `base: Object` for a type under `ffi.Object`. Define the managed reference
-/// with [`def_object_ref!`].
+/// `base: Object` for a type under `ffi.Object`. Declare the managed reference
+/// with [`#[derive(ObjectRef)]`](derive::ObjectRef).
 ///
 /// The macro adds to the struct:
 ///
@@ -246,8 +246,8 @@ pub use tvm_ffi_macros::match_any;
 /// # Examples
 ///
 /// ```
-/// use tvm_ffi::object::ObjectRef;
-/// use tvm_ffi::{def_object_ref, rs_object, Object};
+/// use tvm_ffi::derive::ObjectRef;
+/// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -256,55 +256,17 @@ pub use tvm_ffi_macros::match_any;
 ///     #[reflect(seq_hash_ignore)]
 ///     pub second: tvm_ffi::String,
 /// }
-/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
 ///
-/// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, "one"));
+/// #[derive(Clone, ObjectRef)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
+///
+/// let pair = MyPair::from_object(MyPairObj::new(Object::new(), 1, "one"));
 /// assert_eq!(pair.first, 1);
 /// assert_eq!(pair.second.as_str(), "one");
 /// ```
 pub use tvm_ffi_macros::rs_object;
-
-/// Define the managed reference to an object type, as C++
-/// `TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE` does.
-///
-/// `def_object_ref!(TypeName, ParentType, ObjectName)` defines `TypeName`, a
-/// `derive(ObjectRef)` type that holds an `ObjectName`. It dereferences to
-/// `ObjectName`, and an `ObjectName` converts into it.
-///
-/// # Arguments
-///
-/// * `TypeName` - The reference type to define. Attributes and visibility
-///   before it go on the struct.
-/// * `ParentType` - The reference to the parent's object, `ObjectRef` for a
-///   type under `ffi.Object`. `TypeName` converts into it by
-///   `unsafe_impl_object_upcast!`, and `&TypeName` borrows as `&ParentType` through
-///   `AsRef`; a conversion into a further ancestor takes its own
-///   `unsafe_impl_object_upcast!`.
-/// * `ObjectName` - The object type.
-/// * `crate = path` - Optional, after `ObjectName`: where the generated code
-///   finds tvm-ffi, as for [`rs_object`](macro@rs_object).
-///
-/// # Examples
-///
-/// ```
-/// use tvm_ffi::object::ObjectRef;
-/// use tvm_ffi::{def_object_ref, rs_object, Object};
-///
-/// #[rs_object("my_ext.MyPair", final)]
-/// pub struct MyPairObj {
-///     base: Object,
-///     pub first: i64,
-///     pub second: i64,
-/// }
-///
-/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
-///
-/// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, 2));
-/// assert_eq!(pair.first + pair.second, 3);
-/// let _borrowed: &ObjectRef = pair.as_ref();
-/// let _parent: ObjectRef = pair.into();
-/// ```
-pub use tvm_ffi_macros::def_object_ref;
 
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 pub use tvm_ffi_sys::{

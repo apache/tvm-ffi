@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::atomic::AtomicU64;
 
+use crate::any::AnyView;
 use crate::derive::ObjectRef;
 use crate::type_traits::AnyCompatible;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
@@ -253,11 +254,189 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
     }
 }
 
+/// The [`AnyCompatible`] implementation of an object reference, with every
+/// hook defaulted, as C++ `TypeTraits<T>` derives from
+/// `ObjectRefTypeTraitsBase<T>`: every implementer is `AnyCompatible`.
+///
+/// `#[derive(ObjectRef)]` implements it with the defaults. A typed reference
+/// that accepts only some objects of its type, or converts other values,
+/// implements it by hand and overrides only what differs, as C++ `IntExpr`
+/// overrides `CheckAnyStrict` and `ConvertFallbackValue`. A type with another
+/// representation, such as [`Array`](crate::Array), implements
+/// `AnyCompatible` instead.
+///
+/// # Safety
+///
+/// `Self` is exactly one [`ObjectArc<Self::ContainerType>`](ObjectArc). The
+/// hooks are safe and cannot break the [`AnyCompatible`] contract.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::derive::ObjectRef;
+/// use tvm_ffi::{rs_object, Any, AnyView, Object, ObjectArc, ObjectRefAnyCompatible};
+///
+/// #[rs_object("my_ext.MyPair", final)]
+/// pub struct MyPairObj {
+///     base: Object,
+///     pub first: i64,
+///     pub second: i64,
+/// }
+///
+/// #[derive(Clone, ObjectRef)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
+///
+/// /// A `MyPair` whose `first` is positive.
+/// #[derive(Clone, ObjectRef)]
+/// #[object_ref(skip_any_compatible)]
+/// pub struct PositivePair {
+///     data: ObjectArc<MyPairObj>,
+/// }
+///
+/// unsafe impl ObjectRefAnyCompatible for PositivePair {
+///     fn extra_check(pair: &MyPairObj) -> bool {
+///         pair.first > 0
+///     }
+///
+///     // A positive integer `n` converts to the pair `(n, n)`.
+///     fn convert_fallback(value: AnyView<'_>) -> Option<Self> {
+///         let n = i64::try_from(value).ok().filter(|n| *n > 0)?;
+///         Some(Self::from_object(MyPairObj::new(Object::new(), n, n)))
+///     }
+/// }
+///
+/// let negative = Any::from(MyPair::from_object(MyPairObj::new(Object::new(), -1, 2)));
+/// assert!(negative.downcast_ref::<PositivePair>().is_none());
+/// assert!(PositivePair::try_from(negative).is_err());
+/// assert_eq!(PositivePair::try_from(Any::from(3_i64))?.second, 3);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+pub unsafe trait ObjectRefAnyCompatible: ObjectRefCore {
+    /// Whether no hook is overridden, so that `match_any!` may route a final
+    /// object type by its type index alone; only `#[derive(ObjectRef)]` sets
+    /// it. See [`AnyCompatible::MATCH_ANY_EXACT`].
+    #[doc(hidden)]
+    const MATCH_ANY_EXACT: bool = false;
+
+    /// Whether `obj`, an instance of `ContainerType`, is a value of `Self`.
+    /// Every strict and converting cast checks it, after the object type.
+    #[inline]
+    fn extra_check(obj: &Self::ContainerType) -> bool {
+        let _ = obj;
+        true
+    }
+
+    /// Convert a value that is not a `Self` object, as C++
+    /// `ConvertFallbackValue` does. Only converting casts (`TryFrom<Any>`,
+    /// typed function arguments) call it; `downcast_ref`, `downcast` and
+    /// `match_any!` never do.
+    #[inline]
+    fn convert_fallback(value: AnyView<'_>) -> Option<Self> {
+        let _ = value;
+        None
+    }
+
+    /// The type name in conversion errors and type schemas; by default the
+    /// object's type key. See [`AnyCompatible::type_str`].
+    fn custom_type_str() -> String {
+        Self::ContainerType::TYPE_KEY.into()
+    }
+
+    /// The name of the mismatched `value` in conversion errors; by default its
+    /// runtime type key. See [`AnyCompatible::get_mismatch_type_info`].
+    fn custom_mismatch_type_info(value: AnyView<'_>) -> String {
+        crate::type_traits::runtime_type_key(value.type_index())
+    }
+}
+
+/// Write the object cell of the live object `ptr`.
+#[inline(always)]
+unsafe fn write_object_cell<T: ObjectCore>(ptr: *const T, data: &mut TVMFFIAny) {
+    let object = ptr as *mut TVMFFIObject;
+    data.type_index = (*object).type_index;
+    // SAFETY: a live object's header holds its registered object-range type index.
+    std::hint::assert_unchecked(data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+    data.small_str_len = 0;
+    data.data_union.v_obj = object;
+}
+
+// The object cell encoding, with the strict check `is_instance_of` then
+// `extra_check`, and `convert_fallback` after it in converting casts.
+unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
+    // An overridden hook makes the type inexact; a non-final object type always is.
+    const MATCH_ANY_EXACT: bool = <T as ObjectRefAnyCompatible>::MATCH_ANY_EXACT
+        && <T::ContainerType as ObjectCore>::TYPE_FINAL;
+    const MATCH_ANY_STRICT_EXACT: bool = <T as AnyCompatible>::MATCH_ANY_EXACT;
+
+    #[inline]
+    fn match_any_exact_type_index() -> i32 {
+        T::ContainerType::type_index()
+    }
+
+    #[inline]
+    unsafe fn is_undefined(field: *const Self) -> bool {
+        // `Self` is one `ObjectArc`, so its null form is the undefined field.
+        ObjectArc::is_null(field.cast::<ObjectArc<T::ContainerType>>())
+    }
+
+    #[inline(always)]
+    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+        write_object_cell(ObjectArc::as_ptr(T::data(src)), data);
+    }
+
+    #[inline(always)]
+    unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
+        write_object_cell(ObjectArc::into_raw(T::into_data(src)), data);
+    }
+
+    #[inline(always)]
+    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
+        // An instance of `ContainerType` points to one, so `extra_check` may read it.
+        is_instance_of::<T::ContainerType>(data.type_index)
+            && T::extra_check(&*data.data_union.v_obj.cast::<T::ContainerType>())
+    }
+
+    #[inline]
+    unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+        // The view does not own the object, so the new reference takes one.
+        unsafe_::inc_ref(data.data_union.v_obj);
+        T::from_data(ObjectArc::from_raw(data.data_union.v_obj.cast()))
+    }
+
+    #[inline(always)]
+    unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+        T::from_data(ObjectArc::from_raw(data.data_union.v_obj.cast()))
+    }
+
+    #[inline]
+    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+        if Self::check_any_strict(data) {
+            return Ok(Self::copy_from_any_view_after_check(data));
+        }
+        // A moved-from rvalue slot is consumed only by an exact object match.
+        if data.type_index == TypeIndex::kTVMFFIObjectRValueRef as i32 {
+            return Err(());
+        }
+        T::convert_fallback(AnyView::from_raw_ffi_any(*data)).ok_or(())
+    }
+
+    fn get_mismatch_type_info(data: &TVMFFIAny) -> String {
+        // SAFETY: the caller's cell is valid for the borrow.
+        T::custom_mismatch_type_info(unsafe { AnyView::from_raw_ffi_any(*data) })
+    }
+
+    fn type_str() -> String {
+        T::custom_type_str()
+    }
+}
+
 /// A value that converts into the object reference `T`, owned or borrowed.
 ///
 /// An owned reference converts into an owned `T`, and a borrowed one borrows
 /// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
-/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast)
+/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_ref_upcast!`](crate::unsafe_impl_object_ref_upcast)
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes
@@ -268,8 +447,9 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 ///
 /// ```
 /// use std::borrow::Borrow;
+/// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::object::{IntoObjectRef, ObjectRef, ObjectRefCore};
-/// use tvm_ffi::{def_object_ref, rs_object, Object};
+/// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -277,13 +457,17 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 ///     pub first: i64,
 ///     pub second: i64,
 /// }
-/// def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+///
+/// #[derive(Clone, ObjectRef)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
 ///
 /// fn same(a: impl IntoObjectRef<ObjectRef>, b: &ObjectRef) -> bool {
 ///     a.into_object_ref().borrow().same_as(b)
 /// }
 ///
-/// let pair = MyPair::from(MyPairObj::new(Object::new(), 1, 2));
+/// let pair = MyPair::from_object(MyPairObj::new(Object::new(), 1, 2));
 /// let base: ObjectRef = pair.clone().into();
 /// assert!(same(&pair, &base)); // borrowed as `&ObjectRef`, no new reference
 /// assert!(same(pair.clone(), &base)); // moved into an `ObjectRef`
@@ -503,6 +687,7 @@ pub(crate) fn type_key_of_index(type_index: i32) -> String {
 /// through reference counting.
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
+#[object_ref(skip_deref)]
 pub struct ObjectRef {
     data: ObjectArc<Object>,
 }

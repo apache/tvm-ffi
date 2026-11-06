@@ -557,7 +557,8 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// # use tvm_ffi::*;
     /// # #[rs_object("my_ext.MyPair", final)]
     /// # pub struct MyPairObj { base: Object, pub first: Array<i64>, pub second: Array<i64> }
-    /// # def_object_ref!(pub MyPair, ObjectRef, MyPairObj);
+    /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
+    /// # pub struct MyPair { data: ObjectArc<MyPairObj> }
     /// # struct Pass;
     /// # #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
     /// # impl Pass {
@@ -567,7 +568,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// #     }
     /// # }
     /// # let pair = MyPairObj::new(Object::new(), Array::from_vec(vec![1_i64]), Array::from_vec(vec![2_i64]));
-    /// # structural_mutate(MyPair::from(pair), Pass)?;
+    /// # structural_mutate(MyPair::from_object(pair), Pass)?;
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     ///
