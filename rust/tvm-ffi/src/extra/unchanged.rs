@@ -302,11 +302,7 @@ impl UnchangedOr<Any> {
             // Transfer ownership directly into the checked cold conversion.
             return unsafe {
                 let raw = Any::into_raw_ffi_any(data);
-                Err(structural_error_from_raw(
-                    raw.type_index,
-                    raw.small_str_len,
-                    raw.data_union,
-                ))
+                Err(structural_error_from_raw(raw))
             };
         }
         Ok(Self {

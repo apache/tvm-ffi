@@ -53,7 +53,7 @@ impl<'a> DispatchInput for AnyView<'a> {
     type Source = crate::match_any_internal::ViewSource<'a>;
 }
 impl<'a, T> DispatchInput for crate::MutationView<'a, T> {
-    type Source = crate::match_any_internal::CapabilitySource<'a>;
+    type Source = crate::match_any_internal::MutationSource<'a>;
 }
 
 // Generated alias bounds must not make recovery depend on a temporary borrow.
@@ -70,7 +70,6 @@ impl<'source, 'value> DispatchRecovery<crate::match_any_internal::ViewSource<'so
     type Recovery = ();
 }
 
-use super::structural_common::impl_callback_chain_tuple_arities;
 use std::{borrow::BorrowMut, marker::PhantomData};
 
 /// Inferred selectors for dispatcher normalization.
@@ -101,7 +100,7 @@ pub mod marker {
     pub struct BorrowedObject<T>(PhantomData<fn() -> T>);
     /// Pass the first `AnyView` without a runtime type filter.
     pub enum AnyView {}
-    /// Match a mutation capability for `T`, retaining its scoped permission.
+    /// Match a mutation view for `T`, keeping its in-place mode.
     pub struct Mutation<T = crate::Any>(PhantomData<fn() -> T>);
 }
 
@@ -363,4 +362,39 @@ macro_rules! dispatch_tuple_links {
         }
     };
 }
+// Generate the tuple arities supported by the standard library (1 through 12).
+macro_rules! impl_callback_chain_tuple_arities {
+    ($impl_chain:ident) => {
+        impl_callback_chain_tuple_arities!(
+            @prefixes $impl_chain;
+            [];
+            (F0, M0, 0),
+            (F1, M1, 1),
+            (F2, M2, 2),
+            (F3, M3, 3),
+            (F4, M4, 4),
+            (F5, M5, 5),
+            (F6, M6, 6),
+            (F7, M7, 7),
+            (F8, M8, 8),
+            (F9, M9, 9),
+            (F10, M10, 10),
+            (F11, M11, 11)
+        );
+    };
+    (@prefixes $impl_chain:ident; [$($prefix:tt)*];) => {};
+    (
+        @prefixes $impl_chain:ident;
+        [$($prefix:tt)*];
+        $next:tt $(, $rest:tt)*
+    ) => {
+        $impl_chain!($($prefix)* $next);
+        impl_callback_chain_tuple_arities!(
+            @prefixes $impl_chain;
+            [$($prefix)* $next,];
+            $($rest),*
+        );
+    };
+}
+
 impl_callback_chain_tuple_arities!(dispatch_tuple_links);

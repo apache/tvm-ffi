@@ -50,10 +50,10 @@ pub struct OwnedSource(crate::Any);
 #[doc(hidden)]
 pub struct ViewSource<'a>(AnyView<'a>);
 #[doc(hidden)]
-pub struct CapabilitySource<'a>(Option<crate::MutationView<'a>>);
+pub struct MutationSource<'a>(Option<crate::MutationView<'a>>);
 
 /// Object references move into an owning Any; inherent adapters preserve view and
-/// capability lifetimes independently of the local holder's lifetime.
+/// view lifetimes independently of the local holder's lifetime.
 #[doc(hidden)]
 pub trait PrepareSource {
     type Source;
@@ -89,8 +89,8 @@ impl<'a, T: ?Sized> SourceProbe<&'a T> {
 }
 impl<'a, T> SourceProbe<crate::MutationView<'a, T>> {
     #[inline(always)]
-    pub fn prepare(&mut self) -> CapabilitySource<'a> {
-        CapabilitySource(Some(self.0.take().unwrap().into_untyped()))
+    pub fn prepare(&mut self) -> MutationSource<'a> {
+        MutationSource(Some(self.0.take().unwrap().into_untyped()))
     }
 }
 
@@ -120,7 +120,7 @@ impl SourceView for ViewSource<'_> {
         self.0.as_raw_ffi_any()
     }
 }
-impl SourceView for CapabilitySource<'_> {
+impl SourceView for MutationSource<'_> {
     #[inline(always)]
     fn view(&self) -> AnyView<'_> {
         self.0.as_ref().unwrap().as_any_view()
@@ -131,7 +131,7 @@ impl SourceView for CapabilitySource<'_> {
     }
 }
 
-/// A rejected guard drops an ordinary result or returns the original capability.
+/// A rejected guard drops an ordinary result or returns the original view.
 /// There is no Drop implementation, so native match guards retain Rust's usual
 /// restriction against moving their bindings before the guard succeeds.
 #[doc(hidden)]
@@ -153,7 +153,7 @@ impl<S> Restore<()> for S {
     #[inline(always)]
     fn restore(&mut self, _: ()) {}
 }
-impl<'a> Restore<crate::MutationView<'a>> for CapabilitySource<'a> {
+impl<'a> Restore<crate::MutationView<'a>> for MutationSource<'a> {
     #[inline(always)]
     fn restore(&mut self, recovery: crate::MutationView<'a>) {
         debug_assert!(self.0.is_none());
@@ -162,7 +162,7 @@ impl<'a> Restore<crate::MutationView<'a>> for CapabilitySource<'a> {
 }
 
 /// Type-directed matching. The source parameter also expresses whether an
-/// aliased result can retain the input lifetime or transfer its capability.
+/// aliased result can retain the input lifetime or transfer its view.
 #[doc(hidden)]
 pub trait MatchPattern<S>: Sized {
     type Recovery;
@@ -210,24 +210,22 @@ impl<'b> MatchPattern<&'b mut OwnedSource> for AnyView<'b> {
         })
     }
 }
-impl<'a, 'b> MatchPattern<&'b mut CapabilitySource<'a>> for AnyView<'b> {
+impl<'a, 'b> MatchPattern<&'b mut MutationSource<'a>> for AnyView<'b> {
     type Recovery = ();
     #[inline(always)]
-    fn try_match(source: &'b mut CapabilitySource<'a>) -> Result<Matched<Self, ()>, ()> {
+    fn try_match(source: &'b mut MutationSource<'a>) -> Result<Matched<Self, ()>, ()> {
         Ok(Matched {
             value: source.view(),
             recover: drop,
         })
     }
 }
-impl<'a, 'b, T: crate::type_traits::ContainerElement> MatchPattern<&'b mut CapabilitySource<'a>>
+impl<'a, 'b, T: crate::type_traits::ContainerElement> MatchPattern<&'b mut MutationSource<'a>>
     for crate::MutationView<'a, T>
 {
     type Recovery = crate::MutationView<'a>;
     #[inline(always)]
-    fn try_match(
-        source: &'b mut CapabilitySource<'a>,
-    ) -> Result<Matched<Self, Self::Recovery>, ()> {
+    fn try_match(source: &'b mut MutationSource<'a>) -> Result<Matched<Self, Self::Recovery>, ()> {
         match source.0.take().unwrap().downcast::<T>() {
             Ok(value) => {
                 if unsafe { T::container_match_constraints(value.as_any_view().as_raw_ffi_any()) } {
@@ -292,7 +290,7 @@ impl<'b, T: crate::type_traits::DowncastRefFromAny + 'static, S: SourceView>
         // such as `&Add` points into the cell, an object type into the heap.
         let node = unsafe { T::downcast_ref_from_any(source.cell()) }.ok_or(())? as *const T;
         // SAFETY: the checked value is borrowed from source for 'b. No owning
-        // conversion or capability transfer can occur while this borrow lives.
+        // conversion or view transfer can occur while this borrow lives.
         Ok(Matched {
             value: unsafe { &*node },
             recover: drop,

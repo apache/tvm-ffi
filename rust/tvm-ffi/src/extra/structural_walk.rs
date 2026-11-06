@@ -23,8 +23,7 @@
 //! the non-unwinding native callback boundary aborts the process.
 
 use super::structural_visit::{
-    visit_result_from_any, DefRegionKind, StructuralVisitEngine, StructuralVisitorView,
-    VisitInterrupt,
+    DefRegionKind, StructuralVisitEngine, StructuralVisitorView, VisitInterrupt,
 };
 use crate::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
 use std::borrow::BorrowMut;
@@ -171,26 +170,14 @@ where
     for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
 {
     let root = *root.as_raw_ffi_any();
-    // Take ownership of the raw result right after the native call.
-    let result = match order {
+    match order {
         WalkOrder::PreOrder => {
-            let mut visitor = WalkVisitor::<D, true> { observer };
-            let raw = StructuralVisitEngine::run_visitor_raw::<WalkVisitor<'_, D, true>>(
-                root,
-                &mut visitor,
-            );
-            unsafe { Any::from_raw_ffi_any(raw) }
+            StructuralVisitEngine::run_visitor(root, &mut WalkVisitor::<D, true> { observer })
         }
         WalkOrder::PostOrder => {
-            let mut visitor = WalkVisitor::<D, false> { observer };
-            let raw = StructuralVisitEngine::run_visitor_raw::<WalkVisitor<'_, D, false>>(
-                root,
-                &mut visitor,
-            );
-            unsafe { Any::from_raw_ffi_any(raw) }
+            StructuralVisitEngine::run_visitor(root, &mut WalkVisitor::<D, false> { observer })
         }
-    };
-    visit_result_from_any(result)
+    }
 }
 
 /// Walk `root` with an observer, the Rust analog of C++

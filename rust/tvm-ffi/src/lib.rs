@@ -116,7 +116,7 @@ pub use crate::type_traits::AnyCompatible;
 /// strictly; `&Type` (such as `&Array<i64>` or `&tvm_ffi::String`) or
 /// `&NodeObj`, which borrow the value or the object node in place without
 /// changing a reference count; `MutationView<'_, T>`,
-/// which keeps the permission to mutate in place; or `AnyView<'_>`, which
+/// which keeps the in-place mode; or `AnyView<'_>`, which
 /// matches every value and must be the last handler.
 ///
 /// Only the outer `None` means that no handler matched: a handler error, or a
@@ -169,7 +169,7 @@ pub use tvm_ffi_macros::dispatch;
 ///   `Array<Any>`.
 /// * `Type(ref name)` borrows a managed reference, and `NodeObj(ref name)`
 ///   borrows the object node, without changing its reference count.
-/// * `MutationView<Type>(name)` moves the permission to mutate in place into a
+/// * `MutationView<Type>(name)` moves the in-place mode into a
 ///   typed view.
 ///
 /// Matching is strict: an `i64` arm does not match a stored `f64`, and a value

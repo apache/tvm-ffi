@@ -114,7 +114,7 @@ where
         let raw = *value.as_any_view().as_raw_ffi_any();
         let kind = mutator.def_region_kind();
         if PRE_ORDER {
-            // Snapshot permission before a callback can retain or release ownership.
+            // Snapshot the mode before a callback can retain or release ownership.
             // SAFETY: the input owner remains live through this synchronous callback;
             // its higher-ranked view cannot escape into the owning result.
             let Some(callback_result) = self
