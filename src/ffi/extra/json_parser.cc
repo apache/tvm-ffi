@@ -29,9 +29,17 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
-#include <cinttypes>
+#include <cerrno>
+#include <charconv>
+#include <clocale>
+#include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <utility>
+
+#ifdef __APPLE__
+#include <xlocale.h>
+#endif
 
 namespace tvm {
 namespace ffi {
@@ -162,11 +170,9 @@ class JSONParserContext {
     // e = %x65 / %x45            ; e E
     // exp = e [ minus / plus ] 1*DIGIT
     // frac = decimal-point 1*DIGIT
-    std::string temp_buffer;
     bool maybe_int = true;
     // parse [minus], cross check for Infinity/NaN/-Infinity
     if (*cur_ == '-') {
-      temp_buffer.push_back('-');
       ++cur_;
       if (cur_ != end_ && *cur_ == 'I') {
         if (this->MatchLiteral("Infinity", 8)) {
@@ -202,7 +208,6 @@ class JSONParserContext {
       char next_char = *cur_;
       if ((next_char >= '0' && next_char <= '9') || next_char == 'e' || next_char == 'E' ||
           next_char == '+' || next_char == '-' || next_char == '.') {
-        temp_buffer.push_back(next_char);
         if (next_char == '.' || next_char == 'e' || next_char == 'E') {
           maybe_int = false;
         }
@@ -211,37 +216,60 @@ class JSONParserContext {
         break;
       }
     }
-    if (temp_buffer.empty()) {
+    if (start_pos == cur_) {
       this->SetErrorExpectingValue();
       return false;
     }
-    // parse from temp_buffer_
     if (maybe_int) {
-      // now try to parse the number as int64
-      char* end_ptr;
-      errno = 0;
-      intmax_t int_val = strtoimax(temp_buffer.data(), &end_ptr, 10);
-      if (errno == 0 && int_val >= std::numeric_limits<int64_t>::min() &&
-          int_val <= std::numeric_limits<int64_t>::max() &&
-          end_ptr == temp_buffer.data() + temp_buffer.size()) {
-        *out = static_cast<int64_t>(int_val);
+      int64_t int_value;
+      auto result = std::from_chars(start_pos, cur_, int_value);
+      if (result.ec == std::errc{} && result.ptr == cur_) {
+        *out = int_value;
         return true;
       }
     }
-    {
-      // now try to parse number as double
-      char* end_ptr;
-      errno = 0;
-      double double_val = strtod(temp_buffer.data(), &end_ptr);
-      if (errno == 0 && end_ptr == temp_buffer.data() + temp_buffer.size()) {
-        *out = double_val;
-        return true;
-      } else {
-        this->SetCurrentPosForBetterErrorMsg(start_pos);
-        this->SetErrorExpectingValue();
-        return false;
-      }
+    double double_value;
+// libc++ and older libstdc++ use the C-locale fallback.
+#if defined(_MSC_VER) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11)
+    auto result = std::from_chars(start_pos, cur_, double_value);
+    if (result.ec != std::errc{} || result.ptr != cur_) {
+      this->SetCurrentPosForBetterErrorMsg(start_pos);
+      this->SetErrorExpectingValue();
+      return false;
     }
+    // Keep strtod's underflow behavior for subnormal results.
+    if (double_value == 0 || std::fabs(double_value) > std::numeric_limits<double>::min()) {
+      *out = double_value;
+      return true;
+    }
+#endif
+    // Subnormals fall through to strtod_l to preserve underflow reporting (ERANGE).
+    std::string temp_buffer(start_pos, cur_);
+    char* end_ptr;
+    // Create "C" numeric locale once to ignore process locale; twin: json_writer.cc.
+    static const struct NumberLocale {
+#ifdef _WIN32
+      _locale_t value = _create_locale(LC_NUMERIC, "C");
+      ~NumberLocale() { _free_locale(value); }
+#else
+      locale_t value = newlocale(LC_NUMERIC_MASK, "C", nullptr);
+      ~NumberLocale() { freelocale(value); }
+#endif
+      NumberLocale() { TVM_FFI_ICHECK(value != nullptr) << "Cannot create JSON numeric locale"; }
+    } locale;
+    errno = 0;
+#ifdef _WIN32
+    double_value = _strtod_l(temp_buffer.c_str(), &end_ptr, locale.value);
+#else
+    double_value = strtod_l(temp_buffer.c_str(), &end_ptr, locale.value);
+#endif
+    if (errno == 0 && end_ptr == temp_buffer.c_str() + temp_buffer.size()) {
+      *out = double_value;
+      return true;
+    }
+    this->SetCurrentPosForBetterErrorMsg(start_pos);
+    this->SetErrorExpectingValue();
+    return false;
   }
 
   /*!

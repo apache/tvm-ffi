@@ -22,7 +22,9 @@
 #include <tvm/ffi/extra/json.h>
 #include <tvm/ffi/extra/structural_equal.h>
 
+#include <clocale>
 #include <cmath>
+#include <string>
 
 namespace {
 
@@ -118,6 +120,21 @@ TEST(JSONParser, Number) {
   EXPECT_EQ(json::Parse("1e+10").cast<double>(), 1e+10);
   EXPECT_EQ(json::Parse("1E-10").cast<double>(), 1E-10);
   EXPECT_EQ(json::Parse("123.456E+10").cast<double>(), 123.456E+10);
+}
+
+TEST(JSONParser, NumericLocale) {
+  struct RestoreLocale {
+    std::string saved = std::setlocale(LC_NUMERIC, nullptr);
+    ~RestoreLocale() { std::setlocale(LC_NUMERIC, saved.c_str()); }
+  } restore_locale;
+  const char* found = nullptr;
+  for (const char* name : {"de_DE.UTF-8", "German_Germany.1252"}) {
+    found = std::setlocale(LC_NUMERIC, name);
+    if (found != nullptr) break;
+  }
+  if (found == nullptr) GTEST_SKIP() << "No locale with a decimal comma is installed";
+  EXPECT_EQ(json::Parse("1234.5").cast<double>(), 1234.5);
+  EXPECT_EQ(json::Stringify(1234.5), "1234.5");
 }
 
 TEST(JSONParser, WrongNumber) {
