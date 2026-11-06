@@ -95,7 +95,7 @@ use crate::tvm_ffi_sys::{
 };
 
 use super::structural_common::{
-    missing_field_getter_error, runtime_error, type_key_of, with_structural_error_context,
+    missing_field_getter_error, runtime_error, with_structural_error_context,
     with_structural_field_error_context, with_visit_error_context,
 };
 
@@ -561,7 +561,10 @@ fn annotate_visit_error(
     with_structural_error_context(
         error,
         "visit",
-        &format!("object `{}`", type_key_of(value.type_index)),
+        &format!(
+            "object `{}`",
+            crate::object::type_key_of_index(value.type_index)
+        ),
     )
 }
 

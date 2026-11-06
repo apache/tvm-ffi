@@ -203,16 +203,12 @@ impl TypeSchema for AnyView<'_> {
     }
 }
 
-/// Marker for a value that can be stored in an FFI container.
+/// A value an FFI container such as [`Array`](crate::Array) or
+/// [`Map`](crate::Map) holds: every [`AnyCompatible`] type, and [`Any`].
 ///
-/// This is an implementation detail of [`crate::Array`] and [`crate::Map`].
-/// Users should implement [`AnyCompatible`]; the blanket implementation below
-/// then makes that type a container element automatically. [`Any`] is handled
-/// separately so heterogeneous containers such as `Array<Any>` also work.
-///
-/// The private supertrait seals this marker and owns all conversion operations,
-/// keeping them out of the user-facing trait API.
-#[doc(hidden)]
+/// Use it as the bound of code generic over container elements, as
+/// `Array<T: ContainerElement>` is. The trait is sealed: implement
+/// [`AnyCompatible`] instead, and the type is an element.
 pub trait ContainerElement: container_element_ops::Ops {}
 
 impl<T: AnyCompatible> ContainerElement for T {}

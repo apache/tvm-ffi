@@ -187,12 +187,13 @@ class Object {
    *       copy-on-write in multi-threaded setting.
    */
   bool unique() const {
+    // Acquire pairs with the releasing decrement: other owners' accesses precede an in-place write.
 #ifdef _MSC_VER
-    return (reinterpret_cast<const volatile uint64_t*>(
-               &header_.combined_ref_count))[0] ==  // NOLINT(*)
-           kCombinedRefCountBothOne;
+    return static_cast<uint64_t>(
+               ReadAcquire64(reinterpret_cast<const volatile LONG64*>(  // NOLINT(*)
+                   &header_.combined_ref_count))) == kCombinedRefCountBothOne;
 #else
-    return __atomic_load_n(&(header_.combined_ref_count), __ATOMIC_RELAXED) ==
+    return __atomic_load_n(&(header_.combined_ref_count), __ATOMIC_ACQUIRE) ==
            kCombinedRefCountBothOne;
 #endif
   }

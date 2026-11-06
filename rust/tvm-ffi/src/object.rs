@@ -145,19 +145,21 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
     }
 }
 
-/// A managed object reference: the category of types such as [`ObjectRef`](struct@ObjectRef),
-/// `Array<T>` and every `#[derive(ObjectRef)]` type, with the operations every
-/// reference supports: identity ([`same_as`](Self::same_as)) and strict casts
-/// between reference types, which check the object's runtime type and never
-/// convert. [`downcast_ref`](Self::downcast_ref) borrows in place, and
-/// [`downcast`](Self::downcast) takes the reference, as std's
-/// `dyn Any::downcast_ref` and `Box<dyn Any>::downcast` do. Upcasts are
-/// `From`/`Into`, which `#[derive(ObjectRef)]` and
-/// [`unsafe_impl_object_upcast!`](crate::unsafe_impl_object_upcast) generate.
+/// A managed object reference, such as [`ObjectRef`](struct@ObjectRef), `Array<T>`
+/// or a `#[derive(ObjectRef)]` type, with identity ([`same_as`](Self::same_as))
+/// and strict casts that check the runtime type and never convert; upcasts are
+/// `From`/`Into`.
 ///
-/// The derive implements it. `data`, `into_data` and `from_data` are the
-/// handle plumbing the FFI uses, called as associated functions; the trait is
-/// `unsafe` to implement because they move the reference's internals.
+/// # Casts
+///
+/// * [`downcast_ref`](Self::downcast_ref) borrows, strictly, as std's
+///   `dyn Any::downcast_ref` does.
+/// * [`downcast`](Self::downcast) takes the value, strictly, and hands it back
+///   on a mismatch, as `Box<dyn Any>::downcast` does; the counterpart of C++
+///   `as<T>()`.
+/// * `TryFrom` takes the value and returns a `TypeError`, for `?`. Between
+///   references it only checks; from an [`Any`](crate::Any) it converts by
+///   the FFI rules, such as an integer into a float.
 ///
 /// # Safety
 ///
@@ -213,13 +215,9 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
         }
     }
 
-    /// Take `self` as the reference type `B` when its object is one, without
-    /// copying the object or changing its reference count.
-    ///
-    /// `B` is a subtype, or a parameterized container such as `Array<i64>`,
-    /// whose elements are checked too. On a mismatch the reference is returned
-    /// unchanged, so another type can be tried. For `?`, use the `TryFrom` that
-    /// each upcast provides, which returns a `TypeError` instead.
+    /// Take `self` as `B`, a subtype or a container such as `Array<i64>` whose
+    /// elements are checked too, when its object is one, without copying it.
+    /// On a mismatch the reference is returned unchanged.
     ///
     /// ```
     /// use tvm_ffi::{object::ObjectRef, Array, ObjectRefCore};
@@ -376,21 +374,17 @@ impl std::fmt::Debug for ObjectIdentity {
     }
 }
 
-/// Check whether a runtime type index refers to `Target` or one of its
-/// subtypes.
+/// Whether the runtime type index of an object is `Target` or one of its
+/// subtypes, as C++ `Object::IsInstance<T>()` checks.
 ///
-/// The subtype relation lives in the process-wide type table maintained by the
-/// tvm-ffi library: every registered type records its depth in the single
-/// inheritance tree together with the chain of its ancestors. The check is
-/// O(1) — if `target` really is an ancestor, it must appear in the candidate's
-/// ancestor array exactly at `target`'s depth.
-///
-/// This is a hidden support function for derive-generated object checks. Object
-/// indices in the registered range must refer to entries in the runtime type
-/// table.
-#[doc(hidden)]
+/// Use it in the strict check of a reference type implemented by hand; the
+/// casts of [`ObjectRefCore`] call it already. An index in the object range
+/// must be registered.
 #[inline(always)]
 pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
+    // Every registered type records its depth in the single inheritance tree
+    // and its ancestors, so the check is O(1): an ancestor `Target` appears in
+    // the candidate's ancestor array exactly at `Target`'s depth.
     let target_type_index = Target::type_index();
     if object_type_index == target_type_index {
         return true;
@@ -531,32 +525,23 @@ pub mod unsafe_ {
         kTVMFFIObjectDeleterFlagBitMaskWeak,
     };
 
-    /// Increase the strong reference count of the object
-    ///
-    /// This function is same as TVMFFIObjectIncRef but implemented natively in Rust
-    ///
-    /// # Arguments
-    /// * `obj` - The object to increase the reference count
+    /// Increase the strong reference count of `handle`.
     #[inline]
     pub unsafe fn inc_ref(handle: *mut TVMFFIObject) {
         let obj = &*handle;
         obj.combined_ref_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Decrease the strong reference count of the object
-    ///
-    /// This function is same as TVMFFIObjectDecRef but implemented natively in Rust
-    ///
-    /// # Arguments
-    /// * `obj` - The object to decrease the reference count
+    /// Decrease the strong reference count of `handle`, deleting the object when it was the last.
     #[inline]
     pub(crate) unsafe fn dec_ref(handle: *mut TVMFFIObject) {
+        // Release publishes this owner's writes; the Acquire fence before the deleter pairs with it.
         let old_combined_count = (*handle)
             .combined_ref_count
-            .fetch_sub(COMBINED_REF_COUNT_STRONG_ONE, Ordering::Relaxed);
+            .fetch_sub(COMBINED_REF_COUNT_STRONG_ONE, Ordering::Release);
         if old_combined_count == COMBINED_REF_COUNT_BOTH_ONE {
+            fence(Ordering::Acquire);
             if let Some(deleter) = (*handle).deleter {
-                fence(Ordering::Acquire);
                 deleter(
                     handle.cast::<c_void>(),
                     kTVMFFIObjectDeleterFlagBitMaskBoth as i32,
@@ -593,6 +578,13 @@ pub mod unsafe_ {
     pub(crate) unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
         let obj = &*handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) & COMBINED_REF_COUNT_MASK_U32) as usize
+    }
+
+    /// Whether `handle` is the only reference, so it may be mutated in place (C++ `unique()`).
+    #[inline]
+    pub(crate) unsafe fn is_unique(handle: *mut TVMFFIObject) -> bool {
+        // Acquire pairs with the releasing decrement: other owners' accesses precede an in-place write.
+        (*handle).combined_ref_count.load(Ordering::Acquire) == COMBINED_REF_COUNT_BOTH_ONE
     }
 
     #[inline]
@@ -777,10 +769,11 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// Whether `this` holds a null pointer, as all-zero bytes do: no
     /// `ObjectArc`, but the field of an object that a creator left undefined.
     ///
+    /// See also [`AnyCompatible::is_undefined`].
+    ///
     /// # Safety
     ///
     /// `this` points to an `ObjectArc<T>` or to all-zero bytes.
-    #[doc(hidden)]
     #[inline]
     pub unsafe fn is_null(this: *const Self) -> bool {
         (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
@@ -862,6 +855,12 @@ impl<T: ObjectCore> ObjectArc<T> {
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
         unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+    }
+
+    /// Whether this is the only reference, so it may be mutated in place.
+    #[inline]
+    pub(crate) fn is_unique(this: &Self) -> bool {
+        unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
     /// Get the weak reference count of the ObjectArc

@@ -22,9 +22,7 @@ use crate::collections::array::Array;
 use crate::derive::Object;
 use crate::error::{Error, Result, RUNTIME_ERROR};
 use crate::object::{self, Object, ObjectArc, ObjectRef, ObjectRefCore};
-use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeIndex,
-};
+use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject, TVMFFITypeIndex};
 
 // -----------------------------------------------------------------------------
 // Shared outlined errors
@@ -77,24 +75,6 @@ pub(super) unsafe fn structural_error_from_raw(
     });
     match Error::try_from(value) {
         Ok(error) | Err(error) => error,
-    }
-}
-
-/// Return the registered type key for `type_index`.
-///
-/// When the runtime returns no type information, return `<type_index N>` for diagnostics.
-///
-/// # Arguments
-///
-/// * `type_index` - Runtime type index whose registered type key is requested.
-pub(crate) fn type_key_of(type_index: i32) -> String {
-    unsafe {
-        let info = TVMFFIGetTypeInfo(type_index);
-        if info.is_null() {
-            format!("<type_index {type_index}>")
-        } else {
-            (*info).type_key.as_str().to_string()
-        }
     }
 }
 
@@ -168,7 +148,7 @@ pub(crate) fn with_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Erro
                         .cast::<VisitErrorContextObj>(),
                 )
             };
-            if ObjectArc::strong_count(&context) != 1 {
+            if !ObjectArc::is_unique(&context) {
                 context = ObjectArc::new(VisitErrorContextObj {
                     base: Object::new(),
                     reverse_visit_pattern: context.reverse_visit_pattern.clone(),
@@ -283,4 +263,44 @@ pub(crate) unsafe fn raw_ffi_any_into_result(raw: TVMFFIAny) -> Result<Any> {
         raw.small_str_len,
         raw.data_union,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VisitErrorContextObj;
+    use crate::object::ObjectCore;
+
+    // The binding must match the layout C++ registers for `ffi.VisitErrorContext`.
+    #[test]
+    fn visit_error_context_layout_matches_registered_fields() {
+        let expected = [
+            (
+                "reverse_visit_pattern",
+                std::mem::offset_of!(VisitErrorContextObj, reverse_visit_pattern),
+            ),
+            (
+                "prev_error_context",
+                std::mem::offset_of!(VisitErrorContextObj, prev_error_context),
+            ),
+        ];
+        // SAFETY: the type is registered by the runtime; its field table lives as long.
+        let fields = unsafe {
+            let info = crate::tvm_ffi_sys::TVMFFIGetTypeInfo(VisitErrorContextObj::type_index());
+            assert!(!info.is_null());
+            std::slice::from_raw_parts((*info).fields, (*info).num_fields as usize)
+        };
+        assert_eq!(fields.len(), expected.len());
+        for (name, offset) in expected {
+            let field = fields
+                .iter()
+                .find(|field| field.name.as_str() == name)
+                .unwrap_or_else(|| panic!("`{name}` is not a registered field"));
+            assert_eq!(field.offset as usize, offset, "offset of `{name}`");
+            assert_eq!(
+                field.size as usize,
+                std::mem::size_of::<usize>(),
+                "size of `{name}`"
+            );
+        }
+    }
 }

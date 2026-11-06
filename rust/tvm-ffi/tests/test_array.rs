@@ -171,3 +171,30 @@ fn test_array_parametric_heterogeneity() {
         &[1, 2, 3]
     );
 }
+
+#[test]
+fn test_array_copy_on_write() {
+    let ptr = |a: &Array<String>| ObjectArc::as_ptr(<Array<String> as ObjectRefCore>::data(a));
+    let s = |x: &str| String::from(x);
+    let values = |a: &Array<String>| a.iter().map(|x| x.as_str().to_owned()).collect::<Vec<_>>();
+
+    let mut array = Array::from_vec(vec![s("a"), s("b"), s("c")]);
+    let shared = array.clone();
+    array.set(0, s("x")).unwrap();
+    assert_ne!(ptr(&array), ptr(&shared));
+    assert_eq!(values(&shared), ["a", "b", "c"]);
+
+    let unique = ptr(&array);
+    array.set(1, s("y")).unwrap();
+    array.truncate(2);
+    assert_eq!(array.pop().unwrap().as_str(), "y");
+    assert_eq!(ptr(&array), unique);
+
+    array.push(s("z"));
+    array.insert(0, s("w")).unwrap();
+    assert_eq!(values(&array), ["w", "x", "z"]);
+
+    assert!(array.set(3, s("q")).is_err());
+    assert!(array.insert(4, s("q")).is_err());
+    assert!(Array::<String>::new().pop().is_err());
+}
