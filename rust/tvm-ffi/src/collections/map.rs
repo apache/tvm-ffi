@@ -120,6 +120,10 @@ pub struct Map<K, V> {
     _marker: PhantomData<(K, V)>,
 }
 
+// SAFETY: a `Map` is immutable, so sharing it is as safe as sharing its entries.
+unsafe impl<K: Send + Sync, V: Send + Sync> Send for Map<K, V> {}
+unsafe impl<K: Send + Sync, V: Send + Sync> Sync for Map<K, V> {}
+
 // Manual `Clone`: the data is the shared `ObjectArc`, so `Map<K, V>` is `Clone`
 // regardless of whether `K`/`V` are (they are only phantom markers).
 impl<K, V> Clone for Map<K, V> {

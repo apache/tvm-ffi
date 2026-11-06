@@ -48,8 +48,9 @@ pub struct ObjectArc<T: ObjectCore> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-unsafe impl<T: Send + Sync + ObjectCore> Send for ObjectArc<T> {}
-unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
+// Not `Send`/`Sync`: an object's thread safety is that of its (often C++)
+// implementation, which the handle cannot see. Handles that tvm-ffi knows are
+// immutable opt in explicitly.
 
 /// The native representation of an object-system type.
 ///

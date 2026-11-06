@@ -54,6 +54,10 @@ pub struct Shape {
     data: ObjectArc<ShapeObj>,
 }
 
+// SAFETY: a `Shape` is immutable.
+unsafe impl Send for Shape {}
+unsafe impl Sync for Shape {}
+
 impl Shape {
     /// Create a new empty Shape
     pub fn new() -> Self {

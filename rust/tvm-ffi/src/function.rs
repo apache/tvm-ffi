@@ -56,10 +56,25 @@ pub struct FunctionObj {
 /// assert_eq!(sum, 3);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
+///
+/// A `Function` may be called from any thread, so a Rust callback must be
+/// `Send + Sync`; a callback holding an `Rc` is rejected. The callee's own
+/// thread safety, for C++ functions and the objects they touch, is that of its
+/// implementation.
+///
+/// ```compile_fail
+/// use std::rc::Rc;
+/// let count = Rc::new(0_i64);
+/// tvm_ffi::Function::from_typed(move || -> tvm_ffi::Result<i64> { Ok(*count) });
+/// ```
 #[derive(Clone, ObjectRef)]
 pub struct Function {
     data: ObjectArc<FunctionObj>,
 }
+
+// SAFETY: a `Function` is immutable, and every Rust callback it wraps is `Send + Sync`.
+unsafe impl Send for Function {}
+unsafe impl Sync for Function {}
 
 //------------------------------------------------------------------------
 // CallbackFunctionObjImpl
@@ -70,12 +85,12 @@ pub struct Function {
 /// can correctly delete the entire object including callback part
 /// then we will convert to ObjectArc<FunctionObj> to be used as function
 #[repr(C)]
-struct CallbackFunctionObjImpl<F: Fn(&[AnyView]) -> Result<Any> + 'static> {
+struct CallbackFunctionObjImpl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> {
     function: FunctionObj,
     callback: F,
 }
 
-impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> CallbackFunctionObjImpl<F> {
+impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> CallbackFunctionObjImpl<F> {
     pub fn from_callback(callback: F) -> Self {
         Self {
             function: FunctionObj {
@@ -117,7 +132,9 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> CallbackFunctionObjImpl<F> {
     }
 }
 
-unsafe impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> ObjectCore for CallbackFunctionObjImpl<F> {
+unsafe impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> ObjectCore
+    for CallbackFunctionObjImpl<F>
+{
     const TYPE_KEY: &'static str = FunctionObj::TYPE_KEY;
     const TYPE_DEPTH: i32 = FunctionObj::TYPE_DEPTH;
     fn type_index() -> i32 {
@@ -350,7 +367,7 @@ impl Function {
     /// See also [`get_global`](Self::get_global).
     pub fn register_global_typed<F, I, O>(name: &str, func: F, doc: &str) -> Result<()>
     where
-        F: AsPackedCallable<I, O> + 'static,
+        F: AsPackedCallable<I, O> + Send + Sync + 'static,
     {
         let type_schema = F::type_schema();
         Self::register_global_with_info(name, &Self::from_typed(func), &type_schema, doc)
@@ -405,7 +422,7 @@ impl Function {
     /// See also [`Function`].
     pub fn from_packed<F>(func: F) -> Self
     where
-        F: Fn(&[AnyView]) -> Result<Any> + 'static,
+        F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static,
     {
         unsafe {
             let callback_arc = ObjectArc::new(CallbackFunctionObjImpl::from_callback(func));
@@ -441,7 +458,7 @@ impl Function {
     /// See also [`Function`].
     pub fn from_typed<F, I, O>(func: F) -> Self
     where
-        F: AsPackedCallable<I, O> + 'static,
+        F: AsPackedCallable<I, O> + Send + Sync + 'static,
     {
         let closure = move |packed_args: &[AnyView]| -> Result<Any> {
             let ret_value = func.call_packed(packed_args)?;

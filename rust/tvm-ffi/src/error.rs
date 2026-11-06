@@ -114,6 +114,11 @@ pub struct Error {
     data: ObjectArc<ErrorObj>,
 }
 
+// SAFETY: an `Error` is immutable once built; `extra_context` is diagnostic data.
+// Deliberately thread-safe so a `Result` can cross threads.
+unsafe impl Send for Error {}
+unsafe impl Sync for Error {}
+
 /// A `Result` whose error type defaults to [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

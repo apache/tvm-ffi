@@ -45,6 +45,10 @@ pub struct Bytes {
     data: TVMFFIAny,
 }
 
+// SAFETY: `Bytes` is immutable: inline bytes or an immutable bytes object.
+unsafe impl Send for Bytes {}
+unsafe impl Sync for Bytes {}
+
 // BytesObj for heap-allocated bytes
 #[repr(C)]
 #[derive(Object)]
@@ -254,6 +258,10 @@ impl Debug for Bytes {
 pub struct String {
     data: TVMFFIAny,
 }
+
+// SAFETY: a `String` is immutable: an inline small string or an immutable string object.
+unsafe impl Send for String {}
+unsafe impl Sync for String {}
 
 // StringObj for heap-allocated string
 #[repr(C)]
