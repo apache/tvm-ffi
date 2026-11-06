@@ -93,7 +93,8 @@ pub use crate::type_traits::AnyCompatible;
 /// `None` when no handler matches. The macro also implements [`Dispatcher`]
 /// for `&Self` or `&mut Self`, so the type can drive [`structural_walk`] and
 /// the other traversals, whose engines call it and run their own default
-/// recursion; no prefix has a reserved meaning.
+/// recursion; no prefix has a reserved meaning. Handlers without an `inline`
+/// attribute are marked `#[inline(always)]`.
 ///
 /// # Arguments
 ///
