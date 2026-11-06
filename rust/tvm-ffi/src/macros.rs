@@ -24,10 +24,7 @@ pub use paste;
 // Macros for error handling
 // ----------------------------------------------------------------------------
 
-/// Macro gto get the name of the function
-///
-/// # Usage
-/// Usage: function_name!()
+/// The path of the enclosing function, as `function_name!()`.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! function_name {
@@ -75,16 +72,8 @@ macro_rules! cached_global_func {
     }};
 }
 
-/// Check the return code of the safe call
-///
-/// # Arguments
-/// * `ret_code` - The return code of the safe call
-///
-/// # Returns
-/// * `Result<(), Error>` - The result of the safe call
-/// Macro to check safe calls and automatically update traceback with file/line info
-///
-/// Usage: check_safe_call!(function(args))?;
+/// Turn the return code of a safe call into a `Result`, taking the raised
+/// error when it is nonzero: `check_safe_call!(function(args))?`.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! check_safe_call {
@@ -631,22 +620,14 @@ macro_rules! impl_arg_into_ref {
 macro_rules! tvm_ffi_dll_export_typed_func {
     ($name:ident, $func:expr) => {
         $crate::macros::paste::paste! {
-            // `#[no_mangle]` is required so the symbol is preserved in a
-            // `cdylib` and matches the `__tvm_ffi_<name>` naming convention
-            // that `ffi.Module.load_from_file.<format>` looks up via
-            // `GetSymbolWithSymbolPrefix`. Without it, the linker strips the
-            // function from the output `.so`.
-            //
-            // Using plain `#[no_mangle]` (rather than `#[unsafe(no_mangle)]`,
-            // which would require rustc >= 1.82) keeps the crate buildable
-            // on older toolchains. Edition-2024 callers will see a
-            // deprecation warning, which is harmless.
+            // `no_mangle` keeps the symbol in a `cdylib` under the
+            // `__tvm_ffi_<name>` name that `Module` looks up.
             //
             // The path-qualified `$crate::tvm_ffi_sys::…` reference (rather
             // than a bare `tvm_ffi_sys::…`) lets downstream crates use the
             // macro without having to add `tvm-ffi-sys` to their own
             // `[dependencies]`.
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<__tvm_ffi_ $name>](
                 _handle: *mut std::ffi::c_void,
                 args: *const $crate::tvm_ffi_sys::TVMFFIAny,
@@ -719,7 +700,7 @@ macro_rules! tvm_ffi_dll_export_typed_func_doc {
 macro_rules! __tvm_ffi_dll_export_metadata {
     ($name:ident, $func:expr) => {
         $crate::macros::paste::paste! {
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<__tvm_ffi__metadata_ $name>](
                 _handle: *mut std::ffi::c_void,
                 _args: *const $crate::tvm_ffi_sys::TVMFFIAny,
@@ -751,7 +732,7 @@ macro_rules! __tvm_ffi_dll_export_metadata {
 macro_rules! __tvm_ffi_dll_export_doc {
     ($name:ident, $doc:expr) => {
         $crate::macros::paste::paste! {
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<__tvm_ffi__doc_ $name>](
                 _handle: *mut std::ffi::c_void,
                 _args: *const $crate::tvm_ffi_sys::TVMFFIAny,
@@ -777,33 +758,24 @@ macro_rules! __tvm_ffi_dll_export_doc {
 ///-----------------------------------------------------------
 /// into_typed_fn
 ///
-/// Converts a generic `Function` into a typed function with compile-time
-/// argument count and type checking. This macro provides a convenient way
-/// to create type-safe wrappers around TVM functions.
+/// Wrap a [`Function`](crate::Function) as a typed closure with the given
+/// signature: `into_typed_fn!(func, Fn(A, B) -> Result<R>)`.
 ///
-/// # Arguments
-/// * `$f` - The function identifier to convert
-/// * `$trait` - The trait type (typically `Fn`)
-/// * `($t0, $t1, ...)` - The argument types
-/// * `$ret_ty` - The return type
+/// The closure converts its arguments and the result, and checks the argument
+/// count at compile time; it takes 0 to 8 arguments. An argument may be taken
+/// by value or by reference; prefer a reference for an object reference such as
+/// a `Tensor`, which the caller then keeps.
 ///
-/// # Example
-/// ```rust
+/// # Examples
+///
+/// ```
 /// use tvm_ffi::*;
 ///
 /// let func = Function::from_typed(|x: i32, y: i32| -> Result<i32> { Ok(x + y) });
-/// let typed_func = into_typed_fn!(func, Fn(i32, &i32) -> Result<i32>);
-/// let result = typed_func(10, &20).unwrap(); // Returns 30
-/// assert_eq!(result, 30);
+/// let add = into_typed_fn!(func, Fn(i32, &i32) -> Result<i32>);
+/// assert_eq!(add(10, &20)?, 30);
+/// # Ok::<(), tvm_ffi::Error>(())
 /// ```
-/// Note that the `into_typed_fn!` macro can specify arguments to be passed either
-/// by reference or by value in the argument list.
-/// We recommend passing by reference for ObjectRef types such as Tensor.
-/// Since the ffi mechanism requires us to pass arguments by reference.
-///
-/// # Supported Argument Counts
-/// This macro supports functions with 0 to 8 arguments.
-///-----------------------------------------------------------
 #[macro_export]
 macro_rules! into_typed_fn {
     // Case for 0 arguments

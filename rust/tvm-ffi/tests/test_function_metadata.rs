@@ -122,11 +122,11 @@ fn test_exported_packed_metadata_is_untyped() {
 // these symbols of the same names would otherwise be defined twice.
 #[cfg(not(feature = "export-metadata"))]
 mod without_export_metadata {
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "C" fn __tvm_ffi__metadata_rust_schema_id_int() {}
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "C" fn __tvm_ffi__metadata_rust_packed() {}
-    #[no_mangle]
+    #[unsafe(no_mangle)]
     pub extern "C" fn __tvm_ffi__doc_rust_add() {}
 }
 
