@@ -618,9 +618,7 @@ impl<'a> TryFrom<AnyView<'a>> for TensorView<'a> {
 }
 
 // A typed function argument. A closure `|t: TensorView| ..` is generic over
-// the view's lifetime, so the view cannot be kept past the call. Annotating the
-// parameter `TensorView<'static>` defeats that and must not be done; ruling it
-// out needs higher-ranked typed arguments.
+// the view's lifetime, so the view cannot be kept past the call.
 impl crate::type_traits::TypeSchema for TensorView<'_> {
     fn type_schema() -> String {
         crate::type_traits::type_schema("DLTensor*", &[])
