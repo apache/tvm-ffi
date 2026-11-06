@@ -21,6 +21,7 @@
  *
  * \brief A minimalistic JSON writer based on ffi values.
  */
+#include <locale.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/dict.h>
@@ -39,7 +40,9 @@
 #include <unordered_set>
 #include <utility>
 
-#include "json_number.h"
+#ifdef __APPLE__
+#include <xlocale.h>
+#endif
 
 namespace tvm {
 namespace ffi {
@@ -158,20 +161,33 @@ class JSONWriter {
   }
 
   static int WriteFloatToBuffer(char* buffer, size_t size, double value, bool fixed) {
-#if TVM_FFI_USE_FLOAT_TO_CHARS
+// libc++ and older libstdc++ use the C-locale fallback.
+#if defined(_MSC_VER) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11)
     auto result = std::to_chars(buffer, buffer + size, value,
                                 fixed ? std::chars_format::fixed : std::chars_format::general,
                                 fixed ? 1 : 17);
     return static_cast<int>(result.ptr - buffer);
-#elif defined(_WIN32)
-    return _snprintf_l(buffer, size, fixed ? "%.1f" : "%.17g", GetJSONNumberLocale(), value);
-#elif defined(__APPLE__)
-    return snprintf_l(buffer, size, GetJSONNumberLocale(), fixed ? "%.1f" : "%.17g", value);
 #else
-    locale_t previous_locale = uselocale(GetJSONNumberLocale());
+    static const struct NumberLocale {
+#ifdef _WIN32
+      _locale_t value = _create_locale(LC_NUMERIC, "C");
+      ~NumberLocale() { _free_locale(value); }
+#else
+      locale_t value = newlocale(LC_NUMERIC_MASK, "C", nullptr);
+      ~NumberLocale() { freelocale(value); }
+#endif
+      NumberLocale() { TVM_FFI_ICHECK(value != nullptr) << "Cannot create JSON numeric locale"; }
+    } locale;
+#ifdef _WIN32
+    return _snprintf_l(buffer, size, fixed ? "%.1f" : "%.17g", locale.value, value);
+#elif defined(__APPLE__)
+    return snprintf_l(buffer, size, locale.value, fixed ? "%.1f" : "%.17g", value);
+#else
+    locale_t previous_locale = uselocale(locale.value);
     int count = snprintf(buffer, size, fixed ? "%.1f" : "%.17g", value);
     uselocale(previous_locale);
     return count;
+#endif
 #endif
   }
 

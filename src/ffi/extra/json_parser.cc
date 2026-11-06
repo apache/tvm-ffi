@@ -21,6 +21,7 @@
  *
  * \brief A minimalistic JSON parser based on ffi values.
  */
+#include <locale.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
@@ -36,7 +37,9 @@
 #include <limits>
 #include <utility>
 
-#include "json_number.h"
+#ifdef __APPLE__
+#include <xlocale.h>
+#endif
 
 namespace tvm {
 namespace ffi {
@@ -226,7 +229,8 @@ class JSONParserContext {
       }
     }
     double double_value;
-#if TVM_FFI_USE_FLOAT_FROM_CHARS
+// libc++ and older libstdc++ use the C-locale fallback.
+#if defined(_MSC_VER) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11)
     auto result = std::from_chars(start_pos, cur_, double_value);
     if (result.ec != std::errc{} || result.ptr != cur_) {
       this->SetCurrentPosForBetterErrorMsg(start_pos);
@@ -241,12 +245,21 @@ class JSONParserContext {
 #endif
     std::string temp_buffer(start_pos, cur_);
     char* end_ptr;
-    auto locale = GetJSONNumberLocale();
+    static const struct NumberLocale {
+#ifdef _WIN32
+      _locale_t value = _create_locale(LC_NUMERIC, "C");
+      ~NumberLocale() { _free_locale(value); }
+#else
+      locale_t value = newlocale(LC_NUMERIC_MASK, "C", nullptr);
+      ~NumberLocale() { freelocale(value); }
+#endif
+      NumberLocale() { TVM_FFI_ICHECK(value != nullptr) << "Cannot create JSON numeric locale"; }
+    } locale;
     errno = 0;
 #ifdef _WIN32
-    double_value = _strtod_l(temp_buffer.c_str(), &end_ptr, locale);
+    double_value = _strtod_l(temp_buffer.c_str(), &end_ptr, locale.value);
 #else
-    double_value = strtod_l(temp_buffer.c_str(), &end_ptr, locale);
+    double_value = strtod_l(temp_buffer.c_str(), &end_ptr, locale.value);
 #endif
     if (errno == 0 && end_ptr == temp_buffer.c_str() + temp_buffer.size()) {
       *out = double_value;

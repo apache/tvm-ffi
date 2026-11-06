@@ -98,44 +98,6 @@ endif ()
 add_library(tvm_ffi_objs OBJECT ${_tvm_ffi_objs_sources})
 target_compile_features(tvm_ffi_objs PRIVATE cxx_std_20)
 
-# Probe the floating-point overloads, including link and deployment-target availability.
-if (TVM_FFI_USE_EXTRA_CXX_API)
-  include(CheckCXXSourceCompiles)
-  include(CMakePushCheckState)
-  cmake_push_check_state(RESET)
-  if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_REQUIRED_FLAGS "-Werror=unguarded-availability -Werror=unguarded-availability-new")
-  endif ()
-  # Scope the required language standard to these feature checks.
-  function (tvm_ffi_check_float_charconv)
-    set(CMAKE_CXX_STANDARD 20) # cmake-lint: disable=C0103
-    check_cxx_source_compiles(
-      "#include <charconv>
-       int main() {
-         char buffer[32] = \"1.5\";
-         double value;
-         return int(std::from_chars(buffer, buffer + 3, value).ec);
-       }"
-      TVM_FFI_USE_FLOAT_FROM_CHARS
-    )
-    check_cxx_source_compiles(
-      "#include <charconv>
-       int main() {
-         char buffer[32];
-         return int(std::to_chars(buffer, buffer + 32, 1.5,
-                                 std::chars_format::general, 17).ec);
-       }"
-      TVM_FFI_USE_FLOAT_TO_CHARS
-    )
-  endfunction ()
-  tvm_ffi_check_float_charconv()
-  cmake_pop_check_state()
-  target_compile_definitions(
-    tvm_ffi_objs PRIVATE TVM_FFI_USE_FLOAT_FROM_CHARS=$<BOOL:${TVM_FFI_USE_FLOAT_FROM_CHARS}>
-                         TVM_FFI_USE_FLOAT_TO_CHARS=$<BOOL:${TVM_FFI_USE_FLOAT_TO_CHARS}>
-  )
-endif ()
-
 set_target_properties(
   tvm_ffi_objs
   PROPERTIES POSITION_INDEPENDENT_CODE ON
