@@ -23,7 +23,8 @@ fn create_tensor(val: f32, shape: &[i64]) -> Tensor {
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
     let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, shape, dtype, device);
-    if let Ok(slice) = tensor.data_as_slice_mut::<f32>() {
+    // SAFETY: nothing else accesses the tensor's data meanwhile.
+    if let Ok(slice) = unsafe { tensor.data_as_slice_mut::<f32>() } {
         slice[0] = val;
     }
     tensor

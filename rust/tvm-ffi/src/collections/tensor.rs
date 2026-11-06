@@ -168,11 +168,15 @@ impl Tensor {
     /// here would force artificial mutability annotations throughout the
     /// deep-learning stack with no real safety benefit.
     ///
-    /// # Safety contract (caller responsibility)
-    /// If the `Tensor` has been cloned (via `ObjectArc`), the caller must
-    /// ensure no other clone is concurrently reading the data.
+    /// # Safety
+    ///
+    /// While the returned slice is alive, nothing else may access the data:
+    /// no other slice from this method or [`data_as_slice`](Self::data_as_slice)
+    /// on this tensor or a clone of it, and no kernel or foreign caller writing
+    /// the buffer. Rust cannot check this because the method takes `&self`, as
+    /// `std::slice::from_raw_parts_mut` cannot check it for a raw pointer.
     #[allow(clippy::wrong_self_convention, clippy::mut_from_ref)]
-    pub fn data_as_slice_mut<T: AsDLDataType>(&self) -> Result<&mut [T]> {
+    pub unsafe fn data_as_slice_mut<T: AsDLDataType>(&self) -> Result<&mut [T]> {
         let dtype = T::DL_DATA_TYPE;
         if self.dtype() != dtype {
             crate::bail!(
@@ -378,7 +382,8 @@ impl Tensor {
         if tensor.numel() != slice.len() {
             crate::bail!(crate::error::VALUE_ERROR, "Slice length mismatch");
         }
-        tensor.data_as_slice_mut::<T>()?.copy_from_slice(slice);
+        // SAFETY: the tensor was just allocated, so nothing else can access it.
+        unsafe { tensor.data_as_slice_mut::<T>()? }.copy_from_slice(slice);
         Ok(tensor)
     }
 }

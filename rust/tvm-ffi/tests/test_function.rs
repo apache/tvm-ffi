@@ -283,7 +283,8 @@ fn test_function_apply() {
 
 fn test_add_one_tensor(x: tvm_ffi::Tensor, y: tvm_ffi::Tensor) -> Result<()> {
     let x_data = x.data_as_slice::<f32>()?;
-    let y_data = y.data_as_slice_mut::<f32>()?;
+    // SAFETY: `y` is this call's output, which nothing else accesses.
+    let y_data = unsafe { y.data_as_slice_mut::<f32>()? };
     for i in 0..x_data.len() {
         y_data[i] = x_data[i] + 1.0;
     }

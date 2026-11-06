@@ -59,7 +59,8 @@ fn test_tensor_data_as_slice_f32() {
     assert_eq!(data_slice.len(), 24); // 2 * 3 * 4 = 24 elements
 
     // Test data_as_slice_mut for f32
-    let data_slice_mut = tensor.data_as_slice_mut::<f32>().unwrap();
+    // SAFETY: nothing else accesses the tensor's data meanwhile.
+    let data_slice_mut = unsafe { tensor.data_as_slice_mut::<f32>() }.unwrap();
     assert_eq!(data_slice_mut.len(), 24);
 
     // Test that we can write to the tensor data
