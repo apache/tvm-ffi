@@ -258,6 +258,7 @@ impl Default for AnyView<'_> {
 ///
 /// This is used to define try_from rule while conforming to orphan rule
 /// Users should not use this directly
+#[doc(hidden)]
 pub struct TryFromTemp<T> {
     value: T,
 }

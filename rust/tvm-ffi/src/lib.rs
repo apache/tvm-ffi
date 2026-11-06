@@ -28,6 +28,7 @@ pub mod dtype;
 pub mod error;
 pub mod extra;
 pub mod function;
+#[doc(hidden)]
 pub mod function_internal;
 pub mod macros;
 #[doc(hidden)]
@@ -71,6 +72,7 @@ pub use crate::extra::structural_visit::{
 pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
+pub use crate::function_internal::AsPackedCallable;
 pub use crate::object::ObjectRefCast;
 pub use crate::object::{
     IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity,

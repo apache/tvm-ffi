@@ -26,6 +26,7 @@ pub use paste;
 ///
 /// # Usage
 /// Usage: function_name!()
+#[doc(hidden)]
 #[macro_export]
 macro_rules! function_name {
     () => {{
@@ -150,6 +151,7 @@ macro_rules! impl_object_upcast {
 /// Macro to check safe calls and automatically update traceback with file/line info
 ///
 /// Usage: check_safe_call!(function(args))?;
+#[doc(hidden)]
 #[macro_export]
 macro_rules! check_safe_call {
     ($expr:expr) => {{
@@ -301,6 +303,7 @@ macro_rules! attach_context {
 
 // implements try from any for all integer types
 /// Macro to implement `TryFrom<AnyView>` and `TryFrom<Any>` for a list of types
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_try_from_any {
     ($($t:ty),* $(,)?) => {
@@ -331,6 +334,7 @@ macro_rules! impl_try_from_any {
 }
 
 /// Macro to implement `TryFrom<AnyView>` and `TryFrom<Any>` for generic types like `Option<T>`
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_try_from_any_for_parametric {
     ($generic_type:ident<$param:ident>) => {
@@ -357,6 +361,7 @@ macro_rules! impl_try_from_any_for_parametric {
 }
 
 /// Macro to implement IntoArgHolder for a list of types
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_into_arg_holder_default {
     ($($t:ty),*) => {
@@ -378,6 +383,7 @@ macro_rules! impl_into_arg_holder_default {
 }
 
 /// Macro to implement ArgIntoRef for a list of types
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_arg_into_ref {
     ($($t:ty),*) => {
