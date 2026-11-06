@@ -59,7 +59,7 @@ pub trait PrepareSource {
     type Source;
     fn prepare(&mut self) -> Self::Source;
 }
-impl<T: crate::ObjectRefCore + AnyCompatible> PrepareSource for SourceProbe<T> {
+impl<T: crate::ObjectRefCore> PrepareSource for SourceProbe<T> {
     type Source = OwnedSource;
     #[inline(always)]
     fn prepare(&mut self) -> Self::Source {

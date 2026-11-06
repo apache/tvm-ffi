@@ -56,6 +56,10 @@ pub struct BigInt {
     data: TVMFFIAny,
 }
 
+// SAFETY: a `BigInt` is immutable: an inline `i64` or an immutable big-integer object.
+unsafe impl Send for BigInt {}
+unsafe impl Sync for BigInt {}
+
 // BigIntObj for heap-allocated integers: the word count, then the canonical
 // two's-complement words as trailing items. Mirrors C++ `detail::BigIntObj`.
 #[repr(C)]

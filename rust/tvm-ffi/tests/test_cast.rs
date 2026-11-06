@@ -213,10 +213,7 @@ fn test_downcast_failure() {
     let base = base.downcast::<TestDerived>().unwrap_err();
     assert_eq!(base.data.value, 1);
     assert_eq!(ObjectArc::strong_count(&base.data), 1);
-    let err = expect_err(
-        base.downcast::<TestDerived>()
-            .map_err(Error::downcast_failed::<TestDerived>),
-    );
+    let err = expect_err(TestDerived::try_from(base));
     assert!(err.message().contains("testing.TestObjectBase"));
     assert!(err.message().contains("testing.TestObjectDerived"));
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
@@ -251,4 +248,17 @@ fn test_any_conversion_preserves_runtime_subtype() {
     assert_eq!(derived_from_any.data.extra, 6);
     drop(derived_from_any);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+}
+
+// `TestBaseObj` opts in; `TestDerivedObj` does not, so only `TestBase` crosses threads.
+// SAFETY: test objects are never mutated after construction.
+unsafe impl tvm_ffi::ImmutableObject for TestBaseObj {}
+
+#[test]
+fn test_thread_safe_object_handles() {
+    fn thread_safe<T: Send + Sync>() {}
+    thread_safe::<TestBase>();
+    let base = new_base(3, Arc::new(AtomicU32::new(0)));
+    let value = std::thread::spawn(move || base.data.value).join().unwrap();
+    assert_eq!(value, 3);
 }

@@ -79,6 +79,10 @@ pub struct Array<T> {
     _marker: PhantomData<T>,
 }
 
+// SAFETY: an `Array` is immutable, so sharing it is as safe as sharing its elements.
+unsafe impl<T: Send + Sync> Send for Array<T> {}
+unsafe impl<T: Send + Sync> Sync for Array<T> {}
+
 impl<T: ContainerElement + Clone> Debug for Array<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let full_name = std::any::type_name::<T>();
@@ -104,6 +108,23 @@ impl<T: ContainerElement + Clone> From<Array<T>> for crate::object::ObjectRef {
     #[inline]
     fn from(value: Array<T>) -> Self {
         crate::object::into_root_object_ref(value)
+    }
+}
+
+/// The strict downcast from the root [`ObjectRef`](crate::object::ObjectRef).
+impl<T: ContainerElement + Clone> TryFrom<crate::object::ObjectRef> for Array<T> {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into(value)
+    }
+}
+
+impl<T: ContainerElement + Clone> TryFrom<&crate::object::ObjectRef> for Array<T> {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: &crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into_ref(value)
     }
 }
 

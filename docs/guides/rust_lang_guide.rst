@@ -132,11 +132,14 @@ element type to ``T``. Named reference types implement |rs-objectrefcore|_ for s
    assert_eq!(array.downcast_ref::<ArrayObj>().unwrap().size, 3);
    assert_eq!(array.get(1).unwrap(), 2); // A method of the named type.
 
-Managed references provide ``downcast_ref::<T>()`` with the same inheritance and
-borrowing rules as ``Any`` and ``AnyView``, and ``downcast::<T>()``, which takes the
-reference and hands it back unchanged as ``Err`` when the object is not a ``T``, as
-std's ``Box<dyn Any>::downcast`` does. ``.map_err(Error::downcast_failed::<T>)?``
-turns that into a ``TypeError``. Upcasts are ``From``/``Into``.
+Upcasts are ``From``/``Into``. Each upcast also gives the strict downcast back as
+``TryFrom``, so ``let array: Array<i64> = object.try_into()?;`` checks the object's type
+and returns a ``TypeError`` naming both types; between references it never converts.
+``downcast::<T>()`` takes the reference and hands it back unchanged as ``Err``, so another
+type can be tried, as std's ``Box<dyn Any>::downcast`` does, and ``downcast_ref::<T>()``
+borrows it in place, with the same rules as ``Any`` and ``AnyView``. ``try_from`` an
+``Any`` may convert by the FFI's conversion rules, such as an integer into a float, while
+``try_from`` a reference only checks.
 
 Loading a Module
 ~~~~~~~~~~~~~~~~

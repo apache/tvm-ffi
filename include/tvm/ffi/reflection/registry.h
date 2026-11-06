@@ -782,8 +782,9 @@ class ObjectDef : public ReflectionDefBase {
         }
       }
     }
-    // Step 4. Publish finality, which no other registered metadata exposes.
+    // Step 4. Publish finality and mutability, which no other registered metadata exposes.
     RegisterTypeAttrValue(type_index_, type_attr::kTypeFinal.name, Class::_type_final);
+    RegisterTypeAttrValue(type_index_, type_attr::kTypeMutable.name, Class::_type_mutable);
   }
 
   /*!

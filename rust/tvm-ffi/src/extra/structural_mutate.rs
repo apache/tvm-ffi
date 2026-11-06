@@ -621,7 +621,7 @@ impl<'a, T> MutationView<'a, T> {
 mod mutation_field {
     pub trait Sealed {}
     impl Sealed for crate::Any {}
-    impl<T: crate::object::ObjectRefCore + crate::type_traits::AnyCompatible> Sealed for T {}
+    impl<T: crate::object::ObjectRefCore> Sealed for T {}
 }
 
 /// Owned storage supported by [`MutationView::field`].
@@ -629,7 +629,7 @@ mod mutation_field {
 #[doc(hidden)]
 pub trait MutationField: crate::type_traits::ContainerElement + mutation_field::Sealed {}
 impl MutationField for Any {}
-impl<T: object::ObjectRefCore + crate::type_traits::AnyCompatible> MutationField for T {}
+impl<T: object::ObjectRefCore> MutationField for T {}
 
 impl<T: object::ObjectRefCore> std::ops::Deref for MutationView<'_, T> {
     type Target = T::ContainerType;

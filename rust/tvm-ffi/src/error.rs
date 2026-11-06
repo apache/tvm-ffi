@@ -107,12 +107,20 @@ pub struct ErrorObj {
 /// assert_eq!(error.kind(), VALUE_ERROR);
 /// assert_eq!(error.message(), "not a digit: 'x'");
 /// ```
+///
+/// An `Error` is `Send + Sync`, so a `Result` can cross threads; its attached
+/// context is treated as immutable diagnostic data.
 #[repr(C)]
 #[derive(Clone, ObjectRef)]
 #[custom_debug]
 pub struct Error {
     data: ObjectArc<ErrorObj>,
 }
+
+// SAFETY: an `Error` is immutable once built; `extra_context` is diagnostic data.
+// Deliberately thread-safe so a `Result` can cross threads.
+unsafe impl Send for Error {}
+unsafe impl Sync for Error {}
 
 /// A `Result` whose error type defaults to [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -151,9 +159,7 @@ impl Error {
     /// let error = object.downcast::<Array<f64>>().map_err(Error::downcast_failed::<Array<f64>>);
     /// assert_eq!(error.unwrap_err().kind(), TYPE_ERROR);
     /// ```
-    pub fn downcast_failed<B: AnyCompatible>(
-        source: impl object::ObjectRefCore + AnyCompatible,
-    ) -> Self {
+    pub fn downcast_failed<B: AnyCompatible>(source: impl object::ObjectRefCore) -> Self {
         let mut cell = TVMFFIAny::new();
         // SAFETY: `source` stays alive while its borrowed cell is inspected.
         unsafe { AnyCompatible::copy_to_any_view(&source, &mut cell) };

@@ -147,7 +147,7 @@ fn test_exports_without_metadata() {
 /// Registers `func` as `testing.rust.<name>` and records `name`.
 fn register_typed<F, I, O>(names: &mut Vec<&'static str>, name: &'static str, func: F)
 where
-    F: AsPackedCallable<I, O> + 'static,
+    F: AsPackedCallable<I, O> + Send + Sync + 'static,
 {
     Function::register_global_typed(&format!("testing.rust.{name}"), func, "").unwrap();
     names.push(name);

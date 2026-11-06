@@ -306,7 +306,7 @@ unsafe impl RefFromAnyUnchecked for tvm_ffi_sys::dlpack::DLDevice {
 // An optional object reference is one nullable object pointer (`None` is null,
 // as `OptionalCompatible` relies on), which is the payload word of a `None` or
 // object cell, so `&Option<T>` borrows that word.
-unsafe impl<T: crate::object::ObjectRefCore + AnyCompatible> RefFromAnyUnchecked for Option<T> {
+unsafe impl<T: crate::object::ObjectRefCore> RefFromAnyUnchecked for Option<T> {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
         const {
@@ -322,7 +322,7 @@ unsafe impl<T: crate::object::ObjectRefCore + AnyCompatible> RefFromAnyUnchecked
     }
 }
 
-unsafe impl<T: crate::object::ObjectRefCore + AnyCompatible> DowncastRefFromAny for Option<T> {
+unsafe impl<T: crate::object::ObjectRefCore> DowncastRefFromAny for Option<T> {
     #[inline(always)]
     unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
         downcast_ref_from_any_in_place::<Self>(cell)

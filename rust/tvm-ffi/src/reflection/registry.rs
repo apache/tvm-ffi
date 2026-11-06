@@ -309,7 +309,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// type's registration finishes.
     pub fn def<F, I, O>(&mut self, name: &str, func: F, doc: &str) -> &mut Self
     where
-        F: AsPackedCallable<I, O> + 'static,
+        F: AsPackedCallable<I, O> + Send + Sync + 'static,
     {
         self.method(name, func, doc, false)
     }
@@ -318,14 +318,14 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// `ObjectDef::def_static` does; otherwise as [`ObjectDef::def`].
     pub fn def_static<F, I, O>(&mut self, name: &str, func: F, doc: &str) -> &mut Self
     where
-        F: AsPackedCallable<I, O> + 'static,
+        F: AsPackedCallable<I, O> + Send + Sync + 'static,
     {
         self.method(name, func, doc, true)
     }
 
     fn method<F, I, O>(&mut self, name: &str, func: F, doc: &str, is_static: bool) -> &mut Self
     where
-        F: AsPackedCallable<I, O> + 'static,
+        F: AsPackedCallable<I, O> + Send + Sync + 'static,
     {
         if !self.fresh || self.error.is_some() {
             return self;

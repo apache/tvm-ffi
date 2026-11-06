@@ -48,8 +48,32 @@ pub struct ObjectArc<T: ObjectCore> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-unsafe impl<T: Send + Sync + ObjectCore> Send for ObjectArc<T> {}
-unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
+// Not `Send`/`Sync` by default: an object's thread safety is that of its (often
+// C++) implementation, which the handle cannot see. An object type opts in with
+// `ImmutableObject`; tvm-ffi's own immutable handles opt in explicitly.
+
+/// An object type whose shared instances are never mutated, so handles to it may
+/// cross threads.
+///
+/// A handle `ObjectArc<T>`, and every reference built on it, is `Send + Sync`
+/// when `T: ImmutableObject` and `T`'s fields are themselves `Send + Sync`, so
+/// a field such as `Any`, which may hold a mutable object, keeps the handle
+/// single-threaded. The stub generator implements it for each class whose C++
+/// declaration is not `_type_mutable`. An erased `ObjectRef` may point at any
+/// object, so it never crosses threads.
+///
+/// # Safety
+///
+/// No code may mutate an instance while it is shared: changes go through
+/// copy-on-write, in place only on a uniquely held instance, as for C++ classes
+/// that are not `_type_mutable`.
+pub unsafe trait ImmutableObject: ObjectCore {}
+
+// SAFETY: `T` is never mutated while shared, its fields are thread-safe, and the
+// reference count is atomic.
+unsafe impl<T: ImmutableObject + Send + Sync> Send for ObjectArc<T> {}
+// SAFETY: as for `Send`.
+unsafe impl<T: ImmutableObject + Send + Sync> Sync for ObjectArc<T> {}
 
 /// The native representation of an object-system type.
 ///
@@ -148,7 +172,7 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
 /// must be able to reclaim that owned representation exactly once, and a true
 /// `check_any_strict` result must guarantee that both after-check constructors
 /// are valid for it.
-pub unsafe trait ObjectRefCore: Sized + Clone {
+pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
     type ContainerType: ObjectCore;
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
     fn into_data(this: Self) -> ObjectArc<Self::ContainerType>;
@@ -194,23 +218,21 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     ///
     /// `B` is a subtype, or a parameterized container such as `Array<i64>`,
     /// whose elements are checked too. On a mismatch the reference is returned
-    /// unchanged, so another type can be tried;
-    /// [`Error::downcast_failed`](crate::Error::downcast_failed) turns it into a
-    /// `TypeError` for `?`.
+    /// unchanged, so another type can be tried. For `?`, use the `TryFrom` that
+    /// each upcast provides, which returns a `TypeError` instead.
     ///
     /// ```
-    /// use tvm_ffi::{object::ObjectRef, Array, Error, ObjectRefCore};
+    /// use tvm_ffi::{object::ObjectRef, Array, ObjectRefCore};
     /// let object: ObjectRef = Array::from_vec(vec![1_i64]).into();
     /// let object = object.downcast::<Array<f64>>().unwrap_err();
-    /// let array: Array<i64> = object.downcast().map_err(Error::downcast_failed::<Array<i64>>)?;
+    /// let array: Array<i64> = object.try_into()?;
     /// assert_eq!(array.len(), 1);
     /// # Ok::<(), tvm_ffi::Error>(())
     /// ```
     #[inline(always)]
     fn downcast<B>(self) -> std::result::Result<B, Self>
     where
-        Self: AnyCompatible,
-        B: ObjectRefCore + AnyCompatible,
+        B: ObjectRefCore,
     {
         let mut any_data = TVMFFIAny::new();
         unsafe {
@@ -405,6 +427,30 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     }
 }
 
+/// The strict downcast from the root [`ObjectRef`] to `B`, for the containers'
+/// `TryFrom<ObjectRef>`, which are hand-written as their upcasts are.
+#[inline(always)]
+pub(crate) fn root_try_into<B>(value: ObjectRef) -> crate::error::Result<B>
+where
+    B: ObjectRefCore,
+{
+    value
+        .downcast::<B>()
+        .map_err(crate::error::Error::downcast_failed::<B>)
+}
+
+/// [`root_try_into`] from a borrowed reference, cloning only on success.
+#[inline(always)]
+pub(crate) fn root_try_into_ref<B>(value: &ObjectRef) -> crate::error::Result<B>
+where
+    B: ObjectRefCore + crate::type_traits::DowncastRefFromObject,
+{
+    match value.downcast_ref::<B>() {
+        Some(found) => Ok(found.clone()),
+        None => Err(crate::error::Error::downcast_failed::<B>(value.clone())),
+    }
+}
+
 /// Upcast a managed reference to the root [`ObjectRef`], keeping its allocation.
 #[inline(always)]
 pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
@@ -420,7 +466,23 @@ pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
 
 /// Format a managed reference as its runtime type key and object address, as
 /// the `Debug` implementation of `#[derive(ObjectRef)]` does.
-#[doc(hidden)]
+///
+/// Call it from `Debug` for a reference type implemented by hand, such as a
+/// typed view over another reference, so that `downcast(..).unwrap()` and
+/// `assert_eq!` can print it.
+///
+/// ```
+/// use tvm_ffi::object::{fmt_object_ref, ObjectRef};
+/// use tvm_ffi::Array;
+/// struct Shown(ObjectRef);
+/// impl std::fmt::Debug for Shown {
+///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         fmt_object_ref(&self.0, f)
+///     }
+/// }
+/// let shown = Shown(Array::from_vec(vec![1_i64]).into());
+/// assert!(format!("{shown:?}").starts_with("ffi.Array@"));
+/// ```
 pub fn fmt_object_ref<T: ObjectRefCore>(
     this: &T,
     f: &mut std::fmt::Formatter<'_>,

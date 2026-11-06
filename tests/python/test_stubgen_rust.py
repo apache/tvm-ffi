@@ -76,6 +76,7 @@ def _info(
     parent: str | None = "ffi.Object",
     ancestors: list[str] | None = None,
     is_final: bool | None = None,
+    is_mutable: bool | None = None,
     total_size: int | None = None,
 ) -> ObjectInfo:
     if ancestors is None:
@@ -87,6 +88,7 @@ def _info(
         parent_type_key=parent,
         ancestors=ancestors,
         is_final=is_final,
+        is_mutable=is_mutable,
         total_size=total_size,
     )
 
@@ -441,6 +443,14 @@ def test_render_object_without_fields_has_no_impl() -> None:
     assert "#[type_final]" in text
     assert "impl MarkerObj" not in text
     assert "FieldGetter" not in _uses(imports)
+
+
+def test_render_thread_safe_only_when_not_mutable() -> None:
+    """A class C++ declares not ``_type_mutable`` is ``ImmutableObject``; others are not."""
+    marker = "unsafe impl tvm_ffi::object::ImmutableObject for MarkerObj {}"
+    assert marker in _render(_info("demo.Marker", is_final=True, is_mutable=False))[0]
+    assert marker not in _render(_info("demo.Marker", is_final=True, is_mutable=True))[0]
+    assert marker not in _render(_info("demo.Marker", is_final=True))[0]
 
 
 def test_render_derived_object_same_module() -> None:

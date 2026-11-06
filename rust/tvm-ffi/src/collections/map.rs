@@ -120,6 +120,10 @@ pub struct Map<K, V> {
     _marker: PhantomData<(K, V)>,
 }
 
+// SAFETY: a `Map` is immutable, so sharing it is as safe as sharing its entries.
+unsafe impl<K: Send + Sync, V: Send + Sync> Send for Map<K, V> {}
+unsafe impl<K: Send + Sync, V: Send + Sync> Sync for Map<K, V> {}
+
 // Manual `Clone`: the data is the shared `ObjectArc`, so `Map<K, V>` is `Clone`
 // regardless of whether `K`/`V` are (they are only phantom markers).
 impl<K, V> Clone for Map<K, V> {
@@ -142,7 +146,30 @@ where
     }
 }
 
-unsafe impl<K, V> ObjectRefCore for Map<K, V> {
+/// The strict downcast from the root [`ObjectRef`](crate::object::ObjectRef).
+impl<K, V> TryFrom<crate::object::ObjectRef> for Map<K, V>
+where
+    Map<K, V>: ObjectRefCore,
+{
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into(value)
+    }
+}
+
+impl<K, V> TryFrom<&crate::object::ObjectRef> for Map<K, V>
+where
+    Map<K, V>: ObjectRefCore + crate::type_traits::DowncastRefFromObject,
+{
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: &crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into_ref(value)
+    }
+}
+
+unsafe impl<K: ContainerElement, V: ContainerElement> ObjectRefCore for Map<K, V> {
     type ContainerType = MapObj;
 
     fn data(this: &Self) -> &ObjectArc<MapObj> {

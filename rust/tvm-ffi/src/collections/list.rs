@@ -186,7 +186,24 @@ impl<T: ContainerElement> From<List<T>> for crate::object::ObjectRef {
     }
 }
 
-unsafe impl<T> ObjectRefCore for List<T> {
+/// The strict downcast from the root [`ObjectRef`](crate::object::ObjectRef).
+impl<T: ContainerElement> TryFrom<crate::object::ObjectRef> for List<T> {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into(value)
+    }
+}
+
+impl<T: ContainerElement> TryFrom<&crate::object::ObjectRef> for List<T> {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: &crate::object::ObjectRef) -> crate::error::Result<Self> {
+        crate::object::root_try_into_ref(value)
+    }
+}
+
+unsafe impl<T: ContainerElement> ObjectRefCore for List<T> {
     type ContainerType = ListObj;
 
     fn data(this: &Self) -> &ObjectArc<ListObj> {
