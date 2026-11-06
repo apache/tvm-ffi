@@ -244,6 +244,22 @@ unsafe impl RefFromAnyUnchecked for Any {
     }
 }
 
+// A `BigInt` is one cell, holding an inline `i64` or a `BigInt` object.
+unsafe impl RefFromAnyUnchecked for crate::big_int::BigInt {
+    #[inline(always)]
+    unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
+        const {
+            assert!(
+                std::mem::size_of::<crate::big_int::BigInt>() == std::mem::size_of::<TVMFFIAny>()
+            );
+            assert!(
+                std::mem::align_of::<crate::big_int::BigInt>() == std::mem::align_of::<TVMFFIAny>()
+            );
+        };
+        &*(cell as *const TVMFFIAny as *const crate::big_int::BigInt)
+    }
+}
+
 unsafe impl RefFromAnyUnchecked for crate::String {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
@@ -421,6 +437,7 @@ impl_downcast_ref_from_any!(
     crate::string::Bytes,
     i64,
     f64,
+    crate::big_int::BigInt,
     tvm_ffi_sys::dlpack::DLDataType,
     tvm_ffi_sys::dlpack::DLDevice,
 );
