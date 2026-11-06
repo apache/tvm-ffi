@@ -687,7 +687,11 @@ macro_rules! into_typed_fn {
     // Case for 0 arguments
     ($f:expr, $trait:ident() -> $ret_ty:ty) => {{
         let _f = $f;
-        move || -> $ret_ty { Ok(_f.call_tuple_with_len::<0, _>(())?.try_into()?) }
+        move || -> $ret_ty {
+            _f.call_tuple_with_len::<0, _>(())?
+                .try_into()
+                .map_err(Into::into)
+        }
     }};
     // Case for 1 argument
     ($f:expr, $trait:ident($t0:ty) -> $ret_ty:ty) => {{
@@ -695,7 +699,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0,).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<1, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<1, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
     // Case for 2 arguments
@@ -704,7 +710,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<2, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<2, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
     // Case for 3 arguments
@@ -713,7 +721,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<3, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<3, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
     // Case for 4 arguments
@@ -722,7 +732,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<4, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<4, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
     // Case for 5 arguments
@@ -731,7 +743,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<5, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<5, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
     // Case for 6 arguments
@@ -740,7 +754,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<6, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<6, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
     // Case for 7 arguments
@@ -750,7 +766,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5, a6).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<7, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<7, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
     // Case for 8 arguments
@@ -760,7 +778,9 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6, a7: $t7| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7).into_arg_holder_tuple();
-            Ok(_f.call_tuple_with_len::<8, _>(tuple_args)?.try_into()?)
+            _f.call_tuple_with_len::<8, _>(tuple_args)?
+                .try_into()
+                .map_err(Into::into)
         }
     }};
 }

@@ -34,7 +34,7 @@ fn test_tensor_basic() {
     assert_eq!(tensor.shape(), &shape);
     assert_eq!(tensor.ndim(), 3);
     assert_eq!(tensor.dtype().code, DLDataTypeCode::kDLFloat as u8);
-    assert_eq!(tensor.dtype().bits, 32 as u8);
+    assert_eq!(tensor.dtype().bits, 32_u8);
     assert_eq!(tensor.device().device_type, DLDeviceType::kDLCPU);
 
     // Test strides (should be calculated correctly for row-major layout)
@@ -64,14 +64,14 @@ fn test_tensor_data_as_slice_f32() {
     assert_eq!(data_slice_mut.len(), 24);
 
     // Test that we can write to the tensor data
-    for i in 0..data_slice_mut.len() {
-        data_slice_mut[i] = i as f32;
+    for (i, x) in data_slice_mut.iter_mut().enumerate() {
+        *x = i as f32;
     }
 
     // Test that we can read the written data
     let data_slice_read = tensor.data_as_slice::<f32>().unwrap();
-    for i in 0..data_slice_read.len() {
-        assert_eq!(data_slice_read[i], i as f32);
+    for (i, x) in data_slice_read.iter().enumerate() {
+        assert_eq!(*x, i as f32);
     }
 }
 
@@ -117,7 +117,7 @@ fn test_any_tensor() {
 // ============================================================================
 
 mod env_alloc {
-    use std::ffi::{c_char, c_void, CStr};
+    use std::ffi::{c_char, c_void};
     use tvm_ffi::tvm_ffi_sys::{
         dlpack::DLTensor, DLPackManagedTensorAllocator, TVMFFIEnvSetDLPackManagedTensorAllocator,
     };
@@ -183,8 +183,8 @@ mod env_alloc {
         error_ctx: *mut c_void,
         set_error: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char),
     ) -> i32 {
-        let kind = CStr::from_bytes_with_nul(b"MemoryError\0").unwrap();
-        let message = CStr::from_bytes_with_nul(b"out of test memory\0").unwrap();
+        let kind = c"MemoryError";
+        let message = c"out of test memory";
         set_error(error_ctx, kind.as_ptr(), message.as_ptr());
         -1
     }

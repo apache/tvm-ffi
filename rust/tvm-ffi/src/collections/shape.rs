@@ -156,7 +156,7 @@ impl Eq for Shape {}
 impl PartialOrd for Shape {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_slice().partial_cmp(other.as_slice())
+        Some(self.cmp(other))
     }
 }
 

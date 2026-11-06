@@ -114,8 +114,8 @@ impl ShallowCopy for TestCxxClassBaseObj {
     fn shallow_copy(&self) -> Self {
         Self {
             base: ShallowCopy::shallow_copy(&self.base),
-            v_i64: Clone::clone(&self.v_i64),
-            v_i32: Clone::clone(&self.v_i32),
+            v_i64: self.v_i64,
+            v_i32: self.v_i32,
         }
     }
 }

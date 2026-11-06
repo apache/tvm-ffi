@@ -25,6 +25,11 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
 //-----------------------------------------------------
 /// Trait to enable a value to be compatible with Any
 /// Enables TryFrom/Into AnyView/Any
+///
+/// # Safety
+/// Implementations must encode and decode `TVMFFIAny` cells in the layout of
+/// their FFI type index, and every `*_after_check` function must be sound for
+/// each cell that `check_any_strict` accepts.
 pub unsafe trait AnyCompatible: Sized {
     /// Whether the `AnyView -> Self` conversion matches one exact leaf type.
     ///
@@ -76,10 +81,21 @@ pub unsafe trait AnyCompatible: Sized {
     }
 
     /// the value to copy to TVMFFIAny
+    ///
+    /// # Safety
+    /// The written cell borrows `src` without a reference and must not be used
+    /// after `src` is dropped.
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
     /// consume the value to move to Any
+    ///
+    /// # Safety
+    /// The previous content of `data` is overwritten without release; the
+    /// caller owns the written cell and must release it exactly once.
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny);
-    // check if the value is compatible with the type
+    /// check if the value is compatible with the type
+    ///
+    /// # Safety
+    /// `data` must be a valid `TVMFFIAny` cell.
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool;
 
     /// Additional value-preservation checks used only by `match_any!`, after
@@ -93,13 +109,23 @@ pub unsafe trait AnyCompatible: Sized {
     }
 
     /// Copy value from TVMFFIAny after checking
-    /// caller must ensure that the value is compatible with the type
+    ///
+    /// # Safety
+    /// `data` must have passed `Self::check_any_strict`.
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self;
     /// the value to move from TVMFFIAny
     /// NOTE: pay very careful attention to avoid memory leak!
     /// - When calling from managed Any, remember to use std::mem::ManuallyDrop
+    ///
+    /// # Safety
+    /// `data` must have passed `Self::check_any_strict`. Its ownership moves
+    /// into the result, so the caller must not release `data` again.
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
     /// try to cast the value from AnyView
+    ///
+    /// # Safety
+    /// `data` must be a valid `TVMFFIAny` cell.
+    #[allow(clippy::result_unit_err)]
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
     /// Get the type key of a type when TryCastFromAnyView fails.
     fn get_mismatch_type_info(data: &TVMFFIAny) -> String {
@@ -747,7 +773,7 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return T::check_any_strict(data) || data.type_index == TypeIndex::kTVMFFINone as i32;
+        T::check_any_strict(data) || data.type_index == TypeIndex::kTVMFFINone as i32
     }
 
     unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
@@ -898,16 +924,12 @@ unsafe impl AnyCompatible for () {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return data.type_index == TypeIndex::kTVMFFINone as i32;
+        data.type_index == TypeIndex::kTVMFFINone as i32
     }
 
-    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {
-        ()
-    }
+    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {}
 
-    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {
-        ()
-    }
+    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {}
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFINone as i32 {

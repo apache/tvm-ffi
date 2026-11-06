@@ -38,9 +38,8 @@ fn strict_bool(value: AnyView<'_>) -> Option<bool> {
 
 struct IncrementIntegers;
 
-impl<'receiver, 'value>
-    Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>
-    for &'receiver mut IncrementIntegers
+impl<'value> Dispatcher<(AnyView<'value>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>
+    for &mut IncrementIntegers
 {
     #[inline(always)]
     fn dispatch_tuple(
@@ -70,14 +69,14 @@ struct RecursiveEntryMutator {
     owned_value_pointer: Option<usize>,
 }
 
-impl<'s, 'v, 'c, 'r>
+impl<'v, 'c, 'r>
     Dispatcher<
         (
             MutationView<'v>,
             &'c mut StructuralMutatorView<'r, ManualIncrement>,
         ),
         Option<Result<UnchangedOr<Any>>>,
-    > for &'s mut ManualIncrement
+    > for &mut ManualIncrement
 {
     #[inline(always)]
     fn dispatch_tuple(
@@ -544,7 +543,7 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
             } else {
                 let result = mutator.default_mutate(self, value.with_inplace_mode(mode))?;
                 assert!(result.is_unchanged());
-                Ok(result.into())
+                Ok(result)
             }
         }
     }
@@ -860,12 +859,10 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     assert_eq!(a.size, 1);
     assert_eq!(a.inplace_mode(), Allow);
     assert_eq!(a.as_any_view().debug_strong_count(), Some(1));
-    drop(a);
     let mut value = value.with_inplace_mode(Disallow);
     let b = value.field(|node| &node.b);
     assert_eq!(b.inplace_mode(), Disallow);
     assert_eq!(b.as_any_view().debug_strong_count(), Some(1));
-    drop(b);
     assert_eq!(value.as_any_view().debug_strong_count(), Some(1));
 }
 
@@ -958,12 +955,12 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
                 return if self.0 {
                     Err(Error::new(RUNTIME_ERROR, "child failed", ""))
                 } else {
-                    Ok(UnchangedOr::<Any>::unchanged().into())
+                    Ok(UnchangedOr::<Any>::unchanged())
                 };
             }
             let result = mutator.default_mutate(self, value)?;
             assert!(result.is_unchanged());
-            Ok(result.into())
+            Ok(result)
         }
     }
     for fail in [false, true] {
@@ -1069,7 +1066,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
             if value.downcast_ref::<i64>().copied().is_some() {
                 return Err(self.0.clone());
             }
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         }
     }
 
@@ -1680,9 +1677,9 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
             if let Some(integer) = value.as_any_view().downcast_ref::<i64>().copied() {
                 if integer >= 0 {
                     // Keep this input without constructing an owning return value.
-                    return Ok(UnchangedOr::<Any>::unchanged().into());
+                    return Ok(UnchangedOr::<Any>::unchanged());
                 }
-                return Ok(UnchangedOr::changed(Any::from(0i64)).into());
+                return Ok(UnchangedOr::changed(Any::from(0i64)));
             }
             // Keep the unchanged marker if no child changed.
             mutator.default_mutate(self, value).into_mutate_result()
@@ -2014,7 +2011,7 @@ impl CallbackMutateDepth {
         let mutated = mutator.default_mutate(self, MutationView::borrowed(value))?;
         self.current -= 1;
         self.exits += 1;
-        Ok(mutated.into())
+        Ok(mutated)
     }
 }
 
@@ -2564,7 +2561,7 @@ fn mapping_preserves_post_recursion_state() {
             self.depth -= 1;
             assert_eq!(self.depth, depth);
             self.completed += 1;
-            Ok(result.into())
+            Ok(result)
         }
     }
     let mut state = PostState::default();

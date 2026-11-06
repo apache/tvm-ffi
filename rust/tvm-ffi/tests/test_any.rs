@@ -70,8 +70,8 @@ macro_rules! test_any_float {
 
 // Test all float types with both Any and AnyView
 test_any_float!(
-    f32: 3.14f32, test_any_float_f32, test_any_view_float_f32,
-    f64: 3.14f64, test_any_float_f64, test_any_view_float_f64
+    f32: 2.5f32, test_any_float_f32, test_any_view_float_f32,
+    f64: 2.5f64, test_any_float_f64, test_any_view_float_f64
 );
 
 #[test]
@@ -88,14 +88,14 @@ fn test_any_bool() {
     // Test Any
     assert_eq!(any_true.type_index(), TypeIndex::kTVMFFIBool as i32);
     assert_eq!(any_false.type_index(), TypeIndex::kTVMFFIBool as i32);
-    assert_eq!(bool::try_from(any_true).unwrap(), true);
-    assert_eq!(bool::try_from(any_false).unwrap(), false);
+    assert!(bool::try_from(any_true).unwrap());
+    assert!(!bool::try_from(any_false).unwrap());
 
     // Test AnyView
     assert_eq!(any_view_true.type_index(), TypeIndex::kTVMFFIBool as i32);
     assert_eq!(any_view_false.type_index(), TypeIndex::kTVMFFIBool as i32);
-    assert_eq!(bool::try_from(any_view_true).unwrap(), true);
-    assert_eq!(bool::try_from(any_view_false).unwrap(), false);
+    assert!(bool::try_from(any_view_true).unwrap());
+    assert!(!bool::try_from(any_view_false).unwrap());
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn test_type_mismatch_error() {
 
 #[test]
 fn test_type_mismatch_error_message() {
-    let any_none = Any::from(Option::<i32>::from(None));
+    let any_none = Any::from(None::<i32>);
     // try from will try casting when possible
     // Try to convert int to bool - should be ok
     let err = i32::try_from(any_none).unwrap_err();
@@ -138,8 +138,8 @@ fn test_cross_type_conversion_int_to_bool() {
 
     // Note: This test might fail depending on how try_cast_from_any_view is implemented
     // If it fails, it means the conversion isn't implemented yet
-    assert_eq!(bool_true.unwrap(), true);
-    assert_eq!(bool_false.unwrap(), false);
+    assert!(bool_true.unwrap());
+    assert!(!bool_false.unwrap());
 }
 
 #[test]
@@ -270,6 +270,7 @@ fn test_anyview_any_conversion_and_cloning() {
     assert_eq!(any_view.debug_strong_count(), Some(1));
 
     // Test AnyView cloning - should not affect reference count
+    #[allow(clippy::clone_on_copy)] // exercises AnyView::clone explicitly
     let any_view_clone = any_view.clone();
     assert_eq!(any_view.debug_strong_count(), Some(1));
     assert_eq!(any_view_clone.debug_strong_count(), Some(1));

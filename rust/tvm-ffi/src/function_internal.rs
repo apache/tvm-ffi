@@ -223,7 +223,10 @@ macro_rules! impl_into_arg_holder_tuple {
     };
 }
 
-impl_into_arg_holder_tuple!(;);
+impl IntoArgHolderTuple for () {
+    type Target = ();
+    fn into_arg_holder_tuple(self) -> Self::Target {}
+}
 impl_into_arg_holder_tuple!(T0; 0);
 impl_into_arg_holder_tuple!(T0, T1; 0, 1);
 impl_into_arg_holder_tuple!(T0, T1, T2; 0, 1, 2);

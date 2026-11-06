@@ -97,7 +97,7 @@ impl RecordingVisitor {
 
         // C++: return DefaultVisitExpected(value);
         visitor.with_def_region_kind(def_region_kind, |visitor| {
-            visitor.default_visit(self, &value)
+            visitor.default_visit(self, value)
         })
     }
 }

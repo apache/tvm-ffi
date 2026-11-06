@@ -263,6 +263,8 @@ define_expr_leaves!(
 );
 
 #[test]
+// `(&probe)` mirrors the receiver `match_any!` generates for autoref specialization.
+#[allow(clippy::needless_borrow)]
 fn dispatches_representative_ast_leaf_nodes() {
     register_expr_types();
 

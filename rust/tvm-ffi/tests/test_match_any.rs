@@ -412,6 +412,8 @@ fn direct_lookup_table_maps_runtime_indices_to_local_arm_ids() {
 }
 
 #[test]
+// `(&probe)` mirrors the receiver `match_any!` generates for autoref specialization.
+#[allow(clippy::needless_borrow)]
 fn metadata_only_accepts_exact_leaf_patterns() {
     type Leaf = (Module, ());
     let leaf = LeafPatternProbe::<Leaf>::new();

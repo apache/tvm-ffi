@@ -272,7 +272,7 @@ impl Error {
     ///
     /// The kind of the error, such as [`VALUE_ERROR`].
     pub fn kind(&self) -> ErrorKind<'_> {
-        ErrorKind(&self.data.cell.kind.as_str())
+        ErrorKind(self.data.cell.kind.as_str())
     }
 
     /// Get the message of the error.

@@ -58,7 +58,7 @@ impl DLDataTypeExt for DLDataType {
     fn to_string(&self) -> std::string::String {
         unsafe {
             let mut ffi_any = TVMFFIAny::new();
-            crate::check_safe_call!(TVMFFIDataTypeToString(&*self, &mut ffi_any)).unwrap();
+            crate::check_safe_call!(TVMFFIDataTypeToString(self, &mut ffi_any)).unwrap();
             let name: crate::string::String = crate::any::Any::from_raw_ffi_any(ffi_any)
                 .try_into()
                 .unwrap();
@@ -126,7 +126,7 @@ unsafe impl AnyCompatible for DLDataType {
     /// # Returns
     /// `true` if the Any contains a DLDataType, `false` otherwise
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return data.type_index == TypeIndex::kTVMFFIDataType as i32;
+        data.type_index == TypeIndex::kTVMFFIDataType as i32
     }
 
     /// Copy a DLDataType from an Any view (after type check)

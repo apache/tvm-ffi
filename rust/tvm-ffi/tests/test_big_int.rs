@@ -245,7 +245,8 @@ fn test_big_int_from_words_normalizes() {
 
 #[test]
 fn test_big_int_native_conversions() {
-    let cases: [(BigInt, Option<i64>, Option<u64>, Option<i128>, Option<u128>); 9] = [
+    type Case = (BigInt, Option<i64>, Option<u64>, Option<i128>, Option<u128>);
+    let cases: [Case; 9] = [
         (BigInt::from(0i64), Some(0), Some(0), Some(0), Some(0)),
         (BigInt::from(-1i64), Some(-1), None, Some(-1), None),
         (
@@ -595,6 +596,7 @@ fn test_big_int_promotion_demotion_and_mixed_operands() {
     assert_eq!(&big(i64::MIN as i128) - 1i64, -(&high + 1i64));
     assert_eq!(-big(i64::MIN as i128), high);
     assert_eq!(&big(i64::MIN as i128) / -1i64, high);
+    #[allow(clippy::modulo_one)] // intentional: i64::MIN % -1 must not overflow
     assert_inline(&(&big(i64::MIN as i128) % -1i64), 0);
     assert_eq!(BigInt::from(u64::MAX).to_string(), "18446744073709551615");
     assert_eq!(1i64 + BigInt::from(u64::MAX), pow2(64));
@@ -1000,7 +1002,7 @@ fn test_big_int_random_algebraic_properties() {
     ];
     let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
     let pick = |rng: &mut XorShift| {
-        if rng.next() % 4 == 0 {
+        if rng.next().is_multiple_of(4) {
             pool[(rng.next() % pool.len() as u64) as usize].clone()
         } else {
             rng.big_int()

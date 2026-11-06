@@ -54,7 +54,7 @@ fn test_array_core_and_iteration() {
     assert_eq!(array[1].ndim(), 3);
 
     // Iteration
-    let vals: Vec<f32> = array.iter().map(|t| get_val(&t)).collect();
+    let vals: Vec<f32> = array.iter().map(get_val).collect();
     assert_eq!(vals, vec![10.0, 20.0]);
 }
 
