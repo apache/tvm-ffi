@@ -17,7 +17,7 @@
  * under the License.
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
-use crate::error::{Error, Result, INTERNAL_ERROR};
+use crate::error::{Error, Result};
 use crate::function::FunctionObj;
 use crate::object::{ObjectCore, ObjectRefCore};
 use crate::rvalue_ref::RValueRef;
@@ -32,16 +32,7 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFIStringFromByteArray};
 /// into the caller would abort the process.
 #[doc(hidden)]
 pub fn panic_to_error(payload: Box<dyn std::any::Any + Send>) -> Error {
-    let message = payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| {
-            payload
-                .downcast_ref::<std::string::String>()
-                .map(|s| s.as_str())
-        })
-        .unwrap_or("unknown payload");
-    Error::new(INTERNAL_ERROR, &format!("panicked: {message}"), "")
+    Error::from_panic(payload)
 }
 
 pub trait AsPackedCallable<I, O> {

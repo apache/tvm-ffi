@@ -431,8 +431,27 @@ macro_rules! impl_downcast_ref_from_any {
     };
 }
 
+// An `&Any` must own what it points at, as an `Any` does: a view's cell may
+// instead borrow a C string, byte array, `DLTensor` or rvalue slot, whose
+// `&Any` would clone into an owner of a borrowed resource. Those are refused;
+// an `Any` or container cell never holds them.
+unsafe impl DowncastRefFromAny for Any {
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        let index = cell.type_index;
+        let borrowed = index == TypeIndex::kTVMFFIRawStr as i32
+            || index == TypeIndex::kTVMFFIByteArrayPtr as i32
+            || index == TypeIndex::kTVMFFIDLTensorPtr as i32
+            || index == TypeIndex::kTVMFFIObjectRValueRef as i32;
+        if borrowed {
+            None
+        } else {
+            Some(Any::ref_from_any_unchecked(cell))
+        }
+    }
+}
+
 impl_downcast_ref_from_any!(
-    Any,
     crate::String,
     crate::string::Bytes,
     i64,

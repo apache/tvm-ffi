@@ -117,6 +117,30 @@ pub struct Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl Error {
+    /// The `InternalError` for a panic caught at an FFI boundary, where unwinding
+    /// into the caller would abort the process. The message is the panic's, when it
+    /// is a string.
+    ///
+    /// ```
+    /// use tvm_ffi::{Error, INTERNAL_ERROR};
+    /// let payload = std::panic::catch_unwind(|| panic!("bad state")).unwrap_err();
+    /// let error = Error::from_panic(payload);
+    /// assert_eq!(error.kind(), INTERNAL_ERROR);
+    /// assert_eq!(error.message(), "panicked: bad state");
+    /// ```
+    pub fn from_panic(payload: Box<dyn std::any::Any + Send>) -> Self {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| {
+                payload
+                    .downcast_ref::<std::string::String>()
+                    .map(|s| s.as_str())
+            })
+            .unwrap_or("unknown payload");
+        Self::new(INTERNAL_ERROR, &format!("panicked: {message}"), "")
+    }
+
     /// The `TypeError` for a reference that [`downcast`](crate::ObjectRefCast::downcast)
     /// handed back because it is not a `B`, naming both types.
     ///

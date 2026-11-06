@@ -302,8 +302,14 @@ macro_rules! attach_context {
 // ----------------------------------------------------------------------------
 
 // implements try from any for all integer types
-/// Macro to implement `TryFrom<AnyView>` and `TryFrom<Any>` for a list of types
-#[doc(hidden)]
+/// Implement `TryFrom<AnyView>` and `TryFrom<Any>` for each listed
+/// [`AnyCompatible`](crate::type_traits::AnyCompatible) type, so it converts out of
+/// FFI values.
+///
+/// `#[derive(ObjectRef)]` calls this. Call it yourself for a reference type you
+/// implement by hand, such as a typed view over another reference, together with
+/// [`impl_arg_into_ref!`](crate::impl_arg_into_ref) and
+/// [`impl_into_arg_holder_default!`](crate::impl_into_arg_holder_default).
 #[macro_export]
 macro_rules! impl_try_from_any {
     ($($t:ty),* $(,)?) => {
@@ -360,8 +366,13 @@ macro_rules! impl_try_from_any_for_parametric {
     };
 }
 
-/// Macro to implement IntoArgHolder for a list of types
-#[doc(hidden)]
+/// Implement `IntoArgHolder` for each listed type, so it can be passed to a
+/// [`Function`](crate::Function) call.
+///
+/// `#[derive(ObjectRef)]` calls this. Call it yourself for a reference type you
+/// implement by hand, such as a typed view over another reference, together with
+/// [`impl_try_from_any!`](crate::impl_try_from_any) and
+/// [`impl_arg_into_ref!`](crate::impl_arg_into_ref).
 #[macro_export]
 macro_rules! impl_into_arg_holder_default {
     ($($t:ty),*) => {
@@ -382,8 +393,13 @@ macro_rules! impl_into_arg_holder_default {
     };
 }
 
-/// Macro to implement ArgIntoRef for a list of types
-#[doc(hidden)]
+/// Implement `ArgIntoRef` for each listed type, so a typed function can take it
+/// as an argument by reference.
+///
+/// `#[derive(ObjectRef)]` calls this. Call it yourself for a reference type you
+/// implement by hand, such as a typed view over another reference, together with
+/// [`impl_try_from_any!`](crate::impl_try_from_any) and
+/// [`impl_into_arg_holder_default!`](crate::impl_into_arg_holder_default).
 #[macro_export]
 macro_rules! impl_arg_into_ref {
     ($($t:ty),*) => {
