@@ -110,8 +110,9 @@ pub unsafe trait AnyCompatible: Sized {
     /// `data` must be a valid `TVMFFIAny` cell.
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool;
 
-    /// Additional value-preservation checks used only by `match_any!`, after
-    /// `check_any_strict` succeeds. Ordinary conversion APIs are unchanged.
+    /// Additional value-preservation checks used only by `match_any!` and
+    /// dispatch handlers, after `check_any_strict` succeeds. Ordinary conversion
+    /// APIs are unchanged.
     ///
     /// # Safety
     /// `data` must have passed `Self::check_any_strict`.

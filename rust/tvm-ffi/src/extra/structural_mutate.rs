@@ -429,8 +429,8 @@ impl<'a, T> MutationView<'a, T> {
 
     /// Narrow the matched type without acquiring an owning reference.
     ///
-    /// The check is the strict one of [`Any::downcast_ref`], and the view keeps its
-    /// mode.
+    /// The check is the strict one of `match_any!`: only a value that fits `U` as
+    /// is, elements included, matches. The view keeps its mode.
     ///
     /// # Returns
     ///
@@ -446,7 +446,10 @@ impl<'a, T> MutationView<'a, T> {
     ) -> std::result::Result<MutationView<'a, U>, Self> {
         // SAFETY: the input owner keeps the borrowed value live for this handle's
         // lifetime. This only checks its type and does not acquire ownership.
-        if unsafe { U::container_check_any_strict(&self.value) } {
+        if unsafe {
+            U::container_check_any_strict(&self.value)
+                && U::container_match_constraints(&self.value)
+        } {
             Ok(MutationView::from_raw(self.value, self.mode))
         } else {
             Err(self)
