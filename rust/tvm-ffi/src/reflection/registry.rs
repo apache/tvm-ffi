@@ -163,7 +163,8 @@ impl BitOr for FieldFlags {
 /// returns, so it must not call `type_index()` of `N` or of another Rust type
 /// that is not registered yet, nor register attributes with [`TypeAttrDef`]
 /// or [`EnumDef`](super::EnumDef). When `N` already has metadata in the type
-/// table, every call is a no-op.
+/// table, every call is a no-op; registration fails if a previous one stopped
+/// partway.
 ///
 /// # Examples
 ///
@@ -233,6 +234,17 @@ impl<N: ObjectCore> ObjectDef<N> {
             N::TYPE_KEY
         );
         let fresh = (*info).metadata.is_null();
+        // `finish` writes `__ffi_type_final__` last: metadata without it is
+        // left by a registration that failed partway.
+        crate::ensure!(
+            fresh
+                || super::TypeAttrColumn::lookup("__ffi_type_final__")
+                    .and_then(|column| column.get_raw_ffi_any(type_index))
+                    .is_some_and(|cell| cell.type_index != TVMFFITypeIndex::kTVMFFINone as i32),
+            INTERNAL_ERROR,
+            "`{}` is partly registered: an earlier registration of it failed",
+            N::TYPE_KEY
+        );
         if fresh {
             let kind = match kind {
                 Some(kind) => kind.raw(),
