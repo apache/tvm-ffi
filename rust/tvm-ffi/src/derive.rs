@@ -99,7 +99,7 @@ pub use tvm_ffi_macros::Object;
 ///
 /// The struct holds one field, `ObjectArc<FooObj>`. The derive implements
 /// [`ObjectRefCore`](crate::ObjectRefCore), the default
-/// [`ObjectRefAnyCompatible`](crate::ObjectRefAnyCompatible) (conversions to
+/// [`ObjectRefAnyCompatible`](crate::object::ObjectRefAnyCompatible) (conversions to
 /// and from [`Any`](crate::Any), in-place downcasts, typed function
 /// arguments), the upcast to [`ObjectRef`](crate::object::ObjectRef),
 /// `Deref<Target = FooObj>` for field reads, `Debug`, `Display` (the runtime

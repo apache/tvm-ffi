@@ -691,7 +691,8 @@ Walk handlers may take an optional trailing ``DefRegionKind`` argument:
 
 .. code-block:: rust
 
-   use tvm_ffi::{dispatch, structural_walk, Array, DefRegionKind, Result, WalkOrder, WalkResult};
+   use tvm_ffi::{dispatch, structural_walk, Array, Result, WalkOrder, WalkResult};
+   use tvm_ffi::extra::structural_visit::DefRegionKind;
 
    #[derive(Default)]
    struct Probe {
@@ -731,7 +732,8 @@ take a trailing ``DefRegionKind`` argument:
 
 .. code-block:: rust
 
-   use tvm_ffi::{structural_walk, Array, DefRegionKind, Object, WalkOrder, WalkResult};
+   use tvm_ffi::{structural_walk, Array, Object, WalkOrder, WalkResult};
+   use tvm_ffi::extra::structural_visit::DefRegionKind;
 
    let values = Array::from_vec(vec![1_i64, 2, 3]);
 
@@ -796,7 +798,8 @@ dispatchers and closures.
 
 .. code-block:: rust
 
-   use tvm_ffi::{dispatch, structural_visit, Array, Result, StructuralVisitorView, VisitInterrupt};
+   use tvm_ffi::{dispatch, structural_visit, Array, Result, VisitInterrupt};
+   use tvm_ffi::extra::structural_visit::StructuralVisitorView;
 
    #[derive(Default)]
    struct Stats {
@@ -835,9 +838,8 @@ argument tuple and return type supply the engine signature directly:
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_visit, AnyView, Array, Result, StructuralVisitorView, VisitInterrupt,
-   };
+   use tvm_ffi::{dispatch, structural_visit, AnyView, Array, Result, VisitInterrupt};
+   use tvm_ffi::extra::structural_visit::StructuralVisitorView;
 
    #[derive(Default)]
    struct Depth {
@@ -897,9 +899,9 @@ catch-all and should therefore come last:
 .. code-block:: rust
 
    use tvm_ffi::{
-       dispatch, structural_map, Any, Array, DefRegionKind, AnyView, Result, WalkOrder,
-       UnchangedOr, Unchanged,
+       dispatch, structural_map, Any, Array, AnyView, Result, WalkOrder, UnchangedOr, Unchanged,
    };
+   use tvm_ffi::extra::structural_visit::DefRegionKind;
 
    #[derive(Default)]
    struct Increment {
@@ -986,14 +988,14 @@ Map continues to accept both dispatchers and closures. A native base, a
 ``StructuralVisitEngine::<Base>::visit_root(root, dispatcher)`` and
 ``StructuralMutateEngine::<Base>::mutate_root(root, dispatcher)`` run on it. A base
 delegates to the default operation of ``StructuralVisitorObj`` or
-``StructuralMutatorObj`` for ordinary hooks and reflection.
+``StructuralMutatorObj`` for ordinary hooks and reflection. The views, bases,
+engines, ``DefRegionKind`` and ``InplaceMode`` live in
+``tvm_ffi::extra::structural_visit`` and ``tvm_ffi::extra::structural_mutate``.
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_mutate, Any, Array, MutationView, StructuralMutatorView, Result,
-       UnchangedOr,
-   };
+   use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
+   use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 
    #[derive(Default)]
    struct Stats {
@@ -1049,10 +1051,8 @@ other handler consumes it:
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_mutate, Any, Array, StructuralMutatorView, Result,
-       UnchangedOr,
-   };
+   use tvm_ffi::{dispatch, structural_mutate, Any, Array, Result, UnchangedOr};
+   use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 
    #[derive(Default)]
    struct Increment {
@@ -1080,10 +1080,8 @@ while retaining typed scalar replacements:
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_mutate, Any, Array, InplaceMode, MutationView, StructuralMutatorView, Result,
-       UnchangedOr,
-   };
+   use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
+   use tvm_ffi::extra::structural_mutate::{InplaceMode, StructuralMutatorView};
 
    struct Increment;
 

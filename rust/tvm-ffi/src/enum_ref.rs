@@ -72,7 +72,8 @@ impl EnumObj {
 /// ```
 /// use tvm_ffi::derive::{Object, ObjectRef};
 /// use tvm_ffi::reflection::EnumDef;
-/// use tvm_ffi::{EnumObj, EnumRef, ObjectArc, ObjectRefCore};
+/// use tvm_ffi::{EnumRef, ObjectArc, ObjectRefCore};
+/// use tvm_ffi::enum_ref::EnumObj;
 ///
 /// #[repr(C)]
 /// #[derive(Object)]

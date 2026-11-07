@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use tvm_ffi::collections::tensor::CPUNDAlloc;
 use tvm_ffi::*;
 
 /// Helper to create a CPU `f32` tensor whose first element is `val`.

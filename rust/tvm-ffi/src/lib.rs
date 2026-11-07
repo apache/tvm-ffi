@@ -90,10 +90,9 @@ pub use crate::collections::array::Array;
 pub use crate::collections::list::List;
 pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
-pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor, TensorView};
-pub use crate::device::{current_stream, with_stream};
+pub use crate::collections::tensor::{Tensor, TensorView};
 pub use crate::dtype::DLDataTypeExt;
-pub use crate::enum_ref::{EnumObj, EnumRef};
+pub use crate::enum_ref::EnumRef;
 pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
@@ -106,26 +105,16 @@ pub use crate::extra::structural_eq_hash::{
     structural_equal_with, structural_hash, structural_hash_with, StructuralOptions,
 };
 pub use crate::extra::structural_map::structural_map;
-pub use crate::extra::structural_mutate::{
-    structural_mutate, InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase,
-    StructuralMutatorObj, StructuralMutatorView,
-};
-pub use crate::extra::structural_visit::{
-    structural_visit, DefRegionKind, StructuralVisitEngine, StructuralVisitorBase,
-    StructuralVisitorObj, StructuralVisitorView, VisitInterrupt, VisitInterruptObj,
-};
+pub use crate::extra::structural_mutate::{structural_mutate, MutationView};
+pub use crate::extra::structural_visit::{structural_visit, VisitInterrupt};
 pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
-pub use crate::object::{
-    ImmutableObject, IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems,
-    ObjectIdentity, ObjectRefAnyCompatible, ObjectRefCore,
-};
-pub use crate::optional::{Optional, OptionalCompatible};
-pub use crate::rvalue_ref::RValueRef;
+pub use crate::object::{IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
+pub use crate::optional::Optional;
 pub use crate::static_init::run_static_init_blocks;
 pub use crate::string::{Bytes, String};
-pub use crate::type_traits::{AnyCompatible, TypeSubsumes};
+pub use crate::type_traits::AnyCompatible;
 /// Generate runtime type dispatch from the `prefix_*` methods of an impl.
 ///
 /// `#[dispatch(prefix, (First, Args...), Ret)]` on an inherent impl makes its
@@ -270,7 +259,7 @@ pub use tvm_ffi_macros::match_any;
 /// * `final` - The type has no subtypes.
 /// * `immutable` - Shared objects of the type are never mutated, so its
 ///   references cross threads when its fields can
-///   ([`ImmutableObject`]); a field cannot be
+///   ([`ImmutableObject`](crate::object::ImmutableObject)); a field cannot be
 ///   `writable`.
 /// * `s_eq_hash_kind = "TreeNode"` - The [`SEqHashKind`](crate::reflection::SEqHashKind) of structural
 ///   equality; by default the parent's.
@@ -329,6 +318,4 @@ pub use tvm_ffi_macros::match_any;
 pub use tvm_ffi_macros::rs_object;
 
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-pub use tvm_ffi_sys::{
-    DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, TVMFFIAny, TVMFFIObject, TVMFFIStreamHandle,
-};
+pub use tvm_ffi_sys::{DLDataType, DLDataTypeCode, DLDevice, DLDeviceType};

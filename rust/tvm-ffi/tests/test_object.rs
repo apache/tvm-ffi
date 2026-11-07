@@ -19,6 +19,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::{collections::HashMap, hash::Hash};
+use tvm_ffi::object::{ObjectCoreWithExtraItems, ObjectIdentity};
+use tvm_ffi::tvm_ffi_sys::TVMFFIObject;
 use tvm_ffi::*;
 
 // must have repr(C) for the object header stays in the same position

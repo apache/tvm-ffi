@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use tvm_ffi::device::{current_stream, with_stream};
+use tvm_ffi::tvm_ffi_sys::TVMFFIStreamHandle;
 use tvm_ffi::*;
 
 #[test]

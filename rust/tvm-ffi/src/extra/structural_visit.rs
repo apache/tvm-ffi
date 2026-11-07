@@ -25,8 +25,8 @@
 //!   recursion through an explicit [`StructuralVisitorView`] context. Pass state belongs on
 //!   the dispatcher; `visitor.visit(self, &child)` reborrows it for recursive calls.
 //!   Unmatched values use default child traversal.
-//! * [`structural_walk`] — dispatcher or closure observers steer engine-owned
-//!   recursion through [`WalkResult`] (advance, skip, interrupt).
+//! * [`structural_walk`](crate::structural_walk) — dispatcher or closure observers steer engine-owned
+//!   recursion through [`WalkResult`](crate::WalkResult) (advance, skip, interrupt).
 //!
 //! Both layers thread definition-region state explicitly. Walk handlers opt in
 //! with a trailing [`DefRegionKind`]; visit handlers read it from their context
@@ -59,7 +59,6 @@ use std::os::raw::c_void;
 use std::rc::Rc;
 
 use super::cold_init_lazy_lock::ColdInitLazyLock;
-pub use super::structural_walk::*;
 
 use crate::any::{Any, AnyView};
 use crate::derive::{Object, ObjectRef};
@@ -443,10 +442,8 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
 ///
 /// ```
 /// # fn main() -> tvm_ffi::Result<()> {
-/// use tvm_ffi::{
-///     dispatch, structural_visit, AnyView, Array, Result, StructuralVisitorView,
-///     VisitInterrupt,
-/// };
+/// use tvm_ffi::{dispatch, structural_visit, AnyView, Array, Result, VisitInterrupt};
+/// use tvm_ffi::extra::structural_visit::StructuralVisitorView;
 ///
 /// struct Sum(i64);
 /// #[dispatch(visit, (AnyView<'_>, &mut StructuralVisitorView<'_, Self>), Result<Option<VisitInterrupt>>)]

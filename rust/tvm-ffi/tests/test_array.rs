@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use tvm_ffi::collections::tensor::CPUNDAlloc;
 use tvm_ffi::*;
 
 /// Helper to create a Tensor with a specific float value and shape

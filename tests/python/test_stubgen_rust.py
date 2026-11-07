@@ -486,7 +486,7 @@ def test_render_object_under_builtin_parent() -> None:
     assert "    base_: FfiIntEnumObj," in text
     # One stand-in per builtin ancestor below the crate's `EnumObj`, chained through `base`.
     assert imports.builtin_mirrors == {"ffi.IntEnum": "EnumObj"}
-    assert "tvm_ffi::EnumObj" in _uses(imports)
+    assert "tvm_ffi::enum_ref::EnumObj" in _uses(imports)
     # No Deref or upcast for the stand-ins.
     assert "impl Deref for ColorObj" not in text
     assert "impl_object_ref_upcast" not in text
@@ -506,8 +506,8 @@ def test_render_object_under_builtin_parent() -> None:
 
 
 BUILTIN_MIRRORS_EXPECTED = """\
-use tvm_ffi::EnumObj;
 use tvm_ffi::ObjectArc;
+use tvm_ffi::enum_ref::EnumObj;
 
 /// Header-only stand-in for the builtin `ffi.IntEnum`; it only carries the ancestor depth.
 #[doc(hidden)]

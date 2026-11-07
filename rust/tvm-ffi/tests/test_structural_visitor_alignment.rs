@@ -26,9 +26,9 @@
 //! (tests/cpp/testing_object.h): the first element is visited as a recursive
 //! definition region, the rest inherit the surrounding state.
 
+use tvm_ffi::extra::structural_visit::{DefRegionKind, StructuralVisitorView};
 use tvm_ffi::{
-    dispatch, structural_visit, AnyView, Array, DefRegionKind, Result, String as FfiString,
-    StructuralVisitorView, VisitInterrupt,
+    dispatch, structural_visit, AnyView, Array, Result, String as FfiString, VisitInterrupt,
 };
 
 /// C++: class TestVisitorObj : public StructuralVisitorObj

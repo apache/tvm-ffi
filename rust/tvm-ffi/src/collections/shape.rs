@@ -19,8 +19,9 @@
 //! [`Shape`], the immutable dimensions of a tensor.
 
 use crate::derive::{Object, ObjectRef};
+use crate::object::ObjectRefAnyCompatible;
 use crate::object::{Object, ObjectArc, ObjectCoreWithExtraItems, PlainObjectRef};
-use crate::{AnyView, Array, ObjectRefAnyCompatible};
+use crate::{AnyView, Array};
 use std::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
 use std::ops::Deref;
 use tvm_ffi_sys::TVMFFIShapeCell;

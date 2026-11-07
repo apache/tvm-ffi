@@ -25,9 +25,10 @@ use std::ops::Deref;
 use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
+use crate::object::ObjectCoreWithExtraItems;
 use crate::object::{IntoObjectRef, Object, ObjectArc};
 use crate::type_traits::{ContainerElement, RefFromAnyUnchecked, TypeSubsumes};
-use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
+use crate::{Any, AnyCompatible, AnyView, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 

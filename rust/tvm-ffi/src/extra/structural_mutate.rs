@@ -20,7 +20,7 @@
 //! Native Rust structural mutation and mapping.
 //!
 //! [`structural_mutate`] lets a mutator drive recursion, while
-//! [`structural_map`] applies callbacks around engine-owned recursion.
+//! [`structural_map`](crate::structural_map) applies callbacks around engine-owned recursion.
 
 // `_raw` functions move one owned `TVMFFIAny`: forward it once, or import it into `Any` before
 // anything can unwind. Private `extern "C-unwind"` helpers return it in registers on AArch64.
@@ -36,8 +36,6 @@ use std::borrow::BorrowMut;
 use std::ops::ControlFlow;
 use std::ptr::NonNull;
 use std::rc::Rc;
-
-pub use super::structural_map::*;
 
 use super::dispatch::Dispatcher;
 use crate::any::{is_plain_inline, Any, AnyView};
@@ -60,7 +58,7 @@ use super::structural_common::{
 };
 use super::structural_visit::DefRegionKind;
 use super::unchanged::is_unchanged;
-pub use super::unchanged::{Unchanged, UnchangedOr};
+use super::unchanged::{Unchanged, UnchangedOr};
 use super::visit_error_context::update_visit_error_context;
 
 const STRUCTURAL_MUTATE_ATTR: &str = "__s_mutate__";
@@ -518,8 +516,8 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// Panics if `selector` returns a reference outside the node.
     ///
     /// ```
-    /// # use tvm_ffi::object::ObjectRef;
     /// # use tvm_ffi::*;
+    /// # use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
     /// # #[rs_object("my_ext.MyPair", final)]
     /// # pub struct MyPairObj { base_: Object, pub first: Array<i64>, pub second: Array<i64> }
     /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
@@ -801,7 +799,7 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 /// * `dispatcher` - Owned or mutably borrowed dispatcher implementing [`IntoDispatcher`].
 ///   Matching handlers return replacements and control recursion through
 ///   [`StructuralMutatorView`]; unmatched values use default mutation. For closure
-///   callbacks with automatic recursion, use [`structural_map`].
+///   callbacks with automatic recursion, use [`structural_map`](crate::structural_map).
 ///
 /// # Examples
 ///
@@ -809,10 +807,8 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 /// arrays:
 ///
 /// ```
-/// use tvm_ffi::{
-///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
-///     UnchangedOr,
-/// };
+/// use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
+/// use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 ///
 /// struct Double;
 ///

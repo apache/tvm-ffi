@@ -159,7 +159,7 @@ RUST_MOD_MAP = {
 RUST_ROOT_TYPE_KEY = "ffi.Object"
 
 #: Builtin types whose object struct the crate defines; a subtype embeds it as ``base_``.
-RUST_CRATE_OBJECTS = {"ffi.Enum": "tvm_ffi::EnumObj"}
+RUST_CRATE_OBJECTS = {"ffi.Enum": "tvm_ffi::enum_ref::EnumObj"}
 
 #: Root of the enum types: their registry allocates the values, and their references
 #: implement ``tvm_ffi::EnumRef``.

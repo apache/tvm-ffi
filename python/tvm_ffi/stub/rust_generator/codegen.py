@@ -43,7 +43,7 @@ mirror's) makes the type opaque and is read through its getter; a ``field`` or
 ``enum`` directive types a narrow integer; an ``opaque`` directive vetoes a
 reproducible layout; a scalar width named by a directive is checked against the
 reflected field size.
-A builtin parent the crate defines (``ffi.Enum``: ``tvm_ffi::EnumObj``) is
+A builtin parent the crate defines (``ffi.Enum``: ``tvm_ffi::enum_ref::EnumObj``) is
 embedded as it is. Any other builtin parent (``ffi.IntEnum``, say) has no
 ``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
 per such ancestor so ``derive(Object)`` computes the registry's

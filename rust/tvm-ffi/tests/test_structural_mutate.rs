@@ -20,15 +20,16 @@
 use std::cell::{Cell, RefCell};
 use tvm_ffi::collections::map::MapObj;
 use tvm_ffi::extra::structural_mutate::IntoMutateResult;
+use tvm_ffi::extra::structural_mutate::{InplaceMode, StructuralMutatorView};
+use tvm_ffi::extra::structural_visit::{DefRegionKind, StructuralVisitorView};
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::reflection::FieldGetter;
 use tvm_ffi::ObjectRefCore;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
-    Array, DefRegionKind, Dispatcher, Error, Function, InplaceMode, IntoDispatcher, Map,
-    MutationView, Object, ObjectArc, Result, String as FfiString, StructuralMutatorView,
-    StructuralVisitorView, TypeIndex, Unchanged, UnchangedOr, VisitInterrupt, WalkOrder,
+    Array, Dispatcher, Error, Function, IntoDispatcher, Map, MutationView, Object, ObjectArc,
+    Result, String as FfiString, TypeIndex, Unchanged, UnchangedOr, VisitInterrupt, WalkOrder,
     WalkResult, RUNTIME_ERROR,
 };
 

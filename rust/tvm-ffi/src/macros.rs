@@ -385,7 +385,8 @@ macro_rules! impl_object_ref_upcast {
 /// ```
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, impl_object_ref_downcast_ref, Any};
-/// use tvm_ffi::{Object, ObjectArc, ObjectRefAnyCompatible, ObjectRefCore};
+/// use tvm_ffi::{Object, ObjectArc, ObjectRefCore};
+/// use tvm_ffi::object::ObjectRefAnyCompatible;
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {

@@ -98,7 +98,8 @@ pub struct Optional<T: OptionalCompatible> {
 const _: () = assert!(
     std::mem::size_of::<Optional<i64>>() == 16
         && std::mem::size_of::<Optional<String>>() == 16
-        && std::mem::align_of::<Optional<i64>>() == std::mem::align_of::<crate::TVMFFIAny>()
+        && std::mem::align_of::<Optional<i64>>()
+            == std::mem::align_of::<crate::tvm_ffi_sys::TVMFFIAny>()
 );
 
 impl<T: OptionalCompatible> Optional<T> {
