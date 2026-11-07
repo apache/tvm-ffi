@@ -20,7 +20,9 @@
 use std::any::TypeId;
 
 use tvm_ffi::match_any_internal::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
-use tvm_ffi::{match_any, Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex};
+use tvm_ffi::{
+    match_any, Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex, VisitInterrupt,
+};
 
 type CustomModuleMatcher = Module;
 
@@ -416,7 +418,7 @@ fn direct_lookup_table_maps_runtime_indices_to_local_arm_ids() {
 // `(&probe)` mirrors the receiver `match_any!` generates for autoref specialization.
 #[allow(clippy::needless_borrow)]
 fn metadata_only_accepts_exact_leaf_patterns() {
-    type Leaf = (Module, ());
+    type Leaf = (VisitInterrupt, ());
     let leaf = LeafPatternProbe::<Leaf>::new();
     let mut type_indices = [0; 1];
     assert!((&leaf).leaf_pattern_list_id().is_some());
