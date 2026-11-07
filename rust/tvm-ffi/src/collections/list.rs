@@ -27,6 +27,12 @@
 //! Converting an `Any` into a `List<T>` shares an `ffi.List` whose elements
 //! are all `T`; an `ffi.Array`, or a list whose elements need converting, is
 //! copied into a new list.
+//!
+//! A read checks and converts an element in its cell, in place. While it
+//! does, the element type's
+//! [`extra_check`](crate::object::ObjectRefAnyCompatible::extra_check) and
+//! [`convert_fallback`](crate::object::ObjectRefAnyCompatible::convert_fallback),
+//! and the `Drop` of a value the read releases, must not modify that list.
 
 // `ListObj` mirrors C++ `ListObj` (`Object` followed by `TVMFFISeqCell`), so
 // Rust reads and edits the element cells in place: reads, `List::set`,
@@ -288,6 +294,8 @@ impl<T: ContainerElement> List<T> {
     #[inline]
     pub fn get(&self, index: usize) -> Result<T> {
         let obj = self.obj();
+        // SAFETY: `index` is in bounds, and the conversion leaves the list
+        // unchanged while it reads the cell (see the module docs).
         unsafe {
             if index >= (*(*obj).size.get()) as usize {
                 return index_error("get");
@@ -355,16 +363,14 @@ impl<T: ContainerElement> List<T> {
                 return index_error("remove");
             }
             let cell = ListObj::cell(obj, index);
-            // Convert first, so that a mismatch leaves the list untouched.
-            let value = if T::container_check_any_strict(&*cell) {
+            // Convert first, so that a mismatch leaves the list untouched; the
+            // conversion leaves the list unchanged (see the module docs).
+            let (value, old) = if T::container_check_any_strict(&*cell) {
                 let mut raw = ptr::read(cell);
-                T::container_move_from_any_after_check(&mut raw)
+                (T::container_move_from_any_after_check(&mut raw), None)
             } else {
                 match T::container_try_cast_from_any_view(&*cell) {
-                    Ok(value) => {
-                        drop(take_cell(cell));
-                        value
-                    }
+                    Ok(value) => (value, Some(take_cell(cell))),
                     Err(()) => return type_error(index),
                 }
             };
@@ -372,6 +378,9 @@ impl<T: ContainerElement> List<T> {
                 ptr::copy(cell.add(1), cell, size - index - 1);
             }
             (*(*obj).size.get()) -= 1;
+            // The list is consistent again before the old element's `Drop`
+            // runs, which may modify it.
+            drop(old);
             Ok(value)
         }
     }
@@ -587,8 +596,12 @@ impl<T: ContainerElement> Iter<'_, T> {
         self.back.min(self.list.len())
     }
 
+    /// # Safety
+    /// `index` is below the list's length.
     #[inline]
     unsafe fn read(&self, index: usize) -> Result<T> {
+        // SAFETY: the conversion leaves the list unchanged while it reads the
+        // cell (see the module docs).
         match T::container_try_cast_from_any_view(&*ListObj::cell(self.list.obj(), index)) {
             Ok(value) => Ok(value),
             Err(()) => type_error(index),
@@ -710,7 +723,9 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
             ));
         }
 
-        // Slow path: convert element by element into a new list.
+        // Slow path: convert element by element into a new list. The
+        // conversions leave the source sequence unchanged (see the module
+        // docs), so the borrowed cells stay valid.
         let mut items = Vec::new();
         for cell in seq_cells(data) {
             items.push(T::container_try_cast_from_any_view(cell)?);

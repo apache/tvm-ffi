@@ -405,8 +405,10 @@ impl<'a, T> MutationView<'a, T> {
     /// The value as an [`AnyView`].
     #[inline(always)]
     pub fn as_any_view(&self) -> AnyView<'_> {
-        // SAFETY: the input owner keeps this payload live while the view is
-        // borrowed. The returned lifetime is bounded by self, not by 'a.
+        // SAFETY: the input owner, which a handler does not remove from a list
+        // or dict it modifies (the callback contract), keeps this payload live
+        // while the view is borrowed. The returned lifetime is bounded by self,
+        // not by 'a.
         unsafe { AnyView::from_raw_ffi_any(self.value) }
     }
 
@@ -791,6 +793,10 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 /// The root is consumed to establish the ownership boundary for optional
 /// in-place mutation. A matching callback supplies the final value; unmatched
 /// values use default mutation.
+///
+/// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
+/// value it receives or one of that value's ancestors: the traversal borrows
+/// their cells while the callback runs.
 ///
 /// # Arguments
 ///

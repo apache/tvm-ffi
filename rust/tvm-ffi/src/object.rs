@@ -609,7 +609,9 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 /// # Safety
 ///
 /// `Self` is exactly one [`ObjectArc<Self::ContainerType>`](ObjectArc). The
-/// hooks are safe and cannot break the [`AnyCompatible`] contract.
+/// hooks do not modify an `ffi.List` or `ffi.Dict` that holds the value they
+/// examine, whose cell a container read borrows while they run; otherwise
+/// they cannot break the [`AnyCompatible`] contract.
 ///
 /// # Examples
 ///

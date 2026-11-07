@@ -209,6 +209,9 @@ pub use tvm_ffi_macros::dispatch;
 /// `MutationView` arms do not match a `Map`, including a nested one; use
 /// `MutationView<Any>` for those. Ordinary `Map<K, V>` arms do match.
 ///
+/// While an arm borrows the value, it must not modify an `ffi.List` or
+/// `ffi.Dict` that holds the value, which may be the borrow's only owner.
+///
 /// # Examples
 ///
 /// ```

@@ -429,6 +429,10 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
 /// Callbacks must report failures through [`Result`] and must not panic: a panic
 /// reaching the non-unwinding native callback boundary aborts the process.
 ///
+/// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
+/// value it receives or one of that value's ancestors: the traversal borrows
+/// their cells while the callback runs.
+///
 /// # Arguments
 ///
 /// * `root` - Value borrowed for traversal, convertible into an [`AnyView`].
@@ -624,7 +628,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
             let dispatch = &mut *context.cast::<D>();
             let mut visitor = Self::visitor_context::<D>(runtime);
             // SAFETY: the native caller keeps the input alive for this synchronous
-            // dispatch; the higher-ranked callback cannot retain its borrowed view.
+            // dispatch, and the handler does not modify a list or dict cell
+            // holding it (the callback contract); the higher-ranked callback
+            // cannot retain its borrowed view.
             match crate::Dispatcher::dispatch_tuple(
                 &mut *dispatch,
                 (AnyView::from_raw_ffi_any(raw), &mut visitor),

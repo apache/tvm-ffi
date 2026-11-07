@@ -289,8 +289,10 @@ impl<'b, T: crate::type_traits::DowncastRefFromAny + 'static, S: SourceView>
         // Borrow the source's own cell, which lives for 'b: a reference type
         // such as `&Add` points into the cell, an object type into the heap.
         let node = unsafe { T::downcast_ref_from_any(source.cell()) }.ok_or(())? as *const T;
-        // SAFETY: the checked value is borrowed from source for 'b. No owning
-        // conversion or view transfer can occur while this borrow lives.
+        // SAFETY: the checked value is borrowed from source for 'b, and the arm
+        // does not modify a list or dict holding it (the `match_any!`
+        // contract). No owning conversion or view transfer can occur while this
+        // borrow lives.
         Ok(Matched {
             value: unsafe { &*node },
             recover: drop,
