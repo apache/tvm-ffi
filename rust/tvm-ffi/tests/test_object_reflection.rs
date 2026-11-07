@@ -612,6 +612,20 @@ fn test_native_function() -> Result<()> {
     let error = mismatch.call((&p,)).unwrap_err();
     assert_eq!(error.message(), "Packed hook result type mismatch");
 
+    // A Rust closure as a native hook, whose error is the hook's.
+    let x_of = |p: &PointObj| -> Result<i64> {
+        match p.x {
+            0 => Err(Error::new(VALUE_ERROR, "zero", "")),
+            x => Ok(x),
+        }
+    };
+    let stored = Any::from(NativeFunction::<(&PointObj,), i64>::from(x_of));
+    // SAFETY: the hook was built with this signature.
+    let x_of: NativeFunction<(&PointObj,), i64> = unsafe { NativeFunction::from_any(stored)? };
+    assert_eq!(x_of.call((&*p.data,))?, 3);
+    let error = x_of.call((&*point(0, 0.5, "p").data,)).unwrap_err();
+    assert_eq!(error.kind(), VALUE_ERROR);
+
     // SAFETY: an integer is rejected before any call.
     assert!(unsafe { NativeFunction::<()>::from_any(Any::from(1_i64)) }.is_err());
     Ok(())
