@@ -273,7 +273,7 @@ fn type_info<N: ObjectCore>() -> &'static TVMFFITypeInfo {
 fn field_names<N: ObjectCore>() -> Vec<&'static str> {
     fields(type_info::<N>())
         .iter()
-        .map(|f| f.name.as_str())
+        .map(|f| unsafe { f.name.as_str() })
         .collect()
 }
 
@@ -333,12 +333,12 @@ fn test_fields_are_registered_with_their_flags() {
     };
     assert_eq!(x.flags, FieldFlags::NONE.bits());
     assert_eq!(x.offset, std::mem::offset_of!(RsPointObj, x) as i64);
-    assert_eq!(x.doc.as_str(), "The x coordinate.");
+    assert_eq!(unsafe { x.doc.as_str() }, "The x coordinate.");
     assert_eq!(
         label.flags,
         (FieldFlags::WRITABLE | FieldFlags::SEQ_HASH_IGNORE).bits()
     );
-    assert_eq!(label.doc.as_str(), "A label.");
+    assert_eq!(unsafe { label.doc.as_str() }, "A label.");
     let metadata = unsafe { &*type_info::<RsPointObj>().metadata };
     assert_eq!(
         metadata.total_size as usize,
@@ -370,8 +370,11 @@ fn test_reflection_registers_methods() {
     let info = type_info::<RsPointObj>();
     assert_eq!(info.num_methods, 1);
     let method = unsafe { &*info.methods };
-    assert_eq!(method.name.as_str(), "with_label");
-    assert_eq!(method.doc.as_str(), "The point with another label.");
+    assert_eq!(unsafe { method.name.as_str() }, "with_label");
+    assert_eq!(
+        unsafe { method.doc.as_str() },
+        "The point with another label."
+    );
     let with_label = tvm_ffi::reflection::get_method("testing.rust.RsPoint", "with_label").unwrap();
     let relabeled = with_label
         .call_tuple((point(4, "a"), tvm_ffi::String::from("b")))

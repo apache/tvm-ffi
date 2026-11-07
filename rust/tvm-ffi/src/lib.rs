@@ -66,6 +66,7 @@ pub mod rvalue_ref;
 pub mod static_init;
 pub mod string;
 pub mod type_traits;
+mod util;
 pub use tvm_ffi_sys;
 
 pub use crate::any::{Any, AnyView};

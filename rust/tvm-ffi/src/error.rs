@@ -281,7 +281,8 @@ impl Error {
     ///
     /// The kind of the error, such as [`VALUE_ERROR`].
     pub fn kind(&self) -> ErrorKind<'_> {
-        ErrorKind(self.data.cell.kind.as_str())
+        // SAFETY: the error cell holds UTF-8 text that lives as long as the error.
+        ErrorKind(unsafe { self.data.cell.kind.as_str() })
     }
 
     /// Get the message of the error.
@@ -290,7 +291,8 @@ impl Error {
     ///
     /// The message of the error.
     pub fn message(&self) -> &str {
-        self.data.cell.message.as_str()
+        // SAFETY: the error cell holds UTF-8 text that lives as long as the error.
+        unsafe { self.data.cell.message.as_str() }
     }
 
     /// Get the backtrace of the error.
@@ -299,7 +301,8 @@ impl Error {
     ///
     /// The backtrace, most recent call first.
     pub fn backtrace(&self) -> &str {
-        self.data.cell.backtrace.as_str()
+        // SAFETY: the error cell holds UTF-8 text that lives as long as the error.
+        unsafe { self.data.cell.backtrace.as_str() }
     }
 
     /// The error that caused this one, the next link of the cause chain; the

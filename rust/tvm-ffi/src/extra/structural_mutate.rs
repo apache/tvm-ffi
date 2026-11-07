@@ -1583,7 +1583,8 @@ fn call_field_setter(
     value: &TVMFFIAny,
 ) -> Result<()> {
     if field.setter.is_null() {
-        return Err(missing_field_setter_error(field.name.as_str()));
+        // SAFETY: registered field names are UTF-8 text that lives as long as the process.
+        return Err(missing_field_setter_error(unsafe { field.name.as_str() }));
     }
     let return_code = unsafe {
         if field.flags & FLAG_SETTER_IS_FUNCTION == 0 {

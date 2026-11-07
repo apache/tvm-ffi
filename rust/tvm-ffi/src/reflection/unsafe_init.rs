@@ -188,7 +188,7 @@ mod tests {
 
         assert!(!zero_is_undefined::<i64>());
         assert!(!zero_is_undefined::<bool>());
-        // `None`, through the niche of a reference or a device, or through a tag.
+        // `None`, through the niche of a reference or through a tag.
         assert!(!zero_is_undefined::<Option<Array<i64>>>());
         assert!(!zero_is_undefined::<Option<DLDevice>>());
         assert!(!zero_is_undefined::<Option<String>>());
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn values_are_defined() {
         let cpu = DLDevice {
-            device_type: DLDeviceType::kDLCPU,
+            device_type: DLDeviceType::kDLCPU as i32,
             device_id: 0,
         };
         assert!(!is_undefined(Array::<i64>::new()));

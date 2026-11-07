@@ -350,24 +350,47 @@ where
     /// `try_cast_from_any_view`, which run during argument decoding where a
     /// panic could unwind across the C ABI.
     fn try_raw_entries(&self) -> Result<Vec<(Any, Any)>> {
-        let mut entries = Vec::with_capacity(self.len());
-        let mut remaining = self.len();
+        forward_entries(
+            crate::cached_global_func!("ffi.MapForwardIterFunctor"),
+            AnyView::from(self),
+            self.len(),
+        )
+    }
+
+    /// Converts raw entries one by one into a new map.
+    fn from_raw_entries(entries: Vec<(Any, Any)>) -> Result<Self> {
+        let mut pairs = Vec::with_capacity(entries.len());
+        for (k, v) in entries {
+            pairs.push((element_from_any::<K>(k)?, element_from_any::<V>(v)?));
+        }
+        Self::from_pairs(&pairs)
+    }
+}
+
+/// The `len` entries of the map or dict `container`, read with the iterator
+/// functor that `iter_functor` makes for it.
+fn forward_entries(
+    iter_functor: &Function,
+    container: AnyView,
+    len: usize,
+) -> Result<Vec<(Any, Any)>> {
+    let mut entries = Vec::with_capacity(len);
+    let mut remaining = len;
+    if remaining == 0 {
+        return Ok(entries);
+    }
+    let functor = iter_functor
+        .call_packed(&[container])
+        .and_then(Function::try_from)?;
+    loop {
+        let k = functor.call_packed(&[AnyView::from(&0i64)])?;
+        let v = functor.call_packed(&[AnyView::from(&1i64)])?;
+        entries.push((k, v));
+        remaining -= 1;
         if remaining == 0 {
             return Ok(entries);
         }
-        let functor = crate::cached_global_func!("ffi.MapForwardIterFunctor")
-            .call_packed(&[AnyView::from(self)])
-            .and_then(Function::try_from)?;
-        loop {
-            let k = functor.call_packed(&[AnyView::from(&0i64)])?;
-            let v = functor.call_packed(&[AnyView::from(&1i64)])?;
-            entries.push((k, v));
-            remaining -= 1;
-            if remaining == 0 {
-                return Ok(entries);
-            }
-            functor.call_packed(&[AnyView::from(&2i64)])?;
-        }
+        functor.call_packed(&[AnyView::from(&2i64)])?;
     }
 }
 
@@ -649,6 +672,18 @@ where
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+        if data.type_index == TypeIndex::kTVMFFIDict as i32 {
+            // A dict is mutable, so it converts by copy, as C++ `Map` accepts it.
+            // `ffi.Dict` shares the `MapBaseObj` header.
+            let len = (*(data.data_union.v_obj as *const MapObj)).size as usize;
+            let entries = forward_entries(
+                crate::cached_global_func!("ffi.DictForwardIterFunctor"),
+                AnyView::from_raw_ffi_any(*data),
+                len,
+            )
+            .map_err(|_| ())?;
+            return Self::from_raw_entries(entries).map_err(|_| ());
+        }
         if data.type_index != TypeIndex::kTVMFFIMap as i32 {
             return Err(());
         }
@@ -663,13 +698,8 @@ where
         // Slow path: try to convert entry by entry into a new map, as C++
         // `TryCastFromAnyView` does.
         let src = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
-        let mut pairs = Vec::with_capacity(src.len());
-        for (k, v) in src.try_raw_entries().map_err(|_| ())? {
-            let k = element_from_any::<K>(k).map_err(|_| ())?;
-            let v = element_from_any::<V>(v).map_err(|_| ())?;
-            pairs.push((k, v));
-        }
-        Self::from_pairs(&pairs).map_err(|_| ())
+        let entries = src.try_raw_entries().map_err(|_| ())?;
+        Self::from_raw_entries(entries).map_err(|_| ())
     }
 }
 

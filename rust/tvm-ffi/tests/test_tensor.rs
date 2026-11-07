@@ -35,7 +35,7 @@ fn test_tensor_basic() {
     assert_eq!(tensor.ndim(), 3);
     assert_eq!(tensor.dtype().code, DLDataTypeCode::kDLFloat as u8);
     assert_eq!(tensor.dtype().bits, 32_u8);
-    assert_eq!(tensor.device().device_type, DLDeviceType::kDLCPU);
+    assert_eq!(tensor.device().device_type, DLDeviceType::kDLCPU as i32);
 
     // Test strides (should be calculated correctly for row-major layout)
     let strides = tensor.strides();

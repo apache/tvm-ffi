@@ -326,13 +326,13 @@ fn test_any_dl_device() {
     // Test Any with CPU device
     assert_eq!(any_cpu.type_index(), TypeIndex::kTVMFFIDevice as i32);
     let converted_cpu = DLDevice::try_from(any_cpu).unwrap();
-    assert_eq!(converted_cpu.device_type, DLDeviceType::kDLCPU);
+    assert_eq!(converted_cpu.device_type, DLDeviceType::kDLCPU as i32);
     assert_eq!(converted_cpu.device_id, 0);
 
     // Test AnyView with CPU device
     assert_eq!(any_view_cpu.type_index(), TypeIndex::kTVMFFIDevice as i32);
     let converted_cpu_view = DLDevice::try_from(any_view_cpu).unwrap();
-    assert_eq!(converted_cpu_view.device_type, DLDeviceType::kDLCPU);
+    assert_eq!(converted_cpu_view.device_type, DLDeviceType::kDLCPU as i32);
     assert_eq!(converted_cpu_view.device_id, 0);
 
     // Test DLDevice with CUDA device
@@ -343,13 +343,16 @@ fn test_any_dl_device() {
     // Test Any with CUDA device
     assert_eq!(any_cuda.type_index(), TypeIndex::kTVMFFIDevice as i32);
     let converted_cuda = DLDevice::try_from(any_cuda).unwrap();
-    assert_eq!(converted_cuda.device_type, DLDeviceType::kDLCUDA);
+    assert_eq!(converted_cuda.device_type, DLDeviceType::kDLCUDA as i32);
     assert_eq!(converted_cuda.device_id, 1);
 
     // Test AnyView with CUDA device
     assert_eq!(any_view_cuda.type_index(), TypeIndex::kTVMFFIDevice as i32);
     let converted_cuda_view = DLDevice::try_from(any_view_cuda).unwrap();
-    assert_eq!(converted_cuda_view.device_type, DLDeviceType::kDLCUDA);
+    assert_eq!(
+        converted_cuda_view.device_type,
+        DLDeviceType::kDLCUDA as i32
+    );
     assert_eq!(converted_cuda_view.device_id, 1);
 }
 

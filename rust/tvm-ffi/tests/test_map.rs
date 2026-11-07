@@ -382,3 +382,15 @@ fn test_map_any_cast_slow_path_converts() {
     assert_eq!(AnyView::from(&real).debug_strong_count(), Some(1));
     assert_eq!(AnyView::from(&converted).debug_strong_count(), Some(1));
 }
+
+#[test]
+fn test_map_from_dict_copies() {
+    let dict = Function::get_global("ffi.Dict")
+        .unwrap()
+        .call_tuple((String::from("a"), 1i64, String::from("b"), 2i64))
+        .unwrap();
+    let map = Map::<String, i64>::try_from(dict.clone()).unwrap();
+    assert_eq!(map.len(), 2);
+    assert_eq!(map.get(&String::from("b")).unwrap(), Some(2));
+    assert_eq!(dict.debug_strong_count(), Some(1));
+}

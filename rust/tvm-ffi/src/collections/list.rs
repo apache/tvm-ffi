@@ -231,10 +231,7 @@ unsafe impl<T: ContainerElement> ObjectRefCore for List<T> {
 /// mutated while the slice is alive.
 pub(crate) unsafe fn seq_cells(data: &TVMFFIAny) -> &[TVMFFIAny] {
     let seq = &*(data.data_union.v_obj as *const ListObj);
-    if *seq.size.get() == 0 {
-        return &[];
-    }
-    std::slice::from_raw_parts(
+    crate::util::slice_from_nullable_raw_parts(
         *seq.data.get() as *const TVMFFIAny,
         *seq.size.get() as usize,
     )

@@ -101,7 +101,8 @@ pub fn type_key(type_index: i32) -> Option<&'static str> {
     // SAFETY: the index is registered, and type information lives as long as
     // the process.
     let info: &'static TVMFFITypeInfo = unsafe { &*TVMFFIGetTypeInfo(type_index) };
-    Some(info.type_key.as_str())
+    // SAFETY: a type key is UTF-8 text.
+    Some(unsafe { info.type_key.as_str() })
 }
 
 /// The default value `T` registers for its field `name`, or `None` if `T`
@@ -113,12 +114,14 @@ pub fn field_default<T: ObjectCore>(name: &str) -> Option<Any> {
     // SAFETY: `ObjectCore` types are registered, and type information lives
     // as long as the process.
     let info: &'static TVMFFITypeInfo = unsafe { &*TVMFFIGetTypeInfo(T::type_index()) };
-    if info.fields.is_null() {
-        return None;
-    }
     // SAFETY: a registered type lists `num_fields` initialized fields.
-    let fields = unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) };
-    let field = fields.iter().find(|field| field.name.as_str() == name)?;
+    let fields = unsafe {
+        crate::util::slice_from_nullable_raw_parts(info.fields, info.num_fields as usize)
+    };
+    // SAFETY: a field name is UTF-8 text.
+    let field = fields
+        .iter()
+        .find(|field| unsafe { field.name.as_str() } == name)?;
     let has_default = TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskHasDefault as i64;
     let from_factory = TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskDefaultFromFactory as i64;
     if field.flags & has_default == 0 || field.flags & from_factory != 0 {
@@ -285,9 +288,11 @@ impl FieldGetter {
         })?;
         let field = unsafe { field.as_ref() };
         let getter = field.getter.ok_or_else(|| {
+            // SAFETY: a field name is UTF-8 text.
+            let name = unsafe { field.name.as_str() };
             Error::new(
                 TYPE_ERROR,
-                &format!("Reflected field `{}` has no getter", field.name.as_str()),
+                &format!("Reflected field `{name}` has no getter"),
                 "",
             )
         })?;

@@ -785,8 +785,8 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     unsafe fn is_undefined(field: *const Self) -> bool {
         // With a tag, all-zero bytes are `None`. A niche-optimized `Option<T>`
         // keeps `T`'s bytes, where all-zero bytes are `None` if `None` looks
-        // undefined to `T` (a reference's null pointer, a device's zero type),
-        // and undefined if `None` sits elsewhere in the niche.
+        // undefined to `T` (a reference's null pointer), and undefined if
+        // `None` sits elsewhere in the niche.
         if std::mem::size_of::<Self>() != std::mem::size_of::<T>() {
             return false;
         }
