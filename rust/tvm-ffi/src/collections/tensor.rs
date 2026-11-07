@@ -161,7 +161,7 @@ impl Tensor {
                 dtype.to_string()
             );
         }
-        if self.device().device_type != DLDeviceType::kDLCPU {
+        if self.device().device_type != DLDeviceType::kDLCPU as i32 {
             crate::bail!(crate::error::RUNTIME_ERROR, "Tensor is not on CPU");
         }
         crate::ensure!(
@@ -208,7 +208,7 @@ impl Tensor {
                 self.dtype().to_string()
             );
         }
-        if self.device().device_type != DLDeviceType::kDLCPU {
+        if self.device().device_type != DLDeviceType::kDLCPU as i32 {
             crate::bail!(crate::error::RUNTIME_ERROR, "Tensor is not on CPU");
         }
         crate::ensure!(

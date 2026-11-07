@@ -27,7 +27,7 @@ use tvm_ffi_sys::{TVMFFIEnvGetStream, TVMFFIEnvSetStream, TVMFFIStreamHandle};
 /// The current stream of `device`, as the caller or [`with_stream`] set it;
 /// null if none is set.
 pub fn current_stream(device: &DLDevice) -> TVMFFIStreamHandle {
-    unsafe { TVMFFIEnvGetStream(device.device_type as i32, device.device_id) }
+    unsafe { TVMFFIEnvGetStream(device.device_type, device.device_id) }
 }
 
 /// Call `f` with the device stream temporarily set to `stream`.
@@ -46,7 +46,7 @@ pub unsafe fn with_stream<T>(
     let mut prev_stream: TVMFFIStreamHandle = std::ptr::null_mut();
     unsafe {
         crate::check_safe_call!(TVMFFIEnvSetStream(
-            device.device_type as i32,
+            device.device_type,
             device.device_id,
             stream,
             &mut prev_stream as *mut TVMFFIStreamHandle
@@ -74,7 +74,7 @@ impl RestoreStream {
     fn set(&self) -> i32 {
         unsafe {
             TVMFFIEnvSetStream(
-                self.device.device_type as i32,
+                self.device.device_type,
                 self.device.device_id,
                 self.stream,
                 std::ptr::null_mut(),
@@ -99,8 +99,8 @@ impl Drop for RestoreStream {
 unsafe impl AnyCompatible for DLDevice {
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
-        // No device type is zero; read as an integer, since zero is no `DLDeviceType`.
-        *std::ptr::addr_of!((*field).device_type).cast::<u32>() == 0
+        // No device type is zero.
+        *std::ptr::addr_of!((*field).device_type) == 0
     }
 
     fn type_str() -> String {
