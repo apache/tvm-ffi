@@ -472,7 +472,7 @@ impl Hash for String {
 
 impl Display for String {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.as_str(), f)
+        Display::fmt(self.as_str(), f)
     }
 }
 
