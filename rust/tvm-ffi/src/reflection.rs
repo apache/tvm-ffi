@@ -29,7 +29,9 @@ mod native_function;
 mod registry;
 mod unsafe_init;
 pub use access_path::{AccessKind, AccessPath, AccessPathObj, AccessStep, AccessStepObj};
-pub use accessor::{get_method, get_method_by_index, type_key, FieldGetter, TypeAttrColumn};
+pub use accessor::{
+    field_default, get_method, get_method_by_index, type_key, FieldGetter, TypeAttrColumn,
+};
 pub use enum_def::{EnumAttrMap, EnumDef};
 pub use native_function::{NativeArgs, NativeFunction};
 #[doc(hidden)]

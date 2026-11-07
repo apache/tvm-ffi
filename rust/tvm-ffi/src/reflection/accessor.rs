@@ -24,9 +24,9 @@ use std::ptr::NonNull;
 use std::sync::{PoisonError, RwLock};
 
 use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
-    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeInfo,
-    TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldGetter, TVMFFIFieldInfo,
+    TVMFFIGetTypeAttrColumn, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn,
+    TVMFFITypeIndex, TVMFFITypeInfo, TVMFFITypeKeyToIndex,
 };
 use crate::type_traits::AnyCompatible;
 use crate::{Any, AnyView, Array, Error, Function, ObjectCore, Result, TYPE_ERROR};
@@ -102,6 +102,33 @@ pub fn type_key(type_index: i32) -> Option<&'static str> {
     // the process.
     let info: &'static TVMFFITypeInfo = unsafe { &*TVMFFIGetTypeInfo(type_index) };
     Some(info.type_key.as_str())
+}
+
+/// The default value `T` registers for its field `name`, or `None` if `T`
+/// registers no such field, the field has no default, or its default comes
+/// from a factory.
+///
+/// Only fields `T` registers itself are searched, not those of its ancestors.
+pub fn field_default<T: ObjectCore>(name: &str) -> Option<Any> {
+    // SAFETY: `ObjectCore` types are registered, and type information lives
+    // as long as the process.
+    let info: &'static TVMFFITypeInfo = unsafe { &*TVMFFIGetTypeInfo(T::type_index()) };
+    if info.fields.is_null() {
+        return None;
+    }
+    // SAFETY: a registered type lists `num_fields` initialized fields.
+    let fields = unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) };
+    let field = fields.iter().find(|field| field.name.as_str() == name)?;
+    let has_default = TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskHasDefault as i64;
+    let from_factory = TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskDefaultFromFactory as i64;
+    if field.flags & has_default == 0 || field.flags & from_factory != 0 {
+        return None;
+    }
+    // SAFETY: the registry keeps the default alive; the view only borrows it
+    // for the copy.
+    Some(Any::from(unsafe {
+        AnyView::from_raw_ffi_any(field.default_value_or_factory)
+    }))
 }
 
 /// Whether a type is registered with index `type_index`. The registry aborts

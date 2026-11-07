@@ -124,6 +124,19 @@ fn test_is_instance_of() {
 }
 
 #[test]
+fn test_field_default() {
+    assert_eq!(unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() }, 0);
+    let v_i64 = reflection::field_default::<TestBaseObj>("v_i64").unwrap();
+    assert_eq!(i64::try_from(v_i64).unwrap(), 10);
+    let v_str = reflection::field_default::<TestBaseObj>("v_str").unwrap();
+    assert_eq!(String::try_from(v_str).unwrap().as_str(), "hello");
+    // no default, unknown, and inherited fields
+    assert!(reflection::field_default::<TestDerivedObj>("v_map").is_none());
+    assert!(reflection::field_default::<TestBaseObj>("missing").is_none());
+    assert!(reflection::field_default::<TestDerivedObj>("v_i64").is_none());
+}
+
+#[test]
 fn test_upcast_downcast_roundtrip() {
     let delete_counter = Arc::new(AtomicU32::new(0));
     let derived = new_derived(7, 8, delete_counter.clone());
