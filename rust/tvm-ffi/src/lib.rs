@@ -284,13 +284,25 @@ pub use tvm_ffi_macros::match_any;
 /// `Option` of an object reference or an [`Optional`] of any other value. The parent's object must
 /// implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and
 /// `#[type_rs_parent]` bindings, such as the non-final ones `tvm-ffi-stubgen`
-/// generates, do. The type registers when its library
-/// loads, as [`derive(Object)`](derive::Object) describes, with its fields,
-/// methods, `__ffi_new__` and, unless the methods define it, `__ffi_init__`.
+/// generates, do.
 ///
-/// A key already registered, by another library or a binding, must describe
-/// the same type: `type_index()` checks its parent, depth and size, not its
+/// # Registration
+///
+/// The type registers when its library loads, as a C++ type does in a static
+/// init block, with its fields, methods, `__ffi_new__` and, unless the methods
+/// define it, `__ffi_init__`; under a binding whose library is not loaded
+/// yet, it registers on its first `type_index()` after that library loads. A
+/// key already registered, by another library or a binding, must describe the
+/// same type: `type_index()` checks its parent, depth and size, not its
 /// fields.
+///
+/// Registrations from one library hold that library's lock, so they do not
+/// race each other; libraries that each link tvm-ffi have a lock each. The
+/// runtime's type table is not locked otherwise, and its readers take no
+/// lock: as for C++, types register during static initialization, before
+/// other threads use them or load a library that registers types. A type
+/// that registers lazily, under a binding loaded later, must take its first
+/// `type_index()` under the same rule.
 ///
 /// # Examples
 ///

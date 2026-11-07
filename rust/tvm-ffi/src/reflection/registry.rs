@@ -28,11 +28,10 @@
 //! and Python's generated classes reach the fields and methods of a Rust type,
 //! and construct it.
 //!
-//! Only `#[derive(Object)]` creates an [`ObjectDef`], for a `#[type_register]`
-//! type with `#[reflect]` fields or a `#[type_reflection]` function; the
-//! derive guarantees that each registered field's type and offset match. The
-//! `#[type_reflection]` function receives the builder to register methods
-//! with [`ObjectDef::def`] and [`ObjectDef::def_static`].
+//! Only [`rs_object`](crate::rs_object) creates an [`ObjectDef`], which
+//! guarantees that each registered field's type and offset match. Its
+//! `reflection = path` function receives the builder to register methods with
+//! [`ObjectDef::def`] and [`ObjectDef::def_static`].
 
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -58,10 +57,10 @@ use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR, VALUE_ERRO
 /// `__ffi_shallow_copy__` returns; fields that are references share their
 /// objects, as `Clone` of an `Arc` does.
 ///
-/// `#[derive(Object)]` implements it for a type with `#[reflect]` fields by
-/// copying the parent with its `ShallowCopy` and cloning every other field. A
-/// Rust type whose parent is defined in another language needs that parent to
-/// implement it.
+/// [`rs_object`](crate::rs_object) and `#[type_rs_parent]` on
+/// [`derive(Object)`](crate::derive::Object) implement it by copying the
+/// parent with its `ShallowCopy` and cloning every other field. An
+/// `rs_object` needs its parent's object to implement it.
 pub trait ShallowCopy {
     /// The copy, under a fresh object header.
     fn shallow_copy(&self) -> Self;
@@ -155,9 +154,8 @@ impl BitOr for FieldFlags {
 /// Registers the reflection of the object type `N`: the metadata, each
 /// `#[reflect]` field, the methods and the type attributes.
 ///
-/// `#[derive(Object)]` creates one while it registers a `#[type_register]`
-/// type and passes it to the function that `#[type_reflection(path)]`, or the
-/// `reflection = path` option of [`rs_object`](crate::rs_object), names, which
+/// [`rs_object`](crate::rs_object) creates one while it registers its type
+/// and passes it to the function its `reflection = path` option names, which
 /// registers methods with [`ObjectDef::def`] and [`ObjectDef::def_static`].
 ///
 /// That function runs under the registration lock, before `N::type_index()`
@@ -499,15 +497,11 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 /// # Examples
 ///
 /// ```
-/// use tvm_ffi::derive::Object;
 /// use tvm_ffi::reflection::TypeAttrDef;
 /// use tvm_ffi::reflection::TypeAttrColumn;
-/// use tvm_ffi::{Object, ObjectCore};
+/// use tvm_ffi::{rs_object, Object, ObjectCore};
 ///
-/// #[repr(C)]
-/// #[derive(Object)]
-/// #[type_key = "my_ext.MyPair"]
-/// #[type_register]
+/// #[rs_object("my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 /// }

@@ -309,32 +309,25 @@ the type index is already known (e.g. from ``Any::type_index``).
 Defining Reflected Object Types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An object type defined in Rust registers its type key with ``#[type_register]``
-and its fields with ``#[reflect]``. The registration runs when the library
-that defines the type loads, as for a C++ type:
+``#[rs_object]`` defines an object type in Rust from its object struct, like
+Python's ``py_class``. The type registers when the library that defines it
+loads, as a C++ type does:
 
 .. code-block:: rust
 
-   use tvm_ffi::derive::{Object, ObjectRef};
+   use tvm_ffi::derive::ObjectRef;
    use tvm_ffi::reflection::ObjectDef;
-   use tvm_ffi::{Object, ObjectArc, Result};
+   use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 
-   #[repr(C)]
-   #[derive(Object)]
-   #[type_key = "my.Point"]
-   #[type_register]
-   #[type_s_eq_hash_kind = "TreeNode"]
-   #[type_reflection(PointObj::reflect_methods)]
+   #[rs_object("my.Point", s_eq_hash_kind = "TreeNode", reflection = PointObj::reflect_methods)]
    pub struct PointObj {
        base_: Object,
        /// The x coordinate.
-       #[reflect]
        pub x: i64,
        #[reflect(writable, seq_hash_ignore, doc = "A label.")]
        pub label: tvm_ffi::String,
    }
 
-   #[repr(C)]
    #[derive(ObjectRef, Clone)]
    pub struct Point {
        data: ObjectArc<PointObj>,
@@ -347,17 +340,21 @@ that defines the type loads, as for a C++ type:
        }
    }
 
-Each reflected field gets a C ABI getter and setter, its doc string and its
-type schema, so structural equality and hashing, ``ffi.ReprPrint``,
-``ffi.DeepCopy`` and Python see it. The flags in ``#[reflect(...)]`` name
+The first field, ``base_``, is the parent's object. Every other field is
+reflected: it gets a C ABI getter and setter, its doc string and its type
+schema, so structural equality and hashing, ``ffi.ReprPrint``, ``ffi.DeepCopy``
+and Python see it. The flags in ``#[reflect(...)]`` name
 ``tvm_ffi::reflection::FieldFlags`` constants; ``name = "..."`` registers the field under
 another name, and ``doc = "..."`` sets its doc string, otherwise the field's
-``///`` doc comment. Without ``#[type_s_eq_hash_kind]``, a type keeps its
-nearest reflected ancestor's kind. The derive also implements ``ShallowCopy``
-and registers it as ``__ffi_shallow_copy__``, which requires the parent to
+``///`` doc comment. Without ``s_eq_hash_kind``, a type keeps its nearest
+reflected ancestor's kind. The type also implements ``ShallowCopy`` and
+registers it as ``__ffi_shallow_copy__``, which requires the parent to
 implement ``ShallowCopy`` and the other fields to be ``Clone``.
+``immutable`` declares that shared objects of the type are never mutated
+(``ImmutableObject``), so its references cross threads when its fields can; its
+fields cannot be ``writable``.
 
-``#[type_reflection(path)]`` names a function that registers the type's
+``reflection = path`` names a function that registers the type's
 methods with ``def`` (the object is the first parameter) and ``def_static``,
 each with its type schema and doc
 string, where ``reflection::get_method`` and Python find them. It runs
@@ -367,16 +364,12 @@ yet, nor register type attributes or call ``TypeAttrColumn::ensure``, which
 take the same lock. Method names, like
 reflected field names, must be unique in the type.
 
-Defining Object Types from Their Fields
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``#[derive(Object)]`` instead binds a type that another library, usually C++,
+registers; ``tvm-ffi-stubgen`` generates such bindings.
 
-``#[rs_object]`` defines such a type from its object struct, like Python's
-``py_class``. The first field, ``base_``, is the parent's object; every other field
-is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
-``reflection = path`` after the type key is ``#[type_reflection(path)]``.
-``immutable`` declares that shared objects of the type are never mutated
-(``ImmutableObject``), so its references cross threads when its fields can; its
-fields cannot be ``writable``.
+Deriving Object Types
+~~~~~~~~~~~~~~~~~~~~~
+
 ``#[derive(ObjectRef)]`` declares the reference, and ``#[object_ref(parent = Point)]``
 names the reference to the parent's object:
 

@@ -78,7 +78,7 @@ pub use linkme;
 /// give them distinct crate names.
 ///
 /// A panic in a block is caught and reported as its error, except under `panic = "abort"`, where
-/// it aborts the process; a failed `#[type_register]` registration is such a panic.
+/// it aborts the process; a failed `rs_object` registration is such a panic.
 #[macro_export]
 macro_rules! static_init_block {
     ($($body:tt)*) => {

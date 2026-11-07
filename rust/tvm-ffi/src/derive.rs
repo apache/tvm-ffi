@@ -18,80 +18,35 @@
  */
 //! The derive macros of object types and object references.
 
-/// Derive [`ObjectCore`](crate::ObjectCore) for a `#[repr(C)]` object struct
-/// whose first field is its parent, so that a pointer to the object is one to
-/// its parent.
+/// Bind an object type that another library, usually C++, registers: derive
+/// [`ObjectCore`](crate::ObjectCore) for a `#[repr(C)]` object struct whose
+/// first field is its parent, so that a pointer to the object is one to its
+/// parent. Define a new type in Rust with [`rs_object`](macro@crate::rs_object)
+/// instead.
 ///
-/// `#[type_key = "..."]` names the type, and `#[type_index(unsafe ...)]` gives
-/// it a static index; the `unsafe` marks the caller's promise that the runtime
-/// gives that index to this type. Otherwise a type defined in Rust declares
-/// `#[type_register]`: it is registered under its parent when its library
-/// loads, as a C++ type is in a static init block, or takes the index its key
-/// already has, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does. Under a binding
-/// whose library is not loaded yet, it registers on its first `type_index()`
-/// after that library loads instead. Without `#[type_register]`, the type
-/// binds a key its defining library, usually C++, has registered, and
-/// `type_index()` panics if that library is not loaded yet, so a binding
-/// never registers a key with the wrong child slots. Such a panic is final:
-/// `type_index()` of the type, and of every type under it, keeps panicking
-/// after the library loads, so call it only once the library is loaded. Either way `type_index()` panics unless the registered
-/// key has the type's parent and depth and, when the type table records a
-/// size, that size is the type's, or for a binding at least the type's. A
-/// binding that declares only part of its object must not be constructed:
+/// `#[type_key = "..."]` names the type. `type_index()` takes the index the
+/// defining library registered for the key, and panics if that library is not
+/// loaded yet, so a binding never registers a key with the wrong child slots.
+/// Such a panic is final: `type_index()` of the type, and of every type under
+/// it, keeps panicking after the library loads, so call it only once the
+/// library is loaded. It also panics unless the registered key has the type's
+/// parent and depth and, when the type table records a size, a size no
+/// smaller than the type's. `#[type_index(unsafe ...)]` gives the type a
+/// static index instead; the `unsafe` marks the caller's promise that the
+/// runtime gives that index to this type.
+///
+/// A binding that declares only part of its object must not be constructed:
 /// keep its fields private.
 ///
-/// `#[type_immutable]` implements
-/// [`ImmutableObject`](crate::object::ImmutableObject), as for a C++ type not
-/// registered as `_type_mutable`; a `writable` field does not compile with it,
-/// and every subtype must be immutable too.
-///
-/// `#[type_rs_parent]` implements `ShallowCopy` and
-/// [`UnsafeInit`](crate::reflection::UnsafeInit), so an
-/// [`rs_object`](macro@crate::rs_object) can derive from the type. Each field
-/// other than the parent must implement [`AnyCompatible`](crate::AnyCompatible),
-/// be an [`Any`](crate::Any) or have no drop glue, and be `Clone`.
-///
-/// `#[type_final]`, and with `#[type_register]` `#[type_child_slots = N]` and
-/// `#[type_child_slots_can_overflow = bool]`, mirror C++ `_type_final`,
-/// `_type_child_slots` (default 0) and `_type_child_slots_can_overflow`
-/// (default true).
-///
-/// With `#[type_register]`, fields marked `#[reflect]` are registered with the
-/// type table when the type is, as C++ `refl::ObjectDef<T>().def_ro(...)`
-/// does: a getter, a setter, the doc string and the type schema per field,
-/// the metadata, and the `__ffi_shallow_copy__` and `__ffi_type_final__`
-/// type attributes. C++ structural equality and hashing, `repr`, deep copy
-/// and Python then see the fields. `#[reflect(writable, seq_hash_ignore,
-/// ...)]` adds the [`FieldFlags`](crate::reflection::FieldFlags) of those
-/// names, `name = "..."` registers the field under another name, and
-/// `doc = "..."` sets its doc string, otherwise the field's `///` doc comment.
-/// `#[type_s_eq_hash_kind = "TreeNode"]` names the
-/// [`SEqHashKind`](crate::reflection::SEqHashKind); without it the type keeps
-/// its nearest reflected ancestor's, as a C++ subclass inherits
-/// `_type_s_eq_hash_kind`. `#[type_reflection(path)]` names a function
-/// `fn(&mut ObjectDef<Self>)` that registers the type's methods, as C++
-/// `refl::ObjectDef<T>().def(...)` does; see
-/// [`ObjectDef`](crate::reflection::ObjectDef) for what it must not do. A type
-/// with any of these attributes also gets `ShallowCopy`, which shallow-copies
-/// the parent and clones every other field, so the parent must implement
-/// `ShallowCopy` (`Object` and reflected Rust types do) and the fields must be
-/// `Clone`; a reflected field's type must implement
-/// [`AnyCompatible`](crate::AnyCompatible). As a C++ `def_rw` field, a
-/// `writable` field can be replaced through reflection, such as from Python,
-/// while the object is shared.
-///
-/// A key registered more than once, by `#[type_register]` types or bindings
-/// in different libraries, or by another language, must describe the same
-/// type each time: `type_index()` checks the parent, depth and size, not the
-/// fields.
-///
-/// Registrations from one library hold that library's lock, so they do not
-/// race each other; libraries that each link tvm-ffi have a lock each. The
-/// runtime's type table is not locked otherwise, and its readers take no
-/// lock: as for C++, types register during static initialization, before
-/// other threads use them or load a library that registers types. A type
-/// that registers lazily, under a binding loaded later, must take its first
-/// `type_index()` under the same rule.
+/// * `#[type_final]` - The type has no subtypes, as C++ `_type_final`.
+/// * `#[type_immutable]` - Implement
+///   [`ImmutableObject`](crate::object::ImmutableObject), as for a C++ type
+///   not registered as `_type_mutable`; every subtype must be immutable too.
+/// * `#[type_rs_parent]` - Implement `ShallowCopy` and
+///   [`UnsafeInit`](crate::reflection::UnsafeInit), so an `rs_object` can
+///   derive from the type. Each field other than the parent must be `Clone`
+///   and implement [`AnyCompatible`](crate::AnyCompatible), be an
+///   [`Any`](crate::Any) or have no drop glue.
 pub use tvm_ffi_macros::Object;
 
 /// Declare an object reference: the managed, reference-counted handle to an

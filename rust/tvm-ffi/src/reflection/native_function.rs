@@ -51,14 +51,10 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// # Examples
 ///
 /// ```
-/// use tvm_ffi::derive::Object;
 /// use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn, TypeAttrDef};
-/// use tvm_ffi::{Object, ObjectArc, ObjectCore, Result};
+/// use tvm_ffi::{rs_object, Object, ObjectArc, ObjectCore, Result};
 ///
-/// #[repr(C)]
-/// #[derive(Object)]
-/// #[type_key = "my_ext.MyPair"]
-/// #[type_register]
+/// #[rs_object("my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     first: i64,
