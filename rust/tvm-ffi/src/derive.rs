@@ -29,10 +29,12 @@
 /// loads, as a C++ type is in a static init block, or takes the index its key
 /// already has, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does. Under a binding
 /// whose library is not loaded yet, it registers on its first `type_index()`
-/// instead. Without `#[type_register]`, the type binds a key its defining
-/// library, usually C++, has registered, and `type_index()` panics if that
-/// library is not loaded yet, so a binding never registers a key with the
-/// wrong child slots. Either way `type_index()` panics unless the registered
+/// after that library loads instead. Without `#[type_register]`, the type
+/// binds a key its defining library, usually C++, has registered, and
+/// `type_index()` panics if that library is not loaded yet, so a binding
+/// never registers a key with the wrong child slots. Such a panic is final:
+/// `type_index()` of the type, and of every type under it, keeps panicking
+/// after the library loads, so call it only once the library is loaded. Either way `type_index()` panics unless the registered
 /// key has the type's parent and depth and, when the type table records a
 /// size, that size is the type's, or for a binding at least the type's. A
 /// binding that declares only part of its object must not be constructed:
@@ -68,13 +70,17 @@
 /// while the object is shared.
 ///
 /// A key registered more than once, by `#[type_register]` types or bindings
-/// in different libraries, must describe the same type each time:
-/// `type_index()` checks the parent, depth and size, not the fields.
+/// in different libraries, or by another language, must describe the same
+/// type each time: `type_index()` checks the parent, depth and size, not the
+/// fields.
 ///
-/// Registrations from Rust hold one lock, so they do not race each other. The
+/// Registrations from one library hold that library's lock, so they do not
+/// race each other; libraries that each link tvm-ffi have a lock each. The
 /// runtime's type table is not locked otherwise, and its readers take no
 /// lock: as for C++, types register during static initialization, before
-/// other threads use them or load a library that registers types.
+/// other threads use them or load a library that registers types. A type
+/// that registers lazily, under a binding loaded later, must take its first
+/// `type_index()` under the same rule.
 pub use tvm_ffi_macros::Object;
 
 /// Declare an object reference: the managed, reference-counted handle to an

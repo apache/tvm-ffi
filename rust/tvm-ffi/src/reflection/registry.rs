@@ -469,8 +469,10 @@ impl<N: ObjectCore> ObjectDef<N> {
 /// # Safety
 ///
 /// As `ObjectDef::registering`; `fields` registers fields of `N` as
-/// [`ObjectDef::field`] requires. Like every registration, it runs during
-/// static initialization, before other threads read the type.
+/// [`ObjectDef::field`] requires. Like every registration, it runs before
+/// other threads use the type or register types: during static
+/// initialization, or on the first `type_index()` of a type under a binding
+/// loaded later.
 #[doc(hidden)]
 pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
     type_index: i32,
