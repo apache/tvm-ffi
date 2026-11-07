@@ -26,9 +26,10 @@ use crate::Any;
 /// What an [`AccessStep`] accesses: an attribute, an array item or a map
 /// item, or one of those that is missing.
 ///
-/// A closed set: the values are part of the ABI.
+/// The values are part of the ABI.
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum AccessKind {
     /// An object attribute; the key is its name.
     Attr = 0,

@@ -29,6 +29,7 @@ use crate::dlpack::DLDevice;
 ///  The index type of the FFI objects
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TVMFFITypeIndex {
     /// None/nullptr value
     kTVMFFINone = 0,

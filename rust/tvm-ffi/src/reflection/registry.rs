@@ -75,6 +75,7 @@ impl ShallowCopy for Object {
 
 /// How the structural engines treat instances of a type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SEqHashKind {
     /// Rejected by structural equality and hashing; the default.
     Unsupported,
