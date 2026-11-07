@@ -74,8 +74,6 @@ pub trait DLTensorExt {
     /// # Panics
     /// If an extent is negative or the product overflows `usize`.
     fn numel(&self) -> usize;
-    /// The bytes of one element: `bits * lanes`, rounded up to whole bytes.
-    fn item_size(&self) -> usize;
 }
 
 impl DLTensorExt for DLTensor {
@@ -84,10 +82,6 @@ impl DLTensorExt for DLTensor {
         let shape =
             unsafe { crate::util::slice_from_nullable_raw_parts(self.shape, self.ndim as usize) };
         checked_numel(shape).expect("tensor shape has a negative extent or overflows usize")
-    }
-
-    fn item_size(&self) -> usize {
-        (self.dtype.bits as usize * self.dtype.lanes as usize).div_ceil(8)
     }
 }
 
