@@ -124,6 +124,13 @@ impl<T: ContainerElement + Clone> Debug for Array<T> {
     }
 }
 
+/// Formats the array as its `repr`; see [`AnyView`].
+impl<T: ContainerElement + Clone> std::fmt::Display for Array<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        AnyView::from_object(&**ObjectRefCore::data(self)).fmt(f)
+    }
+}
+
 impl<T: ContainerElement + Clone> Default for Array<T> {
     fn default() -> Self {
         Self::new()

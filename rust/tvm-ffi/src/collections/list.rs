@@ -552,6 +552,13 @@ impl<T> Debug for List<T> {
     }
 }
 
+/// Formats the list as its `repr`; see [`AnyView`].
+impl<T: ContainerElement> std::fmt::Display for List<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        AnyView::from_object(&**ObjectRefCore::data(self)).fmt(f)
+    }
+}
+
 impl<T: ContainerElement> FromIterator<T> for List<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let items: Vec<T> = iter.into_iter().collect();
