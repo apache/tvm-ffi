@@ -30,6 +30,7 @@ use tvm_ffi::*;
 #[derive(Object)]
 #[type_key = "testing.rust.CastBase"]
 #[type_register]
+#[type_immutable]
 struct TestBaseObj {
     base_: Object,
     value: i64,
@@ -65,7 +66,7 @@ struct TestDerived {
     data: ObjectArc<TestDerivedObj>,
 }
 
-tvm_ffi::impl_object_ref_upcast!(unsafe TestDerived => TestBase);
+tvm_ffi::impl_object_ref_upcast!(TestDerived => TestBase);
 
 // unwrap_err() requires the Ok type to implement Debug, which ObjectRef types do not
 fn expect_err<T>(res: Result<T>) -> Error {
@@ -284,8 +285,6 @@ fn test_any_conversion_preserves_runtime_subtype() {
 }
 
 // `TestBaseObj` opts in; `TestDerivedObj` does not, so only `TestBase` crosses threads.
-// SAFETY: test objects are never mutated after construction.
-unsafe impl tvm_ffi::ImmutableObject for TestBaseObj {}
 
 #[test]
 fn test_thread_safe_object_handles() {

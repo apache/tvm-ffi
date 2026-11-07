@@ -38,6 +38,7 @@ pub(crate) fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
 struct RsObjectArgs {
     type_key: LitStr,
     type_final: bool,
+    immutable: bool,
     s_eq_hash_kind: Option<LitStr>,
     child_slots: Option<LitInt>,
     child_slots_can_overflow: Option<LitBool>,
@@ -56,6 +57,7 @@ impl Parse for RsObjectArgs {
         let mut args = RsObjectArgs {
             type_key,
             type_final: false,
+            immutable: false,
             s_eq_hash_kind: None,
             child_slots: None,
             child_slots_can_overflow: None,
@@ -74,11 +76,12 @@ impl Parse for RsObjectArgs {
             if seen.contains(&key) {
                 return Err(syn::Error::new(name.span(), format!("duplicate `{key}`")));
             }
-            if key != "final" {
+            if key != "final" && key != "immutable" {
                 input.parse::<Token![=]>()?;
             }
             match key.as_str() {
                 "final" => args.type_final = true,
+                "immutable" => args.immutable = true,
                 "s_eq_hash_kind" => args.s_eq_hash_kind = Some(input.parse()?),
                 "child_slots" => args.child_slots = Some(input.parse()?),
                 "child_slots_can_overflow" => args.child_slots_can_overflow = Some(input.parse()?),
@@ -87,7 +90,7 @@ impl Parse for RsObjectArgs {
                 _ => {
                     return Err(syn::Error::new(
                         name.span(),
-                        "expected `final`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
+                        "expected `final`, `immutable`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
                          `child_slots_can_overflow = <bool>`, `reflection = <path>` or \
                          `crate = <path>`",
                     ));
@@ -191,6 +194,9 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
     if args.type_final {
         derive_attrs.push(quote!(#[type_final]));
     }
+    if args.immutable {
+        derive_attrs.push(quote!(#[type_immutable]));
+    }
     if let Some(kind) = &args.s_eq_hash_kind {
         derive_attrs.push(quote!(#[type_s_eq_hash_kind = #kind]));
     }
@@ -219,23 +225,6 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
         }
     })?;
     let object_impl = expand_object(&object_input, &tvm_ffi, true);
-    // The parent's fields first, then the others in order, as the drop glue drops
-    // them; only through raw pointers, since some may be undefined.
-    let field_ids = fields.iter().map(|field| &field.ident);
-    let unsafe_init_impl = quote! {
-        unsafe impl #tvm_ffi::reflection::UnsafeInit for #obj {
-            unsafe fn drop_defined_fields(this: *mut Self) {
-                unsafe {
-                    <#base_ty as #tvm_ffi::reflection::UnsafeInit>::drop_defined_fields(
-                        ::core::ptr::addr_of_mut!((*this).#base_id),
-                    );
-                    #(#tvm_ffi::reflection::drop_if_defined(
-                        ::core::ptr::addr_of_mut!((*this).#field_ids),
-                    );)*
-                }
-            }
-        }
-    };
     let plain_fields = fields.iter().map(|field| {
         let mut field = (*field).clone();
         field.attrs.retain(|a| !a.path.is_ident("reflect"));
@@ -251,8 +240,6 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
         }
 
         #object_impl
-
-        #unsafe_init_impl
 
         impl ::core::ops::Deref for #obj {
             type Target = #base_ty;

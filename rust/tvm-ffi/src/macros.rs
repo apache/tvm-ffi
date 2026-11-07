@@ -233,20 +233,26 @@ macro_rules! attach_context {
 /// `Target`, `AsRef<Target>`, which borrows a `&Source` as `&Target`
 /// without touching the reference count, and
 /// [`IntoObjectRef<Target>`](crate::object::IntoObjectRef) for `Source` and `&Source`,
-/// and [`TypeSubsumes<Source>`](crate::TypeSubsumes) for `Target`, so
+/// and [`TypeSubsumes<Source>`](crate::type_traits::TypeSubsumes) for `Target`, so
 /// [`Array::upcast`](crate::Array::upcast) turns an `Array<Source>` into an
 /// `Array<Target>`. It also implements the strict downcast back, `TryFrom<Target>` and
 /// `TryFrom<&Target>` for `Source`, which return a `TypeError` naming both types.
 ///
+/// `impl_object_ref_upcast!(Add => BinaryOp, Add => Expr);` checks at compile
+/// time that the object type of `Source` derives from that of `Target`
+/// ([`ObjectDerivesFrom`](crate::object::ObjectDerivesFrom)), and that `Target`
+/// accepts every object of its type, as a non-generic
+/// [`#[derive(ObjectRef)]`](crate::derive::ObjectRef) reference does.
+///
 /// # Safety
 ///
-/// The leading `unsafe` is a required marker: writing it, the caller promises
-/// that `target` is a registered base of `source` and every `source` satisfies
-/// the target reference invariants. An
-/// incorrect declaration makes the generated safe conversions unsound. The
-/// Rust stub generator writes these from the registered type hierarchy;
-/// `#[object_ref(parent = ...)]` checks the hierarchy at compile time instead.
-/// A call reads `impl_object_ref_upcast!(unsafe Add => BinaryOp, Add => Expr);`.
+/// For a `Target` that promises more than its object type, such as a generic
+/// reference or one with a custom
+/// [`ObjectRefAnyCompatible`](crate::object::ObjectRefAnyCompatible), write
+/// `impl_object_ref_upcast!(unsafe Add => PrimExpr);`. The leading `unsafe`
+/// skips both checks: writing it, the caller promises that `Target` is a base
+/// of `Source` and every `Source` satisfies the `Target` invariants. An
+/// incorrect declaration makes the generated safe conversions unsound.
 #[macro_export]
 macro_rules! impl_object_ref_upcast {
     (unsafe $($source:ty => $target:ty),+ $(,)?) => {
@@ -345,6 +351,21 @@ macro_rules! impl_object_ref_upcast {
             }
         )+
     };
+    ($($source:ty => $target:ty),+ $(,)?) => {
+        $(
+            const _: () = {
+                fn derives_from<T: $crate::object::ObjectDerivesFrom<A, I>, A, I>() {}
+                fn plain<P: $crate::object::PlainObjectRef>() {}
+                let _ = derives_from::<
+                    <$source as $crate::object::ObjectRefCore>::ContainerType,
+                    <$target as $crate::object::ObjectRefCore>::ContainerType,
+                    _,
+                >;
+                let _ = plain::<$target>;
+            };
+        )+
+        $crate::impl_object_ref_upcast!(unsafe $($source => $target),+);
+    };
 }
 
 /// Implement the in-place `downcast_ref` borrows (`array[i]`, `Any::downcast_ref`,
@@ -364,7 +385,8 @@ macro_rules! impl_object_ref_upcast {
 /// ```
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, impl_object_ref_downcast_ref, Any};
-/// use tvm_ffi::{Object, ObjectArc, ObjectRefAnyCompatible, ObjectRefCore};
+/// use tvm_ffi::{Object, ObjectArc, ObjectRefCore};
+/// use tvm_ffi::object::ObjectRefAnyCompatible;
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
@@ -621,11 +643,9 @@ macro_rules! impl_arg_into_ref {
 /// which [`Module::get_function_metadata`](crate::Module::get_function_metadata)
 /// and the stub generator read. A
 /// function's schema lists its parameter and return types; a callable whose
-/// signature is not known, such as a custom [`AsPackedCallable`], has the
+/// signature is not known, such as a custom `AsPackedCallable`, has the
 /// schema of an untyped function. The feature is off by default, so exports
 /// are minimal.
-///
-/// [`AsPackedCallable`]: crate::function_internal::AsPackedCallable
 ///
 /// # Arguments
 /// * `$name` - The name of the function

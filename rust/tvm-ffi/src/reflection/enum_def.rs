@@ -27,12 +27,13 @@ use super::registry::{ensure_not_opaque_ptr, register_type_attr};
 use super::{get_method, NativeFunction, TypeAttrColumn};
 use crate::any::TryFromTemp;
 use crate::derive::{Object, ObjectRef};
+use crate::enum_ref::EnumObj;
 use crate::object::{
     is_instance_of, lock_type_registration, Object, ObjectArc, ObjectCore, ObjectRef,
 };
 use crate::tvm_ffi_sys::{TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeInfo};
 use crate::type_traits::AnyCompatible;
-use crate::{Any, AnyView, EnumObj, EnumRef, Error, List, Result, String, TYPE_ERROR, VALUE_ERROR};
+use crate::{Any, AnyView, EnumRef, Error, List, Result, String, TYPE_ERROR, VALUE_ERROR};
 
 /// Registers a value of the enum type `E`, then its attributes.
 ///
@@ -51,7 +52,8 @@ use crate::{Any, AnyView, EnumObj, EnumRef, Error, List, Result, String, TYPE_ER
 /// ```
 /// use tvm_ffi::derive::{Object, ObjectRef};
 /// use tvm_ffi::reflection::EnumDef;
-/// use tvm_ffi::{EnumObj, EnumRef, ObjectArc};
+/// use tvm_ffi::{EnumRef, ObjectArc};
+/// use tvm_ffi::enum_ref::EnumObj;
 ///
 /// #[repr(C)]
 /// #[derive(Object)]
@@ -97,7 +99,13 @@ impl<E: EnumRef> EnumDef<E> {
     /// (`ffi.IntEnum`), whose values name their own indices, or registers an
     /// object size other than that of [`EnumObj`]: an enum type whose objects
     /// have fields of their own.
-    pub fn new(name: &str) -> Result<Self> {
+    ///
+    /// `E` accepts every object of its type, as a non-generic
+    /// [`#[derive(ObjectRef)]`](crate::derive::ObjectRef) reference does.
+    pub fn new(name: &str) -> Result<Self>
+    where
+        E: crate::object::PlainObjectRef,
+    {
         const {
             assert!(
                 size_of::<E::ContainerType>() == size_of::<EnumObj>()
@@ -212,7 +220,8 @@ impl<E: EnumRef> EnumDef<E> {
         name: &str,
         f: NativeFunction<Args, R>,
     ) -> Result<Self> {
-        self.set_attr_any(name, f.into_any())
+        // SAFETY: the caller vouches for the readers of `name`.
+        self.set_attr_any(name, unsafe { f.into_any() })
     }
 
     fn set_attr_any(self, name: &str, value: Any) -> Result<Self> {

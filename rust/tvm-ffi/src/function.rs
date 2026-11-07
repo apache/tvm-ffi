@@ -64,7 +64,7 @@ pub struct FunctionObj {
 /// `Send + Sync`; a callback holding an `Rc` is rejected. A function written
 /// in another language is as thread-safe as its implementation.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use std::rc::Rc;
 /// let count = Rc::new(0_i64);
 /// tvm_ffi::Function::from_typed(move || -> tvm_ffi::Result<i64> { Ok(*count) });

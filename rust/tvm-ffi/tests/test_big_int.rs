@@ -18,6 +18,7 @@
  */
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tvm_ffi::extra::structural_visit::StructuralVisitorView;
 use tvm_ffi::*;
 
 // (1 << 255) | (0x0123456789ABCDEF << 128) | 0xFEDCBA9876543210: distinct words, an

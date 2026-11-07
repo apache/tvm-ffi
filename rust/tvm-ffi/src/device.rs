@@ -136,9 +136,52 @@ unsafe impl AnyCompatible for DLDevice {
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFIDevice as i32 {
-            Ok(data.data_union.v_device)
-        } else {
-            Err(())
+            return Ok(data.data_union.v_device);
         }
+        let text = <crate::String as AnyCompatible>::try_cast_from_any_view(data)?;
+        parse_device(text.as_str()).ok_or(())
     }
+}
+
+/// The device a string such as `"cuda:1"` names, as C++ converts one: a
+/// device name, an optional `:index`, and anything after a space ignored.
+#[cold]
+fn parse_device(text: &str) -> Option<DLDevice> {
+    use tvm_ffi_sys::dlpack::DLDeviceType::*;
+    let text = text.split(' ').next().unwrap_or_default();
+    let (name, index) = match text.split_once(':') {
+        Some((name, index)) => (name, Some(index)),
+        None => (text, None),
+    };
+    let device_type = match name {
+        "cpu" => kDLCPU,
+        "cuda" => kDLCUDA,
+        "opencl" => kDLOpenCL,
+        "vulkan" => kDLVulkan,
+        "metal" | "mps" => kDLMetal,
+        "vpi" => kDLVPI,
+        "rocm" => kDLROCM,
+        "ext_dev" => kDLExtDev,
+        "oneapi" | "xpu" => kDLOneAPI,
+        "hexagon" => kDLHexagon,
+        "wgpu" | "webgpu" => kDLWebGPU,
+        "maia" => kDLMAIA,
+        "trn" => kDLTrn,
+        "tpu" => kDLTPU,
+        "tpu_host" => kDLTPUHost,
+        "ascend" => kDLAscend,
+        _ => return None,
+    };
+    let device_id = match index {
+        // Digits only, as C++ parses them: no sign.
+        Some(index) if !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()) => {
+            index.parse::<i32>().ok()?
+        }
+        Some(_) => return None,
+        None => 0,
+    };
+    Some(DLDevice {
+        device_type: device_type as i32,
+        device_id,
+    })
 }

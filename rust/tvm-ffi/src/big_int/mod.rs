@@ -152,8 +152,8 @@ impl BigInt {
                 object: Object::new(),
                 size,
             });
-            BigIntObj::extra_items_mut(&mut *ObjectArc::as_mut_ptr(&mut obj))
-                .copy_from_slice(&words[..size]);
+            let items = BigIntObj::extra_items_ptr(ObjectArc::as_mut_ptr(&mut obj));
+            std::ptr::copy_nonoverlapping(words.as_ptr(), items, size);
             Self::from_obj(ObjectArc::into_raw(obj) as *mut BigIntObj)
         }
     }
@@ -207,8 +207,7 @@ impl BigInt {
             if self.data.type_index == TypeIndex::kTVMFFIInt as i32 {
                 std::slice::from_ref(&self.data.data_union.v_int64)
             } else {
-                let obj: &BigIntObj = &*(self.data.data_union.v_obj as *const BigIntObj);
-                BigIntObj::extra_items(obj)
+                BigIntObj::extra_items(self.data.data_union.v_obj as *const BigIntObj)
             }
         }
     }

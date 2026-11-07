@@ -27,6 +27,12 @@
 //! Converting an `Any` into a `List<T>` shares an `ffi.List` whose elements
 //! are all `T`; an `ffi.Array`, or a list whose elements need converting, is
 //! copied into a new list.
+//!
+//! A read checks and converts an element in its cell, in place. While it
+//! does, the element type's
+//! [`extra_check`](crate::object::ObjectRefAnyCompatible::extra_check) and
+//! [`convert_fallback`](crate::object::ObjectRefAnyCompatible::convert_fallback),
+//! and the `Drop` of a value the read releases, must not modify that list.
 
 // `ListObj` mirrors C++ `ListObj` (`Object` followed by `TVMFFISeqCell`), so
 // Rust reads and edits the element cells in place: reads, `List::set`,
@@ -288,6 +294,8 @@ impl<T: ContainerElement> List<T> {
     #[inline]
     pub fn get(&self, index: usize) -> Result<T> {
         let obj = self.obj();
+        // SAFETY: `index` is in bounds, and the conversion leaves the list
+        // unchanged while it reads the cell (see the module docs).
         unsafe {
             if index >= (*(*obj).size.get()) as usize {
                 return index_error("get");
@@ -355,16 +363,14 @@ impl<T: ContainerElement> List<T> {
                 return index_error("remove");
             }
             let cell = ListObj::cell(obj, index);
-            // Convert first, so that a mismatch leaves the list untouched.
-            let value = if T::container_check_any_strict(&*cell) {
+            // Convert first, so that a mismatch leaves the list untouched; the
+            // conversion leaves the list unchanged (see the module docs).
+            let (value, old) = if T::container_check_any_strict(&*cell) {
                 let mut raw = ptr::read(cell);
-                T::container_move_from_any_after_check(&mut raw)
+                (T::container_move_from_any_after_check(&mut raw), None)
             } else {
                 match T::container_try_cast_from_any_view(&*cell) {
-                    Ok(value) => {
-                        drop(take_cell(cell));
-                        value
-                    }
+                    Ok(value) => (value, Some(take_cell(cell))),
                     Err(()) => return type_error(index),
                 }
             };
@@ -372,6 +378,9 @@ impl<T: ContainerElement> List<T> {
                 ptr::copy(cell.add(1), cell, size - index - 1);
             }
             (*(*obj).size.get()) -= 1;
+            // The list is consistent again before the old element's `Drop`
+            // runs, which may modify it.
+            drop(old);
             Ok(value)
         }
     }
@@ -382,28 +391,30 @@ impl<T: ContainerElement> List<T> {
         unsafe { ListObj::truncate(self.obj(), 0) }
     }
 
-    /// Returns the first element, or an `INDEX_ERROR` if the list is empty.
-    pub fn first(&self) -> Result<T> {
-        if self.is_empty() {
-            return index_error("first");
-        }
-        self.get(0)
-    }
-
-    /// Returns the last element, or an `INDEX_ERROR` if the list is empty.
-    pub fn last(&self) -> Result<T> {
+    /// Returns the first element, or `None` if the list is empty; a
+    /// `TYPE_ERROR` as [`get`](Self::get) gives it.
+    pub fn first(&self) -> Result<Option<T>> {
         match self.len() {
-            0 => index_error("last"),
-            len => self.get(len - 1),
+            0 => Ok(None),
+            _ => self.get(0).map(Some),
         }
     }
 
-    /// Removes and returns the last element, or an `INDEX_ERROR` if the list
-    /// is empty.
-    pub fn pop(&self) -> Result<T> {
+    /// Returns the last element, or `None` if the list is empty; a
+    /// `TYPE_ERROR` as [`get`](Self::get) gives it.
+    pub fn last(&self) -> Result<Option<T>> {
         match self.len() {
-            0 => index_error("pop"),
-            len => self.remove(len - 1),
+            0 => Ok(None),
+            len => self.get(len - 1).map(Some),
+        }
+    }
+
+    /// Removes and returns the last element, or `None` if the list is empty;
+    /// a `TYPE_ERROR` as [`remove`](Self::remove) gives it.
+    pub fn pop(&self) -> Result<Option<T>> {
+        match self.len() {
+            0 => Ok(None),
+            len => self.remove(len - 1).map(Some),
         }
     }
 
@@ -523,9 +534,9 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Returns a double-ended iterator over the elements, yielding
-    /// `Result<T>`; see [`ListIterator`].
-    pub fn iter(&self) -> ListIterator<'_, T> {
-        ListIterator {
+    /// `Result<T>`; see [`Iter`].
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
             list: self,
             index: 0,
             back: usize::MAX,
@@ -571,7 +582,7 @@ impl<T: ContainerElement> FromIterator<T> for List<T> {
 /// it there), and then moves on to the next element. It re-reads the length
 /// on every step, so it stays in bounds if the list is mutated meanwhile;
 /// iterating from the back (`rev`) pins the end at the first back step.
-pub struct ListIterator<'a, T> {
+pub struct Iter<'a, T> {
     list: &'a List<T>,
     index: usize,
     /// One past the last position still to visit from the back; `usize::MAX`
@@ -579,14 +590,18 @@ pub struct ListIterator<'a, T> {
     back: usize,
 }
 
-impl<T: ContainerElement> ListIterator<'_, T> {
+impl<T: ContainerElement> Iter<'_, T> {
     #[inline]
     fn end(&self) -> usize {
         self.back.min(self.list.len())
     }
 
+    /// # Safety
+    /// `index` is below the list's length.
     #[inline]
     unsafe fn read(&self, index: usize) -> Result<T> {
+        // SAFETY: the conversion leaves the list unchanged while it reads the
+        // cell (see the module docs).
         match T::container_try_cast_from_any_view(&*ListObj::cell(self.list.obj(), index)) {
             Ok(value) => Ok(value),
             Err(()) => type_error(index),
@@ -594,7 +609,7 @@ impl<T: ContainerElement> ListIterator<'_, T> {
     }
 }
 
-impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
+impl<T: ContainerElement> Iterator for Iter<'_, T> {
     type Item = Result<T>;
 
     #[inline]
@@ -613,7 +628,7 @@ impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
     }
 }
 
-impl<T: ContainerElement> DoubleEndedIterator for ListIterator<'_, T> {
+impl<T: ContainerElement> DoubleEndedIterator for Iter<'_, T> {
     #[inline]
     fn next_back(&mut self) -> Option<Result<T>> {
         let end = self.end();
@@ -627,7 +642,7 @@ impl<T: ContainerElement> DoubleEndedIterator for ListIterator<'_, T> {
 
 impl<'a, T: ContainerElement> IntoIterator for &'a List<T> {
     type Item = Result<T>;
-    type IntoIter = ListIterator<'a, T>;
+    type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -708,7 +723,9 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
             ));
         }
 
-        // Slow path: convert element by element into a new list.
+        // Slow path: convert element by element into a new list. The
+        // conversions leave the source sequence unchanged (see the module
+        // docs), so the borrowed cells stay valid.
         let mut items = Vec::new();
         for cell in seq_cells(data) {
             items.push(T::container_try_cast_from_any_view(cell)?);

@@ -54,7 +54,9 @@ impl TypeAttrColumn {
     }
 
     /// The column `name`, created if no type registered it yet. Call it during
-    /// static initialization, like any registration.
+    /// static initialization, like any registration, but not from the
+    /// `reflection = path` function of an [`rs_object`](crate::rs_object),
+    /// which already holds the registration lock.
     ///
     /// # Errors
     ///
@@ -209,14 +211,18 @@ fn is_registered(type_index: i32) -> bool {
 ///
 /// # Errors
 ///
-/// Returns an error if the type or the method does not exist.
+/// Returns a `TypeError` if the type or the method does not exist.
 pub fn get_method(type_key: &str, method_name: &str) -> Result<Function> {
-    unsafe {
-        let type_key_arg = TVMFFIByteArray::from_str(type_key);
-        let mut type_index: i32 = 0;
-        crate::check_safe_call!(TVMFFITypeKeyToIndex(&type_key_arg, &mut type_index))?;
-        get_method_by_index(type_index, method_name)
+    let mut type_index: i32 = 0;
+    // SAFETY: the byte array borrows `type_key` for the call.
+    let found =
+        unsafe { TVMFFITypeKeyToIndex(&TVMFFIByteArray::from_str(type_key), &mut type_index) == 0 };
+    if !found {
+        // Discard the runtime's error, which reports an internal one.
+        drop(Error::from_raised());
+        crate::bail!(crate::error::TYPE_ERROR, "Cannot find type `{type_key}`");
     }
+    get_method_by_index(type_index, method_name)
 }
 
 /// Look up a reflected method of a type by type index and method name, as

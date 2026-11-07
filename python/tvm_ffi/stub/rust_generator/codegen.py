@@ -29,17 +29,21 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   leaves the wrapper's ``new`` to hand-written code and names the generated
   one ``from_fields``. A type that is not final
   can be the parent of a type defined in Rust (``tvm_ffi::rs_object``): its
-  ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` and
-  ``UnsafeInit`` when every ancestor's is generated too (a ``ty-map``'d one is
-  hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
+  ``<Leaf>Obj::new`` is public, and its object derives ``ShallowCopy`` and
+  ``UnsafeInit`` (``#[type_rs_parent]``) when every ancestor's is generated
+  too (a ``ty-map``'d one is hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
 A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, an
-``ffi.*`` type the default ``ty-map`` does not list, ...) makes the type opaque
-and is read as ``Any``; an ``opaque`` directive vetoes a reproducible layout; a
-scalar width named by a directive is checked against the reflected field size.
-A builtin parent the crate defines (``ffi.Enum``: ``tvm_ffi::EnumObj``) is
+``ffi.*`` type the default ``ty-map`` does not list, a C++ standard-library type
+such as ``std::optional``, an integer narrower than 8 bytes, whose signedness the
+schema does not record, or any field whose reflected size or alignment is not its
+mirror's) makes the type opaque and is read through its getter; a ``field`` or
+``enum`` directive types a narrow integer; an ``opaque`` directive vetoes a
+reproducible layout; a scalar width named by a directive is checked against the
+reflected field size.
+A builtin parent the crate defines (``ffi.Enum``: ``tvm_ffi::enum_ref::EnumObj``) is
 embedded as it is. Any other builtin parent (``ffi.IntEnum``, say) has no
 ``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
 per such ancestor so ``derive(Object)`` computes the registry's
@@ -161,6 +165,17 @@ def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int
             f"Directive on `{target}` maps a {field.size}-byte field to `{rust_type}` "
             f"({width} bytes)"
         )
+
+
+def _layout_matches(field: NamedTypeSchema) -> bool:
+    """Whether the reflected bytes of ``field`` are those of its schema's mirror."""
+    if field.type_key == "ffi.BigInt":
+        layout = C_RUST.RUST_MIRROR_LAYOUTS["Any"]
+    elif field.origin == "float":
+        layout = (field.size, field.size) if field.size in (4, 8) else (0, 0)
+    else:
+        layout = C_RUST.RUST_MIRROR_LAYOUTS.get(field.origin, C_RUST.RUST_POINTER_LAYOUT)
+    return field.size in (None, layout[0]) and field.alignment in (None, layout[1])
 
 
 def _allow_non_snake_case(idents: Iterable[str]) -> list[str]:
@@ -324,9 +339,18 @@ class _ObjectRenderer:
         """Render the ``#[repr(C)]`` mirror type of ``field``, or ``None``.
 
         Directives win; then scalars by reflected width, ``Optional`` by C++ layout, else schema.
+        A C++ standard-library field has none, and so has a field whose reflected size or
+        alignment is not its mirror's.
         """
         directives = self.imports.directives
         target = f"{owner}.{field.name}"
+        if target in directives.nullable and field.size not in (None, C_RUST.RUST_POINTER_SIZE):
+            raise ValueError(
+                f"`nullable` directive on `{target}`: the field is {field.size} bytes, "
+                "not a pointer-sized object reference"
+            )
+        if field.std_container:
+            return None
         enum = directives.enums.get(target)
         if enum is not None:
             _check_width(target, field, enum.repr, C_RUST.RUST_SCALAR_WIDTHS[enum.repr])
@@ -339,17 +363,14 @@ class _ObjectRenderer:
             mirror: str | None = imports.record(override) if "::" in override else override
         elif field.origin == "Optional":
             mirror = self._optional_mirror(field, imports)
+        elif not _layout_matches(field):
+            return None
         else:
             narrowed = C_RUST.RUST_SCALAR_BY_SIZE.get((field.origin, field.size))
             mirror = narrowed or render_rust_type(field, lambda o, k: self._resolve(o, imports, k))
         if mirror is None:
             return None
         if target in directives.nullable and not mirror.startswith("Option<"):
-            if field.size not in (None, C_RUST.RUST_POINTER_SIZE):
-                raise ValueError(
-                    f"`nullable` directive on `{target}`: the field is {field.size} bytes, "
-                    "not a pointer-sized object reference"
-                )
             mirror = f"Option<{mirror}>"
         return mirror
 
@@ -375,7 +396,7 @@ class _ObjectRenderer:
             if any_backed
             else C_RUST.RUST_OBJECT_OPTIONAL_FIELD_SIZE
         )
-        if field.size not in (None, expected):
+        if field.size not in (None, expected) or field.alignment not in (None, 8):
             return None
         if any_backed:
             return f"{imports.record(C_RUST.RUST_OPTIONAL_PATH)}<{inner}>"
@@ -505,20 +526,28 @@ class _ObjectRenderer:
         ]
 
     def _upcast_lines(self) -> list[str]:
-        """``impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
-        targets: list[str] = []
+        """``impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives.
+
+        A generated ancestor accepts every object of its type, so its upcast takes the
+        compile-time checked form; a ``ty-map``'d one or an ``upcast`` view may promise
+        more, so it takes the ``unsafe`` form.
+        """
+        checked: list[str] = []
+        unchecked: list[str] = []
         for key in self.info.ancestors:
             provider = self._provider(key)
             if provider == "mapped":
-                targets.append(self._record_mapped(key, self.ty_map[key], self.imports))
+                unchecked.append(self._record_mapped(key, self.ty_map[key], self.imports))
             elif provider != "crate":
-                targets.append(self.imports.record(self._generated_type_path(key)))
+                checked.append(self.imports.record(self._generated_type_path(key)))
         for view in self.imports.directives.upcasts.get(self.type_key, []):
-            targets.append(self.imports.record(view) if "::" in view else view)
-        if not targets:
-            return []
-        pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
-        return [f"tvm_ffi::impl_object_ref_upcast!(unsafe {pairs});"]
+            unchecked.append(self.imports.record(view) if "::" in view else view)
+        lines = []
+        for prefix, targets in (("", checked), ("unsafe ", unchecked)):
+            if targets:
+                pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
+                lines.append(f"tvm_ffi::impl_object_ref_upcast!({prefix}{pairs});")
+        return lines
 
     def _struct_lines(self, verdict: Verdict, base: str) -> list[str]:
         """Render the object struct: every field when complete, the parent alone when opaque."""
@@ -528,6 +557,8 @@ class _ObjectRenderer:
             "#[derive(tvm_ffi::derive::Object)]",
             f'#[type_key = "{self.type_key}"]',
             *(["#[type_final]"] if self.info.is_final else []),
+            *(["#[type_immutable]"] if self._is_immutable() else []),
+            *(["#[type_rs_parent]"] if self._is_rs_parent(verdict) else []),
             f"pub struct {self.obj_struct} {{",
             f"    base_: {base},",  # a reflected `base_` is rejected (`rust_ident`)
         ]
@@ -702,85 +733,41 @@ class _ObjectRenderer:
         )
         return sections
 
-    def _immutable_object_lines(self) -> list[str] | None:
-        """``ImmutableObject`` for a class that C++ declares not ``_type_mutable``.
+    def _is_immutable(self) -> bool:
+        """Whether C++ declares the class not ``_type_mutable`` and no field along its chain writable.
 
         Such a class only hands out const access and changes through copy-on-write,
-        so its handles may cross threads when its fields can. A mutable class, or one
-        whose mutability is not registered, stays single-threaded.
+        so its handles may cross threads when its fields can. A mutable class, one
+        whose mutability is not registered, or one with a ``def_rw`` field stays
+        single-threaded.
         """
         if self.info.is_mutable is not False:
-            return None
-        return [f"unsafe impl tvm_ffi::object::ImmutableObject for {self.obj_struct} {{}}"]
+            return False
+        chain = [
+            object_info_from_type_key(key)
+            for key in self.info.ancestors
+            if self._provider(key) in ("generated", "mapped")
+        ]
+        return all(field.frozen for info in [*chain, self.info] for field in info.fields)
 
-    def _shallow_copy_lines(self) -> list[str] | None:
-        """``ShallowCopy``, which a subtype defined in Rust needs of its parent's object.
+    def _is_rs_parent(self, verdict: Verdict) -> bool:
+        """Whether the object derives ``ShallowCopy`` and ``UnsafeInit`` (``#[type_rs_parent]``).
 
-        The parent's shallow copy and a clone of every field, as ``derive(Object)``
-        implements it, for a type that is not final and whose ancestors below
-        ``ffi.Object`` are all generated: each of those implements it by this rule,
-        while a ``ty-map``'d one is hand-written and may not.
+        A subtype defined in Rust needs both of its parent's object. They are derived
+        for a complete type that is not final and whose ancestors below ``ffi.Object``
+        are all generated: each of those derives them by this rule, while a
+        ``ty-map``'d one is hand-written and may not.
         """
-        if self.info.is_final:
-            return None
+        if self.info.is_final or not verdict.is_complete:
+            return False
+        if C_RUST.RUST_ENUM_TYPE_KEY in self.info.ancestors:
+            return False
         ancestors = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
-        if not all(self._provider(key) == "generated" for key in ancestors):
-            return None
-        shallow_copy = self.imports.record("tvm_ffi::reflection::ShallowCopy")
-        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
-        init = [
-            f"base_: {shallow_copy}::shallow_copy(&self.base_)",
-            *[f"{name}: Clone::clone(&self.{name})" for name in own],
-        ]
-        return [
-            f"impl {shallow_copy} for {self.obj_struct} {{",
-            "    fn shallow_copy(&self) -> Self {",
-            *_call_lines("        Self { ", init, " }"),
-            "    }",
-            "}",
-        ]
-
-    def _unsafe_init_lines(self) -> list[str]:
-        """``UnsafeInit``, which a subtype defined in Rust needs of its parent's object.
-
-        It drops the defined fields of an object made with every field undefined
-        (all-zero), the parent's first, as the creator of the subtype makes it: a
-        ``TVMFFIAny`` cell (``Any``, an ``Optional`` that is not a pointer) drops as
-        it is, since all-zero bytes are None; an enum newtype has nothing to drop;
-        anything else goes through ``drop_if_defined``, which skips an undefined field.
-        Emitted wherever ``ShallowCopy`` is.
-        """
-        unsafe_init = self.imports.record("tvm_ffi::reflection::UnsafeInit")
-        addr = self.imports.record("std::ptr::addr_of_mut")
-        directives = self.imports.directives
-        drops = [f"{unsafe_init}::drop_defined_fields({addr}!((*this).base_));"]
-        for field in sorted(self.info.fields, key=lambda f: f.offset or 0):
-            target = f"{self.type_key}.{field.name}"
-            if target in directives.enums:
-                continue
-            mirror = self._field_mirror(self.type_key, field, self.imports)
-            assert mirror is not None  # the verdict already ran the renderability check
-            any_cell = target not in directives.field_types and (
-                field.origin == "Any"
-                or (field.origin == "Optional" and not mirror.startswith("Option<"))
-            )
-            drop = self.imports.record(
-                "std::ptr::drop_in_place" if any_cell else "tvm_ffi::reflection::drop_if_defined"
-            )
-            drops.append(f"{drop}({addr}!((*this).{rust_ident(field.name)}));")
-        return [
-            f"unsafe impl {unsafe_init} for {self.obj_struct} {{",
-            "    unsafe fn drop_defined_fields(this: *mut Self) {",
-            "        unsafe {",
-            *[f"            {line}" for line in drops],
-            "        }",
-            "    }",
-            "}",
-        ]
+        return all(self._provider(key) == "generated" for key in ancestors)
 
     def _impl_sections(self, is_enum: bool) -> list[list[str]]:
-        """``ImmutableObject``, ``EnumRef`` and the upcasts, each that applies."""
-        sections = [self._immutable_object_lines()]
+        """``EnumRef`` and the upcasts, each that applies."""
+        sections: list[list[str]] = []
         if is_enum:
             sections.append([f"impl tvm_ffi::EnumRef for {self.leaf} {{}}"])
         sections.append(self._upcast_lines())
@@ -839,10 +826,6 @@ class _ObjectRenderer:
             )
         elif verdict.is_complete and not is_enum:
             sections += self._allocator_sections(base, has_parent)
-            shallow_copy = self._shallow_copy_lines()
-            if shallow_copy:
-                sections.append(shallow_copy)
-                sections.append(self._unsafe_init_lines())
         sections += self._impl_sections(is_enum)
 
         lines: list[str] = []
@@ -896,14 +879,18 @@ def generate_rust_object(
 
 
 def _builtin_mirror_lines(type_key: str, base: str) -> list[str]:
-    """Render the header-only stand-in for one builtin ancestor."""
+    """Render the header-only stand-in for one builtin ancestor.
+
+    It is public, so a public object deriving from it satisfies the parent visibility rule.
+    """
     return [
         f"/// Header-only stand-in for the builtin `{type_key}`; it only carries the ancestor depth.",
+        "#[doc(hidden)]",
         "#[allow(dead_code)]",
         "#[repr(C)]",
         "#[derive(tvm_ffi::derive::Object)]",
         f'#[type_key = "{type_key}"]',
-        f"struct {builtin_mirror_name(type_key)} {{",
+        f"pub struct {builtin_mirror_name(type_key)} {{",
         f"    base_: {base},",
         "}",
     ]

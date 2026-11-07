@@ -100,7 +100,7 @@ struct Point3 {
     data: ObjectArc<Point3Obj>,
 }
 
-tvm_ffi::impl_object_ref_upcast!(unsafe Point3 => Point);
+tvm_ffi::impl_object_ref_upcast!(Point3 => Point);
 
 fn point_obj(x: i64, y: f64, label: &str) -> PointObj {
     PointObj {

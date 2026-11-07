@@ -28,11 +28,10 @@
 //! and Python's generated classes reach the fields and methods of a Rust type,
 //! and construct it.
 //!
-//! Only `#[derive(Object)]` creates an [`ObjectDef`], for a `#[type_register]`
-//! type with `#[reflect]` fields or a `#[type_reflection]` function; the
-//! derive guarantees that each registered field's type and offset match. The
-//! `#[type_reflection]` function receives the builder to register methods
-//! with [`ObjectDef::def`] and [`ObjectDef::def_static`].
+//! Only [`rs_object`](crate::rs_object) creates an [`ObjectDef`], which
+//! guarantees that each registered field's type and offset match. Its
+//! `reflection = path` function receives the builder to register methods with
+//! [`ObjectDef::def`] and [`ObjectDef::def_static`].
 
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -58,10 +57,10 @@ use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR, VALUE_ERRO
 /// `__ffi_shallow_copy__` returns; fields that are references share their
 /// objects, as `Clone` of an `Arc` does.
 ///
-/// `#[derive(Object)]` implements it for a type with `#[reflect]` fields by
-/// copying the parent with its `ShallowCopy` and cloning every other field. A
-/// Rust type whose parent is defined in another language needs that parent to
-/// implement it.
+/// [`rs_object`](crate::rs_object) and `#[type_rs_parent]` on
+/// [`derive(Object)`](crate::derive::Object) implement it by copying the
+/// parent with its `ShallowCopy` and cloning every other field. An
+/// `rs_object` needs its parent's object to implement it.
 pub trait ShallowCopy {
     /// The copy, under a fresh object header.
     fn shallow_copy(&self) -> Self;
@@ -75,6 +74,7 @@ impl ShallowCopy for Object {
 
 /// How the structural engines treat instances of a type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SEqHashKind {
     /// Rejected by structural equality and hashing; the default.
     Unsupported,
@@ -154,16 +154,18 @@ impl BitOr for FieldFlags {
 /// Registers the reflection of the object type `N`: the metadata, each
 /// `#[reflect]` field, the methods and the type attributes.
 ///
-/// `#[derive(Object)]` creates one while it registers a `#[type_register]`
-/// type and passes it to the function that `#[type_reflection(path)]`, or the
-/// `reflection = path` option of [`rs_object`](crate::rs_object), names, which
+/// [`rs_object`](crate::rs_object) creates one while it registers its type
+/// and passes it to the function its `reflection = path` option names, which
 /// registers methods with [`ObjectDef::def`] and [`ObjectDef::def_static`].
 ///
 /// That function runs under the registration lock, before `N::type_index()`
 /// returns, so it must not call `type_index()` of `N` or of another Rust type
 /// that is not registered yet, nor register attributes with [`TypeAttrDef`]
-/// or [`EnumDef`](super::EnumDef). When `N` already has metadata in the type
-/// table, every call is a no-op.
+/// or [`EnumDef`](super::EnumDef), nor call
+/// [`TypeAttrColumn::ensure`](super::TypeAttrColumn::ensure): each takes the
+/// same lock, which is not reentrant. When `N` already has metadata in the type
+/// table, every call is a no-op; registration fails if a previous one stopped
+/// partway.
 ///
 /// # Examples
 ///
@@ -217,7 +219,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     ///
     /// # Safety
     ///
-    /// The caller holds `TYPE_REGISTRATION` for the builder's lifetime, and
+    /// The caller holds `lock_type_registration()` for the builder's lifetime, and
     /// `type_index` is `N`'s. `creator` returns an owned handle of an object of
     /// `N` that the field setters can fill.
     unsafe fn registering(
@@ -233,6 +235,19 @@ impl<N: ObjectCore> ObjectDef<N> {
             N::TYPE_KEY
         );
         let fresh = (*info).metadata.is_null();
+        // `finish` writes `__ffi_type_final__` last, as C++ `ObjectDef` and
+        // Python `py_class` do: metadata without it is left by a registration
+        // that failed partway, or by one that does not publish finality.
+        crate::ensure!(
+            fresh
+                || super::TypeAttrColumn::lookup("__ffi_type_final__")
+                    .and_then(|column| column.get_raw_ffi_any(type_index))
+                    .is_some_and(|cell| cell.type_index != TVMFFITypeIndex::kTVMFFINone as i32),
+            INTERNAL_ERROR,
+            "`{}` has reflection metadata but no `__ffi_type_final__`: an earlier registration \
+             of it failed, or another language registered the key without it",
+            N::TYPE_KEY
+        );
         if fresh {
             let kind = match kind {
                 Some(kind) => kind.raw(),
@@ -453,8 +468,10 @@ impl<N: ObjectCore> ObjectDef<N> {
 /// # Safety
 ///
 /// As `ObjectDef::registering`; `fields` registers fields of `N` as
-/// [`ObjectDef::field`] requires. Like every registration, it runs during
-/// static initialization, before other threads read the type.
+/// [`ObjectDef::field`] requires. Like every registration, it runs before
+/// other threads use the type or register types: during static
+/// initialization, or on the first `type_index()` of a type under a binding
+/// loaded later.
 #[doc(hidden)]
 pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
     type_index: i32,
@@ -480,15 +497,11 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 /// # Examples
 ///
 /// ```
-/// use tvm_ffi::derive::Object;
 /// use tvm_ffi::reflection::TypeAttrDef;
 /// use tvm_ffi::reflection::TypeAttrColumn;
-/// use tvm_ffi::{Object, ObjectCore};
+/// use tvm_ffi::{rs_object, Object, ObjectCore};
 ///
-/// #[repr(C)]
-/// #[derive(Object)]
-/// #[type_key = "my_ext.MyPair"]
-/// #[type_register]
+/// #[rs_object("my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 /// }
@@ -558,7 +571,8 @@ impl<T: ObjectCore> TypeAttrDef<T> {
         name: &str,
         f: NativeFunction<Args, R>,
     ) -> Result<Self> {
-        self.register(name, f.into_any())
+        // SAFETY: the caller vouches for the readers of `name`.
+        self.register(name, unsafe { f.into_any() })
     }
 
     fn register(self, name: &str, value: Any) -> Result<Self> {

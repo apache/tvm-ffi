@@ -18,13 +18,14 @@
  */
 
 use std::cell::{Cell, RefCell};
+use tvm_ffi::extra::structural_visit::{DefRegionKind, StructuralVisitorView};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::reflection::{FieldGetter, TypeAttrColumn};
 use tvm_ffi::ObjectRefCore;
 use tvm_ffi::{
     dispatch, structural_visit, structural_walk, Any, AnyView, Array, DLDataType, DLDataTypeCode,
-    DefRegionKind, Dispatcher, Error, Function, Map, Object, Result, String as FfiString,
-    StructuralVisitorView, TypeIndex, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
+    Dispatcher, Error, Function, Map, Object, Result, String as FfiString, TypeIndex,
+    VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {

@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use tvm_ffi::optional::OptionalCompatible;
 use tvm_ffi::*;
 
 /// The 16-byte `TVMFFIAny` cell backing an `Optional<T>` (type_index@0,

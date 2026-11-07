@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use tvm_ffi::tvm_ffi_sys::TVMFFIObject;
 use tvm_ffi::*;
 
 /// Macro to test integer types with both Any and AnyView

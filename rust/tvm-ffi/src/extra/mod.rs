@@ -41,7 +41,7 @@ mod visit_error_context;
 ///
 /// `StructuralVisitorView::base` cannot outlive its view:
 /// ```compile_fail
-/// use tvm_ffi::{StructuralVisitorObj, StructuralVisitorView};
+/// use tvm_ffi::extra::structural_visit::{StructuralVisitorObj, StructuralVisitorView};
 /// fn retain<D>(view: &StructuralVisitorView<'_, D>) -> &'static StructuralVisitorObj {
 ///     view.base()
 /// }
@@ -49,8 +49,9 @@ mod visit_error_context;
 ///
 /// The visitor prefix cannot be converted into an owning FFI value:
 ///
-/// ```compile_fail
-/// use tvm_ffi::{Any, StructuralVisitorView};
+/// ```compile_fail,E0277
+/// use tvm_ffi::Any;
+/// use tvm_ffi::extra::structural_visit::StructuralVisitorView;
 /// fn retain<D>(view: &StructuralVisitorView<'_, D>) -> Any {
 ///     Any::from(view.base())
 /// }
@@ -58,7 +59,8 @@ mod visit_error_context;
 ///
 /// A node borrowed through a copied `MutationView` cannot survive consumption of the view:
 /// ```compile_fail,E0505
-/// use tvm_ffi::{StructuralMutatorView, MutationView};
+/// use tvm_ffi::MutationView;
+/// use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 /// fn invalid<D>(value: MutationView<'_>, dispatch: &mut D, mutator: &mut StructuralMutatorView<'_, D>) {
 ///     let view = value.as_any_view();
 ///     let copy = view;
@@ -70,7 +72,8 @@ mod visit_error_context;
 ///
 /// Moving the handle into a nested callback cannot bypass that borrow:
 /// ```compile_fail,E0505
-/// use tvm_ffi::{dispatch, structural_mutate, Any, MutationView, StructuralMutatorView, Result, UnchangedOr};
+/// use tvm_ffi::{dispatch, structural_mutate, Any, MutationView, Result, UnchangedOr};
+/// use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 /// struct Inner<'a>(Option<MutationView<'a>>);
 /// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
 /// impl<'a> Inner<'a> {
@@ -89,7 +92,8 @@ mod visit_error_context;
 ///
 /// A copied inspection view also cannot survive low-level default mutation:
 /// ```compile_fail,E0505
-/// use tvm_ffi::{dispatch, Any, MutationView, StructuralMutatorView, Result, Unchanged, UnchangedOr};
+/// use tvm_ffi::{dispatch, Any, MutationView, Result, Unchanged, UnchangedOr};
+/// use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 /// struct Pass;
 /// #[dispatch(mutate, (MutationView<'_>, &mut StructuralMutatorView<'_, Self>), Result<UnchangedOr<Any>>)]
 /// impl Pass {

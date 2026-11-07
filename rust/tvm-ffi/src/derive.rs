@@ -18,6 +18,35 @@
  */
 //! The derive macros of object types and object references.
 
+/// Bind an object type that another library, usually C++, registers: derive
+/// [`ObjectCore`](crate::ObjectCore) for a `#[repr(C)]` object struct whose
+/// first field is its parent, so that a pointer to the object is one to its
+/// parent. Define a new type in Rust with [`rs_object`](macro@crate::rs_object)
+/// instead.
+///
+/// `#[type_key = "..."]` names the type. `type_index()` takes the index the
+/// defining library registered for the key, and panics if that library is not
+/// loaded yet, so a binding never registers a key with the wrong child slots.
+/// Such a panic is final: `type_index()` of the type, and of every type under
+/// it, keeps panicking after the library loads, so call it only once the
+/// library is loaded. It also panics unless the registered key has the type's
+/// parent and depth and, when the type table records a size, a size no
+/// smaller than the type's. `#[type_index(unsafe ...)]` gives the type a
+/// static index instead; the `unsafe` marks the caller's promise that the
+/// runtime gives that index to this type.
+///
+/// A binding that declares only part of its object must not be constructed:
+/// keep its fields private.
+///
+/// * `#[type_final]` - The type has no subtypes, as C++ `_type_final`.
+/// * `#[type_immutable]` - Implement
+///   [`ImmutableObject`](crate::object::ImmutableObject), as for a C++ type
+///   not registered as `_type_mutable`; every subtype must be immutable too.
+/// * `#[type_rs_parent]` - Implement `ShallowCopy` and
+///   [`UnsafeInit`](crate::reflection::UnsafeInit), so an `rs_object` can
+///   derive from the type. Each field other than the parent must be `Clone`
+///   and implement [`AnyCompatible`](crate::AnyCompatible), be an
+///   [`Any`](crate::Any) or have no drop glue.
 pub use tvm_ffi_macros::Object;
 
 /// Declare an object reference: the managed, reference-counted handle to an
@@ -25,7 +54,7 @@ pub use tvm_ffi_macros::Object;
 ///
 /// The struct holds one field, `ObjectArc<FooObj>`. The derive implements
 /// [`ObjectRefCore`](crate::ObjectRefCore), the default
-/// [`ObjectRefAnyCompatible`](crate::ObjectRefAnyCompatible) (conversions to
+/// [`ObjectRefAnyCompatible`](crate::object::ObjectRefAnyCompatible) (conversions to
 /// and from [`Any`](crate::Any), in-place downcasts, typed function
 /// arguments), the upcast to [`ObjectRef`](crate::object::ObjectRef),
 /// `Deref<Target = FooObj>` for field reads, `Debug`, `Display` (the runtime
@@ -100,7 +129,7 @@ pub use tvm_ffi_macros::Object;
 /// A `MyPairObj` does not embed an `ArrayObj`, so it cannot claim `Array` as
 /// its parent:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Array, Object, ObjectArc};
 ///

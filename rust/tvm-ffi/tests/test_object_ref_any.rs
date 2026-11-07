@@ -49,7 +49,7 @@ pub struct PositivePair {
     data: ObjectArc<PairObj>,
 }
 
-unsafe impl tvm_ffi::ObjectRefAnyCompatible for PositivePair {
+unsafe impl tvm_ffi::object::ObjectRefAnyCompatible for PositivePair {
     fn extra_check(pair: &PairObj) -> bool {
         pair.first > 0
     }

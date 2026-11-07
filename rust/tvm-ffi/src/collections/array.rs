@@ -25,9 +25,10 @@ use std::ops::Deref;
 use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
+use crate::object::ObjectCoreWithExtraItems;
 use crate::object::{IntoObjectRef, Object, ObjectArc};
 use crate::type_traits::{ContainerElement, RefFromAnyUnchecked, TypeSubsumes};
-use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
+use crate::{Any, AnyCompatible, AnyView, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 
@@ -449,19 +450,21 @@ impl<T: ContainerElement + Clone> Array<T> {
         let size = items.len();
 
         // Allocate with capacity
-        let mut arc = ObjectArc::<ArrayObj>::new_with_extra_items(ArrayObj {
-            object: Object::new(),
-            data: core::ptr::null_mut(),
-            size: size as i64,
-            capacity: capacity as i64,
-            data_deleter: None,
-        });
+        // SAFETY: the cells are written below; those past `size` are never read.
+        let mut arc = unsafe {
+            ObjectArc::<ArrayObj>::new_with_extra_items(ArrayObj {
+                object: Object::new(),
+                data: core::ptr::null_mut(),
+                size: size as i64,
+                capacity: capacity as i64,
+                data_deleter: None,
+            })
+        };
 
         unsafe {
-            let container = &mut *ObjectArc::as_mut_ptr(&mut arc);
-
-            let base_ptr = ArrayObj::extra_items_mut(container).as_mut_ptr();
-            container.data = base_ptr as *mut _;
+            let container = ObjectArc::as_mut_ptr(&mut arc);
+            let base_ptr = ArrayObj::extra_items_ptr(container);
+            (*container).data = base_ptr as *mut _;
 
             for (i, item) in items.into_iter().enumerate() {
                 write_cell(base_ptr.add(i), item);

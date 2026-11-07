@@ -24,6 +24,7 @@
 // DLPack related declarations
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DLDeviceType {
     kDLCPU = 1,
     kDLCUDA = 2,
@@ -57,6 +58,7 @@ pub struct DLDevice {
 /// DLPack data type code enum
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DLDataTypeCode {
     kDLInt = 0,
     kDLUInt = 1,

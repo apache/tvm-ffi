@@ -21,8 +21,9 @@
 //! attribute `code`), extended from Rust.
 
 use tvm_ffi::derive::{Object, ObjectRef};
+use tvm_ffi::enum_ref::EnumObj;
 use tvm_ffi::reflection::EnumDef;
-use tvm_ffi::{EnumObj, EnumRef, ObjectArc, ObjectRefCore, Result, VALUE_ERROR};
+use tvm_ffi::{EnumRef, ObjectArc, ObjectRefCore, Result, VALUE_ERROR};
 
 #[repr(C)]
 #[derive(Object)]

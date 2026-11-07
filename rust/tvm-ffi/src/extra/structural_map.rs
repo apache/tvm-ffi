@@ -115,8 +115,10 @@ where
         let kind = mutator.def_region_kind();
         if PRE_ORDER {
             // Snapshot the mode before a callback can retain or release ownership.
-            // SAFETY: the input owner remains live through this synchronous callback;
-            // its higher-ranked view cannot escape into the owning result.
+            // SAFETY: the input owner, possibly a list or dict cell the callback
+            // does not modify (the callback contract), remains live through this
+            // synchronous callback; its higher-ranked view cannot escape into the
+            // owning result.
             let Some(callback_result) = self
                 .dispatch
                 .dispatch_tuple((unsafe { AnyView::from_raw_ffi_any(raw) }, kind))
@@ -142,8 +144,10 @@ where
         } else {
             let mapped: Any = mutator.default_mutate(self, value)?.into();
             let current = if is_unchanged(&mapped) {
-                // SAFETY: Unchanged leaves the original input owner in place. Borrow
-                // it only through the callback; the other branch borrows mapped.
+                // SAFETY: Unchanged leaves the original input owner in place, and
+                // the callback does not modify a list or dict cell holding it (the
+                // callback contract). Borrow it only through the callback; the
+                // other branch borrows mapped.
                 unsafe { AnyView::from_raw_ffi_any(raw) }
             } else {
                 AnyView::from(&mapped)
@@ -173,6 +177,11 @@ where
 /// In-place changes completed before an error are not rolled back. Because
 /// this function consumes `root`, an error does not return the partly mapped
 /// root to the caller.
+///
+/// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
+/// value it receives or one of that value's ancestors: the traversal borrows
+/// their cells while the callback runs. A callback that returns an `Error`
+/// object as its value fails the traversal with a `TypeError`.
 ///
 /// # Arguments
 ///

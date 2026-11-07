@@ -47,8 +47,8 @@ use crate::{Error, INTERNAL_ERROR};
 /// The creator that `#[rs_object]` registers for its type makes the object with
 /// [`unsafe_init`], which a JSON graph read back, `__ffi_init__` and
 /// `__ffi_new__` then fill. `#[rs_object]` implements it for its object, so the
-/// parent's object must implement it too: [`Object`] does, and so does the
-/// object of a non-final type bound by `tvm-ffi-stubgen`.
+/// parent's object must implement it too: [`Object`] does, and so does a
+/// binding with `#[type_rs_parent]` on its [`derive(Object)`](crate::derive::Object).
 ///
 /// `__ffi_init__` leaves an `init_off` field as the creator made it, so such a
 /// field's type must take all-zero bytes as a value, as a scalar, `Option<T>`
@@ -57,7 +57,7 @@ use crate::{Error, INTERNAL_ERROR};
 /// # Safety
 ///
 /// `drop_defined_fields` drops each defined field of the object and no
-/// undefined one (as [`drop_if_defined`] does), the parent's object's included.
+/// undefined one, the parent's object's included.
 pub unsafe trait UnsafeInit: ObjectCore {
     /// Drops the defined fields of the object at `this`, the parent's object's
     /// included, and leaves the undefined ones.
@@ -81,12 +81,64 @@ unsafe impl UnsafeInit for Object {
 ///
 /// `field` points to a field of an object, defined or undefined, which is not
 /// used afterwards.
-#[doc(hidden)]
 #[inline]
-pub unsafe fn drop_if_defined<F: AnyCompatible>(field: *mut F) {
+unsafe fn drop_if_defined<F: AnyCompatible>(field: *mut F) {
     unsafe {
         if !F::is_undefined(field) {
             std::ptr::drop_in_place(field);
+        }
+    }
+}
+
+/// The field drops of a derived `UnsafeInit`, chosen by method resolution:
+/// `(&FieldPtr(field)).drop_field()` drops an [`AnyCompatible`] field or an
+/// [`Any`](crate::Any) unless it is undefined, and accepts any other field
+/// only if it has no drop glue.
+#[doc(hidden)]
+pub mod field_drop {
+    use super::drop_if_defined;
+    use crate::any::Any;
+    use crate::type_traits::AnyCompatible;
+
+    pub struct FieldPtr<F>(pub *mut F);
+
+    pub trait DropDefined {
+        /// # Safety
+        ///
+        /// The pointer is to a field of an object, defined or undefined,
+        /// which is not used afterwards.
+        unsafe fn drop_field(&self);
+    }
+
+    impl<F: AnyCompatible> DropDefined for FieldPtr<F> {
+        #[inline(always)]
+        unsafe fn drop_field(&self) {
+            unsafe { drop_if_defined(self.0) }
+        }
+    }
+
+    // All-zero bytes are `None`.
+    impl DropDefined for FieldPtr<Any> {
+        #[inline(always)]
+        unsafe fn drop_field(&self) {
+            unsafe { std::ptr::drop_in_place(self.0) }
+        }
+    }
+
+    pub trait DropNothing {
+        fn drop_field(&self);
+    }
+
+    impl<F> DropNothing for &FieldPtr<F> {
+        #[inline(always)]
+        fn drop_field(&self) {
+            const {
+                assert!(
+                    !std::mem::needs_drop::<F>(),
+                    "a field of an `UnsafeInit` object must implement `AnyCompatible`, be \
+                     `Any`, or have no drop glue"
+                )
+            };
         }
     }
 }

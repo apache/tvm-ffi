@@ -320,21 +320,21 @@ where
     }
 
     /// Returns an iterator over the `(key, value)` pairs of the map.
-    pub fn iter(&self) -> MapItems<K, V> {
-        self.make_iter(|f| (iter_read::<K>(f, 0, "key"), iter_read::<V>(f, 1, "value")))
+    pub fn iter(&self) -> Iter<K, V> {
+        Iter(self.make_iter(|f| (iter_read::<K>(f, 0, "key"), iter_read::<V>(f, 1, "value"))))
     }
 
     /// Returns an iterator over the keys of the map.
-    pub fn keys(&self) -> MapKeys<K> {
-        self.make_iter(|f| iter_read::<K>(f, 0, "key"))
+    pub fn keys(&self) -> Keys<K> {
+        Keys(self.make_iter(|f| iter_read::<K>(f, 0, "key")))
     }
 
     /// Returns an iterator over the values of the map.
-    pub fn values(&self) -> MapValues<V> {
-        self.make_iter(|f| iter_read::<V>(f, 1, "value"))
+    pub fn values(&self) -> Values<V> {
+        Values(self.make_iter(|f| iter_read::<V>(f, 1, "value")))
     }
 
-    /// Builds a [`MapIter`] whose `read` extracts each entry as `T`. The
+    /// Builds a `MapIter` whose `read` extracts each entry as `T`. The
     /// forward-iteration functor is requested only for a non-empty map, so
     /// iterating an empty map makes no FFI call and allocates no functor.
     fn make_iter<T>(&self, read: fn(&Function) -> T) -> MapIter<T> {
@@ -545,9 +545,8 @@ fn iter_advance(functor: &Function, remaining: &mut usize) {
     }
 }
 
-/// Forward iterator over a [`Map`], yielding `T` per entry; see the
-/// [`MapItems`], [`MapKeys`] and [`MapValues`] aliases.
-pub struct MapIter<T> {
+/// Forward iterator over a [`Map`], yielding `T` per entry.
+struct MapIter<T> {
     /// `None` for an empty map (no functor is requested); `Some` while at least
     /// one entry remains to be yielded.
     functor: Option<Function>,
@@ -581,12 +580,41 @@ impl<T> Iterator for MapIter<T> {
 
 impl<T> ExactSizeIterator for MapIter<T> {}
 
-/// Iterator over `(key, value)` pairs, created by [`Map::iter`].
-pub type MapItems<K, V> = MapIter<(K, V)>;
-/// Iterator over keys, created by [`Map::keys`].
-pub type MapKeys<K> = MapIter<K>;
-/// Iterator over values, created by [`Map::values`].
-pub type MapValues<V> = MapIter<V>;
+macro_rules! map_iterator {
+    ($(#[$doc:meta])* $name:ident<$($param:ident),+>, $item:ty) => {
+        $(#[$doc])*
+        pub struct $name<$($param),+>(MapIter<$item>);
+
+        impl<$($param),+> Iterator for $name<$($param),+> {
+            type Item = $item;
+
+            #[inline]
+            fn next(&mut self) -> Option<$item> {
+                self.0.next()
+            }
+
+            #[inline]
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
+            }
+        }
+
+        impl<$($param),+> ExactSizeIterator for $name<$($param),+> {}
+    };
+}
+
+map_iterator!(
+    /// Iterator over `(key, value)` pairs, created by [`Map::iter`].
+    Iter<K, V>, (K, V)
+);
+map_iterator!(
+    /// Iterator over keys, created by [`Map::keys`].
+    Keys<K>, K
+);
+map_iterator!(
+    /// Iterator over values, created by [`Map::values`].
+    Values<V>, V
+);
 
 impl<K, V> IntoIterator for &Map<K, V>
 where
@@ -594,7 +622,7 @@ where
     V: ContainerElement,
 {
     type Item = (K, V);
-    type IntoIter = MapItems<K, V>;
+    type IntoIter = Iter<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()

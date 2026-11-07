@@ -226,7 +226,8 @@ fn matches_concrete_object_containers_in_source_order() {
         Some(1)
     );
 
-    use tvm_ffi::{InplaceMode, MutationView};
+    use tvm_ffi::extra::structural_mutate::InplaceMode;
+    use tvm_ffi::MutationView;
     let mut capability_evaluations = 0;
     let capability = match_any!({
         capability_evaluations += 1;
@@ -374,7 +375,7 @@ fn parameterized_containers_use_complete_conversion_semantics() {
     let recovered = match_any!(cap {
         Cap<Array<Array<Option<u8>>>>(_) => unreachable!(),
         Cap<Array<Array<Option<i64>>>>(value) if {
-            assert_eq!(value.inplace_mode(), tvm_ffi::InplaceMode::Disallow);
+            assert_eq!(value.inplace_mode(), tvm_ffi::extra::structural_mutate::InplaceMode::Disallow);
             false
         } => unreachable!(),
         Cap<Any>(value) => value,

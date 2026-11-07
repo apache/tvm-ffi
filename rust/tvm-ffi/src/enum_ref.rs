@@ -22,7 +22,7 @@
 //! [`reflection::EnumDef`](crate::reflection::EnumDef) registers them.
 
 use crate::derive::Object;
-use crate::object::{ImmutableObject, Object, ObjectCore, ObjectRefCore};
+use crate::object::{Object, ObjectCore, ObjectRefCore};
 use crate::reflection::enum_def::{any_into, dict_get, enum_state};
 use crate::reflection::EnumAttrMap;
 use crate::type_traits::AnyCompatible;
@@ -34,6 +34,7 @@ use crate::{AnyView, Error, Result, String, VALUE_ERROR};
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Enum"]
+#[type_immutable]
 pub struct EnumObj {
     base_: Object,
     // The registration order, which can differ between processes, so values
@@ -42,8 +43,6 @@ pub struct EnumObj {
     index: i64,
     name: String,
 }
-
-unsafe impl ImmutableObject for EnumObj {}
 
 impl EnumObj {
     pub(crate) fn new(index: i64, name: &str) -> Self {
@@ -73,7 +72,8 @@ impl EnumObj {
 /// ```
 /// use tvm_ffi::derive::{Object, ObjectRef};
 /// use tvm_ffi::reflection::EnumDef;
-/// use tvm_ffi::{EnumObj, EnumRef, ObjectArc, ObjectRefCore};
+/// use tvm_ffi::{EnumRef, ObjectArc, ObjectRefCore};
+/// use tvm_ffi::enum_ref::EnumObj;
 ///
 /// #[repr(C)]
 /// #[derive(Object)]

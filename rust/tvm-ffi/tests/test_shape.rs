@@ -36,3 +36,17 @@ fn test_any_shape() {
     let converted_view = Shape::try_from(any_view).unwrap();
     assert_eq!(converted_view.as_slice(), &[1, 2, 3, 4]);
 }
+
+#[test]
+fn test_converting_casts_from_cpp_equivalents() {
+    let shape = Shape::try_from(Any::from(Array::from_vec(vec![2_i64, 3]))).unwrap();
+    assert_eq!(shape.as_slice(), &[2, 3]);
+    let list = List::<i64>::new();
+    list.push(4).unwrap();
+    assert_eq!(Shape::try_from(Any::from(list)).unwrap().as_slice(), &[4]);
+    let device = DLDevice::try_from(Any::from(String::from("cuda:1"))).unwrap();
+    assert_eq!(
+        (device.device_type, device.device_id),
+        (DLDeviceType::kDLCUDA as i32, 1)
+    );
+}

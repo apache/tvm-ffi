@@ -53,6 +53,20 @@ pub(crate) fn expand_object(
         None => false,
     };
 
+    let type_immutable = match get_attr(derive_input, "type_immutable") {
+        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(_) => panic!("Expect #[type_immutable] attribute"),
+        None => false,
+    };
+
+    // Whether an `rs_object` can derive from this type, which needs its
+    // `ShallowCopy` and `UnsafeInit`.
+    let type_rs_parent = match get_attr(derive_input, "type_rs_parent") {
+        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(_) => panic!("Expect #[type_rs_parent] attribute"),
+        None => false,
+    };
+
     // Whether this type is defined here, so that it registers its key, as C++
     // `TVM_FFI_DECLARE_OBJECT_INFO` does. Without it, the type binds a key
     // that its defining library, usually C++, has registered.
@@ -110,17 +124,50 @@ pub(crate) fn expand_object(
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
     let reflection = Reflection::parse(derive_input, rs_object);
+    if type_immutable {
+        let writable = reflection
+            .iter()
+            .flat_map(|reflection| &reflection.reflected)
+            .find(|field| field.flags.iter().any(|flag| flag == "writable"));
+        if let Some(field) = writable {
+            abort!(
+                field.id,
+                "an immutable type cannot have a #[reflect(writable)] field"
+            );
+        }
+    }
+    let immutable_impl = if type_immutable {
+        quote! {
+            unsafe impl #tvm_ffi_crate::object::ImmutableObject for #struct_name {}
+        }
+    } else {
+        quote! {}
+    };
     assert!(
         reflection.is_none() || (type_register && get_attr(derive_input, "type_index").is_none()),
         "#[reflect], #[type_s_eq_hash_kind] and #[type_reflection] need #[type_register] and no \
          #[type_index]"
     );
-    let (register_reflection, shallow_copy_impl) = match &reflection {
-        Some(reflection) => (
-            reflection.register_tokens(&struct_name, &type_key, tvm_ffi_crate),
-            reflection.shallow_copy_tokens(&struct_name, &base_ty, tvm_ffi_crate),
-        ),
-        None => (quote! {}, quote! {}),
+    let register_reflection = match &reflection {
+        Some(reflection) => reflection.register_tokens(&struct_name, &type_key, tvm_ffi_crate),
+        None => quote! {},
+    };
+    let (base_id, field_ids) = struct_field_ids(derive_input);
+    let shallow_copy_impl = if reflection.is_some() || type_rs_parent {
+        shallow_copy_tokens(&struct_name, &base_ty, &base_id, &field_ids, tvm_ffi_crate)
+    } else {
+        quote! {}
+    };
+    let unsafe_init_impl = if rs_object || type_rs_parent {
+        if !derive_input.generics.params.is_empty() {
+            abort!(
+                struct_name,
+                "#[type_rs_parent] needs a struct without generic parameters"
+            );
+        }
+        unsafe_init_tokens(&struct_name, &base_ty, &base_id, &field_ids, tvm_ffi_crate)
+    } else {
+        quote! {}
     };
 
     // A type with a static index has it; one defined here registers its key
@@ -188,6 +235,10 @@ pub(crate) fn expand_object(
                     );
                     *TYPE_INDEX
                 }
+
+                fn type_index_available() -> bool {
+                    <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index_available()
+                }
             }
         }
         None => {
@@ -219,11 +270,28 @@ pub(crate) fn expand_object(
                     );
                     *TYPE_INDEX
                 }
+
+                fn type_index_available() -> bool {
+                    let mut tindex = 0;
+                    // SAFETY: the key and the index outlive the call.
+                    let found = unsafe {
+                        let type_key_arg =
+                            #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
+                        #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeKeyToIndex(&type_key_arg, &mut tindex)
+                            == 0
+                    };
+                    if !found {
+                        // Discard the error the failed lookup raised.
+                        drop(#tvm_ffi_crate::Error::from_raised());
+                    }
+                    found
+                }
             }
         }
     };
     // A type defined here registers when its library loads, as a C++ type does
-    // through `refl::ObjectDef` in a static init block; a binding stays lazy.
+    // through `refl::ObjectDef` in a static init block; a binding stays lazy,
+    // and so does a type under a binding whose library is not loaded yet.
     let register_at_load = if type_register && get_attr(derive_input, "type_index").is_none() {
         if !derive_input.generics.params.is_empty() {
             abort!(
@@ -236,7 +304,9 @@ pub(crate) fn expand_object(
         quote! {
             #tvm_ffi_crate::static_init_block! {
                 let _: &str = #type_key;
-                let _ = <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                if <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index_available() {
+                    let _ = <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                }
             }
         }
     } else {
@@ -285,12 +355,6 @@ pub(crate) fn expand_object(
         _ => panic!("First field must be `<base_name>: <ObjectCoreType>`"),
     };
 
-    let base_id = match &derive_input.data {
-        syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| f.ident.clone()),
-        _ => None,
-    }
-    .expect("First field must be `<base_name>: <ObjectCoreType>`");
-
     quote! {
         #final_parent_check
 
@@ -317,6 +381,10 @@ pub(crate) fn expand_object(
 
         #shallow_copy_impl
 
+        #unsafe_init_impl
+
+        #immutable_impl
+
         #register_at_load
     }
 }
@@ -328,9 +396,6 @@ struct Reflection {
     kind: Option<syn::Ident>,
     /// The function `#[type_reflection(path)]` names, which registers methods.
     methods: Option<syn::Path>,
-    /// The parent's field name and every other field's name.
-    base_id: syn::Ident,
-    field_ids: Vec<syn::Ident>,
     /// The reflected fields.
     reflected: Vec<ReflectedField>,
     /// Whether the type registers the creator of its `UnsafeInit`, as an
@@ -441,14 +506,8 @@ impl Reflection {
             !base.attrs.iter().any(|a| a.path.is_ident("reflect")),
             "the parent field cannot be #[reflect]; the parent registers its own fields"
         );
-        let mut field_ids = Vec::new();
         let mut reflected: Vec<ReflectedField> = Vec::new();
         for field in fields {
-            let id = field
-                .ident
-                .clone()
-                .expect("#[derive(Object)] needs named fields");
-            field_ids.push(id);
             if let Some(attr) = field.attrs.iter().find(|a| a.path.is_ident("reflect")) {
                 let field = ReflectedField::parse(field, attr);
                 if let Some(other) = reflected.iter().find(|f| f.name == field.name) {
@@ -466,11 +525,6 @@ impl Reflection {
         Some(Self {
             kind,
             methods,
-            base_id: base
-                .ident
-                .clone()
-                .expect("First field must be `<base_name>: <ObjectCoreType>`"),
-            field_ids,
             reflected,
             unsafe_init: rs_object,
         })
@@ -545,24 +599,68 @@ impl Reflection {
             }
         }
     }
+}
 
-    /// `ShallowCopy`: the parent's shallow copy and a clone of every other field.
-    fn shallow_copy_tokens(
-        &self,
-        struct_name: &syn::Ident,
-        base_ty: &syn::Type,
-        tvm_ffi_crate: &proc_macro2::TokenStream,
-    ) -> proc_macro2::TokenStream {
-        let base_id = &self.base_id;
-        let field_ids = &self.field_ids;
-        quote! {
-            impl #tvm_ffi_crate::reflection::ShallowCopy for #struct_name {
-                fn shallow_copy(&self) -> Self {
-                    Self {
-                        #base_id: <#base_ty as #tvm_ffi_crate::reflection::ShallowCopy>
-                            ::shallow_copy(&self.#base_id),
-                        #(#field_ids: ::core::clone::Clone::clone(&self.#field_ids),)*
-                    }
+/// The parent's field name and every other field's name.
+fn struct_field_ids(derive_input: &DeriveInput) -> (syn::Ident, Vec<syn::Ident>) {
+    let syn::Data::Struct(s) = &derive_input.data else {
+        panic!("First field must be `<base_name>: <ObjectCoreType>`");
+    };
+    let mut ids = s.fields.iter().map(|field| {
+        field
+            .ident
+            .clone()
+            .expect("#[derive(Object)] needs named fields")
+    });
+    let base_id = ids
+        .next()
+        .expect("First field must be `<base_name>: <ObjectCoreType>`");
+    (base_id, ids.collect())
+}
+
+/// `ShallowCopy`: the parent's shallow copy and a clone of every other field.
+fn shallow_copy_tokens(
+    struct_name: &syn::Ident,
+    base_ty: &syn::Type,
+    base_id: &syn::Ident,
+    field_ids: &[syn::Ident],
+    tvm_ffi_crate: &TokenStream2,
+) -> TokenStream2 {
+    quote! {
+        impl #tvm_ffi_crate::reflection::ShallowCopy for #struct_name {
+            fn shallow_copy(&self) -> Self {
+                Self {
+                    #base_id: <#base_ty as #tvm_ffi_crate::reflection::ShallowCopy>
+                        ::shallow_copy(&self.#base_id),
+                    #(#field_ids: ::core::clone::Clone::clone(&self.#field_ids),)*
+                }
+            }
+        }
+    }
+}
+
+/// `UnsafeInit`: drops the parent's defined fields, then each other defined
+/// field in order, as the drop glue does; only through raw pointers, since
+/// some may be undefined.
+fn unsafe_init_tokens(
+    struct_name: &syn::Ident,
+    base_ty: &syn::Type,
+    base_id: &syn::Ident,
+    field_ids: &[syn::Ident],
+    tvm_ffi_crate: &TokenStream2,
+) -> TokenStream2 {
+    let field_drop = quote!(#tvm_ffi_crate::reflection::field_drop);
+    quote! {
+        unsafe impl #tvm_ffi_crate::reflection::UnsafeInit for #struct_name {
+            #[allow(unused_imports)]
+            unsafe fn drop_defined_fields(this: *mut Self) {
+                use #field_drop::{DropDefined as _, DropNothing as _};
+                unsafe {
+                    <#base_ty as #tvm_ffi_crate::reflection::UnsafeInit>::drop_defined_fields(
+                        ::core::ptr::addr_of_mut!((*this).#base_id),
+                    );
+                    #((&#field_drop::FieldPtr(::core::ptr::addr_of_mut!((*this).#field_ids)))
+                        .drop_field();)*
                 }
             }
         }
@@ -739,26 +837,24 @@ pub(crate) fn expand_object_ref(
     }
     // The root upcast is already above.
     if let Some(parent) = options.parent.filter(|parent| !is_object_ref_root(parent)) {
-        if !options.unsafe_parent {
+        if options.unsafe_parent {
+            // The object type must still derive from the parent's.
             expanded.extend(quote! {
                 const _: () = {
-                    fn plain<P: #tvm_ffi_crate::object::PlainObjectRef>() {}
-                    let _ = plain::<#parent>;
+                    fn derives_from<T: #tvm_ffi_crate::object::ObjectDerivesFrom<A, I>, A, I>() {}
+                    let _ = derives_from::<
+                        <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
+                        <#parent as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
+                        _,
+                    >;
                 };
+                #tvm_ffi_crate::impl_object_ref_upcast!(unsafe #struct_name => #parent);
+            });
+        } else {
+            expanded.extend(quote! {
+                #tvm_ffi_crate::impl_object_ref_upcast!(#struct_name => #parent);
             });
         }
-        // The upcast is sound only if the object type derives from the parent's.
-        expanded.extend(quote! {
-            const _: () = {
-                fn derives_from<T: #tvm_ffi_crate::object::ObjectDerivesFrom<A, I>, A, I>() {}
-                let _ = derives_from::<
-                    <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
-                    <#parent as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
-                    _,
-                >;
-            };
-            #tvm_ffi_crate::impl_object_ref_upcast!(unsafe #struct_name => #parent);
-        });
     }
     expanded
 }

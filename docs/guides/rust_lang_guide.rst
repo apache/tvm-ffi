@@ -54,12 +54,13 @@ Add to your ``Cargo.toml``:
    [dependencies]
    tvm-ffi = { path = "path/to/tvm-ffi/rust/tvm-ffi" }
 
-For published versions:
+For a published version, use the version of the installed ``apache-tvm-ffi``
+package:
 
 .. code-block:: toml
 
    [dependencies]
-   tvm-ffi = "0.1.15"
+   tvm-ffi = "<version>"
 
 Environment Setup
 ~~~~~~~~~~~~~~~~~
@@ -166,7 +167,7 @@ Load a compiled TVM FFI module and call its functions:
 A module also reports whether it implements a function, and reads the
 metadata and doc string a function was exported with, as
 ``Module.implements_function``, ``Module.get_function_metadata`` and
-``Module.get_function_doc`` do in Python. The second argument says whether to
+``Module.get_function_doc`` do in Python. Their ``*_with_imports`` variants
 also look in the modules it imports:
 
 .. code-block:: rust
@@ -224,17 +225,17 @@ Register and access global functions:
 
 .. code-block:: rust
 
-   use tvm_ffi::Function;
-
-   // Get global function
-   let func = Function::get_global("my_function")?;
+   use tvm_ffi::{Any, AnyView, Function, Result};
 
    // Register a new global function
-   let my_func = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
+   let my_func = Function::from_packed(|_args: &[AnyView]| -> Result<Any> {
        // Function implementation
        Ok(Any::default())
    });
    Function::register_global("my_custom_func", my_func)?;
+
+   // Get a global function
+   let func = Function::get_global("my_custom_func")?;
 
    // Register a typed function with a doc string
    Function::register_global_typed(
@@ -283,7 +284,9 @@ Reflected Type Methods
 Methods registered on a type through reflection live in a per-type method table
 rather than the global function table. Resolve them by type key (or type
 index) and method name; a registered constructor is reachable under the
-reserved name ``__ffi_init__``:
+reserved name ``__ffi_init__``. ``testing.TestIntPair`` is registered by
+``libtvm_ffi_testing``, next to ``libtvm_ffi``, once it is loaded, for example
+with ``Module::load_from_file``:
 
 .. code-block:: rust
 
@@ -306,32 +309,25 @@ the type index is already known (e.g. from ``Any::type_index``).
 Defining Reflected Object Types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An object type defined in Rust registers its type key with ``#[type_register]``
-and its fields with ``#[reflect]``. The registration runs when the library
-that defines the type loads, as for a C++ type:
+``#[rs_object]`` defines an object type in Rust from its object struct, like
+Python's ``py_class``. The type registers when the library that defines it
+loads, as a C++ type does:
 
 .. code-block:: rust
 
-   use tvm_ffi::derive::{Object, ObjectRef};
+   use tvm_ffi::derive::ObjectRef;
    use tvm_ffi::reflection::ObjectDef;
-   use tvm_ffi::{Object, ObjectArc, Result};
+   use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 
-   #[repr(C)]
-   #[derive(Object)]
-   #[type_key = "my.Point"]
-   #[type_register]
-   #[type_s_eq_hash_kind = "TreeNode"]
-   #[type_reflection(PointObj::reflect_methods)]
+   #[rs_object("my.Point", s_eq_hash_kind = "TreeNode", reflection = PointObj::reflect_methods)]
    pub struct PointObj {
        base_: Object,
        /// The x coordinate.
-       #[reflect]
        pub x: i64,
        #[reflect(writable, seq_hash_ignore, doc = "A label.")]
        pub label: tvm_ffi::String,
    }
 
-   #[repr(C)]
    #[derive(ObjectRef, Clone)]
    pub struct Point {
        data: ObjectArc<PointObj>,
@@ -344,31 +340,36 @@ that defines the type loads, as for a C++ type:
        }
    }
 
-Each reflected field gets a C ABI getter and setter, its doc string and its
-type schema, so structural equality and hashing, ``ffi.ReprPrint``,
-``ffi.DeepCopy`` and Python see it. The flags in ``#[reflect(...)]`` name
+The first field, ``base_``, is the parent's object. Every other field is
+reflected: it gets a C ABI getter and setter, its doc string and its type
+schema, so structural equality and hashing, ``ffi.ReprPrint``, ``ffi.DeepCopy``
+and Python see it. The flags in ``#[reflect(...)]`` name
 ``tvm_ffi::reflection::FieldFlags`` constants; ``name = "..."`` registers the field under
 another name, and ``doc = "..."`` sets its doc string, otherwise the field's
-``///`` doc comment. Without ``#[type_s_eq_hash_kind]``, a type keeps its
-nearest reflected ancestor's kind. The derive also implements ``ShallowCopy``
-and registers it as ``__ffi_shallow_copy__``, which requires the parent to
+``///`` doc comment. Without ``s_eq_hash_kind``, a type keeps its nearest
+reflected ancestor's kind. The type also implements ``ShallowCopy`` and
+registers it as ``__ffi_shallow_copy__``, which requires the parent to
 implement ``ShallowCopy`` and the other fields to be ``Clone``.
+``immutable`` declares that shared objects of the type are never mutated
+(``ImmutableObject``), so its references cross threads when its fields can; its
+fields cannot be ``writable``.
 
-``#[type_reflection(path)]`` names a function that registers the type's
+``reflection = path`` names a function that registers the type's
 methods with ``def`` (the object is the first parameter) and ``def_static``,
 each with its type schema and doc
 string, where ``reflection::get_method`` and Python find them. It runs
-while the type registers, so it must not call ``type_index()`` of the type or
-of another Rust type that is not registered yet. Method names, like
+while the type registers, under the registration lock, so it must not call
+``type_index()`` of the type or of another Rust type that is not registered
+yet, nor register type attributes or call ``TypeAttrColumn::ensure``, which
+take the same lock. Method names, like
 reflected field names, must be unique in the type.
 
-Defining Object Types from Their Fields
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``#[derive(Object)]`` instead binds a type that another library, usually C++,
+registers; ``tvm-ffi-stubgen`` generates such bindings.
 
-``#[rs_object]`` defines such a type from its object struct, like Python's
-``py_class``. The first field, ``base_``, is the parent's object; every other field
-is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
-``reflection = path`` after the type key is ``#[type_reflection(path)]``.
+Deriving Object Types
+~~~~~~~~~~~~~~~~~~~~~
+
 ``#[derive(ObjectRef)]`` declares the reference, and ``#[object_ref(parent = Point)]``
 names the reference to the parent's object:
 
@@ -415,8 +416,9 @@ names the reference to the parent's object:
 ``#[rs_object]`` adds ``#[repr(C)]``, ``Deref`` to the parent's object and
 ``Point3Obj::new``, which takes the parent's object, then the fields: a scalar
 (``bool``, an integer or a float) as its own type, so that a literal infers as it,
-and any other field from anything that converts into it, as the ``new`` of a type
-bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object
+and any other field as ``impl Into<T>``. A constructor on the reference takes an
+object reference as ``impl IntoObjectRef<T>``, as the ones ``tvm-ffi-stubgen``
+generates do. The reference dereferences to the object
 (``#[object_ref(skip_deref)]`` opts out), and its private ``from_object`` wraps a new
 object for the type's constructors. The reference also converts into ``parent``,
 whose object the reference's object must embed, directly or through its own
@@ -424,8 +426,10 @@ parents, which the derive checks at compile time. A parent that promises more th
 its object type, a generic one such as ``Array<T>`` or one with a custom
 ``ObjectRefAnyCompatible``, is written ``unsafe parent = ...``: the caller promises
 that every value of the reference is a valid parent. Every reference converts into
-``ObjectRef``; ``impl_object_ref_upcast!(unsafe Point3 => Point)``
-declares further conversions without that check.
+``ObjectRef``; ``impl_object_ref_upcast!`` declares conversions into further
+ancestors with the same check, such as ``impl_object_ref_upcast!(Point4 => Point)``
+for a ``Point4`` whose parent is ``Point3``, and ``impl_object_ref_upcast!(unsafe
+...)`` without it, for an ancestor that promises more than its object type.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads
@@ -435,10 +439,12 @@ undefined field holds all-zero bytes, which are no value of its type
 (``AnyCompatible::is_undefined``): the field setter overwrites them without
 dropping, the field getter reads them as None and the object's deleter skips
 them. An ``init_off`` field stays all-zero after ``__ffi_init__``, so its type must
-take all-zero bytes as a value, as a scalar or ``Option<T>`` does; a reference or
+take all-zero bytes as a value, as a scalar, an ``Option`` of a reference or an
+``Optional<T>`` does; a reference or
 a string does not, and fails the type's registration. The parent's object must
-implement ``ShallowCopy`` and ``UnsafeInit``, as ``rs_object`` types and non-final
-types bound by ``tvm-ffi-stubgen`` do.
+implement ``ShallowCopy`` and ``UnsafeInit``, as ``rs_object`` types do, and so
+does a binding with ``#[type_rs_parent]`` on its ``derive(Object)``, such as a
+non-final type bound by ``tvm-ffi-stubgen``.
 
 Converting Borrowed Values into ``Any``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -577,7 +583,7 @@ them. Let's describe nested arrays, with a separator between items:
            let items: Vec<String> = arr
                .iter()
                .map(|item| {
-                   let item = AnyView::from(&item);
+                   let item = AnyView::from(item);
                    self.dispatch(item, sep).unwrap_or_else(|| "?".into())
                })
                .collect();
@@ -678,7 +684,8 @@ Walk handlers may take an optional trailing ``DefRegionKind`` argument:
 
 .. code-block:: rust
 
-   use tvm_ffi::{dispatch, structural_walk, Array, DefRegionKind, Result, WalkOrder, WalkResult};
+   use tvm_ffi::{dispatch, structural_walk, Array, Result, WalkOrder, WalkResult};
+   use tvm_ffi::extra::structural_visit::DefRegionKind;
 
    #[derive(Default)]
    struct Probe {
@@ -718,7 +725,8 @@ take a trailing ``DefRegionKind`` argument:
 
 .. code-block:: rust
 
-   use tvm_ffi::{structural_walk, Array, DefRegionKind, Object, WalkOrder, WalkResult};
+   use tvm_ffi::{structural_walk, Array, Object, WalkOrder, WalkResult};
+   use tvm_ffi::extra::structural_visit::DefRegionKind;
 
    let values = Array::from_vec(vec![1_i64, 2, 3]);
 
@@ -774,7 +782,7 @@ propagate errors with ``?``:
        },
        WalkOrder::PreOrder,
    )?;
-   assert_eq!(found.map(|i| i64::try_from(i.value).unwrap()), Some(2));
+   assert_eq!(found.map(|i| i64::try_from(&i.value).unwrap()), Some(2));
 
 ``structural_visit`` accepts a dispatcher, owned or borrowed. Pass state belongs
 on ``self``; matching handlers control recursion through ``StructuralVisitorView<'_, Self>``.
@@ -783,7 +791,8 @@ dispatchers and closures.
 
 .. code-block:: rust
 
-   use tvm_ffi::{dispatch, structural_visit, Array, Result, StructuralVisitorView, VisitInterrupt};
+   use tvm_ffi::{dispatch, structural_visit, Array, Result, VisitInterrupt};
+   use tvm_ffi::extra::structural_visit::StructuralVisitorView;
 
    #[derive(Default)]
    struct Stats {
@@ -822,9 +831,8 @@ argument tuple and return type supply the engine signature directly:
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_visit, AnyView, Array, Result, StructuralVisitorView, VisitInterrupt,
-   };
+   use tvm_ffi::{dispatch, structural_visit, AnyView, Array, Result, VisitInterrupt};
+   use tvm_ffi::extra::structural_visit::StructuralVisitorView;
 
    #[derive(Default)]
    struct Depth {
@@ -884,9 +892,9 @@ catch-all and should therefore come last:
 .. code-block:: rust
 
    use tvm_ffi::{
-       dispatch, structural_map, Any, Array, DefRegionKind, AnyView, Result, WalkOrder,
-       UnchangedOr, Unchanged,
+       dispatch, structural_map, Any, Array, AnyView, Result, WalkOrder, UnchangedOr, Unchanged,
    };
+   use tvm_ffi::extra::structural_visit::DefRegionKind;
 
    #[derive(Default)]
    struct Increment {
@@ -912,7 +920,7 @@ catch-all and should therefore come last:
        WalkOrder::PostOrder,
    )?;
    let mapped = Array::<i64>::try_from(mapped)?;
-   assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+   assert_eq!(mapped.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
 
 A single typed closure and an ordered tuple of up to twelve closures are also
 accepted; a tuple is itself a link, so ``(a, b, (c, d, ...))`` nests beyond that
@@ -968,18 +976,19 @@ original value.
 
 ``structural_mutate`` accepts an owned or borrowed dispatcher. Its handlers keep
 mutable pass state on ``self`` and receive ``StructuralMutatorView<'_, Self>`` for recursion.
-Map continues to accept both dispatchers and closures. A concrete Base can customize
-default descent through ``StructuralVisitor::new(base, dispatcher)`` or
-``StructuralMutator::new(base, dispatcher)``; the same composition works for walk/map.
-Base implementations delegate to the corresponding ``StructuralVisitorObj`` or
-``StructuralMutatorObj`` default operation when they want ordinary hooks/reflection.
+Map continues to accept both dispatchers and closures. A native base, a
+``StructuralVisitorBase`` or ``StructuralMutatorBase``, customizes default descent:
+``StructuralVisitEngine::<Base>::visit_root(root, dispatcher)`` and
+``StructuralMutateEngine::<Base>::mutate_root(root, dispatcher)`` run on it. A base
+delegates to the default operation of ``StructuralVisitorObj`` or
+``StructuralMutatorObj`` for ordinary hooks and reflection. The views, bases,
+engines, ``DefRegionKind`` and ``InplaceMode`` live in
+``tvm_ffi::extra::structural_visit`` and ``tvm_ffi::extra::structural_mutate``.
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_mutate, Any, Array, MutationView, StructuralMutatorView, Result,
-       UnchangedOr,
-   };
+   use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
+   use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 
    #[derive(Default)]
    struct Stats {
@@ -1000,7 +1009,7 @@ Base implementations delegate to the corresponding ``StructuralVisitorObj`` or
    let mut mutator = Stats::default();
    let mutated = structural_mutate(Array::from_vec(vec![1_i64, 2]), &mut mutator)?;
    let mutated = Array::<i64>::try_from(mutated)?;
-   assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+   assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
    assert_eq!(mutator.integers, 2);
 
 ``mutator.mutate(self, value)`` re-enters dispatch with a ``MutationView``, while
@@ -1035,10 +1044,8 @@ other handler consumes it:
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_mutate, Any, Array, StructuralMutatorView, Result,
-       UnchangedOr,
-   };
+   use tvm_ffi::{dispatch, structural_mutate, Any, Array, Result, UnchangedOr};
+   use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 
    #[derive(Default)]
    struct Increment {
@@ -1056,7 +1063,7 @@ other handler consumes it:
    let mut increment = Increment::default();
    let mutated = structural_mutate(Array::from_vec(vec![1_i64, 2]), &mut increment)?;
    let mutated = Array::<i64>::try_from(mutated)?;
-   assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+   assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
    assert_eq!(increment.integers, 2);
 
 ``MutationView::borrowed`` wraps an ``AnyView`` with ``Disallow``; an exclusive
@@ -1066,10 +1073,8 @@ while retaining typed scalar replacements:
 
 .. code-block:: rust
 
-   use tvm_ffi::{
-       dispatch, structural_mutate, Any, Array, InplaceMode, MutationView, StructuralMutatorView, Result,
-       UnchangedOr,
-   };
+   use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
+   use tvm_ffi::extra::structural_mutate::{InplaceMode, StructuralMutatorView};
 
    struct Increment;
 
@@ -1085,7 +1090,7 @@ while retaining typed scalar replacements:
 
    let mutated = structural_mutate(Array::from_vec(vec![1_i64, 2]), Increment)?;
    let mutated = Array::<i64>::try_from(mutated)?;
-   assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+   assert_eq!(mutated.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
 
 The context's ``var_remap_get`` and ``var_remap_set`` methods use state local to one
 invocation, preserving completed ``FreeVar`` and ``DAGNode`` substitutions without

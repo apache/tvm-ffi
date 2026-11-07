@@ -19,15 +19,18 @@
 
 use std::cell::{Cell, RefCell};
 use std::sync::LazyLock;
+use tvm_ffi::extra::structural_visit::{
+    DefRegionKind, StructuralVisitEngine, StructuralVisitorBase, StructuralVisitorObj,
+    StructuralVisitorView,
+};
 use tvm_ffi::reflection::TypeAttrColumn;
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeGetOrAllocIndex,
     TVMFFITypeMetadata, TVMFFITypeRegisterMetadata,
 };
 use tvm_ffi::{
-    dispatch, structural_visit, Any, AnyView, Array, DefRegionKind, Dispatcher, Error, Function,
-    IntoDispatcher, Result, StructuralVisitEngine, StructuralVisitorBase, StructuralVisitorObj,
-    StructuralVisitorView, VisitInterrupt, RUNTIME_ERROR,
+    dispatch, structural_visit, Any, AnyView, Array, Dispatcher, Error, Function, IntoDispatcher,
+    Result, VisitInterrupt, RUNTIME_ERROR,
 };
 
 thread_local! {

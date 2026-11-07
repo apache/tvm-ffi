@@ -19,6 +19,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::{collections::HashMap, hash::Hash};
+use tvm_ffi::object::{ObjectCoreWithExtraItems, ObjectIdentity};
+use tvm_ffi::tvm_ffi_sys::TVMFFIObject;
 use tvm_ffi::*;
 
 // must have repr(C) for the object header stays in the same position
@@ -116,7 +118,7 @@ fn test_object_arc() {
 fn test_object_arc_with_extra_items() {
     let delete_counter = Arc::new(AtomicU32::new(0));
     let mut obj_arc =
-        ObjectArc::new_with_extra_items(TestIntObj::new(12, delete_counter.clone(), 10));
+        unsafe { ObjectArc::new_with_extra_items(TestIntObj::new(12, delete_counter.clone(), 10)) };
     assert_eq!(obj_arc.value, 12);
     assert_eq!(ObjectArc::strong_count(&obj_arc), 1);
     assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
@@ -125,10 +127,8 @@ fn test_object_arc_with_extra_items() {
         let raw = ObjectArc::as_mut_ptr(&mut obj_arc);
         // layout check of extra items
         assert_eq!(TestIntObj::extra_items_count(&obj_arc), 10);
-        assert_eq!(TestIntObj::extra_items(&obj_arc).len(), 10);
-        assert_eq!(TestIntObj::extra_items_mut(&mut *raw).len(), 10);
         assert_eq!(
-            TestIntObj::extra_items_mut(&mut *raw).as_ptr() as *mut u8,
+            TestIntObj::extra_items_ptr(raw) as *mut u8,
             (raw as *mut u8).add(std::mem::size_of::<TestIntObj>())
         );
     }
@@ -194,7 +194,8 @@ fn release_outlived_by_weak_ref<T: ObjectCore>(
 #[test]
 fn test_object_arc_with_extra_items_outlived_by_weak_ref() {
     let delete_counter = Arc::new(AtomicU32::new(0));
-    let obj_arc = ObjectArc::new_with_extra_items(TestIntObj::new(13, delete_counter.clone(), 10));
+    let obj_arc =
+        unsafe { ObjectArc::new_with_extra_items(TestIntObj::new(13, delete_counter.clone(), 10)) };
     let freed = release_outlived_by_weak_ref(obj_arc, || {
         assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
     });
@@ -237,16 +238,20 @@ fn test_header_only_object_with_extra_items_outlived_by_weak_ref() {
     // The item count is kept in the word after the header: the first item for N = 2,
     // padding the allocation reserves for N = 0.
     let header_size = std::mem::size_of::<TVMFFIObject>();
-    let obj_arc = ObjectArc::new_with_extra_items(HeaderOnlyObj::<2> {
-        object: Object::new(),
-    });
+    let obj_arc = unsafe {
+        ObjectArc::new_with_extra_items(HeaderOnlyObj::<2> {
+            object: Object::new(),
+        })
+    };
     assert_eq!(
         release_outlived_by_weak_ref(obj_arc, || {}),
         header_size + 16
     );
-    let obj_arc = ObjectArc::new_with_extra_items(HeaderOnlyObj::<0> {
-        object: Object::new(),
-    });
+    let obj_arc = unsafe {
+        ObjectArc::new_with_extra_items(HeaderOnlyObj::<0> {
+            object: Object::new(),
+        })
+    };
     assert_eq!(
         release_outlived_by_weak_ref(obj_arc, || {}),
         header_size + 8

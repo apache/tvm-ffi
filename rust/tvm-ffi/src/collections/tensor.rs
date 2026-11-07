@@ -71,23 +71,20 @@ pub unsafe trait NDAllocator: 'static {
 pub trait DLTensorExt {
     /// The number of elements: the product of the shape, 1 for a scalar.
     ///
+    /// # Safety
+    /// `shape` points to `ndim` extents, or `ndim` is 0.
+    ///
     /// # Panics
     /// If an extent is negative or the product overflows `usize`.
-    fn numel(&self) -> usize;
-    /// The bytes of one element: `bits * lanes`, rounded up to whole bytes.
-    fn item_size(&self) -> usize;
+    unsafe fn numel(&self) -> usize;
 }
 
 impl DLTensorExt for DLTensor {
-    fn numel(&self) -> usize {
+    unsafe fn numel(&self) -> usize {
         // A scalar (`ndim == 0`) has one element and may have a null shape.
         let shape =
             unsafe { crate::util::slice_from_nullable_raw_parts(self.shape, self.ndim as usize) };
         checked_numel(shape).expect("tensor shape has a negative extent or overflows usize")
-    }
-
-    fn item_size(&self) -> usize {
-        (self.dtype.bits as usize * self.dtype.lanes as usize).div_ceil(8)
     }
 }
 
@@ -100,10 +97,12 @@ fn checked_numel(shape: &[i64]) -> Option<usize> {
 
 /// The bytes of `tensor`'s data, with sub-byte types packed as C++
 /// `GetDataSize` does; it fits in `isize`, as an allocation must.
-fn data_size(tensor: &DLTensor) -> usize {
+///
+/// # Safety
+/// As [`DLTensorExt::numel`].
+unsafe fn data_size(tensor: &DLTensor) -> usize {
     let bits = tensor.dtype.bits as usize * tensor.dtype.lanes as usize;
-    tensor
-        .numel()
+    unsafe { tensor.numel() }
         .checked_mul(bits)
         .map(|total| total.div_ceil(8))
         .filter(|&size| size <= isize::MAX as usize)
@@ -244,9 +243,10 @@ impl Tensor {
     /// The number of elements.
     ///
     /// # Panics
-    /// As [`DLTensorExt::numel`].
+    /// If an extent is negative or the product overflows `usize`.
     pub fn numel(&self) -> usize {
-        self.data.dltensor.numel()
+        // SAFETY: a tensor's shape holds `ndim` extents.
+        unsafe { self.data.dltensor.numel() }
     }
 
     /// The strides, in elements.
@@ -346,7 +346,8 @@ impl Tensor {
             byte_offset: 0,
         };
         // Allocators size the data from the shape, so check it before allocating.
-        data_size(&dltensor);
+        // SAFETY: `shape` holds `ndim` extents.
+        unsafe { data_size(&dltensor) };
         let tensor_obj = TensorObjFromNDAlloc {
             base_: TensorObj {
                 object: Object::new(),
@@ -360,13 +361,17 @@ impl Tensor {
         unsafe {
             let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
             // The fresh allocation is unique and has not been exposed.
-            let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
-            object.base_.dltensor.shape =
-                TensorObjFromNDAlloc::extra_items(object).as_ptr() as *mut i64;
-            object.base_.dltensor.strides = object.base_.dltensor.shape.add(shape.len());
-            let extra_items = TensorObjFromNDAlloc::extra_items_mut(object);
-            extra_items[..shape.len()].copy_from_slice(shape);
-            Shape::fill_strides_from_shape(shape, &mut extra_items[shape.len()..]);
+            let object = ObjectArc::as_mut_ptr(&mut obj_arc);
+            let items = TensorObjFromNDAlloc::extra_items_ptr(object);
+            std::ptr::copy_nonoverlapping(shape.as_ptr(), items, shape.len());
+            let strides = items.add(shape.len());
+            Shape::fill_strides_from_shape(
+                shape,
+                std::slice::from_raw_parts_mut(strides, shape.len()),
+            );
+            let object = &mut *object;
+            object.base_.dltensor.shape = items;
+            object.base_.dltensor.strides = strides;
             let dltensor_ptr = &object.base_.dltensor as *const DLTensor;
             object.base_.dltensor.data = object.alloc.alloc_data(&*dltensor_ptr);
             Self {
@@ -483,7 +488,7 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// [`Any`](crate::Any), which could outlive it; use [`Tensor`] instead.
 /// Neither misuse compiles:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0597
 /// use tvm_ffi::{Tensor, TensorView};
 /// let view = {
 ///     let tensor = Tensor::from_slice(&[1.0_f32], &[1]).unwrap();
@@ -492,7 +497,7 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// view.ndim();
 /// ```
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use tvm_ffi::{Any, Tensor, TensorView};
 /// let tensor = Tensor::from_slice(&[1.0_f32], &[1]).unwrap();
 /// let _ = Any::from(TensorView::from(&tensor));
@@ -560,9 +565,10 @@ impl<'a> TensorView<'a> {
     /// The number of elements.
     ///
     /// # Panics
-    /// As [`DLTensorExt::numel`].
+    /// If an extent is negative or the product overflows `usize`.
     pub fn numel(&self) -> usize {
-        self.dltensor().numel()
+        // SAFETY: a tensor's shape holds `ndim` extents.
+        unsafe { self.dltensor().numel() }
     }
 
     /// The strides, in elements.

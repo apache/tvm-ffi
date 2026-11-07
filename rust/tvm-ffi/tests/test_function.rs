@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use tvm_ffi::rvalue_ref::RValueRef;
 use tvm_ffi::*;
 
 #[test]

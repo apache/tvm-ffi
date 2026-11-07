@@ -20,7 +20,7 @@
 //! Native Rust structural mutation and mapping.
 //!
 //! [`structural_mutate`] lets a mutator drive recursion, while
-//! [`structural_map`] applies callbacks around engine-owned recursion.
+//! [`structural_map`](crate::structural_map) applies callbacks around engine-owned recursion.
 
 // `_raw` functions move one owned `TVMFFIAny`: forward it once, or import it into `Any` before
 // anything can unwind. Private `extern "C-unwind"` helpers return it in registers on AArch64.
@@ -37,8 +37,6 @@ use std::ops::ControlFlow;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
-pub use super::structural_map::*;
-
 use super::dispatch::Dispatcher;
 use crate::any::{is_plain_inline, Any, AnyView};
 use crate::error::{Error, Result, TYPE_ERROR};
@@ -53,14 +51,14 @@ use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
     field_def_region, for_each_field_info, free_var_child_region, missing_field_getter_error,
-    raw_ffi_any_into_result, raw_ffi_any_same_as, registered_type_index, result_into_raw_ffi_any,
-    runtime_error, seq_hash_kind, with_structural_error_context,
+    raw_ffi_any_into_result, raw_ffi_any_same_as, registered_type_index, reject_error_value,
+    result_into_raw_ffi_any, runtime_error, seq_hash_kind, with_structural_error_context,
     with_structural_field_error_context, wrong_dispatcher, FLAG_SEQ_HASH_IGNORE,
     FLAG_SETTER_IS_FUNCTION,
 };
 use super::structural_visit::DefRegionKind;
 use super::unchanged::is_unchanged;
-pub use super::unchanged::{Unchanged, UnchangedOr};
+use super::unchanged::{Unchanged, UnchangedOr};
 use super::visit_error_context::update_visit_error_context;
 
 const STRUCTURAL_MUTATE_ATTR: &str = "__s_mutate__";
@@ -407,8 +405,10 @@ impl<'a, T> MutationView<'a, T> {
     /// The value as an [`AnyView`].
     #[inline(always)]
     pub fn as_any_view(&self) -> AnyView<'_> {
-        // SAFETY: the input owner keeps this payload live while the view is
-        // borrowed. The returned lifetime is bounded by self, not by 'a.
+        // SAFETY: the input owner, which a handler does not remove from a list
+        // or dict it modifies (the callback contract), keeps this payload live
+        // while the view is borrowed. The returned lifetime is bounded by self,
+        // not by 'a.
         unsafe { AnyView::from_raw_ffi_any(self.value) }
     }
 
@@ -518,8 +518,8 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// Panics if `selector` returns a reference outside the node.
     ///
     /// ```
-    /// # use tvm_ffi::object::ObjectRef;
     /// # use tvm_ffi::*;
+    /// # use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
     /// # #[rs_object("my_ext.MyPair", final)]
     /// # pub struct MyPairObj { base_: Object, pub first: Array<i64>, pub second: Array<i64> }
     /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
@@ -794,6 +794,11 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 /// in-place mutation. A matching callback supplies the final value; unmatched
 /// values use default mutation.
 ///
+/// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
+/// value it receives or one of that value's ancestors: the traversal borrows
+/// their cells while the callback runs. A callback that returns an `Error`
+/// object as its value fails the traversal with a `TypeError`.
+///
 /// # Arguments
 ///
 /// * `root` - Owned value to mutate, convertible into an [`Any`]. A uniquely
@@ -801,7 +806,7 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 /// * `dispatcher` - Owned or mutably borrowed dispatcher implementing [`IntoDispatcher`].
 ///   Matching handlers return replacements and control recursion through
 ///   [`StructuralMutatorView`]; unmatched values use default mutation. For closure
-///   callbacks with automatic recursion, use [`structural_map`].
+///   callbacks with automatic recursion, use [`structural_map`](crate::structural_map).
 ///
 /// # Examples
 ///
@@ -809,10 +814,8 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 /// arrays:
 ///
 /// ```
-/// use tvm_ffi::{
-///     dispatch, structural_mutate, Any, Array, MutationView, Result, StructuralMutatorView,
-///     UnchangedOr,
-/// };
+/// use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
+/// use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
 ///
 /// struct Double;
 ///
@@ -1011,7 +1014,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
             // Map adapters attribute errors to their possibly replaced value;
             // direct mutation attributes callback failures to this input.
             Some(result) => {
-                let result = result.map(Any::from);
+                let result = result.map(Any::from).and_then(reject_error_value);
                 result_into_raw_ffi_any(if CALLBACK_CONTEXT {
                     result.map_err(|error| with_mutation_error_context(error, raw, "mutate"))
                 } else {

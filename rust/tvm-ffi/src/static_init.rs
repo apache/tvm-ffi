@@ -72,7 +72,13 @@ pub use linkme;
 /// library that runs it registers what it defines, and the others skip it. A block of another
 /// version of the crate, or whose text differs, is another block, and registering what it defines
 /// again is an error. A change to the body of a function the block calls does not make another
-/// block: rebuild every library that links a crate after changing it.
+/// block: rebuild every library that links a crate after changing it. A block is known by the
+/// module path, line, crate version and text, so two crates of the same name and version, such as
+/// plugins built from one template, share the identities of their blocks and only the first runs:
+/// give them distinct crate names.
+///
+/// A panic in a block is caught and reported as its error, except under `panic = "abort"`, where
+/// it aborts the process; a failed `rs_object` registration is such a panic.
 #[macro_export]
 macro_rules! static_init_block {
     ($($body:tt)*) => {
@@ -289,6 +295,8 @@ fn run_blocks() -> Vec<(&'static StaticInitBlock, Error)> {
 /// [`tvm_ffi_dll_export_typed_func!`](crate::tvm_ffi_dll_export_typed_func), for its loader to
 /// call. Where the loader does not run the blocks, call it before using what they define.
 pub fn run_static_init_blocks() -> Result<()> {
+    // As at load: what the blocks register keeps this library's code.
+    keep_loaded();
     let mut failures = run_blocks();
     if failures.len() <= 1 {
         return failures.pop().map_or(Ok(()), |(_, error)| Err(error));
