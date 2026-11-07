@@ -135,7 +135,7 @@ macro_rules! impl_as_packed_callable {
             fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>
             {
                 crate::ensure!(
-                    packed_args.len() == $len, crate::error::VALUE_ERROR,
+                    packed_args.len() == $len, crate::error::TYPE_ERROR,
                     "Expected {} arguments, got {}", $len, packed_args.len()
                 );
                 // Expand the function call, consuming the iterator.
