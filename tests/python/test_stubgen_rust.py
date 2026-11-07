@@ -423,7 +423,7 @@ def test_render_root_object() -> None:
         "tvm_ffi::Object",
         "tvm_ffi::ObjectArc",
         "tvm_ffi::ObjectCore",
-        "tvm_ffi::FieldGetter",
+        "tvm_ffi::reflection::FieldGetter",
         "tvm_ffi::Result",
         "tvm_ffi::String",
         "tvm_ffi::Array",
@@ -839,8 +839,8 @@ def test_render_complete_expr_golden() -> None:
         "std::ptr::addr_of_mut",
         "tvm_ffi::Object",
         "tvm_ffi::ObjectArc",
-        "tvm_ffi::ShallowCopy",
-        "tvm_ffi::UnsafeInit",
+        "tvm_ffi::reflection::ShallowCopy",
+        "tvm_ffi::reflection::UnsafeInit",
         "tvm_ffi::reflection::drop_if_defined",
     }
 
@@ -961,7 +961,7 @@ def test_render_complete_enum_field() -> None:
     assert "    pub kind: Kind,\n" in text
     assert "    pub fn new(a: i64, kind: impl Into<Kind>) -> Self {" in text
     assert {"tvm_ffi::Result", "tvm_ffi::Error", "tvm_ffi::VALUE_ERROR"} <= _uses(imports)
-    assert "tvm_ffi::FieldGetter" not in _uses(imports)
+    assert "tvm_ffi::reflection::FieldGetter" not in _uses(imports)
 
 
 def test_allow_missing_docs_and_closed_enum() -> None:
@@ -1059,7 +1059,7 @@ def test_final_type_has_no_unsafe_init() -> None:
     info = _info("demo.Leaf", (_field("a", "int", 24, 8),), total_size=32, is_final=True)
     text, imports = _render(info)
     assert "UnsafeInit" not in text
-    assert "tvm_ffi::UnsafeInit" not in _uses(imports)
+    assert "tvm_ffi::reflection::UnsafeInit" not in _uses(imports)
 
 
 def test_complete_list_field_mirrors() -> None:
@@ -1426,7 +1426,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "tvm_ffi::unsafe_impl_object_ref_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     )
-    assert {"tvm_ffi::String", "tvm_ffi::ShallowCopy"} <= _uses(imports)
+    assert {"tvm_ffi::String", "tvm_ffi::reflection::ShallowCopy"} <= _uses(imports)
 
 
 def test_registry_hidden_field_and_vptr_stay_opaque() -> None:
@@ -1486,7 +1486,9 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert (root / "mod.rs").read_text(encoding="utf-8") == "pub mod testing;\n"
     text = (root / "testing" / "mod.rs").read_text(encoding="utf-8")
     assert text.startswith("#![allow(dead_code, unused_imports)]\n")
-    assert "use tvm_ffi::FieldGetter;" in text  # the opaque fixtures read through getters
+    assert (
+        "use tvm_ffi::reflection::FieldGetter;" in text
+    )  # the opaque fixtures read through getters
     assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
     assert "    base_: TestCxxClassDerivedObj,\n    pub v_str: String," in text
     assert (

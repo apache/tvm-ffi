@@ -220,10 +220,10 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
     // them; only through raw pointers, since some may be undefined.
     let field_ids = fields.iter().map(|field| &field.ident);
     let unsafe_init_impl = quote! {
-        unsafe impl #tvm_ffi::UnsafeInit for #obj {
+        unsafe impl #tvm_ffi::reflection::UnsafeInit for #obj {
             unsafe fn drop_defined_fields(this: *mut Self) {
                 unsafe {
-                    <#base_ty as #tvm_ffi::UnsafeInit>::drop_defined_fields(
+                    <#base_ty as #tvm_ffi::reflection::UnsafeInit>::drop_defined_fields(
                         ::core::ptr::addr_of_mut!((*this).#base_id),
                     );
                     #(#tvm_ffi::reflection::drop_if_defined(

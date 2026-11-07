@@ -107,9 +107,6 @@ pub use crate::object::{
     ObjectIdentity, ObjectRefAnyCompatible, ObjectRefCore,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
-pub use crate::reflection::{
-    FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn, UnsafeInit,
-};
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::static_init::run_static_init_blocks;
 pub use crate::string::{Bytes, String};
@@ -252,7 +249,7 @@ pub use tvm_ffi_macros::match_any;
 ///
 /// * `"type.Key"` - The type key.
 /// * `final` - The type has no subtypes.
-/// * `s_eq_hash_kind = "TreeNode"` - The [`SEqHashKind`] of structural
+/// * `s_eq_hash_kind = "TreeNode"` - The [`SEqHashKind`](crate::reflection::SEqHashKind) of structural
 ///   equality; by default the parent's.
 /// * `child_slots = N`, `child_slots_can_overflow = bool` - Type indices kept
 ///   for subtypes; 0 and `true` by default.
@@ -262,7 +259,7 @@ pub use tvm_ffi_macros::match_any;
 ///   depends on it only through a re-export; by default `tvm_ffi`.
 ///
 /// A field takes `#[reflect(writable, seq_hash_ignore, ...)]` for the
-/// [`FieldFlags`] of those names, and `name = "..."` or `doc = "..."` to
+/// [`FieldFlags`](crate::reflection::FieldFlags) of those names, and `name = "..."` or `doc = "..."` to
 /// register it under another name or with a doc string, by default its `///`
 /// comment.
 ///

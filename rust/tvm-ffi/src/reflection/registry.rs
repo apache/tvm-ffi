@@ -165,7 +165,8 @@ impl BitOr for FieldFlags {
 ///
 /// ```
 /// use tvm_ffi::derive::ObjectRef;
-/// use tvm_ffi::{reflection, rs_object, Object, ObjectArc, ObjectDef, Result};
+/// use tvm_ffi::reflection::{self, ObjectDef};
+/// use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 ///
 /// #[rs_object("my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
 /// pub struct MyPairObj {
@@ -445,14 +446,15 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 
 /// Registers type attributes of the object type `T`, each as soon as
 /// [`attr`](Self::attr) names it, for every language to read with
-/// [`TypeAttrColumn`](crate::TypeAttrColumn).
+/// [`TypeAttrColumn`](crate::reflection::TypeAttrColumn).
 ///
 /// # Examples
 ///
 /// ```
 /// use tvm_ffi::derive::Object;
 /// use tvm_ffi::reflection::TypeAttrDef;
-/// use tvm_ffi::{Object, ObjectCore, TypeAttrColumn};
+/// use tvm_ffi::reflection::TypeAttrColumn;
+/// use tvm_ffi::{Object, ObjectCore};
 ///
 /// #[repr(C)]
 /// #[derive(Object)]

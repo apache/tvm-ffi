@@ -681,7 +681,7 @@ class _ObjectRenderer:
         ancestors = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
         if not all(self._provider(key) == "generated" for key in ancestors):
             return None
-        shallow_copy = self.imports.record("tvm_ffi::ShallowCopy")
+        shallow_copy = self.imports.record("tvm_ffi::reflection::ShallowCopy")
         own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
         init = [
             f"base_: {shallow_copy}::shallow_copy(&self.base_)",
@@ -705,7 +705,7 @@ class _ObjectRenderer:
         anything else goes through ``drop_if_defined``, which skips an undefined field.
         Emitted wherever ``ShallowCopy`` is.
         """
-        unsafe_init = self.imports.record("tvm_ffi::UnsafeInit")
+        unsafe_init = self.imports.record("tvm_ffi::reflection::UnsafeInit")
         addr = self.imports.record("std::ptr::addr_of_mut")
         directives = self.imports.directives
         drops = [f"{unsafe_init}::drop_defined_fields({addr}!((*this).base_));"]
@@ -755,7 +755,7 @@ class _ObjectRenderer:
         has_accessors = bool(fields) and not verdict.is_complete
         if has_accessors:
             self.imports.record("tvm_ffi::ObjectCore")  # `Self::type_index()`
-            self.imports.record("tvm_ffi::FieldGetter")
+            self.imports.record("tvm_ffi::reflection::FieldGetter")
             self.imports.record("tvm_ffi::Result")
 
         # The reference comes first, so a `///` written above the block documents it.

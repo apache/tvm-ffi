@@ -18,7 +18,7 @@
  */
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::reflection::TypeAttrColumn;
-use tvm_ffi::reflection::{FieldFlags, ObjectDef};
+use tvm_ffi::reflection::{FieldFlags, FieldGetter, ObjectDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{
     TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIGetTypeInfo,

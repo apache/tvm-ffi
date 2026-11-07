@@ -19,7 +19,9 @@
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{ObjectArc, ObjectRef, ObjectRefCore};
 use tvm_ffi::reflection::TypeAttrColumn;
-use tvm_ffi::reflection::{drop_if_defined, FieldFlags, ObjectDef};
+use tvm_ffi::reflection::{
+    drop_if_defined, FieldFlags, FieldGetter, ObjectDef, ShallowCopy, UnsafeInit,
+};
 use tvm_ffi::*;
 use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFITypeInfo};
 

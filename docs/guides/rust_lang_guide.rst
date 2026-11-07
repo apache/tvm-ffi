@@ -347,7 +347,7 @@ first ``type_index()``, which allocating an instance calls:
 Each reflected field gets a C ABI getter and setter, its doc string and its
 type schema, so structural equality and hashing, ``ffi.ReprPrint``,
 ``ffi.DeepCopy`` and Python see it. The flags in ``#[reflect(...)]`` name
-``tvm_ffi::FieldFlags`` constants; ``name = "..."`` registers the field under
+``tvm_ffi::reflection::FieldFlags`` constants; ``name = "..."`` registers the field under
 another name, and ``doc = "..."`` sets its doc string, otherwise the field's
 ``///`` doc comment. Without ``#[type_s_eq_hash_kind]``, a type keeps its
 nearest reflected ancestor's kind. The derive also implements ``ShallowCopy``
