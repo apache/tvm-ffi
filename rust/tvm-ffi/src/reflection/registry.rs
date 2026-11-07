@@ -287,6 +287,14 @@ impl<N: ObjectCore> ObjectDef<N> {
                 F::type_str()
             );
         }
+        let type_str = F::type_str();
+        crate::ensure!(
+            !is_option_of_value(&type_str),
+            TYPE_ERROR,
+            "field `{name}` of `{}`: `Option` of a non-object value (`{type_str}`) has no FFI \
+             field layout; only `Option` of an object reference can be reflected",
+            N::TYPE_KEY
+        );
         let metadata = type_schema_metadata(&F::type_schema());
         let info = TVMFFIFieldInfo {
             name: unsafe { TVMFFIByteArray::from_str(name) },
@@ -299,7 +307,7 @@ impl<N: ObjectCore> ObjectDef<N> {
             getter: Some(field_getter::<F>),
             setter: field_setter::<F> as TVMFFIFieldSetter as *mut c_void,
             default_value_or_factory: TVMFFIAny::new(),
-            field_static_type_index: field_static_type_index(&F::type_str()),
+            field_static_type_index: field_static_type_index(&type_str),
         };
         // The table copies the strings before returning.
         crate::check_safe_call!(unsafe { TVMFFITypeRegisterField(self.type_index, &info) })?;
@@ -706,6 +714,18 @@ fn field_static_type_index(type_str: &str) -> i32 {
         // Any other object reference, `Map` included, is typed `Object` statically.
         _ => kTVMFFIStaticObjectBegin as i32,
     }
+}
+
+/// Whether `type_str` is a Rust `Option` of a non-object value. Readers take an
+/// `Optional` field as an object pointer or a `TVMFFIAny` cell, and such an
+/// `Option` is laid out as neither.
+fn is_option_of_value(type_str: &str) -> bool {
+    type_str
+        .strip_prefix("Optional<")
+        .and_then(|inner| inner.strip_suffix('>'))
+        .is_some_and(|inner| {
+            field_static_type_index(inner) < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
+        })
 }
 
 #[cfg(test)]
