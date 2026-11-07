@@ -236,15 +236,17 @@ impl<N: ObjectCore> ObjectDef<N> {
             N::TYPE_KEY
         );
         let fresh = (*info).metadata.is_null();
-        // `finish` writes `__ffi_type_final__` last: metadata without it is
-        // left by a registration that failed partway.
+        // `finish` writes `__ffi_type_final__` last, as C++ `ObjectDef` and
+        // Python `py_class` do: metadata without it is left by a registration
+        // that failed partway, or by one that does not publish finality.
         crate::ensure!(
             fresh
                 || super::TypeAttrColumn::lookup("__ffi_type_final__")
                     .and_then(|column| column.get_raw_ffi_any(type_index))
                     .is_some_and(|cell| cell.type_index != TVMFFITypeIndex::kTVMFFINone as i32),
             INTERNAL_ERROR,
-            "`{}` is partly registered: an earlier registration of it failed",
+            "`{}` has reflection metadata but no `__ffi_type_final__`: an earlier registration \
+             of it failed, or another language registered the key without it",
             N::TYPE_KEY
         );
         if fresh {
