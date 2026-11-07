@@ -124,7 +124,8 @@ pub(crate) fn expand_object(
     };
 
     // A type with a static index has it; one defined here registers its key
-    // under its parent on first use, or takes the index the key already has,
+    // under its parent on its first `type_index()`, which a static init block
+    // calls at load, or takes the index the key already has,
     // as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does; any other type binds the
     // index its defining library registered.
     let type_index_tokens = match get_attr(derive_input, "type_index") {
@@ -160,9 +161,8 @@ pub(crate) fn expand_object(
                             // same lock.
                             let parent =
                                 <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                            let _registering = #tvm_ffi_crate::object::TYPE_REGISTRATION
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner());
+                            let _registering =
+                                #tvm_ffi_crate::object::lock_type_registration();
                             let type_key_arg =
                                  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
                             let tindex = #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeGetOrAllocIndex(
@@ -221,6 +221,23 @@ pub(crate) fn expand_object(
                 }
             }
         }
+    };
+    // A type defined here registers when its library loads, as a C++ type does
+    // through `refl::ObjectDef` in a static init block; a binding stays lazy.
+    let register_at_load = if type_register && get_attr(derive_input, "type_index").is_none() {
+        if !derive_input.generics.params.is_empty() {
+            abort!(
+                struct_name,
+                "#[type_register] needs a struct without generic parameters"
+            );
+        }
+        quote! {
+            #tvm_ffi_crate::static_init_block! {
+                let _ = <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index();
+            }
+        }
+    } else {
+        quote! {}
     };
     // search for field name base and derive the base type
     // we expect base always to be the first field
@@ -296,6 +313,8 @@ pub(crate) fn expand_object(
         }
 
         #shallow_copy_impl
+
+        #register_at_load
     }
 }
 

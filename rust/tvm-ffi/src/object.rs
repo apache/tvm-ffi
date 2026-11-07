@@ -30,11 +30,23 @@ use crate::type_traits::AnyCompatible;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
-/// Held while `#[derive(Object)]` with `#[type_register]` registers a type, so
-/// that registrations from Rust do not race each other: the runtime does not
-/// lock its type table and leaves that to callers.
+// Type registration: writes to the runtime's type table from Rust, and the
+// check that a key registered elsewhere matches its Rust declaration.
+
+/// Held around every write to the type table from Rust, so that registrations
+/// from Rust do not race each other: the runtime does not lock its type table
+/// and leaves that to callers.
+static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Holds the lock around every write to the type table from Rust. A panic in
+/// another registration leaves the table consistent, so a poisoned lock is
+/// still taken.
 #[doc(hidden)]
-pub static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub fn lock_type_registration() -> std::sync::MutexGuard<'static, ()> {
+    TYPE_REGISTRATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// Panics unless `type_index`, the index `#[derive(Object)]` registered or
 /// bound for `T`'s key, describes `T`: a key registered by another library or

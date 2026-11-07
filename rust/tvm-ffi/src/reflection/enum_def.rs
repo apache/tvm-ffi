@@ -23,11 +23,13 @@
 use std::marker::PhantomData;
 use std::mem::{align_of, size_of};
 
-use super::registry::ensure_not_opaque_ptr;
-use super::{get_method, NativeFunction, TypeAttrColumn, TypeAttrDef};
+use super::registry::{ensure_not_opaque_ptr, register_type_attr};
+use super::{get_method, NativeFunction, TypeAttrColumn};
 use crate::any::TryFromTemp;
 use crate::derive::{Object, ObjectRef};
-use crate::object::{is_instance_of, Object, ObjectArc, ObjectCore, ObjectRef};
+use crate::object::{
+    is_instance_of, lock_type_registration, Object, ObjectArc, ObjectCore, ObjectRef,
+};
 use crate::tvm_ffi_sys::{TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeInfo};
 use crate::type_traits::AnyCompatible;
 use crate::{Any, AnyView, EnumObj, EnumRef, Error, List, Result, String, TYPE_ERROR, VALUE_ERROR};
@@ -38,6 +40,11 @@ use crate::{Any, AnyView, EnumObj, EnumRef, Error, List, Result, String, TYPE_ER
 /// [`set_attr`](Self::set_attr) sets each attribute on it, which
 /// [`EnumRef::attr_map`] reads. The value's object is an [`EnumObj`], so `E`'s
 /// object type adds no fields to its parent `EnumObj`.
+///
+/// As in C++, values and attributes register during static initialization,
+/// such as in a [`static_init_block!`](crate::static_init_block), before other
+/// threads read them: registrations from Rust lock each other out, but
+/// readers take no lock.
 ///
 /// # Examples
 ///
@@ -125,7 +132,8 @@ impl<E: EnumRef> EnumDef<E> {
                 "",
             ));
         }
-        let state = ensure_state::<E>()?;
+        let _registering = lock_type_registration();
+        let state = ensure_state(type_index)?;
         let index = state.entries.len() as i64;
         let key = String::from(name);
         let indexes = AnyView::from(&state.indexes);
@@ -200,7 +208,10 @@ impl<E: EnumRef> EnumDef<E> {
     }
 
     fn set_attr_any(self, name: &str, value: Any) -> Result<Self> {
-        let state = ensure_state::<E>()?;
+        // Before the lock, which a first `type_index()` takes to register `E`.
+        let type_index = E::ContainerType::type_index();
+        let _registering = lock_type_registration();
+        let state = ensure_state(type_index)?;
         let attrs = AnyView::from(&state.attrs);
         let key = String::from(name);
         let column = match dict_get(attrs, AnyView::from(&key))? {
@@ -290,14 +301,15 @@ pub(crate) fn enum_state(type_index: i32) -> Result<Option<EnumState>> {
     column.get(type_index).map(EnumState::try_from).transpose()
 }
 
-/// The registry of `E`, created with its first value.
-fn ensure_state<E: EnumRef>() -> Result<EnumState> {
-    if let Some(state) = enum_state(E::ContainerType::type_index())? {
+/// The registry of the enum type `type_index`, created with its first value,
+/// under the registration lock.
+fn ensure_state(type_index: i32) -> Result<EnumState> {
+    if let Some(state) = enum_state(type_index)? {
         return Ok(state);
     }
     let state: EnumState =
         any_into(get_method("ffi.EnumState", "__ffi_init__")?.call_packed(&[])?)?;
-    TypeAttrDef::<E::ContainerType>::new().attr(ENUM_STATE_ATTR, state.clone())?;
+    register_type_attr(type_index, ENUM_STATE_ATTR, Any::from(state.clone()))?;
     Ok(state)
 }
 

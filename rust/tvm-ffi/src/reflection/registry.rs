@@ -42,7 +42,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::NativeFunction;
 use crate::function_internal::AsPackedCallable;
-use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
+use crate::object::{
+    lock_type_registration, Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore,
+};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter,
     TVMFFIGetTypeInfo, TVMFFIMethodInfo, TVMFFIObject, TVMFFIObjectCreator, TVMFFIObjectHandle,
@@ -159,7 +161,8 @@ impl BitOr for FieldFlags {
 ///
 /// That function runs under the registration lock, before `N::type_index()`
 /// returns, so it must not call `type_index()` of `N` or of another Rust type
-/// that is not registered yet. When `N` already has metadata in the type
+/// that is not registered yet, nor register attributes with [`TypeAttrDef`]
+/// or [`EnumDef`](super::EnumDef). When `N` already has metadata in the type
 /// table, every call is a no-op.
 ///
 /// # Examples
@@ -431,7 +434,8 @@ impl<N: ObjectCore> ObjectDef<N> {
 /// # Safety
 ///
 /// As `ObjectDef::registering`; `fields` registers fields of `N` as
-/// [`ObjectDef::field`] requires.
+/// [`ObjectDef::field`] requires. Like every registration, it runs during
+/// static initialization, before other threads read the type.
 #[doc(hidden)]
 pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
     type_index: i32,
@@ -448,6 +452,11 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 /// Registers type attributes of the object type `T`, each as soon as
 /// [`attr`](Self::attr) names it, for every language to read with
 /// [`TypeAttrColumn`](crate::reflection::TypeAttrColumn).
+///
+/// As in C++, attributes register during static initialization, such as in a
+/// [`static_init_block!`](crate::static_init_block), before other threads
+/// read them: registrations from Rust lock each other out, but readers take
+/// no lock.
 ///
 /// # Examples
 ///
@@ -502,8 +511,7 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     pub fn attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
         let value = value.into();
         ensure_not_opaque_ptr(name, &value)?;
-        register_type_attr(T::type_index(), name, value)?;
-        Ok(self)
+        self.register(name, value)
     }
 
     /// Register the native hook `f` as the type attribute `name` of `T`.
@@ -530,7 +538,14 @@ impl<T: ObjectCore> TypeAttrDef<T> {
         name: &str,
         f: NativeFunction<Args, R>,
     ) -> Result<Self> {
-        register_type_attr(T::type_index(), name, f.into_any())?;
+        self.register(name, f.into_any())
+    }
+
+    fn register(self, name: &str, value: Any) -> Result<Self> {
+        // Before the lock, which a first `type_index()` takes to register `T`.
+        let type_index = T::type_index();
+        let _registering = lock_type_registration();
+        register_type_attr(type_index, name, value)?;
         Ok(self)
     }
 }
@@ -588,7 +603,8 @@ fn object_type_key(object: &ObjectRef) -> String {
     unsafe { (*info).type_key.as_str().to_string() }
 }
 
-fn register_type_attr(type_index: i32, name: &str, mut value: Any) -> Result<()> {
+/// The caller holds the registration lock.
+pub(super) fn register_type_attr(type_index: i32, name: &str, mut value: Any) -> Result<()> {
     let name = unsafe { TVMFFIByteArray::from_str(name) };
     // The table takes its own reference to the value.
     let value = Any::as_raw_ffi_any_mut(&mut value);
