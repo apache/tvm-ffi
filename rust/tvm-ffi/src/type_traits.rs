@@ -84,6 +84,14 @@ pub unsafe trait AnyCompatible: Sized {
         false
     }
 
+    /// Whether a reflected field of this type is laid out as readers of its
+    /// static type index expect: an `Optional` field as a nullable object
+    /// pointer or a `TVMFFIAny` cell.
+    #[doc(hidden)]
+    fn has_field_layout() -> bool {
+        true
+    }
+
     /// Write a cell that borrows `src` into `data`.
     ///
     /// # Safety
@@ -780,6 +788,12 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
 
     fn type_schema() -> String {
         type_schema("Optional", &[<T as AnyCompatible>::type_schema()])
+    }
+
+    fn has_field_layout() -> bool {
+        // Only an `Option` of an object reference is the nullable pointer.
+        crate::reflection::field_static_type_index(&T::type_str())
+            >= TypeIndex::kTVMFFIStaticObjectBegin as i32
     }
 
     unsafe fn is_undefined(field: *const Self) -> bool {

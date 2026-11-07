@@ -218,6 +218,26 @@ pub struct RsInitOffReferenceObj {
     pub items: Array<i64>,
 }
 
+/// Optional non-object fields, each one `TVMFFIAny` cell as in C++.
+#[rs_object("testing.rust.RsOptionals", final)]
+pub struct RsOptionalsObj {
+    base_: Object,
+    pub count: Optional<i64>,
+    pub name: Optional<tvm_ffi::String>,
+}
+
+#[derive(Clone, ObjectRef)]
+pub struct RsOptionals {
+    data: ObjectArc<RsOptionalsObj>,
+}
+
+/// An `Option` of a scalar, which has no FFI field layout: its registration fails.
+#[rs_object("testing.rust.RsOptionScalar", final)]
+pub struct RsOptionScalarObj {
+    base_: Object,
+    pub count: Option<i64>,
+}
+
 /// A crate that reaches tvm-ffi only through a re-export names it with `crate`.
 mod reexported {
     // The bare `tvm_ffi` here is not the crate, as in a crate without the dependency.
@@ -628,6 +648,33 @@ fn test_init_off_fields_take_all_zero_bytes_as_a_value() {
     let message = error.message();
     assert!(
         message.contains("`init_off` field `items` of `testing.rust.RsInitOffReference`"),
+        "{message}"
+    );
+}
+
+#[test]
+fn test_optional_fields_are_any_cells() {
+    for field in fields(type_info::<RsOptionalsObj>()) {
+        assert_eq!((field.size, field.field_static_type_index), (16, -1));
+    }
+    let init = type_attr_function(RsOptionalsObj::type_index(), "__ffi_init__");
+    let value = init.call_tuple((7_i64, Any::new())).unwrap();
+    let json = call(
+        "ffi.ToJSONGraphString",
+        &[AnyView::from(&value), AnyView::from(&Any::new())],
+    );
+    let back =
+        RsOptionals::try_from(call("ffi.FromJSONGraphString", &[AnyView::from(&json)])).unwrap();
+    assert_eq!((back.count.get(), back.name.get()), (Some(7), None));
+    let name = FieldGetter::new(RsOptionalsObj::type_index(), "name").unwrap();
+    assert_eq!(name.get_any(&*back).unwrap().type_index(), 0);
+
+    // The `Option<i64>` type fails to register when the test binary loads.
+    let error = tvm_ffi::run_static_init_blocks().unwrap_err();
+    let message = error.message();
+    assert!(
+        message.contains("field `count` of `testing.rust.RsOptionScalar`")
+            && message.contains("use `tvm_ffi::Optional<T>`"),
         "{message}"
     );
 }
