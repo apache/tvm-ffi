@@ -23,7 +23,8 @@
 use std::marker::PhantomData;
 use std::mem::{align_of, size_of};
 
-use super::{get_method, TypeAttrColumn, TypeAttrDef};
+use super::registry::ensure_not_opaque_ptr;
+use super::{get_method, NativeFunction, TypeAttrColumn, TypeAttrDef};
 use crate::any::TryFromTemp;
 use crate::derive::{Object, ObjectRef};
 use crate::object::{is_instance_of, Object, ObjectArc, ObjectCore, ObjectRef};
@@ -163,7 +164,42 @@ impl<E: EnumRef> EnumDef<E> {
     /// # Returns
     ///
     /// The builder, for the next attribute.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` if `value` is an opaque pointer: set a native
+    /// hook with [`set_native_fn_attr`](Self::set_native_fn_attr).
     pub fn set_attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
+        let value = value.into();
+        ensure_not_opaque_ptr(name, &value)?;
+        self.set_attr_any(name, value)
+    }
+
+    /// Set the native hook `f` as the attribute `name` of the value.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the attribute.
+    /// * `f` - The hook.
+    ///
+    /// # Returns
+    ///
+    /// The builder, for the next attribute.
+    ///
+    /// # Safety
+    ///
+    /// Every caller of the attribute `name` calls its hooks with exactly
+    /// `Args` and reads `R`: a native caller calls the function pointer
+    /// unchecked.
+    pub unsafe fn set_native_fn_attr<Args, R>(
+        self,
+        name: &str,
+        f: NativeFunction<Args, R>,
+    ) -> Result<Self> {
+        self.set_attr_any(name, f.into_any())
+    }
+
+    fn set_attr_any(self, name: &str, value: Any) -> Result<Self> {
         let state = ensure_state::<E>()?;
         let attrs = AnyView::from(&state.attrs);
         let key = String::from(name);
@@ -175,7 +211,6 @@ impl<E: EnumRef> EnumDef<E> {
                 column
             }
         };
-        let value = value.into();
         dict_set(
             AnyView::from(&column),
             AnyView::from(&self.value),

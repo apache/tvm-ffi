@@ -40,6 +40,7 @@ use std::mem::{align_of, size_of};
 use std::ops::BitOr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use super::NativeFunction;
 use crate::function_internal::AsPackedCallable;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
 use crate::tvm_ffi_sys::{
@@ -495,11 +496,55 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     ///
     /// # Errors
     ///
-    /// Returns an error if `T` already has the attribute `name`.
+    /// Returns an error if `T` already has the attribute `name`, or a
+    /// `TypeError` if `value` is an opaque pointer: register a native hook
+    /// with [`native_fn_attr`](Self::native_fn_attr).
     pub fn attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
-        register_type_attr(T::type_index(), name, value.into())?;
+        let value = value.into();
+        ensure_not_opaque_ptr(name, &value)?;
+        register_type_attr(T::type_index(), name, value)?;
         Ok(self)
     }
+
+    /// Register the native hook `f` as the type attribute `name` of `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the attribute.
+    /// * `f` - The hook.
+    ///
+    /// # Returns
+    ///
+    /// The builder, for the next attribute.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `T` already has the attribute `name`.
+    ///
+    /// # Safety
+    ///
+    /// Every caller of the column `name` calls its hooks with exactly `Args`
+    /// and reads `R`: a native caller calls the function pointer unchecked.
+    pub unsafe fn native_fn_attr<Args, R>(
+        self,
+        name: &str,
+        f: NativeFunction<Args, R>,
+    ) -> Result<Self> {
+        register_type_attr(T::type_index(), name, f.into_any())?;
+        Ok(self)
+    }
+}
+
+/// Native callers of an attribute call an opaque pointer as a function, so
+/// only [`NativeFunction`] may store one, through an `unsafe` registration.
+pub(super) fn ensure_not_opaque_ptr(name: &str, value: &Any) -> Result<()> {
+    crate::ensure!(
+        value.type_index() != TVMFFITypeIndex::kTVMFFIOpaquePtr as i32,
+        TYPE_ERROR,
+        "attribute `{name}` cannot be an opaque pointer; register a native hook through \
+         `NativeFunction`"
+    );
+    Ok(())
 }
 
 /// The structural kind of the nearest ancestor of `info` with metadata.

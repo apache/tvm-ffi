@@ -18,7 +18,7 @@
  */
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::reflection::{FieldFlags, FieldGetter, ObjectDef};
-use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn};
+use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn, TypeAttrDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{
     TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIGetTypeInfo,
@@ -628,14 +628,27 @@ fn test_native_function() -> Result<()> {
             x => Ok(x),
         }
     };
-    let stored = Any::from(NativeFunction::<(&PointObj,), i64>::from(x_of));
-    // SAFETY: the hook was built with this signature.
-    let x_of: NativeFunction<(&PointObj,), i64> = unsafe { NativeFunction::from_any(stored)? };
+    let hook = NativeFunction::<(&PointObj,), i64>::from(x_of);
+    // SAFETY: `testing.x_of` holds `i64(const PointObj*)` hooks.
+    unsafe { TypeAttrDef::<PointObj>::new().native_fn_attr("testing.x_of", hook)? };
+    let stored = TypeAttrColumn::new("testing.x_of")
+        .unwrap()
+        .get(PointObj::type_index());
+    // SAFETY: as above.
+    let x_of: NativeFunction<(&PointObj,), i64> =
+        unsafe { NativeFunction::from_any(stored.unwrap())? };
     assert_eq!(x_of.call((&*p.data,))?, 3);
     let error = x_of.call((&*point(0, 0.5, "p").data,)).unwrap_err();
     assert_eq!(error.kind(), VALUE_ERROR);
 
     // SAFETY: an integer is rejected before any call.
     assert!(unsafe { NativeFunction::<()>::from_any(Any::from(1_i64)) }.is_err());
+    // A raw pointer is no hook.
+    let pointer = Any::from(std::ptr::null_mut::<std::ffi::c_void>());
+    let error = TypeAttrDef::<PointObj>::new()
+        .attr("testing.raw", pointer)
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), TYPE_ERROR);
     Ok(())
 }
