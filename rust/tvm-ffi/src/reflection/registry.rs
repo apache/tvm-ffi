@@ -443,6 +443,63 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
     def.finish()
 }
 
+/// Registers type attributes of the object type `T`, each as soon as
+/// [`attr`](Self::attr) names it, for every language to read with
+/// [`TypeAttrColumn`](crate::TypeAttrColumn).
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::derive::Object;
+/// use tvm_ffi::reflection::TypeAttrDef;
+/// use tvm_ffi::{Object, ObjectCore, TypeAttrColumn};
+///
+/// #[repr(C)]
+/// #[derive(Object)]
+/// #[type_key = "my_ext.MyPair"]
+/// #[type_register]
+/// pub struct MyPairObj {
+///     base_: Object,
+/// }
+///
+/// TypeAttrDef::<MyPairObj>::new().attr("my_ext.arity", 2_i64)?;
+///
+/// let column = TypeAttrColumn::new("my_ext.arity").unwrap();
+/// let arity: i64 = column.get(MyPairObj::type_index()).unwrap().try_into()?;
+/// assert_eq!(arity, 2);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+pub struct TypeAttrDef<T: ObjectCore> {
+    _type: PhantomData<fn() -> T>,
+}
+
+impl<T: ObjectCore> TypeAttrDef<T> {
+    /// A builder for the type attributes of `T`.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self { _type: PhantomData }
+    }
+
+    /// Register the type attribute `name` of `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the attribute.
+    /// * `value` - The value of the attribute.
+    ///
+    /// # Returns
+    ///
+    /// The builder, for the next attribute.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `T` already has the attribute `name`.
+    pub fn attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
+        register_type_attr(T::type_index(), name, value.into())?;
+        Ok(self)
+    }
+}
+
 /// The structural kind of the nearest ancestor of `info` with metadata.
 unsafe fn inherited_kind(info: *const crate::tvm_ffi_sys::TVMFFITypeInfo) -> i32 {
     for depth in (0..(*info).type_depth).rev() {

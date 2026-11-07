@@ -18,17 +18,20 @@
  */
 
 //! Object reflection: look up the methods, fields and type attributes of
-//! registered types, and register Rust object types with [`ObjectDef`].
+//! registered types; register Rust object types with [`ObjectDef`], type
+//! attributes with [`TypeAttrDef`] and enum values with [`EnumDef`].
 
 mod access_path;
 mod accessor;
+pub(crate) mod enum_def;
 mod registry;
 mod unsafe_init;
 pub use access_path::{AccessKind, AccessPath, AccessPathObj, AccessStep, AccessStepObj};
 pub use accessor::{get_method, get_method_by_index, FieldGetter, TypeAttrColumn};
+pub use enum_def::{EnumAttrMap, EnumDef};
 #[doc(hidden)]
 pub use registry::register_object;
-pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy};
+pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrDef};
 #[doc(hidden)]
 pub use unsafe_init::{drop_if_defined, unsafe_init_creator};
 pub use unsafe_init::{unsafe_init, UnsafeInit};

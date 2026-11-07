@@ -49,6 +49,7 @@ pub mod collections;
 pub mod derive;
 pub mod device;
 pub mod dtype;
+pub mod enum_ref;
 pub mod error;
 pub mod extra;
 pub mod function;
@@ -76,6 +77,7 @@ pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor, TensorView};
 pub use crate::device::{current_stream, with_stream};
 pub use crate::dtype::DLDataTypeExt;
+pub use crate::enum_ref::{EnumObj, EnumRef};
 pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
