@@ -156,16 +156,17 @@ pub const COMBINED_REF_COUNT_WEAK_ONE: u64 = 1u64 << 32;
 pub const COMBINED_REF_COUNT_BOTH_ONE: u64 =
     COMBINED_REF_COUNT_STRONG_ONE | COMBINED_REF_COUNT_WEAK_ONE;
 
-#[repr(C)]
+// `align(8)` pads `deleter` to the 8 bytes of the C union with `int64_t` on
+// 32-bit targets.
+#[repr(C, align(8))]
 pub struct TVMFFIObject {
     pub combined_ref_count: AtomicU64,
     pub type_index: i32,
     pub __padding: u32,
     pub deleter: Option<TVMFFIObjectDeleter>,
-    // private padding to ensure 8 bytes alignment
-    #[cfg(target_pointer_width = "32")]
-    __padding: u32,
 }
+
+const _: () = assert!(size_of::<TVMFFIObject>() == 24 && align_of::<TVMFFIObject>() == 8);
 
 impl TVMFFIObject {
     #[allow(clippy::new_without_default)]
@@ -569,12 +570,16 @@ unsafe extern "C" {
     pub fn TVMFFIBigIntGetContentByteArray(value: *const TVMFFIAny) -> TVMFFIByteArray;
     pub fn TVMFFIDataTypeFromString(str: *const TVMFFIByteArray, out: *mut DLDataType) -> i32;
     pub fn TVMFFIDataTypeToString(dtype: *const DLDataType, out: *mut TVMFFIAny) -> i32;
-    pub fn TVMFFITraceback(
-        filename: *const i8,
-        lineno: i32,
-        func: *const i8,
-        cross_ffi_boundary: i32,
+    pub fn TVMFFIBacktrace(
+        filename: *const std::ffi::c_char,
+        lineno: std::ffi::c_int,
+        func: *const std::ffi::c_char,
+        cross_ffi_boundary: std::ffi::c_int,
     ) -> *const TVMFFIByteArray;
     pub fn TVMFFIGetTypeInfo(type_index: i32) -> *const TVMFFITypeInfo;
+}
+
+#[cfg(feature = "testing")]
+unsafe extern "C" {
     pub fn TVMFFITestingDummyTarget() -> i32;
 }
