@@ -43,9 +43,10 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// caller vouching for the signature, and then calling it is safe. Building a
 /// hook from a Rust function with `into()` is safe; storing it, with
 /// [`TypeAttrDef::native_fn_attr`](super::TypeAttrDef::native_fn_attr) or
-/// [`EnumDef::set_native_fn_attr`](super::EnumDef::set_native_fn_attr), is
-/// `unsafe`, the caller vouching that the slot's callers use exactly this
-/// signature.
+/// [`EnumDef::set_native_fn_attr`](super::EnumDef::set_native_fn_attr), or
+/// converting it to [`Any`] for another registry with
+/// [`into_any`](Self::into_any), is `unsafe`, the caller vouching that the
+/// slot's callers use exactly this signature.
 ///
 /// # Examples
 ///
@@ -180,8 +181,18 @@ impl<Args, R> NativeFunction<Args, R> {
         })
     }
 
-    /// The opaque pointer of a native function, or the packed [`Function`].
-    pub(crate) fn into_any(self) -> Any {
+    /// The hook as a registry slot holds it: the opaque pointer of a native
+    /// function, or the packed [`Function`].
+    ///
+    /// This is how a registry other than a type or enum attribute stores a
+    /// hook; [`from_any`](Self::from_any) reads it back.
+    ///
+    /// # Safety
+    ///
+    /// Every reader of the slot that stores the result calls it with exactly
+    /// `Args` and reads `R`: a native caller calls the function pointer
+    /// unchecked.
+    pub unsafe fn into_any(self) -> Any {
         self.data
     }
 }

@@ -558,7 +558,8 @@ impl<T: ObjectCore> TypeAttrDef<T> {
         name: &str,
         f: NativeFunction<Args, R>,
     ) -> Result<Self> {
-        self.register(name, f.into_any())
+        // SAFETY: the caller vouches for the readers of `name`.
+        self.register(name, unsafe { f.into_any() })
     }
 
     fn register(self, name: &str, value: Any) -> Result<Self> {

@@ -212,7 +212,8 @@ impl<E: EnumRef> EnumDef<E> {
         name: &str,
         f: NativeFunction<Args, R>,
     ) -> Result<Self> {
-        self.set_attr_any(name, f.into_any())
+        // SAFETY: the caller vouches for the readers of `name`.
+        self.set_attr_any(name, unsafe { f.into_any() })
     }
 
     fn set_attr_any(self, name: &str, value: Any) -> Result<Self> {
