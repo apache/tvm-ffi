@@ -55,7 +55,7 @@ unsafe impl Sync for Bytes {}
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Bytes"]
-#[type_index(TypeIndex::kTVMFFIBytes)]
+#[type_index(unsafe TypeIndex::kTVMFFIBytes)]
 pub(crate) struct BytesObj {
     object: Object,
     data: TVMFFIByteArray,
@@ -247,6 +247,9 @@ impl Debug for Bytes {
 /// An immutable UTF-8 string, passed across languages as `ffi.String`
 /// (Python `str`).
 ///
+/// An `ffi.String` holds UTF-8 by contract, which other languages keep, so
+/// [`as_str`](Self::as_str) does not validate strings received through FFI.
+///
 /// Short strings are stored inline in an [`Any`](crate::Any) without an
 /// allocation.
 ///
@@ -273,7 +276,7 @@ unsafe impl Sync for String {}
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.String"]
-#[type_index(TypeIndex::kTVMFFIStr)]
+#[type_index(unsafe TypeIndex::kTVMFFIStr)]
 pub(crate) struct StringObj {
     object: Object,
     data: TVMFFIByteArray,

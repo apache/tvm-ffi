@@ -18,7 +18,7 @@
  */
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::reflection::{FieldFlags, FieldGetter, ObjectDef};
-use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn};
+use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn, TypeAttrDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{
     TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIGetTypeInfo,
@@ -100,7 +100,7 @@ struct Point3 {
     data: ObjectArc<Point3Obj>,
 }
 
-tvm_ffi::unsafe_impl_object_ref_upcast!(Point3 => Point);
+tvm_ffi::impl_object_ref_upcast!(unsafe Point3 => Point);
 
 fn point_obj(x: i64, y: f64, label: &str) -> PointObj {
     PointObj {
@@ -159,23 +159,8 @@ fn call(name: &str, args: &[AnyView]) -> Any {
         .unwrap()
 }
 
-// A type registers on first use, and the runtime does not guard its type table
-// against readers on other threads, so each test registers every type here
-// before it reads the table.
-fn register_types() {
-    static REGISTERED: std::sync::Once = std::sync::Once::new();
-    REGISTERED.call_once(|| {
-        PointObj::type_index();
-        Point3Obj::type_index();
-        CounterObj::type_index();
-        TallyObj::type_index();
-        no_imports::LeafObj::type_index();
-    });
-}
-
 #[test]
 fn test_reflected_fields_are_registered_with_the_type() {
-    register_types();
     let info = type_info::<PointObj>();
     let names: Vec<&str> = fields(info)
         .iter()
@@ -232,7 +217,6 @@ fn test_reflected_fields_are_registered_with_the_type() {
 
 #[test]
 fn test_field_docs_come_from_doc_comments_or_reflect() {
-    register_types();
     let [x, y, label] = fields(type_info::<PointObj>()) else {
         unreachable!()
     };
@@ -251,7 +235,6 @@ fn test_field_docs_come_from_doc_comments_or_reflect() {
 
 #[test]
 fn test_methods_are_registered_with_the_type() {
-    register_types();
     let info = type_info::<PointObj>();
     let names: Vec<&str> = methods(info)
         .iter()
@@ -289,7 +272,6 @@ fn test_methods_are_registered_with_the_type() {
 
 #[test]
 fn test_methods_are_called_through_the_type_table() {
-    register_types();
     let norm1 = tvm_ffi::reflection::get_method("testing.rust.ReflectedPoint", "norm1").unwrap();
     let norm = f64::try_from(norm1.call_tuple((point(3, -4.5, "p"),)).unwrap()).unwrap();
     assert_eq!(norm, 7.5);
@@ -338,13 +320,12 @@ impl TallyObj {
 
 #[test]
 fn test_types_with_only_methods_register_their_reflection() {
-    register_types();
     let info = type_info::<TallyObj>();
     assert_eq!(info.num_fields, 0);
     assert!(!info.metadata.is_null());
     assert_eq!(methods(info).len(), 1);
     assert!(bool::try_from(
-        TypeAttrColumn::new("__ffi_type_final__")
+        TypeAttrColumn::lookup("__ffi_type_final__")
             .and_then(|column| column.get(TallyObj::type_index()))
             .unwrap()
     )
@@ -364,7 +345,6 @@ fn test_types_with_only_methods_register_their_reflection() {
 
 #[test]
 fn test_reflected_fields_read_and_write_through_the_c_abi() {
-    register_types();
     let p3 = point3(3, 4);
     let x = FieldGetter::new(Point3Obj::type_index(), "x").unwrap();
     let z = FieldGetter::new(Point3Obj::type_index(), "z").unwrap();
@@ -399,7 +379,6 @@ fn test_reflected_fields_read_and_write_through_the_c_abi() {
 
 #[test]
 fn test_cpp_structural_equality_and_hash_see_reflected_fields() {
-    register_types();
     let equal = |a: &Point, b: &Point| -> bool {
         let (a, b) = (Any::from(a.clone()), Any::from(b.clone()));
         let args = [
@@ -432,7 +411,6 @@ fn test_cpp_structural_equality_and_hash_see_reflected_fields() {
 
 #[test]
 fn test_repr_and_deep_copy_see_reflected_fields() {
-    register_types();
     let p = Any::from(point(5, 1.5, "hidden"));
     let repr = tvm_ffi::String::try_from(call("ffi.ReprPrint", &[AnyView::from(&p)])).unwrap();
     assert!(repr.as_str().contains("x=5"), "{}", repr.as_str());
@@ -455,10 +433,9 @@ fn test_repr_and_deep_copy_see_reflected_fields() {
 
 #[test]
 fn test_shallow_copy_and_finality_are_type_attributes() {
-    register_types();
     let original = point(1, 2.0, "p");
     let shallow_copy = Function::try_from(
-        TypeAttrColumn::new("__ffi_shallow_copy__")
+        TypeAttrColumn::lookup("__ffi_shallow_copy__")
             .and_then(|column| column.get(PointObj::type_index()))
             .unwrap(),
     )
@@ -486,7 +463,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
 
     let is_final = |type_index| {
         bool::try_from(
-            TypeAttrColumn::new("__ffi_type_final__")
+            TypeAttrColumn::lookup("__ffi_type_final__")
                 .and_then(|column| column.get(type_index))
                 .unwrap(),
         )
@@ -516,11 +493,10 @@ struct Counter {
 
 #[test]
 fn test_types_without_reflect_register_no_reflection() {
-    register_types();
     let info = type_info::<CounterObj>();
     assert_eq!(info.num_fields, 0);
     assert!(info.metadata.is_null());
-    assert!(TypeAttrColumn::new("__ffi_shallow_copy__")
+    assert!(TypeAttrColumn::lookup("__ffi_shallow_copy__")
         .and_then(|column| column.get(CounterObj::type_index()))
         .is_none());
 }
@@ -531,7 +507,7 @@ mod no_imports {
     #[derive(tvm_ffi::derive::Object)]
     #[type_key = "testing.rust.ReflectedNoImports"]
     #[type_register]
-    pub struct LeafObj {
+    pub(super) struct LeafObj {
         base_: super::PointObj,
         #[reflect]
         pub w: i64,
@@ -539,11 +515,11 @@ mod no_imports {
 
     #[repr(C)]
     #[derive(tvm_ffi::derive::ObjectRef, Clone)]
-    pub struct Leaf {
+    pub(super) struct Leaf {
         pub data: tvm_ffi::ObjectArc<LeafObj>,
     }
 
-    pub fn leaf(w: i64) -> Leaf {
+    pub(super) fn leaf(w: i64) -> Leaf {
         Leaf {
             data: tvm_ffi::ObjectArc::new(LeafObj {
                 base_: super::point_obj(0, 0.0, ""),
@@ -555,7 +531,6 @@ mod no_imports {
 
 #[test]
 fn test_derives_need_nothing_in_scope() {
-    register_types();
     let leaf = no_imports::leaf(9);
     let w = FieldGetter::new(no_imports::LeafObj::type_index(), "w").unwrap();
     assert_eq!(w.get::<_, i64>(&*leaf.data).unwrap(), 9);
@@ -585,17 +560,21 @@ impl DuplicateMethodObj {
     }
 }
 
+// The registration fails when the test binary loads, which
+// `run_static_init_blocks` reports.
 #[test]
-#[should_panic(expected = "duplicate method `same` of `testing.rust.DuplicateMethod`")]
 fn test_duplicate_method_names_fail_the_registration() {
-    DuplicateMethodObj::type_index();
+    let error = tvm_ffi::run_static_init_blocks().unwrap_err();
+    assert!(error
+        .message()
+        .contains("duplicate method `same` of `testing.rust.DuplicateMethod`"));
 }
 
 #[test]
 fn test_native_function() -> Result<()> {
     // A big integer object registers a native `__any_equal__` hook.
     let big = |value: i128| Any::from(BigInt::from(value));
-    let column = TypeAttrColumn::new("__any_equal__").expect("the column is registered");
+    let column = TypeAttrColumn::lookup("__any_equal__").expect("the column is registered");
     let hook = column
         .get(big(1 << 100).type_index())
         .expect("the hook is registered");
@@ -628,14 +607,32 @@ fn test_native_function() -> Result<()> {
             x => Ok(x),
         }
     };
-    let stored = Any::from(NativeFunction::<(&PointObj,), i64>::from(x_of));
-    // SAFETY: the hook was built with this signature.
-    let x_of: NativeFunction<(&PointObj,), i64> = unsafe { NativeFunction::from_any(stored)? };
+    let hook = NativeFunction::<(&PointObj,), i64>::from(x_of);
+    // SAFETY: `testing.x_of` holds `i64(const PointObj*)` hooks.
+    unsafe { TypeAttrDef::<PointObj>::new().native_fn_attr("testing.x_of", hook)? };
+    let stored = TypeAttrColumn::lookup("testing.x_of")
+        .unwrap()
+        .get(PointObj::type_index());
+    // SAFETY: as above.
+    let x_of: NativeFunction<(&PointObj,), i64> =
+        unsafe { NativeFunction::from_any(stored.unwrap())? };
     assert_eq!(x_of.call((&*p.data,))?, 3);
     let error = x_of.call((&*point(0, 0.5, "p").data,)).unwrap_err();
     assert_eq!(error.kind(), VALUE_ERROR);
 
     // SAFETY: an integer is rejected before any call.
     assert!(unsafe { NativeFunction::<()>::from_any(Any::from(1_i64)) }.is_err());
+    // A raw pointer is no hook.
+    struct RawPointer;
+    impl From<RawPointer> for Any {
+        fn from(_: RawPointer) -> Any {
+            Any::from(std::ptr::null_mut::<std::ffi::c_void>())
+        }
+    }
+    let error = TypeAttrDef::<PointObj>::new()
+        .attr("testing.raw", RawPointer)
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), TYPE_ERROR);
     Ok(())
 }

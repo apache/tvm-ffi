@@ -77,6 +77,7 @@ use std::{borrow::BorrowMut, marker::PhantomData};
 /// Entry points infer one marker from the input. Callback markers select argument
 /// matching and a leading argument count; tuple markers contain each link's marker.
 /// Normalization stores the input once, before traversal, without cloning it.
+#[doc(hidden)]
 pub mod marker {
     use std::marker::PhantomData;
     /// Store an owned dispatcher with the exact target argument and result types.
@@ -252,13 +253,14 @@ macro_rules! callback_prefix {
             #[inline(always)]
             fn dispatch_link(&mut self, (value, $($a,)*): (AnyView<'v>, $($A,)*)) -> Option<R> {
                 $(let _ = &$a;)*
-                // Strict: a handler matches only its exact type (a `bool` handler
-                // never catches an int), so this does not convert.
+                // Strict: a handler matches only values that fit its type as is (a
+                // `bool` handler never catches an int), so this does not convert.
                 let cell = value.as_raw_ffi_any();
                 // SAFETY: the view's cell is valid for the call, and the copy runs
                 // only after the strict check.
                 let typed = unsafe {
-                    T::check_any_strict(cell).then(|| T::copy_from_any_view_after_check(cell))
+                    (T::check_any_strict(cell) && T::match_constraints(cell))
+                        .then(|| T::copy_from_any_view_after_check(cell))
                 };
                 typed.map(|typed| self(typed, $($b,)*).callback_result())
             }

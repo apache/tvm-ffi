@@ -23,10 +23,13 @@
 use std::marker::PhantomData;
 use std::mem::{align_of, size_of};
 
-use super::{get_method, TypeAttrColumn, TypeAttrDef};
+use super::registry::{ensure_not_opaque_ptr, register_type_attr};
+use super::{get_method, NativeFunction, TypeAttrColumn};
 use crate::any::TryFromTemp;
 use crate::derive::{Object, ObjectRef};
-use crate::object::{is_instance_of, Object, ObjectArc, ObjectCore, ObjectRef};
+use crate::object::{
+    is_instance_of, lock_type_registration, Object, ObjectArc, ObjectCore, ObjectRef,
+};
 use crate::tvm_ffi_sys::{TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeInfo};
 use crate::type_traits::AnyCompatible;
 use crate::{Any, AnyView, EnumObj, EnumRef, Error, List, Result, String, TYPE_ERROR, VALUE_ERROR};
@@ -37,6 +40,11 @@ use crate::{Any, AnyView, EnumObj, EnumRef, Error, List, Result, String, TYPE_ER
 /// [`set_attr`](Self::set_attr) sets each attribute on it, which
 /// [`EnumRef::attr_map`] reads. The value's object is an [`EnumObj`], so `E`'s
 /// object type adds no fields to its parent `EnumObj`.
+///
+/// As in C++, values and attributes register during static initialization,
+/// such as in a [`static_init_block!`](crate::static_init_block), before other
+/// threads read them: registrations from Rust lock each other out, but
+/// readers take no lock.
 ///
 /// # Examples
 ///
@@ -84,8 +92,8 @@ impl<E: EnumRef> EnumDef<E> {
     ///
     /// # Errors
     ///
-    /// Returns a `ValueError` if `E` already has a value named `name`, or a
-    /// `TypeError` if `E` is not an enum type, is an integer enum
+    /// Returns a `ValueError` if `name` is empty or `E` already has a value named
+    /// `name`, and a `TypeError` if `E` is not an enum type, is an integer enum
     /// (`ffi.IntEnum`), whose values name their own indices, or registers an
     /// object size other than that of [`EnumObj`]: an enum type whose objects
     /// have fields of their own.
@@ -99,6 +107,13 @@ impl<E: EnumRef> EnumDef<E> {
         };
         let type_index = E::ContainerType::type_index();
         let type_key = E::ContainerType::TYPE_KEY;
+        if name.is_empty() {
+            return Err(Error::new(
+                VALUE_ERROR,
+                &format!("a value name of `{type_key}` must be non-empty"),
+                "",
+            ));
+        }
         if !is_instance_of::<EnumObj>(type_index) || is_int_enum(type_index) {
             return Err(Error::new(
                 TYPE_ERROR,
@@ -124,7 +139,8 @@ impl<E: EnumRef> EnumDef<E> {
                 "",
             ));
         }
-        let state = ensure_state::<E>()?;
+        let _registering = lock_type_registration();
+        let state = ensure_state(type_index)?;
         let index = state.entries.len() as i64;
         let key = String::from(name);
         let indexes = AnyView::from(&state.indexes);
@@ -158,13 +174,52 @@ impl<E: EnumRef> EnumDef<E> {
     /// # Arguments
     ///
     /// * `name` - The name of the attribute.
-    /// * `value` - The value of the attribute.
+    /// * `value` - The value of the attribute, `Send + Sync` since every
+    ///   thread reads it.
     ///
     /// # Returns
     ///
     /// The builder, for the next attribute.
-    pub fn set_attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
-        let state = ensure_state::<E>()?;
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` if `value` is an opaque pointer: set a native
+    /// hook with [`set_native_fn_attr`](Self::set_native_fn_attr).
+    pub fn set_attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
+        let value = value.into();
+        ensure_not_opaque_ptr(name, &value)?;
+        self.set_attr_any(name, value)
+    }
+
+    /// Set the native hook `f` as the attribute `name` of the value.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the attribute.
+    /// * `f` - The hook.
+    ///
+    /// # Returns
+    ///
+    /// The builder, for the next attribute.
+    ///
+    /// # Safety
+    ///
+    /// Every caller of the attribute `name` calls its hooks with exactly
+    /// `Args` and reads `R`: a native caller calls the function pointer
+    /// unchecked.
+    pub unsafe fn set_native_fn_attr<Args, R>(
+        self,
+        name: &str,
+        f: NativeFunction<Args, R>,
+    ) -> Result<Self> {
+        self.set_attr_any(name, f.into_any())
+    }
+
+    fn set_attr_any(self, name: &str, value: Any) -> Result<Self> {
+        // Before the lock, which a first `type_index()` takes to register `E`.
+        let type_index = E::ContainerType::type_index();
+        let _registering = lock_type_registration();
+        let state = ensure_state(type_index)?;
         let attrs = AnyView::from(&state.attrs);
         let key = String::from(name);
         let column = match dict_get(attrs, AnyView::from(&key))? {
@@ -175,7 +230,6 @@ impl<E: EnumRef> EnumDef<E> {
                 column
             }
         };
-        let value = value.into();
         dict_set(
             AnyView::from(&column),
             AnyView::from(&self.value),
@@ -249,20 +303,21 @@ pub(crate) struct EnumState {
 
 /// The registry of the enum type `type_index`, or `None` before its first value.
 pub(crate) fn enum_state(type_index: i32) -> Result<Option<EnumState>> {
-    let Some(column) = TypeAttrColumn::new(ENUM_STATE_ATTR) else {
+    let Some(column) = TypeAttrColumn::lookup(ENUM_STATE_ATTR) else {
         return Ok(None);
     };
     column.get(type_index).map(EnumState::try_from).transpose()
 }
 
-/// The registry of `E`, created with its first value.
-fn ensure_state<E: EnumRef>() -> Result<EnumState> {
-    if let Some(state) = enum_state(E::ContainerType::type_index())? {
+/// The registry of the enum type `type_index`, created with its first value,
+/// under the registration lock.
+fn ensure_state(type_index: i32) -> Result<EnumState> {
+    if let Some(state) = enum_state(type_index)? {
         return Ok(state);
     }
     let state: EnumState =
         any_into(get_method("ffi.EnumState", "__ffi_init__")?.call_packed(&[])?)?;
-    TypeAttrDef::<E::ContainerType>::new().attr(ENUM_STATE_ATTR, state.clone())?;
+    register_type_attr(type_index, ENUM_STATE_ATTR, Any::from(state.clone()))?;
     Ok(state)
 }
 

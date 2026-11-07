@@ -59,7 +59,7 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.List"]
-#[type_index(TypeIndex::kTVMFFIList)]
+#[type_index(unsafe TypeIndex::kTVMFFIList)]
 pub struct ListObj {
     pub(crate) object: Object,
     // `List` mutates these through `&self` (`push`, `set`, growth), so they are

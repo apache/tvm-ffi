@@ -97,6 +97,11 @@ pub(crate) fn expand_object(
                 && get_attr(derive_input, "type_child_slots_can_overflow").is_none()),
         "#[type_child_slots] and #[type_child_slots_can_overflow] need #[type_register]"
     );
+    // Upcasts reinterpret a pointer to the object as one to its parent, which
+    // only `repr(C)` keeps at offset zero.
+    if !derive_input.attrs.iter().any(is_repr_c) {
+        abort!(struct_name, "#[derive(Object)] needs #[repr(C)]");
+    }
     // we expect base always to be the first field
     let base_ty = match &derive_input.data {
         syn::Data::Struct(s) => s.fields.iter().next().map(|f| f.ty.clone()),
@@ -119,13 +124,26 @@ pub(crate) fn expand_object(
     };
 
     // A type with a static index has it; one defined here registers its key
-    // under its parent on first use, or takes the index the key already has,
+    // under its parent on its first `type_index()`, which a static init block
+    // calls at load, or takes the index the key already has,
     // as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does; any other type binds the
     // index its defining library registered.
-    let type_index_tokens = match get_attr(derive_input, "type_index").map(attr_to_expr) {
-        Some(type_index) => {
-            let type_index_expr =
-                type_index.expect("Expect #[type_index(TypeIndex::<my_type_index>)] attribute");
+    let type_index_tokens = match get_attr(derive_input, "type_index") {
+        Some(attr) => {
+            // A static index is trusted: the type must be the one the runtime
+            // gives that index.
+            let type_index_expr = attr
+                .parse_args_with(|input: syn::parse::ParseStream| {
+                    input.parse::<syn::Token![unsafe]>()?;
+                    input.parse::<syn::Expr>()
+                })
+                .unwrap_or_else(|error| {
+                    abort!(
+                        attr,
+                        "expected #[type_index(unsafe TypeIndex::...)]: {}",
+                        error
+                    )
+                });
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
@@ -143,9 +161,8 @@ pub(crate) fn expand_object(
                             // same lock.
                             let parent =
                                 <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                            let _registering = #tvm_ffi_crate::object::TYPE_REGISTRATION
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner());
+                            let _registering =
+                                #tvm_ffi_crate::object::lock_type_registration();
                             let type_key_arg =
                                  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
                             let tindex = #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeGetOrAllocIndex(
@@ -157,11 +174,14 @@ pub(crate) fn expand_object(
                                 parent,
                             );
                             if tindex < 0 {
-                                panic!(
+                                ::core::panic!(
                                     "Failed to get or allocate type index for type key: {}",
                                     #type_key
                                 );
                             }
+                            #tvm_ffi_crate::object::assert_registered_type_matches::<#struct_name>(
+                                tindex, parent, false,
+                            );
                             #register_reflection
                             tindex
                         }
@@ -183,12 +203,17 @@ pub(crate) fn expand_object(
                                 &type_key_arg, &mut tindex
                             );
                             if ret != 0 {
-                                panic!(
+                                ::core::panic!(
                                     "Type key {} is not registered: load the library that defines \
                                      it first, or add #[type_register] if this crate defines it",
                                     #type_key
                                 );
                             }
+                            #tvm_ffi_crate::object::assert_registered_type_matches::<#struct_name>(
+                                tindex,
+                                <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index(),
+                                true,
+                            );
                             tindex
                         }
                     );
@@ -196,6 +221,23 @@ pub(crate) fn expand_object(
                 }
             }
         }
+    };
+    // A type defined here registers when its library loads, as a C++ type does
+    // through `refl::ObjectDef` in a static init block; a binding stays lazy.
+    let register_at_load = if type_register && get_attr(derive_input, "type_index").is_none() {
+        if !derive_input.generics.params.is_empty() {
+            abort!(
+                struct_name,
+                "#[type_register] needs a struct without generic parameters"
+            );
+        }
+        quote! {
+            #tvm_ffi_crate::static_init_block! {
+                let _ = <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index();
+            }
+        }
+    } else {
+        quote! {}
     };
     // search for field name base and derive the base type
     // we expect base always to be the first field
@@ -218,6 +260,8 @@ pub(crate) fn expand_object(
             let (base_id, base_ty) = (f.ident.clone()?, f.ty.clone());
             // The transitive case of subtyping
             Some(quote! {
+                type Parent = #base_ty;
+
                 const TYPE_DEPTH: i32 =
                     <#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_DEPTH + 1;
 
@@ -238,8 +282,19 @@ pub(crate) fn expand_object(
         _ => panic!("First field must be `<base_name>: <ObjectCoreType>`"),
     };
 
+    let base_id = match &derive_input.data {
+        syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| f.ident.clone()),
+        _ => None,
+    }
+    .expect("First field must be `<base_name>: <ObjectCoreType>`");
+
     quote! {
         #final_parent_check
+
+        const _: () = ::core::assert!(
+            ::core::mem::offset_of!(#struct_name, #base_id) == 0,
+            "the parent object must be the first field"
+        );
 
         unsafe impl #tvm_ffi_crate::object::ObjectCore for #struct_name {
             const TYPE_KEY: &'static str = #type_key;
@@ -258,6 +313,8 @@ pub(crate) fn expand_object(
         }
 
         #shallow_copy_impl
+
+        #register_at_load
     }
 }
 
@@ -426,8 +483,8 @@ impl Reflection {
     ) -> proc_macro2::TokenStream {
         let reflection = quote!(#tvm_ffi_crate::reflection);
         let kind = match &self.kind {
-            Some(kind) => quote!(Some(#reflection::SEqHashKind::#kind)),
-            None => quote!(None),
+            Some(kind) => quote!(::core::option::Option::Some(#reflection::SEqHashKind::#kind)),
+            None => quote!(::core::option::Option::None),
         };
         let fields = self.reflected.iter().map(|field| {
             let ReflectedField {
@@ -465,9 +522,9 @@ impl Reflection {
         });
         let methods = methods.unwrap_or_else(|| quote!(|_| {}));
         let creator = if self.unsafe_init {
-            quote!(Some(#reflection::unsafe_init_creator::<#struct_name>))
+            quote!(::core::option::Option::Some(#reflection::unsafe_init_creator::<#struct_name>))
         } else {
-            quote!(None)
+            quote!(::core::option::Option::None)
         };
         quote! {
             let registered = #reflection::register_object::<#struct_name>(
@@ -476,12 +533,12 @@ impl Reflection {
                 #creator,
                 |def| {
                     #(#fields)*
-                    Ok(def)
+                    ::core::result::Result::Ok(def)
                 },
                 #methods,
             );
-            if let Err(error) = registered {
-                panic!("Failed to register the reflection of type key {}: {}", #type_key, error);
+            if let ::core::result::Result::Err(error) = registered {
+                ::core::panic!("Failed to register the reflection of type key {}: {}", #type_key, error);
             }
         }
     }
@@ -576,7 +633,7 @@ pub(crate) fn expand_object_ref(
         // payload word holds, so an `Array` cell can lend `&Self` in place.
         const _: () = {
             type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType;
-            assert!(
+            ::core::assert!(
                 ::core::mem::size_of::<#struct_name>()
                     == ::core::mem::size_of::<#tvm_ffi_crate::object::ObjectArc<ContainerType>>()
                     && ::core::mem::offset_of!(#struct_name, #data_id) == 0,
@@ -585,7 +642,7 @@ pub(crate) fn expand_object_ref(
         };
 
         // SAFETY: one `ObjectArc` (asserted above), checked by `check_any_strict`.
-        #tvm_ffi_crate::unsafe_impl_object_ref_downcast_ref!(#struct_name);
+        #tvm_ffi_crate::impl_object_ref_downcast_ref!(unsafe #struct_name);
 
         // As `str`, `Path` and `[T]` do, so `impl AsRef<Base>` bounds accept the
         // base itself; upcasts add `AsRef` to each base.
@@ -615,7 +672,7 @@ pub(crate) fn expand_object_ref(
         impl ::std::convert::From<&#struct_name> for #struct_name {
             #[inline]
             fn from(value: &#struct_name) -> Self {
-                value.clone()
+                ::core::clone::Clone::clone(value)
             }
         }
     };
@@ -627,6 +684,11 @@ pub(crate) fn expand_object_ref(
                 const MATCH_ANY_EXACT: bool = true;
             }
         });
+        if derive_input.generics.params.is_empty() {
+            expanded.extend(quote! {
+                unsafe impl #tvm_ffi_crate::object::PlainObjectRef for #struct_name {}
+            });
+        }
     }
     // Field reads through the reference, as C++ `operator->`.
     if !options.skip_deref {
@@ -667,16 +729,46 @@ pub(crate) fn expand_object_ref(
         expanded.extend(quote! {
             #tvm_ffi_crate::impl_any_compatible_conversions!(#struct_name);
             // Every object reference upcasts to the root `ObjectRef`.
-            #tvm_ffi_crate::unsafe_impl_object_ref_upcast!(#struct_name => #tvm_ffi_crate::object::ObjectRef);
+            #tvm_ffi_crate::impl_object_ref_upcast!(
+                unsafe #struct_name => #tvm_ffi_crate::object::ObjectRef
+            );
         });
     }
     // The root upcast is already above.
     if let Some(parent) = options.parent.filter(|parent| !is_object_ref_root(parent)) {
+        if !options.unsafe_parent {
+            expanded.extend(quote! {
+                const _: () = {
+                    fn plain<P: #tvm_ffi_crate::object::PlainObjectRef>() {}
+                    let _ = plain::<#parent>;
+                };
+            });
+        }
+        // The upcast is sound only if the object type derives from the parent's.
         expanded.extend(quote! {
-            #tvm_ffi_crate::unsafe_impl_object_ref_upcast!(#struct_name => #parent);
+            const _: () = {
+                fn derives_from<T: #tvm_ffi_crate::object::ObjectDerivesFrom<A, I>, A, I>() {}
+                let _ = derives_from::<
+                    <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
+                    <#parent as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
+                    _,
+                >;
+            };
+            #tvm_ffi_crate::impl_object_ref_upcast!(unsafe #struct_name => #parent);
         });
     }
     expanded
+}
+
+/// Whether `attr` is a `#[repr(...)]` that includes `C`.
+fn is_repr_c(attr: &syn::Attribute) -> bool {
+    let Ok(syn::Meta::List(list)) = attr.parse_meta() else {
+        return false;
+    };
+    list.path.is_ident("repr")
+        && list.nested.iter().any(|item| {
+            matches!(item, syn::NestedMeta::Meta(syn::Meta::Path(path)) if path.is_ident("C"))
+        })
 }
 
 /// `T` of a field type spelled `ObjectArc<T>`.
@@ -714,25 +806,30 @@ fn is_object_ref_root(ty: &syn::Type) -> bool {
 struct ObjectRefOptions {
     tvm_ffi_crate: Option<syn::Path>,
     parent: Option<syn::Type>,
+    unsafe_parent: bool,
     skip_deref: bool,
     skip_debug: bool,
     skip_display: bool,
     skip_any_compatible: bool,
 }
 
-/// One `#[object_ref(...)]` item: a flag, `parent = Type` or `crate = path`.
+/// One `#[object_ref(...)]` item: a flag, `[unsafe] parent = Type` or `crate = path`.
 enum ObjectRefOption {
     Flag(syn::Ident),
-    Parent(Box<syn::Type>),
+    Parent(Box<syn::Type>, bool),
     Crate(syn::Path),
 }
 
 impl syn::parse::Parse for ObjectRefOption {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let is_unsafe = input.parse::<Option<syn::Token![unsafe]>>()?.is_some();
         let name: syn::Ident = input.call(syn::Ident::parse_any)?;
         if name == "parent" {
             input.parse::<syn::Token![=]>()?;
-            return Ok(ObjectRefOption::Parent(Box::new(input.parse()?)));
+            return Ok(ObjectRefOption::Parent(Box::new(input.parse()?), is_unsafe));
+        }
+        if is_unsafe {
+            return Err(syn::Error::new(name.span(), "only `parent` takes `unsafe`"));
         }
         if name == "crate" {
             input.parse::<syn::Token![=]>()?;
@@ -756,7 +853,10 @@ fn object_ref_options(derive_input: &DeriveInput) -> ObjectRefOptions {
             .unwrap_or_else(|error| abort!(error.span(), "{}", error));
         for item in items {
             match item {
-                ObjectRefOption::Parent(parent) => options.parent = Some(*parent),
+                ObjectRefOption::Parent(parent, is_unsafe) => {
+                    options.parent = Some(*parent);
+                    options.unsafe_parent = is_unsafe;
+                }
                 ObjectRefOption::Crate(path) => options.tvm_ffi_crate = Some(path),
                 ObjectRefOption::Flag(flag) if flag == "skip_deref" => options.skip_deref = true,
                 ObjectRefOption::Flag(flag) if flag == "skip_debug" => options.skip_debug = true,
@@ -768,7 +868,7 @@ fn object_ref_options(derive_input: &DeriveInput) -> ObjectRefOptions {
                 }
                 ObjectRefOption::Flag(flag) => abort!(
                     flag,
-                    "unknown `object_ref` option; expected `parent = ...`, `skip_deref`, \
+                    "unknown `object_ref` option; expected `[unsafe] parent = ...`, `skip_deref`, \
                      `skip_debug`, `skip_display`, `skip_any_compatible` or `crate = ...`"
                 ),
             }

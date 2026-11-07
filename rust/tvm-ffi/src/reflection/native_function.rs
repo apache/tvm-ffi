@@ -41,8 +41,11 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// A native function carries no signature at run time, so the slot declares
 /// it. Reading a hook with [`from_any`](Self::from_any) is `unsafe`, the
 /// caller vouching for the signature, and then calling it is safe. Building a
-/// hook from a Rust function with `into()` is safe; store it, through
-/// `Any::from`, only in a slot whose callers use exactly this signature.
+/// hook from a Rust function with `into()` is safe; storing it, with
+/// [`TypeAttrDef::native_fn_attr`](super::TypeAttrDef::native_fn_attr) or
+/// [`EnumDef::set_native_fn_attr`](super::EnumDef::set_native_fn_attr), is
+/// `unsafe`, the caller vouching that the slot's callers use exactly this
+/// signature.
 ///
 /// # Examples
 ///
@@ -66,9 +69,10 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// }
 ///
 /// let hook: NativeFunction<(&MyPairObj,), i64> = sum.into();
-/// TypeAttrDef::<MyPairObj>::new().attr("my_ext.sum", hook)?;
+/// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.
+/// unsafe { TypeAttrDef::<MyPairObj>::new().native_fn_attr("my_ext.sum", hook)? };
 ///
-/// let stored = TypeAttrColumn::new("my_ext.sum").unwrap().get(MyPairObj::type_index()).unwrap();
+/// let stored = TypeAttrColumn::lookup("my_ext.sum").unwrap().get(MyPairObj::type_index()).unwrap();
 /// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.
 /// let sum: NativeFunction<(&MyPairObj,), i64> = unsafe { NativeFunction::from_any(stored)? };
 /// let pair = ObjectArc::new(MyPairObj { base_: Object::new(), first: 1, second: 2 });
@@ -173,16 +177,10 @@ impl<Args, R> NativeFunction<Args, R> {
             signature: PhantomData,
         })
     }
-}
 
-/// Stores the hook in a registry slot, such as with
-/// [`TypeAttrDef::attr`](super::TypeAttrDef::attr): the opaque pointer of a
-/// native function, or the packed [`Function`]. Store it only in a slot whose
-/// callers call it with exactly `Args` and `R`, which native callers do not
-/// check.
-impl<Args, R> From<NativeFunction<Args, R>> for Any {
-    fn from(hook: NativeFunction<Args, R>) -> Self {
-        hook.data
+    /// The opaque pointer of a native function, or the packed [`Function`].
+    pub(crate) fn into_any(self) -> Any {
+        self.data
     }
 }
 

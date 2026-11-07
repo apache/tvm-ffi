@@ -505,7 +505,7 @@ class _ObjectRenderer:
         ]
 
     def _upcast_lines(self) -> list[str]:
-        """``unsafe_impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
+        """``impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
         targets: list[str] = []
         for key in self.info.ancestors:
             provider = self._provider(key)
@@ -518,7 +518,7 @@ class _ObjectRenderer:
         if not targets:
             return []
         pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
-        return [f"tvm_ffi::unsafe_impl_object_ref_upcast!({pairs});"]
+        return [f"tvm_ffi::impl_object_ref_upcast!(unsafe {pairs});"]
 
     def _struct_lines(self, verdict: Verdict, base: str) -> list[str]:
         """Render the object struct: every field when complete, the parent alone when opaque."""

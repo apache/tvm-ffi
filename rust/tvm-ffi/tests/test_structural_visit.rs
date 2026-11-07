@@ -280,7 +280,7 @@ fn regions_compose_with_field_flags_and_function_hooks() {
         let root = visit_region_graph(with_hook);
         if with_hook {
             assert!(Function::try_from(
-                TypeAttrColumn::new("__s_visit__")
+                TypeAttrColumn::lookup("__s_visit__")
                     .and_then(|column| column.get(root.type_index()))
                     .unwrap()
             )
@@ -426,12 +426,12 @@ fn public_reflection_access_uses_registered_field_and_type_attr() {
 
     // ObjectDef registers this Function-valued attribute for copyable C++ types.
     assert!(Function::try_from(
-        TypeAttrColumn::new("__ffi_shallow_copy__")
+        TypeAttrColumn::lookup("__ffi_shallow_copy__")
             .and_then(|column| column.get(type_index))
             .unwrap()
     )
     .is_ok());
-    assert!(TypeAttrColumn::new("missing")
+    assert!(TypeAttrColumn::lookup("missing")
         .and_then(|column| column.get(type_index))
         .is_none());
 }
@@ -482,7 +482,7 @@ fn plain_walk_visits_map_values_without_visiting_keys() {
 
 #[test]
 fn primitive_values_are_leaves_in_pre_and_post_order() {
-    assert!(TypeAttrColumn::new("__s_visit__")
+    assert!(TypeAttrColumn::lookup("__s_visit__")
         .and_then(|column| column.get(TypeIndex::kTVMFFIDataType as i32))
         .is_none());
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
