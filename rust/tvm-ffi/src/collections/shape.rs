@@ -106,7 +106,8 @@ impl Shape {
         }
     }
 
-    /// Fill `strides` with the row-major strides of `shape`.
+    /// Fill `strides` with the row-major strides of `shape`, wrapping on
+    /// overflow as C++ does: only a zero-element tensor gets that far.
     pub(crate) fn fill_strides_from_shape<T>(shape: T, strides: &mut [i64])
     where
         T: AsRef<[i64]>,
@@ -115,7 +116,7 @@ impl Shape {
         let mut stride = 1;
         for i in (0..shape.len()).rev() {
             strides[i] = stride;
-            stride *= shape[i];
+            stride = stride.wrapping_mul(shape[i]);
         }
     }
 }
