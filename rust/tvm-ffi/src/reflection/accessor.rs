@@ -114,11 +114,10 @@ pub fn field_default<T: ObjectCore>(name: &str) -> Option<Any> {
     // SAFETY: `ObjectCore` types are registered, and type information lives
     // as long as the process.
     let info: &'static TVMFFITypeInfo = unsafe { &*TVMFFIGetTypeInfo(T::type_index()) };
-    if info.fields.is_null() {
-        return None;
-    }
     // SAFETY: a registered type lists `num_fields` initialized fields.
-    let fields = unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) };
+    let fields = unsafe {
+        crate::util::slice_from_nullable_raw_parts(info.fields, info.num_fields as usize)
+    };
     // SAFETY: a field name is UTF-8 text.
     let field = fields
         .iter()

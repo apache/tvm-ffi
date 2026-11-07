@@ -35,6 +35,17 @@ pub fn panic_to_error(payload: Box<dyn std::any::Any + Send>) -> Error {
     Error::from_panic(payload)
 }
 
+/// The arguments of a packed call from C.
+///
+/// # Safety
+/// If `num_args` is positive, `args` must point to `num_args` valid
+/// arguments that outlive `'a`.
+#[doc(hidden)]
+#[inline(always)]
+pub unsafe fn packed_args<'a>(args: *const TVMFFIAny, num_args: i32) -> &'a [AnyView<'a>] {
+    crate::util::slice_from_nullable_raw_parts(args as *const AnyView, num_args as usize)
+}
+
 pub trait AsPackedCallable<I, O> {
     // Call the function in packed convention
     fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>;

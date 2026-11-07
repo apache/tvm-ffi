@@ -641,8 +641,7 @@ macro_rules! tvm_ffi_dll_export_typed_func {
                 num_args: i32,
                 result: *mut $crate::tvm_ffi_sys::TVMFFIAny,
             ) -> i32 {
-                let packed_args =
-                    std::slice::from_raw_parts(args as *const $crate::any::AnyView, num_args as usize);
+                let packed_args = $crate::function_internal::packed_args(args, num_args);
                 let ret_value = match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
                     $crate::function_internal::call_packed_callable($func, packed_args)
                 })) {

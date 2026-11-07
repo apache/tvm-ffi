@@ -225,10 +225,11 @@ unsafe fn visit_field_level<B>(
     info: *const TVMFFITypeInfo,
     callback: &mut impl FnMut(&'static TVMFFIFieldInfo) -> ControlFlow<B>,
 ) -> Option<B> {
-    if info.is_null() || (*info).fields.is_null() {
+    if info.is_null() {
         return None;
     }
-    let fields = std::slice::from_raw_parts((*info).fields, (*info).num_fields as usize);
+    let fields =
+        crate::util::slice_from_nullable_raw_parts((*info).fields, (*info).num_fields as usize);
     for field in fields {
         // C reflection tables are immortal once registered.
         let field: &'static TVMFFIFieldInfo = &*(field as *const TVMFFIFieldInfo);

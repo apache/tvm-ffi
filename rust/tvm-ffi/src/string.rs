@@ -524,7 +524,7 @@ unsafe impl AnyCompatible for Bytes {
         if data.type_index == TypeIndex::kTVMFFIByteArrayPtr as i32 {
             // deep copy from bytearray ptr
             let bytes = &*(data.data_union.v_ptr as *const TVMFFIByteArray);
-            Ok(Self::from(std::slice::from_raw_parts(
+            Ok(Self::from(crate::util::slice_from_nullable_raw_parts(
                 bytes.data, bytes.size,
             )))
         } else if data.type_index == TypeIndex::kTVMFFISmallBytes as i32 {

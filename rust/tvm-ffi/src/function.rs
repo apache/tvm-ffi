@@ -116,7 +116,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> CallbackFunctionO
         result: *mut TVMFFIAny,
     ) -> i32 {
         let this = &*(handle as *mut Self);
-        let packed_args = std::slice::from_raw_parts(args as *const AnyView, num_args as usize);
+        let packed_args = crate::function_internal::packed_args(args, num_args);
         let ret_value = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             (this.callback)(packed_args)
         })) {

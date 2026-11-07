@@ -79,10 +79,8 @@ pub trait DLTensorExt {
 impl DLTensorExt for DLTensor {
     fn numel(&self) -> usize {
         // A scalar (`ndim == 0`) has one element and may have a null shape.
-        if self.ndim <= 0 {
-            return 1;
-        }
-        let shape = unsafe { std::slice::from_raw_parts(self.shape, self.ndim as usize) };
+        let shape =
+            unsafe { crate::util::slice_from_nullable_raw_parts(self.shape, self.ndim as usize) };
         checked_numel(shape).expect("tensor shape has a negative extent or overflows usize")
     }
 
@@ -187,11 +185,7 @@ impl Tensor {
         );
 
         unsafe {
-            // An empty tensor may have a null data pointer, which a slice cannot.
-            if self.numel() == 0 {
-                return Ok(&[]);
-            }
-            Ok(std::slice::from_raw_parts(
+            Ok(crate::util::slice_from_nullable_raw_parts(
                 self.data.dltensor.data as *const T,
                 self.numel(),
             ))
@@ -233,10 +227,7 @@ impl Tensor {
             "Tensor is not contiguous"
         );
         unsafe {
-            if self.numel() == 0 {
-                return Ok(&mut []);
-            }
-            Ok(std::slice::from_raw_parts_mut(
+            Ok(crate::util::slice_from_nullable_raw_parts_mut(
                 self.data.dltensor.data as *mut T,
                 self.numel(),
             ))
@@ -246,11 +237,7 @@ impl Tensor {
     /// The extent of each dimension.
     pub fn shape(&self) -> &[i64] {
         let t = &self.data.dltensor;
-        // A scalar may have a null shape, which a slice cannot.
-        if t.ndim == 0 {
-            return &[];
-        }
-        unsafe { std::slice::from_raw_parts(t.shape, t.ndim as usize) }
+        unsafe { crate::util::slice_from_nullable_raw_parts(t.shape, t.ndim as usize) }
     }
 
     /// The number of dimensions.
@@ -564,10 +551,7 @@ impl<'a> TensorView<'a> {
     /// The extent of each dimension.
     pub fn shape(&self) -> &'a [i64] {
         let t = self.dltensor();
-        if t.ndim == 0 {
-            return &[];
-        }
-        unsafe { std::slice::from_raw_parts(t.shape, t.ndim as usize) }
+        unsafe { crate::util::slice_from_nullable_raw_parts(t.shape, t.ndim as usize) }
     }
 
     /// The number of elements.
