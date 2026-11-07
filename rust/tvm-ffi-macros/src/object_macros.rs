@@ -188,6 +188,10 @@ pub(crate) fn expand_object(
                     );
                     *TYPE_INDEX
                 }
+
+                fn type_index_available() -> bool {
+                    <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index_available()
+                }
             }
         }
         None => {
@@ -219,11 +223,23 @@ pub(crate) fn expand_object(
                     );
                     *TYPE_INDEX
                 }
+
+                fn type_index_available() -> bool {
+                    let mut tindex = 0;
+                    // SAFETY: the key and the index outlive the call.
+                    unsafe {
+                        let type_key_arg =
+                            #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
+                        #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeKeyToIndex(&type_key_arg, &mut tindex)
+                            == 0
+                    }
+                }
             }
         }
     };
     // A type defined here registers when its library loads, as a C++ type does
-    // through `refl::ObjectDef` in a static init block; a binding stays lazy.
+    // through `refl::ObjectDef` in a static init block; a binding stays lazy,
+    // and so does a type under a binding whose library is not loaded yet.
     let register_at_load = if type_register && get_attr(derive_input, "type_index").is_none() {
         if !derive_input.generics.params.is_empty() {
             abort!(
@@ -236,7 +252,9 @@ pub(crate) fn expand_object(
         quote! {
             #tvm_ffi_crate::static_init_block! {
                 let _: &str = #type_key;
-                let _ = <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                if <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index_available() {
+                    let _ = <#struct_name as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                }
             }
         }
     } else {

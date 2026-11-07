@@ -51,7 +51,8 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// `#[type_register]`: it is registered under its parent when its library
 /// loads, as a C++ type is in a static init block, or takes the index its key
 /// already has, as C++
-/// `TVM_FFI_DECLARE_OBJECT_INFO` does.
+/// `TVM_FFI_DECLARE_OBJECT_INFO` does. Under a binding whose library is not
+/// loaded yet, it registers on its first `type_index()` instead.
 /// Without `#[type_register]`, the type binds a key its defining library,
 /// usually C++, has registered, and `type_index()` panics if that library is
 /// not loaded yet, so a binding never registers a key with the wrong child

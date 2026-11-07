@@ -383,6 +383,13 @@ pub unsafe trait ObjectCore: Sized + 'static {
     const TYPE_FINAL: bool = false;
     /// The runtime type index of this type.
     fn type_index() -> i32;
+    /// Whether [`type_index`](Self::type_index) can return now: false while
+    /// the key of a binding, this type or an ancestor, is not registered
+    /// because its library is not loaded yet.
+    #[doc(hidden)]
+    fn type_index_available() -> bool {
+        true
+    }
     /// The object header, mutably.
     ///
     /// # Arguments
