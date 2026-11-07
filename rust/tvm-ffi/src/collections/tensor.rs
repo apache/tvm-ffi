@@ -71,13 +71,16 @@ pub unsafe trait NDAllocator: 'static {
 pub trait DLTensorExt {
     /// The number of elements: the product of the shape, 1 for a scalar.
     ///
+    /// # Safety
+    /// `shape` points to `ndim` extents, or `ndim` is 0.
+    ///
     /// # Panics
     /// If an extent is negative or the product overflows `usize`.
-    fn numel(&self) -> usize;
+    unsafe fn numel(&self) -> usize;
 }
 
 impl DLTensorExt for DLTensor {
-    fn numel(&self) -> usize {
+    unsafe fn numel(&self) -> usize {
         // A scalar (`ndim == 0`) has one element and may have a null shape.
         let shape =
             unsafe { crate::util::slice_from_nullable_raw_parts(self.shape, self.ndim as usize) };
@@ -94,10 +97,12 @@ fn checked_numel(shape: &[i64]) -> Option<usize> {
 
 /// The bytes of `tensor`'s data, with sub-byte types packed as C++
 /// `GetDataSize` does; it fits in `isize`, as an allocation must.
-fn data_size(tensor: &DLTensor) -> usize {
+///
+/// # Safety
+/// As [`DLTensorExt::numel`].
+unsafe fn data_size(tensor: &DLTensor) -> usize {
     let bits = tensor.dtype.bits as usize * tensor.dtype.lanes as usize;
-    tensor
-        .numel()
+    unsafe { tensor.numel() }
         .checked_mul(bits)
         .map(|total| total.div_ceil(8))
         .filter(|&size| size <= isize::MAX as usize)
@@ -238,9 +243,10 @@ impl Tensor {
     /// The number of elements.
     ///
     /// # Panics
-    /// As [`DLTensorExt::numel`].
+    /// If an extent is negative or the product overflows `usize`.
     pub fn numel(&self) -> usize {
-        self.data.dltensor.numel()
+        // SAFETY: a tensor's shape holds `ndim` extents.
+        unsafe { self.data.dltensor.numel() }
     }
 
     /// The strides, in elements.
@@ -340,7 +346,8 @@ impl Tensor {
             byte_offset: 0,
         };
         // Allocators size the data from the shape, so check it before allocating.
-        data_size(&dltensor);
+        // SAFETY: `shape` holds `ndim` extents.
+        unsafe { data_size(&dltensor) };
         let tensor_obj = TensorObjFromNDAlloc {
             base_: TensorObj {
                 object: Object::new(),
@@ -554,9 +561,10 @@ impl<'a> TensorView<'a> {
     /// The number of elements.
     ///
     /// # Panics
-    /// As [`DLTensorExt::numel`].
+    /// If an extent is negative or the product overflows `usize`.
     pub fn numel(&self) -> usize {
-        self.dltensor().numel()
+        // SAFETY: a tensor's shape holds `ndim` extents.
+        unsafe { self.dltensor().numel() }
     }
 
     /// The strides, in elements.
