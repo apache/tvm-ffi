@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use std::borrow::Borrow;
+
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{ObjectArc, ObjectRef, ObjectRefCore};
 use tvm_ffi::reflection::TypeAttrColumn;
@@ -404,6 +406,44 @@ fn test_constructors_deref_and_upcast() {
     // A root type converts into `ObjectRef`, its parent type.
     let root = point(2, "r");
     assert!(ObjectRef::from(&root).same_as(&root));
+}
+
+#[test]
+fn test_containers_upcast_without_a_copy() {
+    register_types();
+    fn keep_array(value: impl Into<Array<RsPoint>>) -> Array<RsPoint> {
+        value.into()
+    }
+    fn keep_map(value: impl Into<Map<tvm_ffi::String, RsPoint>>) -> Map<tvm_ffi::String, RsPoint> {
+        value.into()
+    }
+    fn len(value: impl IntoObjectRef<Array<RsPoint>>) -> usize {
+        value.into_object_ref().borrow().len()
+    }
+
+    let (a, b) = (point(1, "a"), point(2, "b"));
+    let array = keep_array([a.clone(), b.clone()]);
+    assert!(keep_array(&array).same_as(&array));
+    assert!(keep_array(vec![a.clone()])[0].same_as(&a));
+
+    let points3 = Array::from([point3(1, 3)]);
+    let upcast: Array<RsPoint> = points3.clone().upcast();
+    assert!(upcast.same_as(&points3));
+    assert!(upcast[0].same_as(&points3[0]));
+    assert!(points3.upcast_ref::<RsPoint>().same_as(&points3));
+    assert_eq!(
+        (len(&points3), len(points3.clone()), len(&array)),
+        (1, 1, 2)
+    );
+
+    let map = keep_map([("a".into(), a.clone())]);
+    assert!(keep_map(&map).same_as(&map));
+    let map3: Map<tvm_ffi::String, RsPoint3> = [("p".into(), point3(1, 3))].into();
+    let upcast: Map<tvm_ffi::String, RsPoint> = map3.clone().upcast();
+    assert!(upcast.same_as(&map3));
+    assert_eq!(upcast.get(&"p".into()).unwrap().unwrap().x, 1);
+    let roots: &Map<tvm_ffi::String, ObjectRef> = map3.upcast_ref();
+    assert!(roots.same_as(&map3));
 }
 
 #[test]

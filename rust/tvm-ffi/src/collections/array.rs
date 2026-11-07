@@ -25,8 +25,8 @@ use std::ops::Deref;
 use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
-use crate::object::{Object, ObjectArc};
-use crate::type_traits::{ContainerElement, RefFromAnyUnchecked};
+use crate::object::{IntoObjectRef, Object, ObjectArc};
+use crate::type_traits::{ContainerElement, RefFromAnyUnchecked, TypeSubsumes};
 use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -136,6 +136,44 @@ impl<T: ContainerElement + Clone> From<Vec<T>> for Array<T> {
     }
 }
 
+impl<T: ContainerElement + Clone, const N: usize> From<[T; N]> for Array<T> {
+    fn from(items: [T; N]) -> Self {
+        Self::from_vec(items.into())
+    }
+}
+
+impl<T: ContainerElement + Clone> From<&[T]> for Array<T> {
+    fn from(items: &[T]) -> Self {
+        Self::from_vec(items.to_vec())
+    }
+}
+
+/// A reference-count bump, as `From<&T> for T` of an object reference.
+impl<T: ContainerElement + Clone> From<&Array<T>> for Array<T> {
+    #[inline]
+    fn from(value: &Array<T>) -> Self {
+        value.clone()
+    }
+}
+
+impl<T, U: TypeSubsumes<T>> IntoObjectRef<Array<U>> for Array<T> {
+    type Output = Array<U>;
+    #[inline(always)]
+    fn into_object_ref(self) -> Array<U> {
+        self.upcast()
+    }
+}
+
+impl<'a, T, U: TypeSubsumes<T> + ContainerElement + Clone + 'a> IntoObjectRef<Array<U>>
+    for &'a Array<T>
+{
+    type Output = &'a Array<U>;
+    #[inline(always)]
+    fn into_object_ref(self) -> &'a Array<U> {
+        self.upcast_ref()
+    }
+}
+
 /// An array upcasts to the root [`ObjectRef`](crate::object::ObjectRef).
 impl<T: ContainerElement + Clone> From<Array<T>> for crate::object::ObjectRef {
     #[inline]
@@ -158,6 +196,39 @@ impl<T: ContainerElement + Clone> TryFrom<&crate::object::ObjectRef> for Array<T
     #[inline]
     fn try_from(value: &crate::object::ObjectRef) -> crate::error::Result<Self> {
         crate::object::root_try_into_ref(value)
+    }
+}
+
+impl<T> Array<T> {
+    /// View this array as an `Array<U>` without a copy, as C++
+    /// `Array<U>(const Array<T>&)` does for a base `U` of `T`.
+    ///
+    /// It is a method, not `From`: `From<Array<T>> for Array<U>` would overlap
+    /// `From<T> for T` at `T = U` (E0119), and a crate that defines `T` and `U`
+    /// cannot implement it for `Array` either (orphan rule, E0117).
+    ///
+    /// ```
+    /// use tvm_ffi::object::{ObjectRef, ObjectRefCore};
+    /// use tvm_ffi::{Array, Shape};
+    ///
+    /// let shapes = Array::from([Shape::from([1_i64, 2])]);
+    /// let objects: Array<ObjectRef> = shapes.clone().upcast();
+    /// assert!(objects[0].same_as(&shapes[0]));
+    /// ```
+    #[inline]
+    pub fn upcast<U: TypeSubsumes<T>>(self) -> Array<U> {
+        Array {
+            data: self.data,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Borrow this array as an `Array<U>`, as [`upcast`](Self::upcast) does.
+    #[inline]
+    pub fn upcast_ref<U: TypeSubsumes<T>>(&self) -> &Array<U> {
+        // SAFETY: `Array<T>` and `Array<U>` are both `repr(C)` over one
+        // `ObjectArc<ArrayObj>`, and every `T` cell is a valid `U` cell.
+        unsafe { &*(self as *const Self as *const Array<U>) }
     }
 }
 

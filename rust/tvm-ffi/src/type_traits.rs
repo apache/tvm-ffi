@@ -248,6 +248,23 @@ pub trait ContainerElement: container_element_ops::Ops {}
 impl<T: AnyCompatible> ContainerElement for T {}
 impl ContainerElement for Any {}
 
+/// Every `Source` value is a valid `Self` as stored, so a container of
+/// `Source` is a container of `Self` without a copy, as C++
+/// `type_subsumes_v<Self, Source>`. [`Array::upcast`](crate::Array::upcast)
+/// and [`Map::upcast`](crate::Map::upcast) use it.
+///
+/// It holds for every type and itself, and for a base object reference and
+/// each derived one, which [`unsafe_impl_object_ref_upcast!`](crate::unsafe_impl_object_ref_upcast)
+/// declares.
+///
+/// # Safety
+///
+/// Every cell that `Source` strictly accepts, `Self` strictly accepts, also
+/// after a change made through `Self`.
+pub unsafe trait TypeSubsumes<Source: ?Sized> {}
+
+unsafe impl<T: ?Sized> TypeSubsumes<T> for T {}
+
 /// A type whose value an FFI cell stores in place, so `&Self` borrows from the
 /// cell, as [`Array`](crate::Array) indexing does.
 ///
