@@ -392,15 +392,19 @@ unsafe impl<T: crate::object::ObjectRefCore> DowncastRefFromAny for Option<T> {
 }
 
 /// A type that [`Any::downcast_ref`] and [`AnyView::downcast_ref`] borrow from
-/// an FFI cell in place: object types (`ArrayObj`), and the
-/// [`RefFromAnyUnchecked`] types (managed references such as `Array<T>`,
-/// `String`, `i64`).
+/// an FFI cell in place, without a reference count change: object types
+/// (`ArrayObj`), managed references (`Array<T>`, `String`, any
+/// [`#[derive(ObjectRef)]`](crate::derive::ObjectRef) type), `Option` of a
+/// reference and scalars such as `i64`.
+///
+/// Name it to bound a generic borrow, as in `fn get<T: DowncastRefFromAny>`.
+/// A reference that implements `ObjectRefCore` by hand implements it with
+/// [`impl_object_ref_downcast_ref!`](crate::impl_object_ref_downcast_ref).
 ///
 /// # Safety
 ///
 /// `downcast_ref_from_any` must return `Some` only when `cell` holds a `Self`, with
 /// a reference that stays valid while `cell` is borrowed.
-#[doc(hidden)]
 pub unsafe trait DowncastRefFromAny {
     /// Borrow `cell` as `Self` when it holds one.
     ///
