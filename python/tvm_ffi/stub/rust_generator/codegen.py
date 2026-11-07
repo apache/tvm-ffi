@@ -896,14 +896,18 @@ def generate_rust_object(
 
 
 def _builtin_mirror_lines(type_key: str, base: str) -> list[str]:
-    """Render the header-only stand-in for one builtin ancestor."""
+    """Render the header-only stand-in for one builtin ancestor.
+
+    It is public, so a public object deriving from it satisfies the parent visibility rule.
+    """
     return [
         f"/// Header-only stand-in for the builtin `{type_key}`; it only carries the ancestor depth.",
+        "#[doc(hidden)]",
         "#[allow(dead_code)]",
         "#[repr(C)]",
         "#[derive(tvm_ffi::derive::Object)]",
         f'#[type_key = "{type_key}"]',
-        f"struct {builtin_mirror_name(type_key)} {{",
+        f"pub struct {builtin_mirror_name(type_key)} {{",
         f"    base_: {base},",
         "}",
     ]

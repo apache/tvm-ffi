@@ -510,20 +510,22 @@ use tvm_ffi::EnumObj;
 use tvm_ffi::ObjectArc;
 
 /// Header-only stand-in for the builtin `ffi.IntEnum`; it only carries the ancestor depth.
+#[doc(hidden)]
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ffi.IntEnum"]
-struct FfiIntEnumObj {
+pub struct FfiIntEnumObj {
     base_: EnumObj,
 }
 
 /// Header-only stand-in for the builtin `ffi.StrEnum`; it only carries the ancestor depth.
+#[doc(hidden)]
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ffi.StrEnum"]
-struct FfiStrEnumObj {
+pub struct FfiStrEnumObj {
     base_: EnumObj,
 }"""
 
