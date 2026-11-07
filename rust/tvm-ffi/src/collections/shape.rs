@@ -19,7 +19,8 @@
 //! [`Shape`], the immutable dimensions of a tensor.
 
 use crate::derive::{Object, ObjectRef};
-use crate::object::{Object, ObjectArc, ObjectCoreWithExtraItems};
+use crate::object::{Object, ObjectArc, ObjectCoreWithExtraItems, PlainObjectRef};
+use crate::{AnyView, Array, ObjectRefAnyCompatible};
 use std::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
 use std::ops::Deref;
 use tvm_ffi_sys::TVMFFIShapeCell;
@@ -39,7 +40,8 @@ pub struct ShapeObj {
 }
 
 /// An immutable sequence of `i64` dimensions, passed across languages as
-/// `ffi.Shape`.
+/// `ffi.Shape`. A converting cast, such as a typed function argument, also
+/// takes an `Array` or `List` of integers, as C++ does.
 ///
 /// # Examples
 ///
@@ -52,10 +54,22 @@ pub struct ShapeObj {
 /// ```
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
-#[object_ref(skip_deref)]
+#[object_ref(skip_deref, skip_any_compatible)]
 pub struct Shape {
     data: ObjectArc<ShapeObj>,
 }
+
+// SAFETY: every `ShapeObj` is a `Shape`; the fallback only builds new shapes.
+unsafe impl ObjectRefAnyCompatible for Shape {
+    #[cold]
+    fn convert_fallback(value: AnyView<'_>) -> Option<Self> {
+        let dims = Array::<i64>::try_from(value).ok()?;
+        Some(Self::from(dims.iter().copied().collect::<Vec<_>>()))
+    }
+}
+
+// SAFETY: as for `ObjectRefAnyCompatible`, every `ShapeObj` is a `Shape`.
+unsafe impl PlainObjectRef for Shape {}
 
 // SAFETY: a `Shape` is immutable.
 unsafe impl Send for Shape {}
