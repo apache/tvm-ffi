@@ -460,7 +460,7 @@ def test_render_derived_object_same_module() -> None:
     assert "#[type_final]\npub struct AddObj {\n    base_: ExprObj,\n}" in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
     assert "pub fn a(&self) -> Result<Expr> {" in text
-    assert text.endswith("tvm_ffi::impl_object_ref_upcast!(unsafe Add => BaseExpr, Add => Expr);")
+    assert text.endswith("tvm_ffi::impl_object_ref_upcast!(Add => BaseExpr, Add => Expr);")
     # Same-module names are local items: nothing to `use`.
     assert not any(path.startswith("demo") for path in _uses(imports))
 
@@ -470,7 +470,7 @@ def test_render_derived_object_cross_module() -> None:
     info = _info("tirx.Add", parent="ir.Expr", ancestors=["ffi.Object", "ir.Expr"])
     text, imports = _render(info)
     assert "    base_: ExprObj," in text
-    assert text.endswith("tvm_ffi::impl_object_ref_upcast!(unsafe Add => Expr);")
+    assert text.endswith("tvm_ffi::impl_object_ref_upcast!(Add => Expr);")
     assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
 
 
@@ -626,7 +626,7 @@ impl IterVarObj {{
     }}
 }}
 
-tvm_ffi::impl_object_ref_upcast!(unsafe IterVar => PrimExprConvertible);"""
+tvm_ffi::impl_object_ref_upcast!(IterVar => PrimExprConvertible);"""
 
 
 def test_render_iter_var_golden() -> None:
@@ -833,7 +833,8 @@ impl Add {
     }
 }
 
-tvm_ffi::impl_object_ref_upcast!(unsafe Add => Expr, Add => PrimExpr);"""
+tvm_ffi::impl_object_ref_upcast!(Add => Expr);
+tvm_ffi::impl_object_ref_upcast!(unsafe Add => PrimExpr);"""
 
 
 def test_render_complete_expr_golden() -> None:
@@ -1357,7 +1358,8 @@ def test_upcast_directive_adds_typed_views() -> None:
     RUST.add_directive(imports, "upcast", "demo.Leaf -> Other", 2)
     text, imports = _render(info, imports)
     assert text.endswith(
-        "tvm_ffi::impl_object_ref_upcast!(unsafe Leaf => Base, Leaf => LeafView, Leaf => Other);"
+        "tvm_ffi::impl_object_ref_upcast!(Leaf => Base);\n"
+        "tvm_ffi::impl_object_ref_upcast!(unsafe Leaf => LeafView, Leaf => Other);"
     )
     assert "crate::typed::LeafView" in _uses(imports)
     assert "fn new(" not in text
@@ -1526,7 +1528,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "}"
     ) in dd
     assert dd.endswith(
-        "tvm_ffi::impl_object_ref_upcast!(unsafe TestCxxClassDerivedDerived => TestCxxClassBase, "
+        "tvm_ffi::impl_object_ref_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     )
     assert {"tvm_ffi::String", "tvm_ffi::reflection::ShallowCopy"} <= _uses(imports)
@@ -1595,7 +1597,7 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
     assert "    base_: TestCxxClassDerivedObj,\n    pub v_str: String," in text
     assert (
-        "tvm_ffi::impl_object_ref_upcast!(unsafe TestCxxClassDerivedDerived => TestCxxClassBase, "
+        "tvm_ffi::impl_object_ref_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     ) in text
     # Builtin ancestors are mirrored once, in the import section; enum fixtures embed the last one.
@@ -1817,9 +1819,7 @@ def test_blocks_are_named_by_the_module_of_their_file(
     text = nested.read_text(encoding="utf-8")
     assert "use crate::TestCxxClassBase;\nuse crate::TestCxxClassBaseObj;\n" in text
     assert "    base_: TestCxxClassBaseObj," in text
-    assert (
-        "tvm_ffi::impl_object_ref_upcast!(unsafe TestCxxClassDerived => TestCxxClassBase);" in text
-    )
+    assert "tvm_ffi::impl_object_ref_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
     assert "super::" not in text
     # Moving the parent's block moves the path, not the type key.
     lib.write_text("", encoding="utf-8")
@@ -1942,7 +1942,7 @@ def test_parent_with_the_objects_own_name_is_spelled_in_full() -> None:
     parent = "crate::demo::t::Frame"
     assert f"    base_: {parent}Obj," in text
     assert f"    type Target = {parent}Obj;" in text
-    assert text.endswith(f"tvm_ffi::impl_object_ref_upcast!(unsafe Frame => {parent});")
+    assert text.endswith(f"tvm_ffi::impl_object_ref_upcast!(Frame => {parent});")
     assert not any(path.startswith(f"{parent}") for path in _uses(imports))
 
 

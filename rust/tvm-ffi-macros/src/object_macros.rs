@@ -762,26 +762,24 @@ pub(crate) fn expand_object_ref(
     }
     // The root upcast is already above.
     if let Some(parent) = options.parent.filter(|parent| !is_object_ref_root(parent)) {
-        if !options.unsafe_parent {
+        if options.unsafe_parent {
+            // The object type must still derive from the parent's.
             expanded.extend(quote! {
                 const _: () = {
-                    fn plain<P: #tvm_ffi_crate::object::PlainObjectRef>() {}
-                    let _ = plain::<#parent>;
+                    fn derives_from<T: #tvm_ffi_crate::object::ObjectDerivesFrom<A, I>, A, I>() {}
+                    let _ = derives_from::<
+                        <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
+                        <#parent as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
+                        _,
+                    >;
                 };
+                #tvm_ffi_crate::impl_object_ref_upcast!(unsafe #struct_name => #parent);
+            });
+        } else {
+            expanded.extend(quote! {
+                #tvm_ffi_crate::impl_object_ref_upcast!(#struct_name => #parent);
             });
         }
-        // The upcast is sound only if the object type derives from the parent's.
-        expanded.extend(quote! {
-            const _: () = {
-                fn derives_from<T: #tvm_ffi_crate::object::ObjectDerivesFrom<A, I>, A, I>() {}
-                let _ = derives_from::<
-                    <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
-                    <#parent as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType,
-                    _,
-                >;
-            };
-            #tvm_ffi_crate::impl_object_ref_upcast!(unsafe #struct_name => #parent);
-        });
     }
     expanded
 }

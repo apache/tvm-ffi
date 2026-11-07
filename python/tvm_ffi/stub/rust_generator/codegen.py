@@ -505,20 +505,28 @@ class _ObjectRenderer:
         ]
 
     def _upcast_lines(self) -> list[str]:
-        """``impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
-        targets: list[str] = []
+        """``impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives.
+
+        A generated ancestor accepts every object of its type, so its upcast takes the
+        compile-time checked form; a ``ty-map``'d one or an ``upcast`` view may promise
+        more, so it takes the ``unsafe`` form.
+        """
+        checked: list[str] = []
+        unchecked: list[str] = []
         for key in self.info.ancestors:
             provider = self._provider(key)
             if provider == "mapped":
-                targets.append(self._record_mapped(key, self.ty_map[key], self.imports))
+                unchecked.append(self._record_mapped(key, self.ty_map[key], self.imports))
             elif provider != "crate":
-                targets.append(self.imports.record(self._generated_type_path(key)))
+                checked.append(self.imports.record(self._generated_type_path(key)))
         for view in self.imports.directives.upcasts.get(self.type_key, []):
-            targets.append(self.imports.record(view) if "::" in view else view)
-        if not targets:
-            return []
-        pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
-        return [f"tvm_ffi::impl_object_ref_upcast!(unsafe {pairs});"]
+            unchecked.append(self.imports.record(view) if "::" in view else view)
+        lines = []
+        for prefix, targets in (("", checked), ("unsafe ", unchecked)):
+            if targets:
+                pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
+                lines.append(f"tvm_ffi::impl_object_ref_upcast!({prefix}{pairs});")
+        return lines
 
     def _struct_lines(self, verdict: Verdict, base: str) -> list[str]:
         """Render the object struct: every field when complete, the parent alone when opaque."""

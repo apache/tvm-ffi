@@ -431,8 +431,9 @@ its object type, a generic one such as ``Array<T>`` or one with a custom
 ``ObjectRefAnyCompatible``, is written ``unsafe parent = ...``: the caller promises
 that every value of the reference is a valid parent. Every reference converts into
 ``ObjectRef``; ``impl_object_ref_upcast!`` declares conversions into further
-ancestors without that check, such as ``impl_object_ref_upcast!(unsafe Point4 =>
-Point)`` for a ``Point4`` whose parent is ``Point3``.
+ancestors with the same check, such as ``impl_object_ref_upcast!(Point4 => Point)``
+for a ``Point4`` whose parent is ``Point3``, and ``impl_object_ref_upcast!(unsafe
+...)`` without it, for an ancestor that promises more than its object type.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads
