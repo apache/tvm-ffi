@@ -380,7 +380,8 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
     /// `value` itself again.
     ///
     /// Children are found by the type's registered visit hook or its reflected
-    /// fields. The visit stops at the first child that returns an interrupt.
+    /// fields. A hook uses the visitor only through its arguments, during the
+    /// call, and must not keep it or call it outside them. The visit stops at the first child that returns an interrupt.
     ///
     /// # Arguments
     ///

@@ -315,6 +315,9 @@ impl Error {
 
     /// Get the backtrace of the error.
     ///
+    /// It may be rewritten when the error is re-raised through another
+    /// language: copy it to keep it across FFI calls.
+    ///
     /// # Returns
     ///
     /// The backtrace, most recent call first.

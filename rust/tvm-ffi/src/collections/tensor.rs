@@ -39,7 +39,8 @@ use tvm_ffi_sys::{TVMFFIEnvTensorAlloc, TVMFFIObjectHandle};
 /// `alloc_data` must return a pointer aligned to `MIN_ALIGN` and valid for the
 /// prototype's data, `numel() * bits * lanes` bits rounded up to whole bytes
 /// (sub-byte types are packed), and `free_data` must release
-/// exactly what `alloc_data` returned.
+/// exactly what `alloc_data` returned. `free_data` may be called for a tensor
+/// whose `data` is null, when `alloc_data` panicked, and must then do nothing.
 pub unsafe trait NDAllocator: 'static {
     /// The minimum alignment of the allocated data, in bytes.
     const MIN_ALIGN: usize;
@@ -61,8 +62,8 @@ pub unsafe trait NDAllocator: 'static {
     /// * `tensor` - The tensor whose `data` to free.
     ///
     /// # Safety
-    /// `tensor.data` must come from `alloc_data` on this allocator with the same
-    /// shape and dtype, and must not be used afterwards.
+    /// `tensor.data` must be null or come from `alloc_data` on this allocator
+    /// with the same shape and dtype, and must not be used afterwards.
     unsafe fn free_data(&mut self, tensor: &DLTensor);
 }
 

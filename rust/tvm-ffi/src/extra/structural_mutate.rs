@@ -689,7 +689,8 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
     /// `value` itself again.
     ///
     /// Children are found by the type's registered mutation hook or its reflected
-    /// fields. The result is unchanged when no child changed; otherwise it is a
+    /// fields. A hook uses the mutator only through its arguments, during the
+    /// call, and must not keep it or call it outside them. The result is unchanged when no child changed; otherwise it is a
     /// node with the new children, made in place when `value` allows it and is
     /// uniquely owned.
     ///

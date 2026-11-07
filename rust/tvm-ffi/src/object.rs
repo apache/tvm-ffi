@@ -326,7 +326,8 @@ impl<T: ObjectCore> Clone for ObjectArc<T> {
 /// No code may mutate an instance while it is shared: changes go through
 /// copy-on-write, in place only on a uniquely held instance (one strong
 /// reference, no weak ones). This holds for every type not registered as
-/// mutable (`_type_mutable`), in any language.
+/// mutable (`_type_mutable`), in any language. Every subclass must also be
+/// immutable while shared, with thread-safe fields.
 pub unsafe trait ImmutableObject: ObjectCore {}
 
 // SAFETY: `T` is never mutated while shared, its fields are thread-safe, and the
