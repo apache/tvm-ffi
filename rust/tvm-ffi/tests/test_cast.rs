@@ -55,6 +55,7 @@ struct TestBase {
 #[type_key = "testing.rust.CastDerived"]
 #[type_register]
 #[type_final]
+#[type_immutable]
 struct TestDerivedObj {
     base_: TestBaseObj,
     extra: i64,

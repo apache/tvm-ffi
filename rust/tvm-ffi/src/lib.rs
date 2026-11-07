@@ -262,8 +262,8 @@ pub use tvm_ffi_macros::match_any;
 /// * `final` - The type has no subtypes.
 /// * `immutable` - Shared objects of the type are never mutated, so its
 ///   references cross threads when its fields can
-///   ([`ImmutableObject`](crate::object::ImmutableObject)); a field cannot be
-///   `writable`.
+///   ([`ImmutableObject`](crate::object::ImmutableObject)); a field, own or
+///   inherited, cannot be `writable`. Every subtype must be `immutable` too.
 /// * `s_eq_hash_kind = "TreeNode"` - The [`SEqHashKind`](crate::reflection::SEqHashKind) of structural
 ///   equality; by default the parent's.
 /// * `child_slots = N`, `child_slots_can_overflow = bool` - Type indices kept

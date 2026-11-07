@@ -343,7 +343,9 @@ impl<T: ObjectCore> Clone for ObjectArc<T> {
 /// copy-on-write, in place only on a uniquely held instance (one strong
 /// reference, no weak ones). This holds for every type not registered as
 /// mutable (`_type_mutable`), in any language. Every subclass must also be
-/// immutable while shared, with thread-safe fields.
+/// immutable while shared, with thread-safe fields; the derives reject a
+/// subtype that is not `immutable` at compile time. A hand-written impl must
+/// also set `ObjectCore::TYPE_IMMUTABLE` and keep every subtype immutable.
 pub unsafe trait ImmutableObject: ObjectCore {}
 
 // SAFETY: `T` is never mutated while shared, its fields are thread-safe, and the
@@ -393,6 +395,12 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// A final type has no separately registered object-system subtype.
     #[doc(hidden)]
     const TYPE_FINAL: bool = false;
+    /// Whether `Self` implements [`ImmutableObject`].
+    #[doc(hidden)]
+    const TYPE_IMMUTABLE: bool = false;
+    /// Whether `Self` or an ancestor declares a `writable` reflected field.
+    #[doc(hidden)]
+    const TYPE_HAS_WRITABLE_FIELD: bool = false;
     /// The runtime type index of this type.
     fn type_index() -> i32;
     /// Whether [`type_index`](Self::type_index) can return now: false while

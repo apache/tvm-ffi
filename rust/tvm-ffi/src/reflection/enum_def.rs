@@ -60,6 +60,7 @@ use crate::{Any, AnyView, EnumRef, Error, List, Result, String, TYPE_ERROR, VALU
 /// #[type_key = "my_ext.Color"]
 /// #[type_register]
 /// #[type_final]
+/// #[type_immutable]
 /// pub struct ColorObj {
 ///     base_: EnumObj,
 /// }
