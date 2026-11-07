@@ -24,9 +24,10 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
 - *complete*: the struct mirrors every physical field at its real offset and
   width, pinned by a ``const`` size/alignment assertion. ``<Leaf>Obj::new``
   and the wrapper's ``new`` take every field root to leaf: the former each as
-  its own type, the latter a scalar as its own type and anything else as
-  ``impl Into``. ``custom-new`` leaves the wrapper's ``new`` to hand-written
-  code and names the generated one ``from_fields``. A type that is not final
+  its own type, the latter a scalar as its own type, an object reference as
+  ``impl IntoObjectRef`` and anything else as ``impl Into``. ``custom-new``
+  leaves the wrapper's ``new`` to hand-written code and names the generated
+  one ``from_fields``. A type that is not final
   can be the parent of a type defined in Rust (``tvm_ffi::rs_object``): its
   ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` and
   ``UnsafeInit`` when every ancestor's is generated too (a ``ty-map``'d one is
@@ -59,7 +60,7 @@ module, a ``crate::`` path anywhere else.
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from .. import consts as C
 from ..layout import Verdict, classify
@@ -76,6 +77,8 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from pathlib import Path
+
+    from tvm_ffi.core import TypeSchema
 
     from ..file_utils import CodeBlock
     from ..utils import InitConfig, NamedTypeSchema, ObjectInfo, Options
@@ -103,14 +106,52 @@ def _call_lines(open_: str, items: list[str], close: str) -> list[str]:
     ]
 
 
-def _param_type(rust_type: str) -> str:
-    """Type a parameter of the wrapper's allocator: a scalar as itself, anything else as ``impl Into``."""
-    return rust_type if rust_type in C_RUST.RUST_EXACT_PARAMS else f"impl Into<{rust_type}>"
+class _Param(NamedTuple):
+    """A parameter of an allocator: one physical field, root to leaf."""
+
+    name: str
+    #: The type ``<Leaf>Obj::new`` takes: the field's mirror, or a ``field`` directive's narrowing.
+    rust_type: str
+    #: Whether the reflected field is an object reference (:func:`_is_object_ref`), not an enum.
+    of_object: bool
+
+    @property
+    def is_object(self) -> bool:
+        """Whether ``rust_type`` is an object reference; a ``nullable`` one is an ``Option``."""
+        return self.of_object and not self.rust_type.startswith("Option<")
 
 
-def _forward(ident: str, rust_type: str) -> str:
-    """Pass a parameter of the wrapper's allocator to ``<Leaf>Obj::new``, which takes ``rust_type``."""
-    return ident if rust_type in C_RUST.RUST_EXACT_PARAMS else f"{ident}.into()"
+def _is_object_ref(schema: TypeSchema) -> bool:
+    """Whether the Rust type of ``schema`` is an object reference.
+
+    A builtin origin is one when listed in ``RUST_OBJECT_REF_ORIGINS``; a type key
+    outside ``ffi.*`` always is, as a generated or ``ty-map``'d binding.
+    """
+    origin = schema.origin
+    if origin in C_RUST.RUST_OBJECT_REF_ORIGINS:
+        return True
+    return "." in origin and not origin.startswith("ctypes.") and not is_crate_type_key(origin)
+
+
+def _param_type(param: _Param, imports: RustImports) -> str:
+    """Type a parameter of the wrapper's allocator.
+
+    A scalar as itself, an object reference as ``impl IntoObjectRef`` (recording its ``use``,
+    which also brings ``into_owned_object_ref`` into scope), anything else as ``impl Into``.
+    """
+    if param.rust_type in C_RUST.RUST_EXACT_PARAMS:
+        return param.rust_type
+    if param.is_object:
+        return f"impl {imports.record('tvm_ffi::IntoObjectRef')}<{param.rust_type}>"
+    return f"impl Into<{param.rust_type}>"
+
+
+def _forward(param: _Param) -> str:
+    """Pass a parameter of the wrapper's allocator to ``<Leaf>Obj::new``, which takes its mirror."""
+    ident = rust_ident(param.name)
+    if param.rust_type in C_RUST.RUST_EXACT_PARAMS:
+        return ident
+    return f"{ident}.into_owned_object_ref()" if param.is_object else f"{ident}.into()"
 
 
 def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
@@ -522,13 +563,13 @@ class _ObjectRenderer:
 
     def _allocator_params(
         self, key: str, info: ObjectInfo, narrowed: frozenset[str] = frozenset()
-    ) -> list[tuple[str, str]]:
-        """``(field, type)`` of every physical field root to leaf, as ``<key>Obj::new`` takes.
+    ) -> list[_Param]:
+        """Every physical field root to leaf, as ``<key>Obj::new`` takes it.
 
         ``narrowed`` names the fields a subtype of ``key`` narrows with a ``field`` directive.
         """
         parent = info.parent_type_key
-        inherited: list[tuple[str, str]] = []
+        inherited: list[_Param] = []
         if parent is not None and self._provider(parent) != "crate":
             inherited = self._allocator_params(
                 parent, object_info_from_type_key(parent), narrowed | self._narrowed_names(key)
@@ -539,9 +580,9 @@ class _ObjectRenderer:
         self,
         key: str,
         info: ObjectInfo,
-        inherited: list[tuple[str, str]],
+        inherited: list[_Param],
         narrowed: frozenset[str] = frozenset(),
-    ) -> list[tuple[str, str]]:
+    ) -> list[_Param]:
         """Extend the parent's parameters with ``key``'s own fields by offset.
 
         A ``field`` directive on an inherited field narrows that parameter; the
@@ -553,13 +594,15 @@ class _ObjectRenderer:
             return RustImports() if name in narrowed else self.imports
 
         params = [
-            (name, self._narrowed(key, name, rust_type, imports(name)))
-            for name, rust_type in inherited
+            p._replace(rust_type=self._narrowed(key, p.name, p.rust_type, imports(p.name)))
+            for p in inherited
         ]
+        enums = self.imports.directives.enums
         for field in sorted(info.fields, key=lambda f: f.offset or 0):
             mirror = self._field_mirror(key, field, imports(field.name))
             assert mirror is not None  # complete: every field along the chain has a mirror
-            params.append((field.name, mirror))
+            of_object = f"{key}.{field.name}" not in enums and _is_object_ref(field)
+            params.append(_Param(field.name, mirror, of_object))
         return params
 
     def _narrowed_names(self, key: str) -> frozenset[str]:
@@ -577,7 +620,7 @@ class _ObjectRenderer:
     def _fn_lines(
         self,
         head: str,
-        params: list[tuple[str, str]],
+        params: list[_Param],
         call: tuple[str, list[str]],
         init: list[str],
         *,
@@ -585,15 +628,16 @@ class _ObjectRenderer:
     ) -> list[str]:
         """Render ``<head>(<params>) -> Self { let <call>; Self { <init> } }`` in an ``impl`` block.
 
-        ``generic`` takes a parameter that is not a scalar as ``impl Into`` (:func:`_param_type`).
+        ``generic`` takes a parameter that is not a scalar as ``impl IntoObjectRef`` or
+        ``impl Into`` (:func:`_param_type`).
         """
         plist = [
-            f"{rust_ident(name)}: {_param_type(rust_type) if generic else rust_type}"
-            for name, rust_type in params
+            f"{rust_ident(p.name)}: {_param_type(p, self.imports) if generic else p.rust_type}"
+            for p in params
         ]
         binding, args = call
         return [
-            *[f"    {line}" for line in _allow_non_snake_case(rust_ident(n) for n, _ in params)],
+            *[f"    {line}" for line in _allow_non_snake_case(rust_ident(p.name) for p in params)],
             *_call_lines(f"    {head}(", plist, ") -> Self {"),
             *_call_lines(f"        let {binding}(", args, ");"),
             *_call_lines("        Self { ", init, " }"),
@@ -605,13 +649,14 @@ class _ObjectRenderer:
 
         ``<Leaf>Obj::new`` takes every field as its own type, so the parent's, generated
         or hand-written, takes what it hands on. The wrapper's ``new`` takes a scalar
-        field as its own type and any other as ``impl Into`` (:func:`_param_type`), as
-        ``#[rs_object]``'s ``new`` does, and converts it on the way to ``<Leaf>Obj::new``.
+        field as its own type, as ``#[rs_object]``'s ``new`` does, an object reference as
+        ``impl IntoObjectRef`` and any other as ``impl Into`` (:func:`_param_type`), and
+        converts it on the way to ``<Leaf>Obj::new``.
         ``custom-new`` names the wrapper's allocator ``from_fields`` instead.
         ``<Leaf>Obj::new`` of a type that is not final is public: a subtype defined in Rust
         builds its parent's object with it.
         """
-        inherited: list[tuple[str, str]] = []
+        inherited: list[_Param] = []
         if has_parent:
             parent = self.info.parent_type_key
             assert parent is not None
@@ -620,11 +665,11 @@ class _ObjectRenderer:
             )
         params = self._level_params(self.type_key, self.info, inherited)
         to_parent = [
-            f"{rust_ident(name)}.into()" if rust_type != parent_type else rust_ident(name)
-            for (name, rust_type), (_, parent_type) in zip(params, inherited)
+            f"{rust_ident(p.name)}.into()" if p.rust_type != q.rust_type else rust_ident(p.name)
+            for p, q in zip(params, inherited)
         ]
-        own = [rust_ident(name) for name, _ in params[len(inherited) :]]
-        forward = [_forward(rust_ident(name), rust_type) for name, rust_type in params]
+        own = [rust_ident(p.name) for p in params[len(inherited) :]]
+        forward = [_forward(p) for p in params]
         allow = self._allow_missing_docs()
         sections = [
             [

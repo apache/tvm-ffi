@@ -243,7 +243,11 @@ pub use tvm_ffi_macros::match_any;
 ///   fields of both.
 /// * `MyPairObj::new(base_, fields...)`, which takes the fields in order: a
 ///   scalar (`bool`, an integer or a float) as its own type, so that a literal
-///   infers as it, and any other field from anything that converts into it.
+///   infers as it, and any other field as `impl Into<T>`. This is the
+///   object-level allocator, which sees only tokens and so cannot tell an
+///   object reference from a value; a constructor on the reference takes an
+///   object reference as [`impl IntoObjectRef<T>`](IntoObjectRef), as the
+///   ones `tvm-ffi-stubgen` generates do.
 ///
 /// # Arguments
 ///
