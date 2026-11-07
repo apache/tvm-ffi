@@ -48,8 +48,9 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// `#[type_key = "..."]` names the type, and `#[type_index(unsafe ...)]` gives
 /// it a static index; the `unsafe` marks the caller's promise that the runtime
 /// gives that index to this type. Otherwise a type defined in Rust declares
-/// `#[type_register]`: it is registered under its parent on first use of
-/// `type_index()`, or takes the index its key already has, as C++
+/// `#[type_register]`: it is registered under its parent when its library
+/// loads, as a C++ type is in a static init block, or takes the index its key
+/// already has, as C++
 /// `TVM_FFI_DECLARE_OBJECT_INFO` does.
 /// Without `#[type_register]`, the type binds a key its defining library,
 /// usually C++, has registered, and `type_index()` panics if that library is
@@ -86,10 +87,9 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// [`SEqHashKind`]: ../tvm_ffi/reflection/enum.SEqHashKind.html
 ///
 /// Registrations from Rust hold one lock, so they do not race each other. The
-/// runtime's type table is not locked otherwise: as for C++, a type must not
-/// be registered while another thread loads a library that registers types.
-/// Calling `type_index()` before starting such threads registers a type
-/// eagerly.
+/// runtime's type table is not locked otherwise, and its readers take no
+/// lock: as for C++, types register during static initialization, before
+/// other threads use them or load a library that registers types.
 #[proc_macro_error]
 #[proc_macro_derive(
     Object,

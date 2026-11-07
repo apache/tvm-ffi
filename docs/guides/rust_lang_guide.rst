@@ -307,8 +307,8 @@ Defining Reflected Object Types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An object type defined in Rust registers its type key with ``#[type_register]``
-and its fields with ``#[reflect]``. The registration runs on the type's
-first ``type_index()``, which allocating an instance calls:
+and its fields with ``#[reflect]``. The registration runs when the library
+that defines the type loads, as for a C++ type:
 
 .. code-block:: rust
 
