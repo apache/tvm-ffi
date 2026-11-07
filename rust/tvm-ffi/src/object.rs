@@ -897,13 +897,9 @@ pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
 
 /// The registered type key of `type_index`, or `<type_index N>` when it has none.
 pub(crate) fn type_key_of_index(type_index: i32) -> String {
-    unsafe {
-        let info = TVMFFIGetTypeInfo(type_index);
-        if info.is_null() {
-            format!("<type_index {type_index}>")
-        } else {
-            (*info).type_key.as_str().to_string()
-        }
+    match crate::reflection::type_key(type_index) {
+        Some(key) => key.to_string(),
+        None => format!("<type_index {type_index}>"),
     }
 }
 

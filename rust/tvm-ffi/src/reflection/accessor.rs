@@ -21,13 +21,15 @@
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
+use std::sync::{PoisonError, RwLock};
 
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
-    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
+    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeInfo,
+    TVMFFITypeKeyToIndex,
 };
 use crate::type_traits::AnyCompatible;
-use crate::{Any, AnyView, Error, Function, ObjectCore, Result, TYPE_ERROR};
+use crate::{Any, AnyView, Array, Error, Function, ObjectCore, Result, TYPE_ERROR};
 
 /// A registry-owned type-attribute column indexed by runtime type.
 ///
@@ -80,6 +82,60 @@ impl TypeAttrColumn {
             }
         }
     }
+}
+
+/// The type key registered for `type_index`, such as `"ffi.Array"`, or `None`
+/// if no type has that index.
+///
+/// ```
+/// use tvm_ffi::collections::array::ArrayObj;
+/// use tvm_ffi::{reflection, ObjectCore};
+///
+/// assert_eq!(reflection::type_key(ArrayObj::type_index()), Some("ffi.Array"));
+/// assert_eq!(reflection::type_key(-1), None);
+/// ```
+pub fn type_key(type_index: i32) -> Option<&'static str> {
+    if !is_registered(type_index) {
+        return None;
+    }
+    // SAFETY: the index is registered, and type information lives as long as
+    // the process.
+    let info: &'static TVMFFITypeInfo = unsafe { &*TVMFFIGetTypeInfo(type_index) };
+    Some(info.type_key.as_str())
+}
+
+/// Whether a type is registered with index `type_index`. The registry aborts
+/// the process on a lookup of any other index, so the registered indices are
+/// listed once and again whenever an index is missing, as types register over
+/// time.
+fn is_registered(type_index: i32) -> bool {
+    static REGISTERED: RwLock<Vec<bool>> = RwLock::new(Vec::new());
+    let Ok(index) = usize::try_from(type_index) else {
+        return false;
+    };
+    let read = REGISTERED.read().unwrap_or_else(PoisonError::into_inner);
+    if read.get(index).copied().unwrap_or(false) {
+        return true;
+    }
+    drop(read);
+    let keys = crate::cached_global_func!("ffi.GetRegisteredTypeKeys")
+        .call_tuple(())
+        .and_then(Array::<crate::String>::try_from);
+    let mut registered = REGISTERED.write().unwrap_or_else(PoisonError::into_inner);
+    for key in keys.iter().flat_map(|keys| keys.iter()) {
+        let mut key_index = 0;
+        // SAFETY: the byte array borrows `key` for the call.
+        let found = unsafe {
+            TVMFFITypeKeyToIndex(&TVMFFIByteArray::from_str(key.as_str()), &mut key_index) == 0
+        };
+        if let (true, Ok(key_index)) = (found, usize::try_from(key_index)) {
+            if registered.len() <= key_index {
+                registered.resize(key_index + 1, false);
+            }
+            registered[key_index] = true;
+        }
+    }
+    registered.get(index).copied().unwrap_or(false)
 }
 
 /// Look up a reflected method of a type by type key and method name.
