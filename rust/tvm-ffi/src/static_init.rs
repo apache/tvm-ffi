@@ -289,6 +289,8 @@ fn run_blocks() -> Vec<(&'static StaticInitBlock, Error)> {
 /// [`tvm_ffi_dll_export_typed_func!`](crate::tvm_ffi_dll_export_typed_func), for its loader to
 /// call. Where the loader does not run the blocks, call it before using what they define.
 pub fn run_static_init_blocks() -> Result<()> {
+    // As at load: what the blocks register keeps this library's code.
+    keep_loaded();
     let mut failures = run_blocks();
     if failures.len() <= 1 {
         return failures.pop().map_or(Ok(()), |(_, error)| Err(error));
