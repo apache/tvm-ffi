@@ -733,22 +733,30 @@ class _ObjectRenderer:
         )
         return sections
 
-    def _is_immutable(self) -> bool:
+    def _is_immutable(self, info: ObjectInfo | None = None) -> bool:
         """Whether C++ declares the class not ``_type_mutable`` and no field along its chain writable.
 
         Such a class only hands out const access and changes through copy-on-write,
         so its handles may cross threads when its fields can. A mutable class, one
-        whose mutability is not registered, or one with a ``def_rw`` field stays
-        single-threaded.
+        with a ``def_rw`` field, or one whose mutability is not registered stays
+        single-threaded, except that an unregistered subtype of an immutable class
+        is immutable too, as the derive requires.
         """
-        if self.info.is_mutable is not False:
+        info = self.info if info is None else info
+        parent = info.parent_type_key
+        if info.is_mutable is None and parent is not None:
+            if parent == C_RUST.RUST_ENUM_TYPE_KEY:
+                return True
+            if self._provider(parent) == "generated":
+                return self._is_immutable(object_info_from_type_key(parent))
+        if info.is_mutable is not False:
             return False
         chain = [
             object_info_from_type_key(key)
-            for key in self.info.ancestors
+            for key in info.ancestors
             if self._provider(key) in ("generated", "mapped")
         ]
-        return all(field.frozen for info in [*chain, self.info] for field in info.fields)
+        return all(field.frozen for each in [*chain, info] for field in each.fields)
 
     def _is_rs_parent(self, verdict: Verdict) -> bool:
         """Whether the object derives ``ShallowCopy`` and ``UnsafeInit`` (``#[type_rs_parent]``).

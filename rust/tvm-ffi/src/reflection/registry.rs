@@ -435,8 +435,9 @@ impl<N: ObjectCore> ObjectDef<N> {
             return Ok(());
         }
         if let Some(creator) = self.creator {
-            // Objects from this creator start zeroed: another language must set
-            // every field before Rust code reads it.
+            // Objects from this creator start zero-filled, in the `UnsafeInit`
+            // state: whoever creates one, in any language, must set every
+            // field before it is used.
             let new = Function::from_typed(move || -> Result<ObjectRef> {
                 let mut handle: TVMFFIObjectHandle = std::ptr::null_mut();
                 crate::check_safe_call!(unsafe { creator(&mut handle) })?;

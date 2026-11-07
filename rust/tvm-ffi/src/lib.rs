@@ -53,6 +53,9 @@
 //! * A [`TensorView`] received as a function argument is valid only during
 //!   the call, and so is an [`Any`] holding a `DLTensor*` converted from it
 //!   or from an [`AnyView`].
+//! * A registered structural visit or mutate hook uses the visitor or
+//!   mutator only through its arguments, during the call, and does not keep
+//!   it.
 #![warn(missing_docs)]
 
 // Lets macro-generated `::tvm_ffi` paths resolve inside this crate too.
@@ -105,8 +108,12 @@ pub use crate::extra::structural_eq_hash::{
     structural_equal_with, structural_hash, structural_hash_with, StructuralOptions,
 };
 pub use crate::extra::structural_map::structural_map;
-pub use crate::extra::structural_mutate::{structural_mutate, MutationView};
-pub use crate::extra::structural_visit::{structural_visit, VisitInterrupt};
+pub use crate::extra::structural_mutate::{
+    structural_mutate, InplaceMode, MutationView, StructuralMutatorView,
+};
+pub use crate::extra::structural_visit::{
+    structural_visit, DefRegionKind, StructuralVisitorView, VisitInterrupt,
+};
 pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
@@ -262,10 +269,12 @@ pub use tvm_ffi_macros::match_any;
 /// * `final` - The type has no subtypes.
 /// * `immutable` - Shared objects of the type are never mutated, so its
 ///   references cross threads when its fields can
-///   ([`ImmutableObject`](crate::object::ImmutableObject)); a field cannot be
-///   `writable`.
+///   ([`ImmutableObject`](crate::object::ImmutableObject)); a field, own or
+///   inherited, cannot be `writable`. Every subtype must be `immutable` too.
 /// * `s_eq_hash_kind = "TreeNode"` - The [`SEqHashKind`](crate::reflection::SEqHashKind) of structural
-///   equality; by default the parent's.
+///   equality; by default the parent's. Structural equality and hashing see
+///   the fields only when the type or an ancestor has one, and otherwise fail
+///   with a `TypeError`.
 /// * `child_slots = N`, `child_slots_can_overflow = bool` - Type indices kept
 ///   for subtypes; 0 and `true` by default.
 /// * `reflection = path` - A `fn(&mut ObjectDef<Self>)` that registers the

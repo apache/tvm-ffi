@@ -519,7 +519,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     ///
     /// ```
     /// # use tvm_ffi::*;
-    /// # use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
+    /// # use tvm_ffi::StructuralMutatorView;
     /// # #[rs_object("my_ext.MyPair", final)]
     /// # pub struct MyPairObj { base_: Object, pub first: Array<i64>, pub second: Array<i64> }
     /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
@@ -794,6 +794,9 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 /// in-place mutation. A matching callback supplies the final value; unmatched
 /// values use default mutation.
 ///
+/// Callbacks must report failures through [`Result`] and must not panic: a panic
+/// reaching the non-unwinding native callback boundary aborts the process.
+///
 /// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
 /// value it receives or one of that value's ancestors: the traversal borrows
 /// their cells while the callback runs. A callback that returns an `Error`
@@ -815,7 +818,7 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 ///
 /// ```
 /// use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
-/// use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
+/// use tvm_ffi::StructuralMutatorView;
 ///
 /// struct Double;
 ///

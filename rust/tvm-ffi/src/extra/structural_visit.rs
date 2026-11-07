@@ -447,7 +447,7 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
 /// ```
 /// # fn main() -> tvm_ffi::Result<()> {
 /// use tvm_ffi::{dispatch, structural_visit, AnyView, Array, Result, VisitInterrupt};
-/// use tvm_ffi::extra::structural_visit::StructuralVisitorView;
+/// use tvm_ffi::StructuralVisitorView;
 ///
 /// struct Sum(i64);
 /// #[dispatch(visit, (AnyView<'_>, &mut StructuralVisitorView<'_, Self>), Result<Option<VisitInterrupt>>)]

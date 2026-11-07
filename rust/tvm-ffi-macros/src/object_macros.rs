@@ -124,18 +124,17 @@ pub(crate) fn expand_object(
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
     let reflection = Reflection::parse(derive_input, rs_object);
-    if type_immutable {
-        let writable = reflection
-            .iter()
-            .flat_map(|reflection| &reflection.reflected)
-            .find(|field| field.flags.iter().any(|flag| flag == "writable"));
-        if let Some(field) = writable {
-            abort!(
-                field.id,
-                "an immutable type cannot have a #[reflect(writable)] field"
-            );
-        }
+    let writable = reflection
+        .iter()
+        .flat_map(|reflection| &reflection.reflected)
+        .find(|field| field.flags.iter().any(|flag| flag == "writable"));
+    if let (true, Some(field)) = (type_immutable, writable) {
+        abort!(
+            field.id,
+            "an immutable type cannot have a #[reflect(writable)] field"
+        );
     }
+    let has_writable_field = writable.is_some();
     let immutable_impl = if type_immutable {
         quote! {
             unsafe impl #tvm_ffi_crate::object::ImmutableObject for #struct_name {}
@@ -282,7 +281,7 @@ pub(crate) fn expand_object(
                     };
                     if !found {
                         // Discard the error the failed lookup raised.
-                        drop(#tvm_ffi_crate::Error::from_raised());
+                        ::core::mem::drop(#tvm_ffi_crate::Error::from_raised());
                     }
                     found
                 }
@@ -322,6 +321,16 @@ pub(crate) fn expand_object(
                     ::core::assert!(
                         !<#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL,
                         "an object type cannot derive from a final parent"
+                    );
+                    ::core::assert!(
+                        #type_immutable
+                            || !<#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_IMMUTABLE,
+                        "a subtype of an immutable object type must be immutable"
+                    );
+                    ::core::assert!(
+                        !#type_immutable
+                            || !<#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_HAS_WRITABLE_FIELD,
+                        "an immutable type cannot inherit a #[reflect(writable)] field"
                     );
                 };
             }
@@ -366,6 +375,10 @@ pub(crate) fn expand_object(
         unsafe impl #tvm_ffi_crate::object::ObjectCore for #struct_name {
             const TYPE_KEY: &'static str = #type_key;
             const TYPE_FINAL: bool = #type_final;
+            const TYPE_IMMUTABLE: bool = #type_immutable;
+            const TYPE_HAS_WRITABLE_FIELD: bool =
+                <#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_HAS_WRITABLE_FIELD
+                    || #has_writable_field;
 
             #type_index_tokens
 

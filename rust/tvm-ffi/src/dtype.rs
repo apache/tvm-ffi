@@ -27,7 +27,8 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFIDataTypeFromString, TVMFFIDa
 /// Name conversions of a `DLDataType`.
 pub trait DLDataTypeExt: Sized {
     /// Return the name of the data type, such as `"int32"`, `"float64"` or
-    /// `"int8x4"` (bits and lanes), the name every language uses for it.
+    /// `"int8x4"` (bits and lanes), the name every language uses for it, or
+    /// `"dtype(code=.., bits=.., lanes=..)"` for one the runtime cannot name.
     ///
     /// ```
     /// use tvm_ffi::{DLDataType, DLDataTypeExt};
@@ -53,13 +54,18 @@ pub trait DLDataTypeExt: Sized {
 
 impl DLDataTypeExt for DLDataType {
     fn to_string(&self) -> std::string::String {
-        unsafe {
+        let name = unsafe {
             let mut ffi_any = TVMFFIAny::new();
-            crate::check_safe_call!(TVMFFIDataTypeToString(self, &mut ffi_any)).unwrap();
-            let name: crate::string::String = crate::any::Any::from_raw_ffi_any(ffi_any)
-                .try_into()
-                .unwrap();
-            name.as_str().to_owned()
+            crate::check_safe_call!(TVMFFIDataTypeToString(self, &mut ffi_any)).and_then(|()| {
+                crate::string::String::try_from(crate::any::Any::from_raw_ffi_any(ffi_any))
+            })
+        };
+        match name {
+            Ok(name) => name.as_str().to_owned(),
+            Err(_) => format!(
+                "dtype(code={}, bits={}, lanes={})",
+                self.code, self.bits, self.lanes
+            ),
         }
     }
 

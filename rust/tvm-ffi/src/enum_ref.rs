@@ -80,6 +80,7 @@ impl EnumObj {
 /// #[type_key = "my_ext.Color"]
 /// #[type_register]
 /// #[type_final]
+/// #[type_immutable]
 /// pub struct ColorObj {
 ///     base_: EnumObj,
 /// }

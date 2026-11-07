@@ -164,6 +164,9 @@ impl<T: ObjectCore> ObjectArc<T> {
     where
         T: ObjectCoreWithExtraItems<ExtraItem = U>,
     {
+        // `data` may describe items it does not hold yet, so a panic before
+        // the write leaks it rather than dropping it.
+        let data = std::mem::ManuallyDrop::new(data);
         unsafe {
             // ensure strict alignment requirements
             // so we can have { T, U*extra_items } layout
@@ -176,7 +179,7 @@ impl<T: ObjectCore> ObjectArc<T> {
                 std::alloc::handle_alloc_error(layout);
             }
             let ptr = raw_data_ptr as *mut T;
-            std::ptr::write(ptr, data);
+            std::ptr::write(ptr, std::mem::ManuallyDrop::into_inner(data));
             // now override the header directly
             std::ptr::write(
                 ptr as *mut TVMFFIObject,
@@ -340,7 +343,9 @@ impl<T: ObjectCore> Clone for ObjectArc<T> {
 /// copy-on-write, in place only on a uniquely held instance (one strong
 /// reference, no weak ones). This holds for every type not registered as
 /// mutable (`_type_mutable`), in any language. Every subclass must also be
-/// immutable while shared, with thread-safe fields.
+/// immutable while shared, with thread-safe fields; the derives reject a
+/// subtype that is not `immutable` at compile time. A hand-written impl must
+/// also set `ObjectCore::TYPE_IMMUTABLE` and keep every subtype immutable.
 pub unsafe trait ImmutableObject: ObjectCore {}
 
 // SAFETY: `T` is never mutated while shared, its fields are thread-safe, and the
@@ -390,6 +395,12 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// A final type has no separately registered object-system subtype.
     #[doc(hidden)]
     const TYPE_FINAL: bool = false;
+    /// Whether `Self` implements [`ImmutableObject`].
+    #[doc(hidden)]
+    const TYPE_IMMUTABLE: bool = false;
+    /// Whether `Self` or an ancestor declares a `writable` reflected field.
+    #[doc(hidden)]
+    const TYPE_HAS_WRITABLE_FIELD: bool = false;
     /// The runtime type index of this type.
     fn type_index() -> i32;
     /// Whether [`type_index`](Self::type_index) can return now: false while
@@ -1162,10 +1173,16 @@ pub mod unsafe_ {
 
     /// Layout of a `T` followed by `count` extra items, kept at least one word past the
     /// header: once a weak reference outlives the data, the deleter stores `count` there.
+    /// Panics with "capacity overflow" (like `Vec`) when the size does not fit in `isize`.
     pub(crate) fn extra_items_layout<T, U>(count: usize) -> std::alloc::Layout {
-        let size = std::mem::size_of::<T>() + count * std::mem::size_of::<U>();
+        use std::alloc::Layout;
         let min_size = std::mem::size_of::<TVMFFIObject>() + std::mem::size_of::<u64>();
-        std::alloc::Layout::from_size_align(size.max(min_size), std::mem::align_of::<T>()).unwrap()
+        Layout::array::<U>(count)
+            .and_then(|items| Layout::new::<T>().extend(items))
+            .and_then(|(layout, _)| {
+                Layout::from_size_align(layout.size().max(min_size), layout.align())
+            })
+            .expect("capacity overflow")
     }
 
     pub(crate) unsafe extern "C" fn object_deleter_for_new_with_extra_items<T, U>(
