@@ -273,7 +273,8 @@ pub use tvm_ffi_macros::match_any;
 /// * `child_slots = N`, `child_slots_can_overflow = bool` - Type indices kept
 ///   for subtypes; 0 and `true` by default.
 /// * `reflection = path` - A `fn(&mut ObjectDef<Self>)` that registers the
-///   type's methods.
+///   type's methods, under the constraints of
+///   [`ObjectDef`](crate::reflection::ObjectDef).
 /// * `crate = path` - Where the generated code finds tvm-ffi, for a crate that
 ///   depends on it only through a re-export; by default `tvm_ffi`.
 ///
@@ -289,9 +290,9 @@ pub use tvm_ffi_macros::match_any;
 /// field's type must take all-zero bytes as a value. An optional field is an
 /// `Option` of an object reference or an [`Optional`] of any other value. The parent's object must
 /// implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and non-final
-/// types bound by `tvm-ffi-stubgen` do. The type registers on its first
-/// `type_index()`, with its fields, methods, `__ffi_new__` and, unless the
-/// methods define it, `__ffi_init__`.
+/// types bound by `tvm-ffi-stubgen` do. The type registers when its library
+/// loads, as [`derive(Object)`](derive::Object) describes, with its fields,
+/// methods, `__ffi_new__` and, unless the methods define it, `__ffi_init__`.
 ///
 /// A key already registered, by another library or a binding, must describe
 /// the same type: `type_index()` checks its parent, depth and size, not its

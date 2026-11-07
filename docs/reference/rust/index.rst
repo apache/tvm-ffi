@@ -37,5 +37,5 @@ The Rust API is organized into three crates:
    * - 📦 `tvm-ffi-sys <generated/tvm_ffi_sys/index.html>`_
      - Low-level unsafe bindings to the C API.
    * - 📦 `tvm-ffi-macros <generated/tvm_ffi_macros/index.html>`_
-     - The ``Object`` and ``ObjectRef`` derive macros implement the ``ObjectCore`` and
-       ``ObjectRefCore`` traits, respectively.
+     - Procedural macros that ``tvm-ffi`` re-exports and documents: ``derive(Object)``,
+       ``derive(ObjectRef)``, ``rs_object``, ``dispatch`` and ``match_any!``.

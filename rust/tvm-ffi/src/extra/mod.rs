@@ -49,7 +49,7 @@ mod visit_error_context;
 ///
 /// The visitor prefix cannot be converted into an owning FFI value:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use tvm_ffi::{Any, StructuralVisitorView};
 /// fn retain<D>(view: &StructuralVisitorView<'_, D>) -> Any {
 ///     Any::from(view.base())

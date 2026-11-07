@@ -621,11 +621,9 @@ macro_rules! impl_arg_into_ref {
 /// which [`Module::get_function_metadata`](crate::Module::get_function_metadata)
 /// and the stub generator read. A
 /// function's schema lists its parameter and return types; a callable whose
-/// signature is not known, such as a custom [`AsPackedCallable`], has the
+/// signature is not known, such as a custom `AsPackedCallable`, has the
 /// schema of an untyped function. The feature is off by default, so exports
 /// are minimal.
-///
-/// [`AsPackedCallable`]: crate::function_internal::AsPackedCallable
 ///
 /// # Arguments
 /// * `$name` - The name of the function

@@ -477,7 +477,7 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// [`Any`](crate::Any), which could outlive it; use [`Tensor`] instead.
 /// Neither misuse compiles:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0597
 /// use tvm_ffi::{Tensor, TensorView};
 /// let view = {
 ///     let tensor = Tensor::from_slice(&[1.0_f32], &[1]).unwrap();
@@ -486,7 +486,7 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// view.ndim();
 /// ```
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use tvm_ffi::{Any, Tensor, TensorView};
 /// let tensor = Tensor::from_slice(&[1.0_f32], &[1]).unwrap();
 /// let _ = Any::from(TensorView::from(&tensor));

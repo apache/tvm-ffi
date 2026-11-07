@@ -54,7 +54,9 @@ impl TypeAttrColumn {
     }
 
     /// The column `name`, created if no type registered it yet. Call it during
-    /// static initialization, like any registration.
+    /// static initialization, like any registration, but not from a
+    /// `#[type_reflection]` function, which already holds the registration
+    /// lock.
     ///
     /// # Errors
     ///

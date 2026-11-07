@@ -162,7 +162,9 @@ impl BitOr for FieldFlags {
 /// That function runs under the registration lock, before `N::type_index()`
 /// returns, so it must not call `type_index()` of `N` or of another Rust type
 /// that is not registered yet, nor register attributes with [`TypeAttrDef`]
-/// or [`EnumDef`](super::EnumDef). When `N` already has metadata in the type
+/// or [`EnumDef`](super::EnumDef), nor call
+/// [`TypeAttrColumn::ensure`](super::TypeAttrColumn::ensure): each takes the
+/// same lock, which is not reentrant. When `N` already has metadata in the type
 /// table, every call is a no-op; registration fails if a previous one stopped
 /// partway.
 ///
@@ -218,7 +220,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     ///
     /// # Safety
     ///
-    /// The caller holds `TYPE_REGISTRATION` for the builder's lifetime, and
+    /// The caller holds `lock_type_registration()` for the builder's lifetime, and
     /// `type_index` is `N`'s. `creator` returns an owned handle of an object of
     /// `N` that the field setters can fill.
     unsafe fn registering(

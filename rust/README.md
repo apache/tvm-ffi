@@ -63,7 +63,7 @@ export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:`tvm-ffi-config --libdir`
 
 ## Running Examples
 
-You can run an optional library-loading example similar to the quick_start examples in [examples/quick_start](../examples/quick_start/).
+You can run an optional library-loading example similar to the quick_start examples in [examples/quickstart](../examples/quickstart/).
 
 ```bash
 cargo run --example load_library --features example

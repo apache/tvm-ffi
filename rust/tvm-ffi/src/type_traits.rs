@@ -34,7 +34,10 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
 /// # Safety
 /// Implementations must encode and decode `TVMFFIAny` cells in the layout of
 /// their FFI type index, and every `*_after_check` function must be sound for
-/// each cell that `check_any_strict` accepts.
+/// each cell that `check_any_strict` accepts. [`is_undefined`](Self::is_undefined)
+/// returns false for every value, and true for all-zero bytes unless they are
+/// a value whose drop does nothing: reflection drops and reads a field it
+/// does not report undefined.
 pub unsafe trait AnyCompatible: Sized {
     /// Whether the `AnyView -> Self` conversion matches one exact leaf type.
     ///

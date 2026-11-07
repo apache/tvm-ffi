@@ -90,7 +90,7 @@ pub struct Object {
 }
 
 impl Object {
-    /// A new object header, for the `base` field of a new object.
+    /// A new object header, for the `base_` field of a new object.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
