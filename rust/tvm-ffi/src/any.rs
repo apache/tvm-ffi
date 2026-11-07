@@ -412,9 +412,9 @@ impl std::fmt::Display for AnyView<'_> {
             .call_packed(&[*self])
             .and_then(crate::String::try_from);
         match repr {
-            Ok(text) => f.write_str(text.as_str()),
+            Ok(text) => f.pad(text.as_str()),
             // Formatting cannot fail, so a printer error falls back to the type key.
-            Err(_) => f.write_str(&object::type_key_of_index(self.type_index())),
+            Err(_) => f.pad(&object::type_key_of_index(self.type_index())),
         }
     }
 }
