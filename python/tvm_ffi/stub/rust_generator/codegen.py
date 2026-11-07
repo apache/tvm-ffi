@@ -241,11 +241,12 @@ class _ObjectRenderer:
         if parent not in (None, C_RUST.RUST_ROOT_TYPE_KEY, *chain):
             chain.append(parent)
         assert all(self._provider(key) == "crate" for key in chain), (self.type_key, chain)
-        root = "tvm_ffi::Object"
-        for i, key in enumerate(chain):
-            if key in C_RUST.RUST_CRATE_OBJECTS:
-                root, chain = C_RUST.RUST_CRATE_OBJECTS[key], chain[i + 1 :]
-        return self.imports.record_builtin_base(chain, root), False
+        defined = [i for i, key in enumerate(chain) if key in C_RUST.RUST_CRATE_OBJECTS]
+        if not defined:
+            return self.imports.record_builtin_base(chain), False
+        deepest = defined[-1]
+        root = C_RUST.RUST_CRATE_OBJECTS[chain[deepest]]
+        return self.imports.record_builtin_base(chain[deepest + 1 :], root), False
 
     # --- classification ----------------------------------------------------
 
