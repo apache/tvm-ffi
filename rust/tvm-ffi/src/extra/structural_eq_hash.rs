@@ -38,7 +38,7 @@ pub struct StructuralOptions {
 /// and content, compared recursively through containers and reflected
 /// fields, not by identity.
 ///
-/// Objects compare as their [`SEqHashKind`](crate::SEqHashKind) declares.
+/// Objects compare as their [`SEqHashKind`](crate::reflection::SEqHashKind) declares.
 ///
 /// # Arguments
 ///

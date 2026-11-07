@@ -111,12 +111,12 @@ class RustImports:
     reserved: set[str] = dataclasses.field(default_factory=set)
     """Names the file's ``object/`` blocks define; an import may not take one."""
 
-    def record_builtin_base(self, chain: list[str]) -> str:
+    def record_builtin_base(self, chain: list[str], root: str = "tvm_ffi::Object") -> str:
         """Record the stand-ins for the builtin ``chain`` (root side first); return the last name.
 
-        An empty chain (parent ``ffi.Object``) yields the crate's ``Object``.
+        The first stand-in embeds the crate's ``root`` object; an empty chain yields ``root``.
         """
-        base = self.record("tvm_ffi::Object")
+        base = self.record(root)
         for key in chain:
             self.builtin_mirrors.setdefault(key, base)
             base = builtin_mirror_name(key)

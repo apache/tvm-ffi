@@ -165,7 +165,8 @@ impl BitOr for FieldFlags {
 ///
 /// ```
 /// use tvm_ffi::derive::ObjectRef;
-/// use tvm_ffi::{reflection, rs_object, Object, ObjectArc, ObjectDef, Result};
+/// use tvm_ffi::reflection::{self, ObjectDef};
+/// use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 ///
 /// #[rs_object("my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
 /// pub struct MyPairObj {
@@ -215,8 +216,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// The caller holds `TYPE_REGISTRATION` for the builder's lifetime, and
     /// `type_index` is `N`'s. `creator` returns an owned handle of an object of
     /// `N` that the field setters can fill.
-    #[doc(hidden)]
-    pub unsafe fn registering(
+    unsafe fn registering(
         type_index: i32,
         kind: Option<SEqHashKind>,
         creator: Option<TVMFFIObjectCreator>,
@@ -304,8 +304,7 @@ impl<N: ObjectCore> ObjectDef<N> {
 
     /// Registers `__ffi_shallow_copy__` from [`ShallowCopy`], which reflected
     /// mutation (copy on write through the field setters) needs.
-    #[doc(hidden)]
-    pub fn shallow_copy(self) -> Result<Self>
+    fn shallow_copy(self) -> Result<Self>
     where
         N: ShallowCopy,
     {
@@ -392,8 +391,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// `__ffi_init__` from the fields unless the type defines its own, then
     /// `__ffi_type_final__`, which no other registered metadata exposes; and
     /// reports the first failed method registration.
-    #[doc(hidden)]
-    pub fn finish(self) -> Result<()> {
+    fn finish(self) -> Result<()> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -422,6 +420,85 @@ impl<N: ObjectCore> ObjectDef<N> {
             "__ffi_type_final__",
             Any::from(N::TYPE_FINAL),
         )
+    }
+}
+
+/// Registers the reflection of `N` for `#[derive(Object)]`: its metadata,
+/// then `fields` its fields, its `__ffi_shallow_copy__`, then `methods` its
+/// methods, then its type attributes.
+///
+/// # Safety
+///
+/// As `ObjectDef::registering`; `fields` registers fields of `N` as
+/// [`ObjectDef::field`] requires.
+#[doc(hidden)]
+pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
+    type_index: i32,
+    kind: Option<SEqHashKind>,
+    creator: Option<TVMFFIObjectCreator>,
+    fields: impl FnOnce(ObjectDef<N>) -> Result<ObjectDef<N>>,
+    methods: impl FnOnce(&mut ObjectDef<N>),
+) -> Result<()> {
+    let mut def = fields(ObjectDef::registering(type_index, kind, creator)?)?.shallow_copy()?;
+    methods(&mut def);
+    def.finish()
+}
+
+/// Registers type attributes of the object type `T`, each as soon as
+/// [`attr`](Self::attr) names it, for every language to read with
+/// [`TypeAttrColumn`](crate::reflection::TypeAttrColumn).
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::derive::Object;
+/// use tvm_ffi::reflection::TypeAttrDef;
+/// use tvm_ffi::reflection::TypeAttrColumn;
+/// use tvm_ffi::{Object, ObjectCore};
+///
+/// #[repr(C)]
+/// #[derive(Object)]
+/// #[type_key = "my_ext.MyPair"]
+/// #[type_register]
+/// pub struct MyPairObj {
+///     base_: Object,
+/// }
+///
+/// TypeAttrDef::<MyPairObj>::new().attr("my_ext.arity", 2_i64)?;
+///
+/// let column = TypeAttrColumn::new("my_ext.arity").unwrap();
+/// let arity: i64 = column.get(MyPairObj::type_index()).unwrap().try_into()?;
+/// assert_eq!(arity, 2);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+pub struct TypeAttrDef<T: ObjectCore> {
+    _type: PhantomData<fn() -> T>,
+}
+
+impl<T: ObjectCore> TypeAttrDef<T> {
+    /// A builder for the type attributes of `T`.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self { _type: PhantomData }
+    }
+
+    /// Register the type attribute `name` of `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the attribute.
+    /// * `value` - The value of the attribute.
+    ///
+    /// # Returns
+    ///
+    /// The builder, for the next attribute.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `T` already has the attribute `name`.
+    pub fn attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
+        register_type_attr(T::type_index(), name, value.into())?;
+        Ok(self)
     }
 }
 

@@ -442,12 +442,12 @@ impl Reflection {
                 format_ident!("{}", flag.to_string().to_uppercase(), span = flag.span())
             });
             quote! {
-                .field::<#ty>(
+                let def = def.field::<#ty>(
                     #name,
                     #doc,
                     ::core::mem::offset_of!(#struct_name, #id),
                     #reflection::FieldFlags::NONE #(| #reflection::FieldFlags::#flags)*,
-                )?
+                )?;
             }
         });
         // The `#[type_reflection]` function registers the methods after the
@@ -461,26 +461,25 @@ impl Reflection {
                     first.ident = struct_name.clone();
                 }
             }
-            quote! {
-                let mut def = def;
-                #path(&mut def);
-            }
+            quote!(#path)
         });
+        let methods = methods.unwrap_or_else(|| quote!(|_| {}));
         let creator = if self.unsafe_init {
             quote!(Some(#reflection::unsafe_init_creator::<#struct_name>))
         } else {
             quote!(None)
         };
         quote! {
-            let registered = (|| -> #tvm_ffi_crate::Result<()> {
-                let def = #reflection::ObjectDef::<#struct_name>::registering(
-                    tindex, #kind, #creator,
-                )?
+            let registered = #reflection::register_object::<#struct_name>(
+                tindex,
+                #kind,
+                #creator,
+                |def| {
                     #(#fields)*
-                    .shallow_copy()?;
-                #methods
-                def.finish()
-            })();
+                    Ok(def)
+                },
+                #methods,
+            );
             if let Err(error) = registered {
                 panic!("Failed to register the reflection of type key {}: {}", #type_key, error);
             }
