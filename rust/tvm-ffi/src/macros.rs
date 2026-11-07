@@ -228,8 +228,10 @@ macro_rules! attach_context {
 /// its base object-reference types: `From<Source>` and `From<&Source>` into
 /// `Target`, `AsRef<Target>`, which borrows a `&Source` as `&Target`
 /// without touching the reference count, and
-/// [`IntoObjectRef<Target>`](crate::object::IntoObjectRef) for `Source` and `&Source`.
-/// It also implements the strict downcast back, `TryFrom<Target>` and
+/// [`IntoObjectRef<Target>`](crate::object::IntoObjectRef) for `Source` and `&Source`,
+/// and [`TypeSubsumes<Source>`](crate::TypeSubsumes) for `Target`, so
+/// [`Array::upcast`](crate::Array::upcast) turns an `Array<Source>` into an
+/// `Array<Target>`. It also implements the strict downcast back, `TryFrom<Target>` and
 /// `TryFrom<&Target>` for `Source`, which return a `TypeError` naming both types.
 ///
 /// # Safety
@@ -271,6 +273,10 @@ macro_rules! unsafe_impl_object_ref_upcast {
                     value.clone().into()
                 }
             }
+
+            // SAFETY: the declaration promises every `source` is a valid
+            // `target`, and an object reference never changes its object.
+            unsafe impl $crate::type_traits::TypeSubsumes<$source> for $target {}
 
             impl $crate::object::IntoObjectRef<$target> for $source {
                 type Output = $target;

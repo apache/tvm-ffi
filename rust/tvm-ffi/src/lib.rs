@@ -111,7 +111,7 @@ pub use crate::reflection::{
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::static_init::run_static_init_blocks;
 pub use crate::string::{Bytes, String};
-pub use crate::type_traits::AnyCompatible;
+pub use crate::type_traits::{AnyCompatible, TypeSubsumes};
 /// Generate runtime type dispatch from the `prefix_*` methods of an impl.
 ///
 /// `#[dispatch(prefix, (First, Args...), Ret)]` on an inherent impl makes its

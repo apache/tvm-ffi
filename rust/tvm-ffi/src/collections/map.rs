@@ -36,8 +36,9 @@ use std::ops::Deref;
 use crate::any::TryFromTemp;
 use crate::derive::Object;
 use crate::function::Function;
+use crate::object::IntoObjectRef;
 use crate::object::{Object, ObjectArc};
-use crate::type_traits::ContainerElement;
+use crate::type_traits::{ContainerElement, TypeSubsumes};
 use crate::{Any, AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -409,6 +410,60 @@ where
     fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
         let pairs: Vec<(K, V)> = iter.into_iter().collect();
         Self::from_pairs(&pairs).expect("ffi.Map() failed to construct a map")
+    }
+}
+
+impl<K: ContainerElement, V: ContainerElement, const N: usize> From<[(K, V); N]> for Map<K, V> {
+    fn from(pairs: [(K, V); N]) -> Self {
+        Self::from_pairs(&pairs).expect("ffi.Map() failed to construct a map")
+    }
+}
+
+/// A reference-count bump, as `From<&T> for T` of an object reference.
+impl<K, V> From<&Map<K, V>> for Map<K, V> {
+    #[inline]
+    fn from(value: &Map<K, V>) -> Self {
+        value.clone()
+    }
+}
+
+impl<K, V> Map<K, V> {
+    /// View this map as a `Map<KU, VU>` without a copy, as C++
+    /// `Map<KU, VU>(const Map<K, V>&)` does for bases `KU` and `VU`.
+    ///
+    /// It is a method, not `From`, for the reasons on [`Array::upcast`](crate::Array::upcast).
+    #[inline]
+    pub fn upcast<KU: TypeSubsumes<K>, VU: TypeSubsumes<V>>(self) -> Map<KU, VU> {
+        Map {
+            data: self.data,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Borrow this map as a `Map<KU, VU>`, as [`upcast`](Self::upcast) does.
+    #[inline]
+    pub fn upcast_ref<KU: TypeSubsumes<K>, VU: TypeSubsumes<V>>(&self) -> &Map<KU, VU> {
+        // SAFETY: both are `repr(C)` over one `ObjectArc<MapObj>`, and every
+        // entry of `Map<K, V>` is a valid entry of `Map<KU, VU>`.
+        unsafe { &*(self as *const Self as *const Map<KU, VU>) }
+    }
+}
+
+impl<K, V, KU: TypeSubsumes<K>, VU: TypeSubsumes<V>> IntoObjectRef<Map<KU, VU>> for Map<K, V> {
+    type Output = Map<KU, VU>;
+    #[inline(always)]
+    fn into_object_ref(self) -> Map<KU, VU> {
+        self.upcast()
+    }
+}
+
+impl<'a, K, V, KU: TypeSubsumes<K> + 'a, VU: TypeSubsumes<V> + 'a> IntoObjectRef<Map<KU, VU>>
+    for &'a Map<K, V>
+{
+    type Output = &'a Map<KU, VU>;
+    #[inline(always)]
+    fn into_object_ref(self) -> &'a Map<KU, VU> {
+        self.upcast_ref()
     }
 }
 
