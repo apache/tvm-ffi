@@ -122,14 +122,19 @@ unsafe impl AnyCompatible for DLDataType {
 }
 
 /// A Rust element type of a tensor, such as `f32`, and its `DLDataType`.
-pub trait AsDLDataType: Copy {
+///
+/// # Safety
+/// Tensor data of `DL_DATA_TYPE` is read as `Self` without checks, so `Self`
+/// must have that data type's item size, be no more aligned than the item
+/// size, and accept every bit pattern of it.
+pub unsafe trait AsDLDataType: Copy {
     /// The data type of `Self`.
     const DL_DATA_TYPE: DLDataType;
 }
 
 macro_rules! impl_as_dl_data_type {
     ($type: ty, $code: expr, $bits: expr) => {
-        impl AsDLDataType for $type {
+        unsafe impl AsDLDataType for $type {
             const DL_DATA_TYPE: DLDataType = DLDataType {
                 code: $code as u8,
                 bits: $bits as u8,
