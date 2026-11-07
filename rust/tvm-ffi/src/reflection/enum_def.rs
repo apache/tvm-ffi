@@ -92,8 +92,8 @@ impl<E: EnumRef> EnumDef<E> {
     ///
     /// # Errors
     ///
-    /// Returns a `ValueError` if `E` already has a value named `name`, or a
-    /// `TypeError` if `E` is not an enum type, is an integer enum
+    /// Returns a `ValueError` if `name` is empty or `E` already has a value named
+    /// `name`, and a `TypeError` if `E` is not an enum type, is an integer enum
     /// (`ffi.IntEnum`), whose values name their own indices, or registers an
     /// object size other than that of [`EnumObj`]: an enum type whose objects
     /// have fields of their own.
@@ -107,6 +107,13 @@ impl<E: EnumRef> EnumDef<E> {
         };
         let type_index = E::ContainerType::type_index();
         let type_key = E::ContainerType::TYPE_KEY;
+        if name.is_empty() {
+            return Err(Error::new(
+                VALUE_ERROR,
+                &format!("a value name of `{type_key}` must be non-empty"),
+                "",
+            ));
+        }
         if !is_instance_of::<EnumObj>(type_index) || is_int_enum(type_index) {
             return Err(Error::new(
                 TYPE_ERROR,
