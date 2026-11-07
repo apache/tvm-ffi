@@ -191,7 +191,7 @@ impl RecursiveEntryMutator {
 #[type_register]
 #[type_s_eq_hash_kind = "DAGNode"]
 struct RemapNodeObj {
-    base: Object,
+    base_: Object,
     #[reflect]
     value: i64,
 }
@@ -207,7 +207,7 @@ struct RemapNode {
 #[type_key = "testing.rust.MutationFieldNode"]
 #[type_register]
 struct FieldNodeObj {
-    base: Object,
+    base_: Object,
     a: Array<i64>,
     b: Any,
 }
@@ -365,7 +365,7 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
 
     let key = Any::from(RemapNode {
         data: ObjectArc::new(RemapNodeObj {
-            base: Object::new(),
+            base_: Object::new(),
             value: 7,
         }),
     });
@@ -852,7 +852,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     }
     let mut owner: Any = FieldNode {
         data: ObjectArc::new(FieldNodeObj {
-            base: Object::new(),
+            base_: Object::new(),
             a: Array::from_vec(vec![1_i64]),
             b: Array::from_vec(vec![2_i64]).into(),
         }),

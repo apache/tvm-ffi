@@ -30,7 +30,7 @@ use tvm_ffi::{
 #[type_child_slots = 20]
 #[type_child_slots_can_overflow = false]
 struct ExprObj {
-    base: ObjectBase,
+    base_: ObjectBase,
 }
 
 fn register_type<T: ObjectCore>() -> i32 {
@@ -48,7 +48,7 @@ macro_rules! define_expr_leaves {
             #[type_register]
             #[type_final]
             struct $object {
-                base: ExprObj,
+                base_: ExprObj,
             }
 
             #[repr(C)]
@@ -61,8 +61,8 @@ macro_rules! define_expr_leaves {
                 fn default() -> Self {
                     Self {
                         data: ObjectArc::new($object {
-                            base: ExprObj {
-                                base: ObjectBase::new(),
+                            base_: ExprObj {
+                                base_: ObjectBase::new(),
                             },
                         }),
                     }

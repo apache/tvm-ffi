@@ -279,7 +279,7 @@ struct TensorObjFromNDAlloc<TNDAlloc>
 where
     TNDAlloc: NDAllocator,
 {
-    base: TensorObj,
+    base_: TensorObj,
     alloc: TNDAlloc,
 }
 
@@ -290,21 +290,21 @@ unsafe impl<TNDAlloc: NDAllocator> ObjectCore for TensorObjFromNDAlloc<TNDAlloc>
         TensorObj::type_index()
     }
     unsafe fn object_header_mut(this: &mut Self) -> &mut tvm_ffi_sys::TVMFFIObject {
-        TensorObj::object_header_mut(&mut this.base)
+        TensorObj::object_header_mut(&mut this.base_)
     }
 }
 
 unsafe impl<TNDAlloc: NDAllocator> ObjectCoreWithExtraItems for TensorObjFromNDAlloc<TNDAlloc> {
     type ExtraItem = i64;
     fn extra_items_count(this: &Self) -> usize {
-        (this.base.dltensor.ndim * 2) as usize
+        (this.base_.dltensor.ndim * 2) as usize
     }
 }
 
 impl<TNDAlloc: NDAllocator> Drop for TensorObjFromNDAlloc<TNDAlloc> {
     fn drop(&mut self) {
         unsafe {
-            self.alloc.free_data(&self.base.dltensor);
+            self.alloc.free_data(&self.base_.dltensor);
         }
     }
 }
@@ -330,7 +330,7 @@ impl Tensor {
         TNDAlloc: NDAllocator,
     {
         let tensor_obj = TensorObjFromNDAlloc {
-            base: TensorObj {
+            base_: TensorObj {
                 object: Object::new(),
                 dltensor: DLTensor {
                     data: std::ptr::null_mut(),
@@ -348,14 +348,14 @@ impl Tensor {
             let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
             // The fresh allocation is unique and has not been exposed.
             let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
-            object.base.dltensor.shape =
+            object.base_.dltensor.shape =
                 TensorObjFromNDAlloc::extra_items(object).as_ptr() as *mut i64;
-            object.base.dltensor.strides = object.base.dltensor.shape.add(shape.len());
+            object.base_.dltensor.strides = object.base_.dltensor.shape.add(shape.len());
             let extra_items = TensorObjFromNDAlloc::extra_items_mut(object);
             extra_items[..shape.len()].copy_from_slice(shape);
             Shape::fill_strides_from_shape(shape, &mut extra_items[shape.len()..]);
-            let dltensor_ptr = &object.base.dltensor as *const DLTensor;
-            object.base.dltensor.data = object.alloc.alloc_data(&*dltensor_ptr);
+            let dltensor_ptr = &object.base_.dltensor as *const DLTensor;
+            object.base_.dltensor.data = object.alloc.alloc_data(&*dltensor_ptr);
             Self {
                 data: ObjectArc::from_raw(ObjectArc::into_raw(obj_arc) as *mut TensorObj),
             }

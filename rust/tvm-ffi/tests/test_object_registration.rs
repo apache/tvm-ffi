@@ -32,7 +32,7 @@ use tvm_ffi_sys::{TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeKeyToIndex};
 #[type_child_slots = 2]
 #[type_child_slots_can_overflow = false]
 struct RegisteredBaseObj {
-    base: Object,
+    base_: Object,
     value: i64,
 }
 
@@ -48,7 +48,7 @@ struct RegisteredBase {
 #[type_register]
 #[type_final]
 struct RegisteredLeafObj {
-    base: RegisteredBaseObj,
+    base_: RegisteredBaseObj,
     extra: i64,
 }
 
@@ -94,8 +94,8 @@ fn test_derived_object_types_are_registered_on_first_use() {
 fn test_registered_object_types_round_trip_through_any() {
     let leaf = RegisteredLeaf {
         data: ObjectArc::new(RegisteredLeafObj {
-            base: RegisteredBaseObj {
-                base: Object::new(),
+            base_: RegisteredBaseObj {
+                base_: Object::new(),
                 value: 7,
             },
             extra: 8,
@@ -119,7 +119,7 @@ macro_rules! concurrent_types {
             #[type_key = $key]
             #[type_register]
             struct $name {
-                base: Object,
+                base_: Object,
             }
         )*
     };
@@ -180,7 +180,7 @@ fn test_registration_from_threads() {
 #[derive(Object)]
 #[type_key = "testing.rust.NeverRegistered"]
 struct UnregisteredBindingObj {
-    base: Object,
+    base_: Object,
 }
 
 #[test]

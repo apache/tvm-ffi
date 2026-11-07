@@ -83,6 +83,10 @@ pub use crate::error::{
 };
 pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
+pub use crate::extra::structural_eq_hash::{
+    get_first_structural_mismatch, get_first_structural_mismatch_with, structural_equal,
+    structural_equal_with, structural_hash, structural_hash_with, StructuralOptions,
+};
 pub use crate::extra::structural_map::structural_map;
 pub use crate::extra::structural_mutate::{
     structural_mutate, InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase,
@@ -229,15 +233,16 @@ pub use tvm_ffi_macros::match_any;
 /// `#[rs_object("type.Key", options...)]` registers the struct as an object
 /// type with the reflection of every field, so that structural equality and
 /// hashing, `repr`, deep copy and Python see the fields. The first field,
-/// `base`, is the parent type's object, embedded at the start of the struct:
-/// `base: Object` for a type under `ffi.Object`. Declare the managed reference
-/// with [`#[derive(ObjectRef)]`](derive::ObjectRef).
+/// `base_`, is the parent type's object, embedded at the start of the struct:
+/// `base_: Object` for a type under `ffi.Object`; the trailing `_` leaves
+/// `base` free for a reflected field. Declare the managed reference with
+/// [`#[derive(ObjectRef)]`](derive::ObjectRef).
 ///
 /// The macro adds to the struct:
 ///
 /// * `#[repr(C)]` and `Deref` to the parent's object, so `obj.field` reads the
 ///   fields of both.
-/// * `MyPairObj::new(base, fields...)`, which takes the fields in order: a
+/// * `MyPairObj::new(base_, fields...)`, which takes the fields in order: a
 ///   scalar (`bool`, an integer or a float) as its own type, so that a literal
 ///   infers as it, and any other field from anything that converts into it.
 ///
@@ -276,7 +281,7 @@ pub use tvm_ffi_macros::match_any;
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
-///     base: Object,
+///     base_: Object,
 ///     pub first: i64,
 ///     #[reflect(seq_hash_ignore)]
 ///     pub second: tvm_ffi::String,

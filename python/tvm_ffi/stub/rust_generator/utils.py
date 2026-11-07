@@ -196,17 +196,16 @@ def check_tokens(lines: Iterable[str]) -> tuple[str, ...]:
 def rust_ident(name: str) -> str:
     """Spell a reflected field name in Rust.
 
-    Two naming conventions are unwrapped, and nothing else is renamed: a C++
-    member with one trailing underscore (``global_var_map_``) loses it, and a
-    dunder name (``__dict__``) loses both pairs. Keywords become raw
-    identifiers; the four that cannot, and ``base`` (the member name the
-    generated structs use themselves), get a trailing underscore.
+    The name is kept as registered: keywords become raw identifiers, and the
+    four that cannot get a trailing underscore. The generated structs' own
+    members, ``base_`` and ``data_``, are rejected as reflected names.
     """
-    if len(name) > 4 and name.startswith("__") and name.endswith("__"):
-        name = name[2:-2]
-    elif len(name) > 1 and name.endswith("_") and not name.endswith("__"):
-        name = name[:-1]
-    if name in C.RUST_NOT_RAW_IDENTIFIERS or name in C.RUST_RESERVED_MEMBERS:
+    if name in C.RUST_GENERATED_MEMBERS:
+        raise ValueError(
+            f"reflected field `{name}` collides with the member the generated Rust bindings "
+            f"name `{name}`; register the field under another name"
+        )
+    if name in C.RUST_NOT_RAW_IDENTIFIERS:
         return f"{name}_"
     if name in C.RUST_KEYWORDS:
         return f"r#{name}"

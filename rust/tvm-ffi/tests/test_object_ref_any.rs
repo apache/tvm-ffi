@@ -28,7 +28,7 @@ use tvm_ffi::{Any, AnyCompatible, AnyView, Object, ObjectRefCore};
 // A derived reference.
 #[rs_object("testing.object_ref_any.Pair", final)]
 pub struct PairObj {
-    base: Object,
+    base_: Object,
     pub first: i64,
     pub second: i64,
 }

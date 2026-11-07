@@ -36,7 +36,7 @@ use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex};
 #[type_key = "ffi.VisitErrorContext"]
 #[type_final]
 pub(crate) struct VisitErrorContextObj {
-    base: Object,
+    base_: Object,
     /// Visited nodes, innermost first; an entry may be `None`.
     reverse_visit_pattern: Array<Option<ObjectRef>>,
     /// The `extra_context` the error carried before this context replaced it.
@@ -93,7 +93,7 @@ pub(crate) fn update_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Er
             };
             if !ObjectArc::is_unique(&context) {
                 context = ObjectArc::new(VisitErrorContextObj {
-                    base: Object::new(),
+                    base_: Object::new(),
                     reverse_visit_pattern: context.reverse_visit_pattern.clone(),
                     prev_error_context: context.prev_error_context.clone(),
                 });
@@ -107,7 +107,7 @@ pub(crate) fn update_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Er
             context
         }
         previous => ObjectArc::new(VisitErrorContextObj {
-            base: Object::new(),
+            base_: Object::new(),
             reverse_visit_pattern: Array::from_vec(vec![Some(node)]),
             prev_error_context: previous,
         }),

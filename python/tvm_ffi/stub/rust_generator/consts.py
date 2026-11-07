@@ -24,6 +24,7 @@ RUST_DIRECTIVE_KINDS = frozenset(
         "import-object",
         "field",
         "nullable",
+        "visibility",
         "enum",
         "opaque",
         "upcast",
@@ -45,7 +46,7 @@ RUST_TY_MAP_DEFAULTS = {
     "Array": "tvm_ffi::Array",  # the crate's own Array<T>, NOT Vec
     "List": "tvm_ffi::List",  # the crate's own List<T>, NOT Vec
     "Map": "tvm_ffi::Map",  # the crate's own Map<K, V>, NOT HashMap
-    # An object value is the `ObjectRef` handle; `Object` only appears as an embedded `base`.
+    # An object value is the `ObjectRef` handle; `Object` only appears as an embedded `base_`.
     "Object": "tvm_ffi::object::ObjectRef",
     "Tensor": "tvm_ffi::Tensor",
     "Shape": "tvm_ffi::Shape",
@@ -132,10 +133,11 @@ RUST_KEYWORDS = frozenset(
 )
 RUST_NOT_RAW_IDENTIFIERS = frozenset({"self", "Self", "super", "crate"})
 
-#: The one member name the generated structs use themselves: ``base`` is the parent slot of every
-#: object struct and the ``ObjectArc`` slot of every reference wrapper. A reflected field of that
-#: name would collide (or shadow through ``Deref``), so ``rust_ident`` spells it ``base_``.
-RUST_RESERVED_MEMBERS = frozenset({"base"})
+#: The members the generated structs use themselves: ``base_``, the parent's object in every
+#: object struct, and ``data_``, the ``ObjectArc`` of every reference. The trailing ``_`` keeps
+#: them apart from reflected names such as ``base`` and ``data``.
+RUST_GENERATED_MEMBERS = frozenset({"base_", "data_"})
+
 
 #: ``rustfmt``'s default ``max_width``; a wider allocator signature wraps one parameter per line.
 RUST_MAX_WIDTH = 100

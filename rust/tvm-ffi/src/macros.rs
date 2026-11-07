@@ -355,7 +355,7 @@ macro_rules! unsafe_impl_object_ref_upcast {
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
-///     base: Object,
+///     base_: Object,
 ///     pub first: i64,
 ///     pub second: i64,
 /// }

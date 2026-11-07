@@ -29,6 +29,7 @@ pub mod cold_init_lazy_lock;
 pub mod dispatch;
 pub mod module;
 mod structural_common;
+pub mod structural_eq_hash;
 pub mod structural_map;
 pub mod structural_mutate;
 pub mod structural_visit;

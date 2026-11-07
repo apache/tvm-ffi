@@ -54,7 +54,7 @@ pub use tvm_ffi_macros::Object;
 ///
 /// #[rs_object("my_ext.MyPair")]
 /// pub struct MyPairObj {
-///     base: Object,
+///     base_: Object,
 ///     pub first: i64,
 ///     pub second: i64,
 /// }
@@ -66,7 +66,7 @@ pub use tvm_ffi_macros::Object;
 ///
 /// #[rs_object("my_ext.MyTriple", final)]
 /// pub struct MyTripleObj {
-///     base: MyPairObj,
+///     base_: MyPairObj,
 ///     pub third: i64,
 /// }
 ///

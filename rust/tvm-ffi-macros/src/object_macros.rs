@@ -530,7 +530,7 @@ pub(crate) fn expand_object_ref(
     };
 
     // The `ObjectArc<T>` slot is the first field; its name is the struct's choice
-    // (`data` in this crate, `base` in stubgen output, so that reflected fields
+    // (`data` in this crate, `data_` in stubgen output, so that reflected fields
     // named `data` keep their name).
     let (data_id, data_ty) = match &derive_input.data {
         syn::Data::Struct(s) => s

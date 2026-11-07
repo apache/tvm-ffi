@@ -33,7 +33,7 @@ use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFIT
     reflection = RsPointObj::reflect_methods
 )]
 pub struct RsPointObj {
-    base: Object,
+    base_: Object,
     /// The x coordinate.
     pub x: i64,
     #[reflect(writable, seq_hash_ignore, doc = "A label.")]
@@ -60,7 +60,7 @@ impl RsPointObj {
 /// A subtype of a Rust-defined type, with a private field.
 #[rs_object("testing.rust.RsPoint3", final)]
 pub struct RsPoint3Obj {
-    base: RsPointObj,
+    base_: RsPointObj,
     pub z: i64,
     pub tags: Array<tvm_ffi::String>,
     tag: i64,
@@ -76,7 +76,7 @@ pub struct RsPoint3 {
 /// A subtype without fields, which still registers its reflection.
 #[rs_object("testing.rust.RsMarker", final)]
 pub struct RsMarkerObj {
-    base: RsPointObj,
+    base_: RsPointObj,
 }
 
 #[derive(Clone, ObjectRef)]
@@ -88,7 +88,7 @@ pub struct RsMarker {
 /// Scalar fields, whose literal arguments to `new` infer as the field types.
 #[rs_object("testing.rust.RsScalars", final)]
 pub struct RsScalarsObj {
-    base: Object,
+    base_: Object,
     pub big: i64,
     pub count: u64,
     pub port: u16,
@@ -108,22 +108,26 @@ pub struct RsScalars {
 #[derive(Object)]
 #[type_key = "testing.TestCxxClassBase"]
 pub struct TestCxxClassBaseObj {
-    base: Object,
+    base_: Object,
     pub v_i64: i64,
     pub v_i32: i32,
 }
 
 impl TestCxxClassBaseObj {
     pub fn new(v_i64: i64, v_i32: i32) -> Self {
-        let base = Object::new();
-        Self { base, v_i64, v_i32 }
+        let base_ = Object::new();
+        Self {
+            base_,
+            v_i64,
+            v_i32,
+        }
     }
 }
 
 impl ShallowCopy for TestCxxClassBaseObj {
     fn shallow_copy(&self) -> Self {
         Self {
-            base: ShallowCopy::shallow_copy(&self.base),
+            base_: ShallowCopy::shallow_copy(&self.base_),
             v_i64: self.v_i64,
             v_i32: self.v_i32,
         }
@@ -133,7 +137,7 @@ impl ShallowCopy for TestCxxClassBaseObj {
 unsafe impl UnsafeInit for TestCxxClassBaseObj {
     unsafe fn drop_defined_fields(this: *mut Self) {
         unsafe {
-            UnsafeInit::drop_defined_fields(std::ptr::addr_of_mut!((*this).base));
+            UnsafeInit::drop_defined_fields(std::ptr::addr_of_mut!((*this).base_));
             drop_if_defined(std::ptr::addr_of_mut!((*this).v_i64));
             drop_if_defined(std::ptr::addr_of_mut!((*this).v_i32));
         }
@@ -149,7 +153,7 @@ pub struct TestCxxClassBase {
 /// A subtype of a C++ type.
 #[rs_object("testing.rust.RsCxxChild", final, s_eq_hash_kind = "TreeNode")]
 pub struct RsCxxChildObj {
-    base: TestCxxClassBaseObj,
+    base_: TestCxxClassBaseObj,
     pub name: tvm_ffi::String,
 }
 
@@ -162,7 +166,7 @@ pub struct RsCxxChild {
 /// A type that defines its own `__ffi_init__`, over which C++ generates none.
 #[rs_object("testing.rust.RsOwnInit", final, reflection = RsOwnInitObj::reflect_methods)]
 pub struct RsOwnInitObj {
-    base: Object,
+    base_: Object,
     pub v: i64,
 }
 
@@ -189,7 +193,7 @@ impl RsOwnInitObj {
 /// `init_off` fields, which `__ffi_init__` leaves all-zero: a value of these types.
 #[rs_object("testing.rust.RsInitOff", final)]
 pub struct RsInitOffObj {
-    base: Object,
+    base_: Object,
     pub v: i64,
     #[reflect(init_off)]
     pub count: i64,
@@ -205,7 +209,7 @@ pub struct RsInitOff {
 /// An `init_off` reference, which all-zero bytes leave undefined: its registration fails.
 #[rs_object("testing.rust.RsInitOffReference", final)]
 pub struct RsInitOffReferenceObj {
-    base: Object,
+    base_: Object,
     #[reflect(init_off)]
     pub items: Array<i64>,
 }
@@ -218,7 +222,7 @@ mod reexported {
 
     #[::tvm_ffi::rs_object("testing.rust.RsReexported", crate = ::tvm_ffi)]
     pub struct ReexportedObj {
-        base: ::tvm_ffi::Object,
+        base_: ::tvm_ffi::Object,
         pub v: i64,
     }
 

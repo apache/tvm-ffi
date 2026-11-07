@@ -38,6 +38,12 @@ use tvm_ffi::VALUE_ERROR;
 // tvm-ffi-stubgen(custom-new): rust_stubgen.IntPair
 
 // tvm-ffi-stubgen(begin): object/rust_stubgen.IntPair
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+pub struct IntPair {
+    data_: ObjectArc<IntPairObj>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct PairKind(i32);
@@ -63,13 +69,15 @@ impl TryFrom<i64> for PairKind {
     }
 }
 
+/// The object behind [`IntPair`].
+///
 /// Complete: reflected fields fill [24, 48) exactly (alignment padding [44, 48)).
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "rust_stubgen.IntPair"]
 #[type_final]
 pub struct IntPairObj {
-    base: Object,
+    base_: Object,
     pub a: i64,
     pub b: i64,
     pub kind: PairKind,
@@ -80,16 +88,10 @@ const _: () = {
     assert!(::core::mem::align_of::<IntPairObj>() == 8);
 };
 
-#[repr(C)]
-#[derive(tvm_ffi::derive::ObjectRef, Clone)]
-pub struct IntPair {
-    base: ObjectArc<IntPairObj>,
-}
-
 impl IntPairObj {
     pub(crate) fn new(a: i64, b: i64, kind: PairKind) -> Self {
-        let base = Object::new();
-        Self { base, a, b, kind }
+        let base_ = Object::new();
+        Self { base_, a, b, kind }
     }
 }
 
@@ -97,7 +99,7 @@ impl IntPair {
     /// Lossless complete-field allocation.
     pub fn from_fields(a: i64, b: i64, kind: impl Into<PairKind>) -> Self {
         let obj = IntPairObj::new(a, b, kind.into());
-        Self { base: ObjectArc::new(obj) }
+        Self { data_: ObjectArc::new(obj) }
     }
 }
 

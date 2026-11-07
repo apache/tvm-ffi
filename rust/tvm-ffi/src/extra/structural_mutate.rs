@@ -94,7 +94,7 @@ struct StructuralMutatorVTable {
 /// `StructuralMutatorObj`, with no Rust traversal state.
 #[repr(C)]
 pub struct StructuralMutatorObj {
-    base: Object,
+    base_: Object,
     vtable: *const StructuralMutatorVTable,
     def_region_mode: UnsafeCell<i32>,
 }
@@ -108,7 +108,7 @@ impl Default for StructuralMutatorObj {
     #[inline(always)]
     fn default() -> Self {
         Self {
-            base: Object::new(),
+            base_: Object::new(),
             vtable: std::ptr::null(),
             def_region_mode: UnsafeCell::new(DefRegionKind::None as i32),
         }
@@ -516,7 +516,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// # use tvm_ffi::object::ObjectRef;
     /// # use tvm_ffi::*;
     /// # #[rs_object("my_ext.MyPair", final)]
-    /// # pub struct MyPairObj { base: Object, pub first: Array<i64>, pub second: Array<i64> }
+    /// # pub struct MyPairObj { base_: Object, pub first: Array<i64>, pub second: Array<i64> }
     /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
     /// # pub struct MyPair { data: ObjectArc<MyPairObj> }
     /// # struct Pass;

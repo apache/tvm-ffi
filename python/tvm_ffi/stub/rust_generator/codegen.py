@@ -221,7 +221,7 @@ class _ObjectRenderer:
         return None
 
     def _base_type(self) -> tuple[str, bool]:
-        """Resolve the ``base`` struct and whether it is a generated or ``ty-map``'d parent.
+        """Resolve the ``base_`` struct and whether it is a generated or ``ty-map``'d parent.
 
         A builtin parent below ``ffi.Object`` is embedded as its header-only
         stand-in (see :meth:`RustImports.record_builtin_base`).
@@ -334,6 +334,10 @@ class _ObjectRenderer:
         """``#[allow(missing_docs)]`` under ``missing-docs: allow``, for a crate that warns on it."""
         return ["#[allow(missing_docs)]"] if self.imports.directives.allow_missing_docs else []
 
+    def _visibility(self, target: str) -> str:
+        """``pub``, or what a ``visibility`` directive sets."""
+        return self.imports.directives.visibility.get(target, "pub")
+
     def _accessor_lines(self, field: NamedTypeSchema) -> list[str]:
         """One ``pub fn <field>(&self) -> Result<T>`` through the C ABI getter.
 
@@ -342,6 +346,7 @@ class _ObjectRenderer:
         directives = self.imports.directives
         target = f"{self.type_key}.{field.name}"
         name = rust_ident(field.name)
+        vis = self._visibility(target)
         getter = f'FieldGetter::new(Self::type_index(), "{field.name}")?'
         allow = _allow_non_snake_case([name])
 
@@ -349,7 +354,7 @@ class _ObjectRenderer:
         if enum is not None:
             return [
                 *allow,
-                f"pub fn {name}(&self) -> Result<{enum.name}> {{",
+                f"{vis} fn {name}(&self) -> Result<{enum.name}> {{",
                 f"    let raw: i64 = {getter}.get(self)?;",
                 f"    {enum.name}::try_from(raw)",
                 "}",
@@ -365,7 +370,7 @@ class _ObjectRenderer:
             any_type = self.imports.record("tvm_ffi::Any")
             return [
                 *allow,
-                f"pub fn {name}(&self) -> Result<{any_type}> {{",
+                f"{vis} fn {name}(&self) -> Result<{any_type}> {{",
                 f"    {getter}.get_any(self)",
                 "}",
             ]
@@ -373,7 +378,7 @@ class _ObjectRenderer:
             rust_type = f"Option<{rust_type}>"
         return [
             *allow,
-            f"pub fn {name}(&self) -> Result<{rust_type}> {{",
+            f"{vis} fn {name}(&self) -> Result<{rust_type}> {{",
             f"    {getter}.get(self)",
             "}",
         ]
@@ -471,10 +476,12 @@ class _ObjectRenderer:
             f'#[type_key = "{self.type_key}"]',
             *(["#[type_final]"] if self.info.is_final else []),
             f"pub struct {self.obj_struct} {{",
-            f"    base: {base},",  # a reflected `base` field becomes `base_` (`rust_ident`)
+            f"    base_: {base},",  # a reflected `base_` is rejected (`rust_ident`)
         ]
+        summary = [f"/// The object behind [`{self.leaf}`].", "///"]
         if not verdict.is_complete:
             return [
+                *summary,
                 f"/// Opaque: {verdict.detail}. Fields are read through the C ABI getters.",
                 *header,
                 "}",
@@ -483,8 +490,10 @@ class _ObjectRenderer:
         for field in sorted(self.info.fields, key=lambda f: f.offset or 0):
             mirror = self._field_mirror(self.type_key, field, self.imports)
             assert mirror is not None  # the verdict already ran the renderability check
-            members.append(f"    pub {rust_ident(field.name)}: {mirror},")
+            vis = self._visibility(f"{self.type_key}.{field.name}")
+            members.append(f"    {vis} {rust_ident(field.name)}: {mirror},")
         return [
+            *summary,
             f"/// Complete: {verdict.detail}.",
             *_allow_non_snake_case(rust_ident(f.name) for f in self.info.fields),
             *header,
@@ -499,34 +508,59 @@ class _ObjectRenderer:
 
     # --- allocators --------------------------------------------------------
 
-    def _allocator_params(self, key: str, info: ObjectInfo) -> list[tuple[str, str]]:
-        """``(field, type)`` of every physical field root to leaf, as ``<key>Obj::new`` takes."""
+    def _allocator_params(
+        self, key: str, info: ObjectInfo, narrowed: frozenset[str] = frozenset()
+    ) -> list[tuple[str, str]]:
+        """``(field, type)`` of every physical field root to leaf, as ``<key>Obj::new`` takes.
+
+        ``narrowed`` names the fields a subtype of ``key`` narrows with a ``field`` directive.
+        """
         parent = info.parent_type_key
         inherited: list[tuple[str, str]] = []
         if parent is not None and self._provider(parent) != "crate":
-            inherited = self._allocator_params(parent, object_info_from_type_key(parent))
-        return self._level_params(key, info, inherited)
+            inherited = self._allocator_params(
+                parent, object_info_from_type_key(parent), narrowed | self._narrowed_names(key)
+            )
+        return self._level_params(key, info, inherited, narrowed)
 
     def _level_params(
-        self, key: str, info: ObjectInfo, inherited: list[tuple[str, str]]
+        self,
+        key: str,
+        info: ObjectInfo,
+        inherited: list[tuple[str, str]],
+        narrowed: frozenset[str] = frozenset(),
     ) -> list[tuple[str, str]]:
         """Extend the parent's parameters with ``key``'s own fields by offset.
 
         A ``field`` directive on an inherited field narrows that parameter; the
         body hands it to the parent with ``.into()``.
         """
-        params = [(name, self._narrowed(key, name, rust_type)) for name, rust_type in inherited]
+
+        # A type a subtype narrows away is not spelled in this file: don't import it.
+        def imports(name: str) -> RustImports:
+            return RustImports() if name in narrowed else self.imports
+
+        params = [
+            (name, self._narrowed(key, name, rust_type, imports(name)))
+            for name, rust_type in inherited
+        ]
         for field in sorted(info.fields, key=lambda f: f.offset or 0):
-            mirror = self._field_mirror(key, field, self.imports)
+            mirror = self._field_mirror(key, field, imports(field.name))
             assert mirror is not None  # complete: every field along the chain has a mirror
             params.append((field.name, mirror))
         return params
 
-    def _narrowed(self, key: str, field_name: str, rust_type: str) -> str:
+    def _narrowed_names(self, key: str) -> frozenset[str]:
+        """Name the inherited fields ``key`` narrows with a ``field`` directive."""
+        prefix = f"{key}."
+        targets = self.imports.directives.field_types
+        return frozenset(t[len(prefix) :] for t in targets if t.startswith(prefix))
+
+    def _narrowed(self, key: str, field_name: str, rust_type: str, imports: RustImports) -> str:
         override = self.imports.directives.field_types.get(f"{key}.{field_name}")
         if override is None:
             return rust_type
-        return self.imports.record(override) if "::" in override else override
+        return imports.record(override) if "::" in override else override
 
     def _fn_lines(
         self,
@@ -569,7 +603,9 @@ class _ObjectRenderer:
         if has_parent:
             parent = self.info.parent_type_key
             assert parent is not None
-            inherited = self._allocator_params(parent, object_info_from_type_key(parent))
+            inherited = self._allocator_params(
+                parent, object_info_from_type_key(parent), self._narrowed_names(self.type_key)
+            )
         params = self._level_params(self.type_key, self.info, inherited)
         to_parent = [
             f"{rust_ident(name)}.into()" if rust_type != parent_type else rust_ident(name)
@@ -585,8 +621,8 @@ class _ObjectRenderer:
                 *self._fn_lines(
                     "pub(crate) fn new" if self.info.is_final else "pub fn new",
                     params,
-                    (f"base = {base}::new", to_parent),
-                    ["base", *own],
+                    (f"base_ = {base}::new", to_parent),
+                    ["base_", *own],
                 ),
                 "}",
             ]
@@ -601,7 +637,7 @@ class _ObjectRenderer:
                     "pub fn from_fields" if custom else "pub fn new",
                     params,
                     (f"obj = {self.obj_struct}::new", forward),
-                    ["base: ObjectArc::new(obj)"],
+                    ["data_: ObjectArc::new(obj)"],
                     generic=True,
                 ),
                 "}",
@@ -636,7 +672,7 @@ class _ObjectRenderer:
         shallow_copy = self.imports.record("tvm_ffi::ShallowCopy")
         own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
         init = [
-            f"base: {shallow_copy}::shallow_copy(&self.base)",
+            f"base_: {shallow_copy}::shallow_copy(&self.base_)",
             *[f"{name}: Clone::clone(&self.{name})" for name in own],
         ]
         return [
@@ -660,7 +696,7 @@ class _ObjectRenderer:
         unsafe_init = self.imports.record("tvm_ffi::UnsafeInit")
         addr = self.imports.record("std::ptr::addr_of_mut")
         directives = self.imports.directives
-        drops = [f"{unsafe_init}::drop_defined_fields({addr}!((*this).base));"]
+        drops = [f"{unsafe_init}::drop_defined_fields({addr}!((*this).base_));"]
         for field in sorted(self.info.fields, key=lambda f: f.offset or 0):
             target = f"{self.type_key}.{field.name}"
             if target in directives.enums:
@@ -701,7 +737,17 @@ class _ObjectRenderer:
             self.imports.record("tvm_ffi::FieldGetter")
             self.imports.record("tvm_ffi::Result")
 
-        sections: list[list[str]] = []
+        # The reference comes first, so a `///` written above the block documents it.
+        sections: list[list[str]] = [
+            [
+                *self._allow_missing_docs(),
+                "#[repr(C)]",
+                "#[derive(tvm_ffi::derive::ObjectRef, Clone)]",
+                f"pub struct {self.leaf} {{",
+                f"    data_: ObjectArc<{self.obj_struct}>,",
+                "}",
+            ]
+        ]
         enums = self.imports.directives.enums
         sections += [
             self._enum_lines(enums[f"{self.type_key}.{f.name}"])
@@ -709,18 +755,8 @@ class _ObjectRenderer:
             if f"{self.type_key}.{f.name}" in enums
         ]
         sections.append(self._struct_lines(verdict, base))
-        sections.append(
-            [
-                *self._allow_missing_docs(),
-                "#[repr(C)]",
-                "#[derive(tvm_ffi::derive::ObjectRef, Clone)]",
-                f"pub struct {self.leaf} {{",
-                f"    base: ObjectArc<{self.obj_struct}>,",
-                "}",
-            ]
-        )
         if has_parent:
-            sections.append(self._deref_lines(self.obj_struct, base, "base"))
+            sections.append(self._deref_lines(self.obj_struct, base, "base_"))
         if has_accessors:
             accessors: list[str] = []
             for i, field in enumerate(fields):
@@ -807,7 +843,7 @@ def _builtin_mirror_lines(type_key: str, base: str) -> list[str]:
         "#[derive(tvm_ffi::derive::Object)]",
         f'#[type_key = "{type_key}"]',
         f"struct {builtin_mirror_name(type_key)} {{",
-        f"    base: {base},",
+        f"    base_: {base},",
         "}",
     ]
 

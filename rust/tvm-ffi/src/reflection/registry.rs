@@ -169,7 +169,7 @@ impl BitOr for FieldFlags {
 ///
 /// #[rs_object("my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
 /// pub struct MyPairObj {
-///     base: Object,
+///     base_: Object,
 ///     pub first: i64,
 ///     pub second: i64,
 /// }

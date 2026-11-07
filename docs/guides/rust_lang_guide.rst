@@ -323,7 +323,7 @@ first ``type_index()``, which allocating an instance calls:
    #[type_s_eq_hash_kind = "TreeNode"]
    #[type_reflection(PointObj::reflect_methods)]
    pub struct PointObj {
-       base: Object,
+       base_: Object,
        /// The x coordinate.
        #[reflect]
        pub x: i64,
@@ -366,7 +366,7 @@ Defining Object Types from Their Fields
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``#[rs_object]`` defines such a type from its object struct, like Python's
-``py_class``. The first field, ``base``, is the parent's object; every other field
+``py_class``. The first field, ``base_``, is the parent's object; every other field
 is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
 ``reflection = path`` after the type key is ``#[type_reflection(path)]``.
 ``#[derive(ObjectRef)]`` declares the reference, and ``#[object_ref(parent = Point)]``
@@ -379,7 +379,7 @@ names the reference to the parent's object:
 
    #[rs_object("my.Point", s_eq_hash_kind = "TreeNode")]
    pub struct PointObj {
-       base: Object,
+       base_: Object,
        pub x: i64,
        #[reflect(writable, seq_hash_ignore)]
        pub label: tvm_ffi::String,
@@ -392,7 +392,7 @@ names the reference to the parent's object:
 
    #[rs_object("my.Point3", final)]
    pub struct Point3Obj {
-       base: PointObj,
+       base_: PointObj,
        pub z: i64,
    }
 
