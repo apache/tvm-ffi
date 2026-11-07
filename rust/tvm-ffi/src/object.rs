@@ -39,7 +39,7 @@ pub static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// The root object type, `ffi.Object`: just the object header.
 ///
 /// An object type defined in Rust starts with its parent's object, which for
-/// a direct subtype is `base: Object`.
+/// a direct subtype is `base_: Object`.
 #[repr(C)]
 pub struct Object {
     header: TVMFFIObject,
@@ -511,7 +511,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
-///     base: Object,
+///     base_: Object,
 ///     pub first: i64,
 ///     pub second: i64,
 /// }
@@ -675,7 +675,7 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
 ///
 /// #[rs_object("my_ext.MyPair", final)]
 /// pub struct MyPairObj {
-///     base: Object,
+///     base_: Object,
 ///     pub first: i64,
 ///     pub second: i64,
 /// }

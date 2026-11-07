@@ -255,18 +255,16 @@ def test_render_rust_type_without_mirror(schema: TypeSchema) -> None:
 
 def test_rust_ident() -> None:
     assert rust_ident("value") == "value"
-    assert rust_ident("imports_") == "imports"  # C++ member convention: one trailing underscore
-    assert rust_ident("__dict__") == "dict"  # dunder convention: both pairs
-    assert rust_ident("__dict") == "__dict"  # neither convention: kept verbatim
+    assert rust_ident("imports_") == "imports_"  # names are kept as registered
+    assert rust_ident("__dict__") == "__dict__"
     assert rust_ident("_private") == "_private"
-    assert rust_ident("odd__") == "odd__"
-    assert rust_ident("_") == "_"
-    assert rust_ident("____") == "____"
     assert rust_ident("type") == "r#type"
     assert rust_ident("self") == "self_"
     assert rust_ident("crate") == "crate_"
-    assert rust_ident("base") == "base_"  # the parent slot of every generated object struct
-    assert rust_ident("data") == "data"  # the wrapper slot is `base`, so `data` is free
+    assert rust_ident("base") == "base"  # the generated members are `base_` and `data_`
+    for name in ("base_", "data_"):
+        with pytest.raises(ValueError, match="collides"):
+            rust_ident(name)
 
 
 def test_check_tokens_ignores_spelling() -> None:
@@ -274,7 +272,7 @@ def test_check_tokens_ignores_spelling() -> None:
         "use super::super::ir::ExprObj;",
         "/// Complete: every field is mirrored.",
         "#[derive(tvm_ffi::derive::Object)]",
-        "pub struct AddObj { base: ExprObj, pub a: i64, pub b: i64 }",
+        "pub struct AddObj { base_: ExprObj, pub a: i64, pub b: i64 }",
         "const _: () = assert!(::core::mem::size_of::<AddObj>() == 40);",
         "tvm_ffi::unsafe_impl_object_ref_upcast!(Add => super::super::ir::Expr);",
     ]
@@ -282,7 +280,7 @@ def test_check_tokens_ignores_spelling() -> None:
         "use crate::ir::Expr;",
         "#[derive(Object)]",
         "pub struct AddObj {",
-        "    base: crate::ir::ExprObj,",
+        "    base_: crate::ir::ExprObj,",
         "    pub a: i64,",
         "    pub b: i64,",
         "}",
@@ -349,6 +347,7 @@ def test_generator_declares_its_directives_and_records_imports() -> None:
         "import-object",
         "field",
         "nullable",
+        "visibility",
         "enum",
         "opaque",
         "upcast",
@@ -367,18 +366,20 @@ def test_generator_declares_its_directives_and_records_imports() -> None:
 # ---------------------------------------------------------------------------
 
 ROOT_EXPECTED = f"""\
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+pub struct Pair {{
+    data_: ObjectArc<PairObj>,
+}}
+
+/// The object behind [`Pair`].
+///
 {NO_METADATA}
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "demo.Pair"]
 pub struct PairObj {{
-    base: Object,
-}}
-
-#[repr(C)]
-#[derive(tvm_ffi::derive::ObjectRef, Clone)]
-pub struct Pair {{
-    base: ObjectArc<PairObj>,
+    base_: Object,
 }}
 
 impl PairObj {{
@@ -456,7 +457,7 @@ def test_render_derived_object_same_module() -> None:
         is_final=True,
     )
     text, imports = _render(info)
-    assert "#[type_final]\npub struct AddObj {\n    base: ExprObj,\n}" in text
+    assert "#[type_final]\npub struct AddObj {\n    base_: ExprObj,\n}" in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
     assert "pub fn a(&self) -> Result<Expr> {" in text
     assert text.endswith("tvm_ffi::unsafe_impl_object_ref_upcast!(Add => BaseExpr, Add => Expr);")
@@ -468,7 +469,7 @@ def test_render_derived_object_cross_module() -> None:
     """A parent in another module is reached through the generated root."""
     info = _info("tirx.Add", parent="ir.Expr", ancestors=["ffi.Object", "ir.Expr"])
     text, imports = _render(info)
-    assert "    base: ExprObj," in text
+    assert "    base_: ExprObj," in text
     assert text.endswith("tvm_ffi::unsafe_impl_object_ref_upcast!(Add => Expr);")
     assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
 
@@ -482,7 +483,7 @@ def test_render_object_under_builtin_parent() -> None:
         ancestors=["ffi.Object", "ffi.Enum", "ffi.IntEnum"],
     )
     text, imports = _render(info)
-    assert "    base: FfiIntEnumObj," in text
+    assert "    base_: FfiIntEnumObj," in text
     # One stand-in per builtin ancestor below `ffi.Object`, chained through `base`.
     assert imports.builtin_mirrors == {"ffi.Enum": "Object", "ffi.IntEnum": "FfiEnumObj"}
     assert "tvm_ffi::Object" in _uses(imports)
@@ -492,7 +493,7 @@ def test_render_object_under_builtin_parent() -> None:
     assert not any("Enum" in path for path in _uses(imports))
     # A child of `ffi.Object` embeds the crate's header.
     text, imports = _render(_info("demo.Root"))
-    assert "    base: Object," in text
+    assert "    base_: Object," in text
     assert imports.builtin_mirrors == {}
     # A generated parent is embedded by name.
     red = _info(
@@ -501,7 +502,7 @@ def test_render_object_under_builtin_parent() -> None:
         ancestors=["ffi.Object", "ffi.Enum", "ffi.IntEnum", "demo.Color"],
     )
     text, imports = _render(red)
-    assert "    base: ColorObj," in text
+    assert "    base_: ColorObj," in text
     assert imports.builtin_mirrors == {}
 
 
@@ -515,7 +516,7 @@ use tvm_ffi::ObjectArc;
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ffi.Enum"]
 struct FfiEnumObj {
-    base: Object,
+    base_: Object,
 }
 
 /// Header-only stand-in for the builtin `ffi.IntEnum`; it only carries the ancestor depth.
@@ -524,7 +525,7 @@ struct FfiEnumObj {
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ffi.IntEnum"]
 struct FfiIntEnumObj {
-    base: FfiEnumObj,
+    base_: FfiEnumObj,
 }
 
 /// Header-only stand-in for the builtin `ffi.StrEnum`; it only carries the ancestor depth.
@@ -533,7 +534,7 @@ struct FfiIntEnumObj {
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ffi.StrEnum"]
 struct FfiStrEnumObj {
-    base: FfiEnumObj,
+    base_: FfiEnumObj,
 }"""
 
 
@@ -561,6 +562,12 @@ def test_import_section_defines_builtin_mirrors_once() -> None:
 
 
 ITER_VAR_EXPECTED = f"""\
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+pub struct IterVar {{
+    data_: ObjectArc<IterVarObj>,
+}}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct IterVarType(i32);
@@ -586,25 +593,21 @@ impl TryFrom<i64> for IterVarType {{
     }}
 }}
 
+/// The object behind [`IterVar`].
+///
 {NO_METADATA}
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "tirx.IterVar"]
 #[type_final]
 pub struct IterVarObj {{
-    base: PrimExprConvertibleObj,
-}}
-
-#[repr(C)]
-#[derive(tvm_ffi::derive::ObjectRef, Clone)]
-pub struct IterVar {{
-    base: ObjectArc<IterVarObj>,
+    base_: PrimExprConvertibleObj,
 }}
 
 impl Deref for IterVarObj {{
     type Target = PrimExprConvertibleObj;
     fn deref(&self) -> &PrimExprConvertibleObj {{
-        &self.base
+        &self.base_
     }}
 }}
 
@@ -723,12 +726,20 @@ def _add() -> ObjectInfo:
 
 
 EXPR_EXPECTED = """\
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+pub struct Expr {
+    data_: ObjectArc<ExprObj>,
+}
+
+/// The object behind [`Expr`].
+///
 /// Complete: reflected fields fill [24, 40) exactly.
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ir.Expr"]
 pub struct ExprObj {
-    base: Object,
+    base_: Object,
     pub span: Option<Span>,
     pub ty: Type,
 }
@@ -738,16 +749,10 @@ const _: () = {
     assert!(::core::mem::align_of::<ExprObj>() == 8);
 };
 
-#[repr(C)]
-#[derive(tvm_ffi::derive::ObjectRef, Clone)]
-pub struct Expr {
-    base: ObjectArc<ExprObj>,
-}
-
 impl ExprObj {
     pub fn new(span: Option<Span>, ty: Type) -> Self {
-        let base = Object::new();
-        Self { base, span, ty }
+        let base_ = Object::new();
+        Self { base_, span, ty }
     }
 }
 
@@ -755,14 +760,14 @@ impl Expr {
     /// Lossless complete-field allocation.
     pub fn new(span: impl Into<Option<Span>>, ty: impl Into<Type>) -> Self {
         let obj = ExprObj::new(span.into(), ty.into());
-        Self { base: ObjectArc::new(obj) }
+        Self { data_: ObjectArc::new(obj) }
     }
 }
 
 impl ShallowCopy for ExprObj {
     fn shallow_copy(&self) -> Self {
         Self {
-            base: ShallowCopy::shallow_copy(&self.base),
+            base_: ShallowCopy::shallow_copy(&self.base_),
             span: Clone::clone(&self.span),
             ty: Clone::clone(&self.ty),
         }
@@ -772,7 +777,7 @@ impl ShallowCopy for ExprObj {
 unsafe impl UnsafeInit for ExprObj {
     unsafe fn drop_defined_fields(this: *mut Self) {
         unsafe {
-            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base));
+            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base_));
             drop_if_defined(addr_of_mut!((*this).span));
             drop_if_defined(addr_of_mut!((*this).ty));
         }
@@ -780,13 +785,21 @@ unsafe impl UnsafeInit for ExprObj {
 }"""
 
 ADD_EXPECTED = """\
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+pub struct Add {
+    data_: ObjectArc<AddObj>,
+}
+
+/// The object behind [`Add`].
+///
 /// Complete: reflected fields fill [40, 56) exactly.
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "tirx.Add"]
 #[type_final]
 pub struct AddObj {
-    base: ExprObj,
+    base_: ExprObj,
     pub a: PrimExpr,
     pub b: PrimExpr,
 }
@@ -796,23 +809,17 @@ const _: () = {
     assert!(::core::mem::align_of::<AddObj>() == 8);
 };
 
-#[repr(C)]
-#[derive(tvm_ffi::derive::ObjectRef, Clone)]
-pub struct Add {
-    base: ObjectArc<AddObj>,
-}
-
 impl Deref for AddObj {
     type Target = ExprObj;
     fn deref(&self) -> &ExprObj {
-        &self.base
+        &self.base_
     }
 }
 
 impl AddObj {
     pub(crate) fn new(span: Option<Span>, ty: PrimType, a: PrimExpr, b: PrimExpr) -> Self {
-        let base = ExprObj::new(span, ty.into());
-        Self { base, a, b }
+        let base_ = ExprObj::new(span, ty.into());
+        Self { base_, a, b }
     }
 }
 
@@ -825,7 +832,7 @@ impl Add {
         b: impl Into<PrimExpr>,
     ) -> Self {
         let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());
-        Self { base: ObjectArc::new(obj) }
+        Self { data_: ObjectArc::new(obj) }
     }
 }
 
@@ -854,7 +861,7 @@ def test_render_shallow_copy_that_fits_is_one_line() -> None:
     assert (
         "impl ShallowCopy for StmtObj {\n"
         "    fn shallow_copy(&self) -> Self {\n"
-        "        Self { base: ShallowCopy::shallow_copy(&self.base), "
+        "        Self { base_: ShallowCopy::shallow_copy(&self.base_), "
         "span: Clone::clone(&self.span) }\n"
         "    }\n"
         "}"
@@ -883,7 +890,6 @@ def test_render_complete_add_golden() -> None:
         "crate::ir::ExprObj",
         "crate::ir::Expr",
         "crate::ir::Span",
-        "crate::ir::Type",
     }
 
 
@@ -892,7 +898,7 @@ def test_render_complete_span_and_prim_type() -> None:
     text, _ = _render(_span())
     assert (
         "pub struct SpanObj {\n"
-        "    base: Object,\n"
+        "    base_: Object,\n"
         "    pub source_name: SourceName,\n"
         "    pub line: i32,\n"
         "    pub column: i32,\n"
@@ -914,29 +920,41 @@ def test_render_complete_span_and_prim_type() -> None:
     assert (
         "/// Complete: reflected fields fill [32, 40) exactly (alignment padding [36, 40))." in text
     )
-    assert "pub struct PrimTypeObj {\n    base: TypeObj,\n    pub dtype: DLDataType,\n}" in text
+    assert "pub struct PrimTypeObj {\n    base_: TypeObj,\n    pub dtype: DLDataType,\n}" in text
     assert "assert!(::core::mem::size_of::<PrimTypeObj>() == 40);" in text
     assert "tvm_ffi::DLDataType" in _uses(imports)
 
 
-def test_reserved_member_names_get_a_trailing_underscore() -> None:
-    """A reflected `base` or `data` field must not collide with the generated members."""
+def test_reflected_base_and_data_keep_their_names() -> None:
+    """Reflected names are kept (`base`, `data`, `cache_`); `visibility` makes one `pub(crate)`."""
     info = _info(
         "demo.Ramp",
-        (_field("base", "int", 24, 8), _field("data", "int", 32, 8)),
-        total_size=40,
+        (
+            _field("base", "int", 24, 8),
+            _field("data", "int", 32, 8),
+            _field("cache_", "int", 40, 8),
+        ),
+        total_size=48,
         is_final=True,
     )
-    text, _ = _render(info)
-    assert "    base: Object,\n    pub base_: i64,\n    pub data: i64,\n" in text
-    assert "    pub fn new(base_: i64, data: i64) -> Self {" in text
-    assert "        Self { base, base_, data }" in text
-    # The opaque form keeps the reflected name on the C ABI side.
-    text, _ = _render(_info("demo.Node", (_field("base", "int"),)))
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "visibility", "demo.Ramp.cache_ -> pub(crate)", 1)
+    text, _ = _render(info, imports)
     assert (
-        'pub fn base_(&self) -> Result<i64> {\n        FieldGetter::new(Self::type_index(), "base")'
+        "    base_: Object,\n    pub base: i64,\n    pub data: i64,\n    pub(crate) cache_: i64,\n"
+    ) in text
+    assert "    pub fn new(base: i64, data: i64, cache_: i64) -> Self {" in text
+    assert "        Self { base_, base, data, cache_ }" in text
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "visibility", "demo.Node.cache_ -> pub(crate)", 1)
+    text, _ = _render(_info("demo.Node", (_field("base", "int"), _field("cache_", "int"))), imports)
+    assert (
+        'pub fn base(&self) -> Result<i64> {\n        FieldGetter::new(Self::type_index(), "base")'
         in text
     )
+    assert "    pub(crate) fn cache_(&self) -> Result<i64> {" in text
+    with pytest.raises(ValueError, match=r"`visibility` directive at line 2"):
+        Directives().add("visibility", "demo.Node.cache_ -> pub(super)", 2)
 
 
 def test_render_complete_enum_field() -> None:
@@ -969,6 +987,10 @@ def test_allow_missing_docs_and_closed_enum() -> None:
     RUST.add_directive(imports, "enum", "demo.Pair.kind -> Kind(i32) closed { A=0, B=-1 }", 2)
     text, _ = _render(info, imports)
     assert text.startswith(
+        "#[allow(missing_docs)]\n"
+        "#[repr(C)]\n"
+        "#[derive(tvm_ffi::derive::ObjectRef, Clone)]\n"
+        "pub struct Pair {\n    data_: ObjectArc<PairObj>,\n}\n\n"
         "#[allow(missing_docs)]\n"
         "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n"
         "#[repr(i32)]\n"
@@ -1030,7 +1052,7 @@ def test_unsafe_init_drops_each_field_by_its_all_zero_bytes() -> None:
         "unsafe impl UnsafeInit for MixedObj {\n"
         "    unsafe fn drop_defined_fields(this: *mut Self) {\n"
         "        unsafe {\n"
-        "            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base));\n"
+        "            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base_));\n"
         "            drop_in_place(addr_of_mut!((*this).count));\n"
         "            drop_in_place(addr_of_mut!((*this).value));\n"
         "            drop_if_defined(addr_of_mut!((*this).items));\n"
@@ -1083,7 +1105,7 @@ def test_complete_big_int_field_mirrors() -> None:
     )
     text, imports = _render(info)
     assert (
-        "    base: Object,\n"
+        "    base_: Object,\n"
         "    pub value: BigInt,\n"
         "    pub maybe: Optional<BigInt>,\n"
         "    pub count: i64,\n"
@@ -1160,7 +1182,7 @@ def test_registry_big_int_fields_are_mirrored(big_int_holder: ObjectInfo) -> Non
     text, imports = _render(big_int_holder)
     assert (
         "pub struct BigIntHolderObj {\n"
-        "    base: Object,\n"
+        "    base_: Object,\n"
         "    pub value: BigInt,\n"
         "    pub maybe: Optional<BigInt>,\n"
         "    pub count: i64,\n"
@@ -1210,7 +1232,7 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
         "        b: impl Into<Expr>,\n"
         "    ) -> Self {\n"
         "        let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());\n"
-        "        Self { base: ObjectArc::new(obj) }\n"
+        "        Self { data_: ObjectArc::new(obj) }\n"
         "    }\n}"
     ) in text
     assert "    pub fn new(" not in text
@@ -1226,13 +1248,12 @@ def test_allocator_body_wraps_like_rustfmt() -> None:
 
     name, text = render(70)  # the `let` is exactly 100 columns
     assert f"        let obj = WObj::new({name});\n" in text
-    name, text = render(76)  # 106 columns; the call alone is exactly 100
+    name, text = render(76)  # 106 columns; the call alone and `Self { .. }` are exactly 100
     assert f"        let obj =\n            WObj::new({name});\n" in text
-    name, text = render(77)  # the call alone is 101 columns; `Self { .. }` is exactly 100
+    assert f"        Self {{ base_, {name} }}\n" in text
+    name, text = render(77)  # the call alone is 101 columns
     assert f"        let obj = WObj::new(\n            {name},\n        );\n" in text
-    assert f"        Self {{ base, {name} }}\n" in text
-    name, text = render(78)
-    assert f"        Self {{\n            base,\n            {name},\n        }}\n" in text
+    assert f"        Self {{\n            base_,\n            {name},\n        }}\n" in text
 
 
 def test_upcast_directive_adds_typed_views() -> None:
@@ -1265,7 +1286,7 @@ def test_builtin_parent_keeps_the_type_opaque() -> None:
     )
     text, _ = _render(info)
     assert "/// Opaque: parent 'ffi.Enum' is opaque (no-mirror)." in text
-    assert "    base: FfiEnumObj," in text
+    assert "    base_: FfiEnumObj," in text
     assert "const _: () =" not in text
     assert "fn new(" not in text
     # The registry fixtures under `ffi.Enum` / `ffi.IntEnum` / `ffi.StrEnum` follow the same rule.
@@ -1285,7 +1306,7 @@ def test_opaque_parent_keeps_the_child_opaque() -> None:
     _register(_info("ir.Expr", (_field("span", "ir.Span", 24, 8),), total_size=40))  # hole
     text, _ = _render(_add())
     assert "/// Opaque: parent 'ir.Expr' is opaque (uncovered-bytes)." in text
-    assert "    base: ExprObj," in text
+    assert "    base_: ExprObj," in text
     assert "pub fn a(&self) -> Result<Expr> {" in text
 
 
@@ -1366,7 +1387,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "/// Complete: reflected fields fill [24, 40) exactly (alignment padding [36, 40))." in base
     )
     assert (
-        "pub struct TestCxxClassBaseObj {\n    base: Object,\n    pub v_i64: i64,\n    pub v_i32: i32,\n}"
+        "pub struct TestCxxClassBaseObj {\n    base_: Object,\n    pub v_i64: i64,\n    pub v_i32: i32,\n}"
         in base
     )
     assert "assert!(::core::mem::size_of::<TestCxxClassBaseObj>() == 40);" in base
@@ -1375,7 +1396,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
 
     dd, imports = _render(object_info_from_type_key("testing.TestCxxClassDerivedDerived"))
     assert (
-        "    base: TestCxxClassDerivedObj,\n    pub v_str: String,\n    pub v_bool: bool,\n}" in dd
+        "    base_: TestCxxClassDerivedObj,\n    pub v_str: String,\n    pub v_bool: bool,\n}" in dd
     )
     # The allocator flattens the chain; a signature over 100 columns wraps.
     assert (
@@ -1388,8 +1409,8 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "        v_str: String,\n"
         "        v_bool: bool,\n"
         "    ) -> Self {\n"
-        "        let base = TestCxxClassDerivedObj::new(v_i64, v_i32, v_f64, v_f32);\n"
-        "        Self { base, v_str, v_bool }\n"
+        "        let base_ = TestCxxClassDerivedObj::new(v_i64, v_i32, v_f64, v_f32);\n"
+        "        Self { base_, v_str, v_bool }\n"
         "    }\n"
         "}"
     ) in dd
@@ -1406,7 +1427,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "impl ShallowCopy for TestCxxClassDerivedDerivedObj {\n"
         "    fn shallow_copy(&self) -> Self {\n"
         "        Self {\n"
-        "            base: ShallowCopy::shallow_copy(&self.base),\n"
+        "            base_: ShallowCopy::shallow_copy(&self.base_),\n"
         "            v_str: Clone::clone(&self.v_str),\n"
         "            v_bool: Clone::clone(&self.v_bool),\n"
         "        }\n"
@@ -1479,19 +1500,19 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert text.startswith("#![allow(dead_code, unused_imports)]\n")
     assert "use tvm_ffi::FieldGetter;" in text  # the opaque fixtures read through getters
     assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
-    assert "    base: TestCxxClassDerivedObj,\n    pub v_str: String," in text
+    assert "    base_: TestCxxClassDerivedObj,\n    pub v_str: String," in text
     assert (
         "tvm_ffi::unsafe_impl_object_ref_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     ) in text
     # Builtin ancestors are mirrored once, in the import section; enum fixtures embed the last one.
-    assert text.count("struct FfiEnumObj {\n    base: Object,\n}") == 1
-    assert text.count("struct FfiIntEnumObj {\n    base: FfiEnumObj,\n}") == 1
-    assert text.count("struct FfiStrEnumObj {\n    base: FfiEnumObj,\n}") == 1
+    assert text.count("struct FfiEnumObj {\n    base_: Object,\n}") == 1
+    assert text.count("struct FfiIntEnumObj {\n    base_: FfiEnumObj,\n}") == 1
+    assert text.count("struct FfiStrEnumObj {\n    base_: FfiEnumObj,\n}") == 1
     assert text.index("struct FfiIntEnumObj") < text.index(f"{C.RUST_SYNTAX.begin} object/")
-    assert "pub struct TestEnumVariantObj {\n    base: FfiEnumObj,\n}" in text
-    assert "pub struct TestCxxIntEnumObj {\n    base: FfiIntEnumObj,\n}" in text
-    assert "pub struct TestCxxStrEnumObj {\n    base: FfiStrEnumObj,\n}" in text
+    assert "pub struct TestEnumVariantObj {\n    base_: FfiEnumObj,\n}" in text
+    assert "pub struct TestCxxIntEnumObj {\n    base_: FfiIntEnumObj,\n}" in text
+    assert "pub struct TestCxxStrEnumObj {\n    base_: FfiStrEnumObj,\n}" in text
     # Running again over the generated tree is a no-op.
     assert stub_cli.__main__() == 0
     assert (root / "testing" / "mod.rs").read_text(encoding="utf-8") == text
@@ -1566,7 +1587,7 @@ def test_cli_check_ignores_how_a_binding_is_spelled(
     for old, new in [
         ("use tvm_ffi::String;\n", ""),
         ("use std::ops::Deref;\n", "use std::ops::Deref;\nuse crate::testing::TestCompare;\n"),
-        ("    base: Object,\n", "    base: tvm_ffi::Object,\n"),
+        ("    base_: Object,\n", "    base_: tvm_ffi::Object,\n"),
         ("/// Complete: ", "/// Mirrored: "),
         (
             "    pub fn new(\n"
@@ -1652,7 +1673,7 @@ def test_unasked_dependencies_are_an_error() -> None:
         _render(info, declared=_declared("tirx.Add"))
     # Declared in another file of the run: reached by the `crate::` path of its module.
     text, imports = _render(info, declared=_declared("tirx.Add", "ir.Expr", "tirx.Var"))
-    assert "    base: ExprObj," in text
+    assert "    base_: ExprObj," in text
     assert "pub fn a(&self) -> Result<Var> {" in text  # same module: a bare name
     assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
 
@@ -1702,7 +1723,7 @@ def test_blocks_are_named_by_the_module_of_their_file(
     assert stub_cli.__main__() == 0
     text = nested.read_text(encoding="utf-8")
     assert "use crate::TestCxxClassBase;\nuse crate::TestCxxClassBaseObj;\n" in text
-    assert "    base: TestCxxClassBaseObj," in text
+    assert "    base_: TestCxxClassBaseObj," in text
     assert (
         "tvm_ffi::unsafe_impl_object_ref_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
     )
@@ -1726,7 +1747,7 @@ def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
     imports = RustImports()
     generate_rust_object(block, ty_map, imports, Options(), info, _declared("tirx.Add"))
     text = "\n".join(block.lines[1:-1])
-    assert "    base: ExprObj," in text
+    assert "    base_: ExprObj," in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
     assert text.endswith("tvm_ffi::unsafe_impl_object_ref_upcast!(Add => Expr);")
     assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
@@ -1762,8 +1783,8 @@ def test_allocator_hands_a_ty_map_parent_its_own_types() -> None:
     assert (
         "impl ChildObj {\n"
         "    pub(crate) fn new(name: String, kind: Kind, n: i64) -> Self {\n"
-        "        let base = BaseObj::new(name, kind.into());\n"
-        "        Self { base, n }\n"
+        "        let base_ = BaseObj::new(name, kind.into());\n"
+        "        Self { base_, n }\n"
     ) in text
     assert (
         "    pub fn new(name: impl Into<String>, kind: impl Into<Kind>, n: i64) -> Self {\n"
@@ -1796,7 +1817,7 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
     _stage_1(info, ty_map)
     _stage_3(info, Options(dry_run=True), ty_map, {}, RUST, declared)
     text = "\n".join(line for block in info.code_blocks for line in block.lines)
-    assert "    base: TestCxxClassBaseObj," in text
+    assert "    base_: TestCxxClassBaseObj," in text
     assert "use crate::hand::TestCxxClassBaseObj;" in text
     # Not final: public `new`; a hand-written parent may lack `ShallowCopy`, so the type has none.
     assert "impl TestCxxClassDerivedObj {\n    pub fn new(" in text
@@ -1826,7 +1847,7 @@ def test_parent_with_the_objects_own_name_is_spelled_in_full() -> None:
     info = _info("demo.s.Frame", parent="demo.t.Frame", ancestors=["ffi.Object", "demo.t.Frame"])
     text, imports = _render(info)
     parent = "crate::demo::t::Frame"
-    assert f"    base: {parent}Obj," in text
+    assert f"    base_: {parent}Obj," in text
     assert f"    type Target = {parent}Obj;" in text
     assert text.endswith(f"tvm_ffi::unsafe_impl_object_ref_upcast!(Frame => {parent});")
     assert not any(path.startswith(f"{parent}") for path in _uses(imports))
@@ -1866,7 +1887,7 @@ def test_ty_map_target_in_the_files_own_module_is_not_imported() -> None:
     assert "    pub fn op(&self) -> Result<Op> {" in text
     assert "crate::ir::Op" not in _uses(imports)
     text, imports = render(_info("ir.Special", parent="ir.Op", ancestors=["ffi.Object", "ir.Op"]))
-    assert "    base: OpObj," in text
+    assert "    base_: OpObj," in text
     assert text.endswith("tvm_ffi::unsafe_impl_object_ref_upcast!(Special => Op);")
     assert not any(path.startswith("crate::") for path in _uses(imports))
     # Elsewhere the target is imported as written.

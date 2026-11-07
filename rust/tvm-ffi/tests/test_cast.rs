@@ -33,7 +33,7 @@ use tvm_ffi::*;
 #[derive(Object)]
 #[type_key = "testing.TestObjectBase"]
 struct TestBaseObj {
-    base: Object,
+    base_: Object,
     value: i64,
     // counter for recording the number of times the object is deleted
     delete_counter: Arc<AtomicU32>,
@@ -56,7 +56,7 @@ struct TestBase {
 #[type_key = "testing.TestObjectDerived"]
 #[type_final]
 struct TestDerivedObj {
-    base: TestBaseObj,
+    base_: TestBaseObj,
     extra: i64,
 }
 
@@ -79,7 +79,7 @@ fn expect_err<T>(res: Result<T>) -> Error {
 fn new_base(value: i64, delete_counter: Arc<AtomicU32>) -> TestBase {
     TestBase {
         data: ObjectArc::new(TestBaseObj {
-            base: Object::new(),
+            base_: Object::new(),
             value,
             delete_counter,
         }),
@@ -89,8 +89,8 @@ fn new_base(value: i64, delete_counter: Arc<AtomicU32>) -> TestBase {
 fn new_derived(value: i64, extra: i64, delete_counter: Arc<AtomicU32>) -> TestDerived {
     TestDerived {
         data: ObjectArc::new(TestDerivedObj {
-            base: TestBaseObj {
-                base: Object::new(),
+            base_: TestBaseObj {
+                base_: Object::new(),
                 value,
                 delete_counter,
             },
@@ -134,7 +134,7 @@ fn test_upcast_downcast_roundtrip() {
     let obj: ObjectRef = base.into();
     // downcast all the way back
     let derived2: TestDerived = obj.downcast().unwrap();
-    assert_eq!(derived2.data.base.value, 7);
+    assert_eq!(derived2.data.base_.value, 7);
     assert_eq!(derived2.data.extra, 8);
     // every step moved ownership; no extra references were created
     assert_eq!(ObjectArc::strong_count(&derived2.data), 1);
@@ -150,7 +150,7 @@ fn test_borrowed_node_cast_preserves_reference_count() {
     let strong_count = ObjectArc::strong_count(TestBase::data(&base));
 
     let derived = base.downcast_ref::<TestDerivedObj>().unwrap();
-    assert_eq!(derived.base.value, 7);
+    assert_eq!(derived.base_.value, 7);
     assert_eq!(derived.extra, 8);
     let base_node = base.downcast_ref::<TestBaseObj>().unwrap();
     assert_eq!(base_node.value, 7);
@@ -228,7 +228,7 @@ fn test_try_cast_from_any_view_preserves_runtime_subtype() {
     // Array::get calls this method directly, without check_any_strict first.
     let base = unsafe { TestBase::try_cast_from_any_view(&raw) }.unwrap();
     let derived: TestDerived = base.downcast().unwrap();
-    assert_eq!(derived.data.base.value, 3);
+    assert_eq!(derived.data.base_.value, 3);
     assert_eq!(derived.data.extra, 4);
     assert_eq!(ObjectArc::strong_count(&derived.data), 2);
     drop(derived);

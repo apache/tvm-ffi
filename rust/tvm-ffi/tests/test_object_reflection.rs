@@ -36,7 +36,7 @@ use tvm_ffi_sys::{
 #[type_s_eq_hash_kind = "TreeNode"]
 #[type_reflection(PointObj::reflect_methods)]
 struct PointObj {
-    base: Object,
+    base_: Object,
     /// The x coordinate.
     ///
     /// Signed.
@@ -85,7 +85,7 @@ struct Point {
 #[type_register]
 #[type_final]
 struct Point3Obj {
-    base: PointObj,
+    base_: PointObj,
     #[reflect]
     z: i64,
     #[reflect(name = "labels")]
@@ -104,7 +104,7 @@ tvm_ffi::unsafe_impl_object_ref_upcast!(Point3 => Point);
 
 fn point_obj(x: i64, y: f64, label: &str) -> PointObj {
     PointObj {
-        base: Object::new(),
+        base_: Object::new(),
         x,
         y,
         label: label.into(),
@@ -121,7 +121,7 @@ fn point(x: i64, y: f64, label: &str) -> Point {
 fn point3(x: i64, z: i64) -> Point3 {
     Point3 {
         data: ObjectArc::new(Point3Obj {
-            base: point_obj(x, 0.5, "p3"),
+            base_: point_obj(x, 0.5, "p3"),
             z,
             tags: Array::from_vec(vec!["a".into(), "b".into()]),
             r#type: Some(point(1, 2.0, "inner")),
@@ -311,7 +311,7 @@ fn test_methods_are_called_through_the_type_table() {
 #[type_final]
 #[type_reflection(Self::reflect_methods)]
 struct TallyObj {
-    base: Object,
+    base_: Object,
     count: i64,
 }
 
@@ -343,7 +343,7 @@ fn test_types_with_only_methods_register_their_reflection() {
     let count = tvm_ffi::reflection::get_method_by_index(TallyObj::type_index(), "count").unwrap();
     let tally = Tally {
         data: ObjectArc::new(TallyObj {
-            base: Object::new(),
+            base_: Object::new(),
             count: 11,
         }),
     };
@@ -433,7 +433,7 @@ fn test_repr_and_deep_copy_see_reflected_fields() {
     let any = Any::from(original.clone());
     let copy = Point3::try_from(call("ffi.DeepCopy", &[AnyView::from(&any)])).unwrap();
     assert!(!copy.same_as(&original));
-    assert_eq!((copy.data.base.x, copy.data.z), (1, 2));
+    assert_eq!((copy.data.base_.x, copy.data.z), (1, 2));
     assert_eq!(copy.data.tags.len(), 2);
     // The nested object is copied too.
     let (inner, original_inner) = (
@@ -468,7 +468,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
     // Applied to another type, it is a type error.
     let other = Counter {
         data: ObjectArc::new(CounterObj {
-            base: Object::new(),
+            base_: Object::new(),
             count: 0,
         }),
     };
@@ -495,7 +495,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
 #[type_register]
 #[type_final]
 struct CounterObj {
-    base: Object,
+    base_: Object,
     count: i64,
 }
 
@@ -523,7 +523,7 @@ mod no_imports {
     #[type_key = "testing.rust.ReflectedNoImports"]
     #[type_register]
     pub struct LeafObj {
-        base: super::PointObj,
+        base_: super::PointObj,
         #[reflect]
         pub w: i64,
     }
@@ -537,7 +537,7 @@ mod no_imports {
     pub fn leaf(w: i64) -> Leaf {
         Leaf {
             data: tvm_ffi::ObjectArc::new(LeafObj {
-                base: super::point_obj(0, 0.0, ""),
+                base_: super::point_obj(0, 0.0, ""),
                 w,
             }),
         }
@@ -558,7 +558,7 @@ fn test_derives_need_nothing_in_scope() {
 #[type_register]
 #[type_reflection(Self::reflect_methods)]
 struct DuplicateMethodObj {
-    base: Object,
+    base_: Object,
 }
 
 impl DuplicateMethodObj {

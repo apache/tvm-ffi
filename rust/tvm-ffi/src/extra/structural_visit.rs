@@ -100,7 +100,7 @@ struct StructuralVisitorVTable {
 /// `StructuralVisitorObj`.
 #[repr(C)]
 pub struct StructuralVisitorObj {
-    base: Object,
+    base_: Object,
     vtable: *const StructuralVisitorVTable,
     def_region_mode: UnsafeCell<i32>,
 }
@@ -114,7 +114,7 @@ impl Default for StructuralVisitorObj {
     #[inline(always)]
     fn default() -> Self {
         Self {
-            base: Object::new(),
+            base_: Object::new(),
             vtable: std::ptr::null(),
             def_region_mode: UnsafeCell::new(DefRegionKind::None as i32),
         }
@@ -128,7 +128,7 @@ impl Default for StructuralVisitorObj {
 #[type_index(TVMFFITypeIndex::kTVMFFIVisitInterrupt)]
 #[type_final]
 pub struct VisitInterruptObj {
-    base: Object,
+    base_: Object,
     /// Payload returned with the interrupt, or FFI `None` for no payload.
     pub value: Any,
 }
@@ -200,7 +200,7 @@ impl VisitInterrupt {
     #[inline(always)]
     pub fn new<T: Into<Any>>(payload: T) -> Self {
         Self::from_object(VisitInterruptObj {
-            base: Object::new(),
+            base_: Object::new(),
             value: payload.into(),
         })
     }

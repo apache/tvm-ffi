@@ -31,6 +31,9 @@ and alignment to the reflected facts, and a generated allocator builds the
 object in Rust. `main.rs` builds one that way, reads `pair.a` directly, and
 hands it to a C++ function that reads it back.
 
+The generated members end in `_` (`base_`, the embedded parent; `data_`, the
+reference's handle), so reflected fields keep their registered names.
+
 An object whose layout cannot be reproduced (a polymorphic one, say, with a
 vtable in front of the object header) is bound *opaquely* instead: the struct
 embeds only the parent, every field is read through an accessor that calls the
@@ -112,10 +115,11 @@ Besides `prefix` and `custom-new`, this example declares the integer field
 // tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) { Unordered=0, Ordered=1 }
 ```
 
-Three more are available: `field` names the Rust type of a field
+Four more are available: `field` names the Rust type of a field
 (`// tvm-ffi-stubgen(field): rust_stubgen.IntPair.a -> MyInt`), `nullable`
 wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
-and `upcast` adds a conversion to a hand-written typed view
+`visibility` makes it `pub(crate)` instead of `pub`
+(`// tvm-ffi-stubgen(visibility): rust_stubgen.IntPair.a -> pub(crate)`), and `upcast` adds a conversion to a hand-written typed view
 (`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`).
 
 When the C++ side fixes the value set in its ABI, `closed` before the member

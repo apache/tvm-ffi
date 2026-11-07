@@ -16,11 +16,12 @@
 # under the License.
 """The Rust backend's one-line directives: payload grammar and per-file storage.
 
-Three address one reflected field as ``<type_key>.<field>``, three address a type,
+Four address one reflected field as ``<type_key>.<field>``, three address a type,
 and one applies to the whole file::
 
     // tvm-ffi-stubgen(field): tirx.Add.a -> PrimExpr
     // tvm-ffi-stubgen(nullable): ir.Expr.span
+    // tvm-ffi-stubgen(visibility): ir.IRModule.global_var_map_ -> pub(crate)
     // tvm-ffi-stubgen(enum): tirx.For.kind -> ForKind(i32) { Serial=0, Parallel=1 }
     // tvm-ffi-stubgen(opaque): ir.SourceName
     // tvm-ffi-stubgen(upcast): tirx.Add -> PrimExpr
@@ -29,7 +30,8 @@ and one applies to the whole file::
 
 ``field`` sets the field's Rust type (a name in scope, or a ``::`` path to
 ``use``); on a field inherited from an ancestor it narrows the allocator
-parameter instead. ``nullable`` wraps it in ``Option``; ``enum`` declares an open
+parameter instead. ``nullable`` wraps it in ``Option``; ``visibility`` makes the
+field and its accessor ``pub(crate)`` instead of ``pub``; ``enum`` declares an open
 integer newtype for it, or with ``closed`` before the member list a
 ``#[repr(<int>)]`` enum of exactly those members; ``opaque`` keeps a type opaque
 even when its layout is reproducible. ``upcast`` adds an upcast to a reference
@@ -72,6 +74,7 @@ class Directives:
 
     field_types: dict[str, str] = dataclasses.field(default_factory=dict)
     nullable: set[str] = dataclasses.field(default_factory=set)
+    visibility: dict[str, str] = dataclasses.field(default_factory=dict)
     enums: dict[str, EnumSpec] = dataclasses.field(default_factory=dict)
     opaque: set[str] = dataclasses.field(default_factory=set)
     upcasts: dict[str, list[str]] = dataclasses.field(default_factory=dict)
@@ -85,6 +88,11 @@ class Directives:
             self.field_types[_field_target(name, lhs, lineno)] = rust_type
         elif name == "nullable":
             self.nullable.add(_field_target(name, payload, lineno))
+        elif name == "visibility":
+            lhs, vis = _split_arrow(name, payload, lineno, "<type_key>.<field> -> pub(crate)")
+            if vis != "pub(crate)":  # the one non-default level so far
+                raise _invalid(name, lineno, "<type_key>.<field> -> pub(crate)")
+            self.visibility[_field_target(name, lhs, lineno)] = vis
         elif name == "enum":
             target, spec = _parse_enum(payload, lineno)
             self.enums[target] = spec

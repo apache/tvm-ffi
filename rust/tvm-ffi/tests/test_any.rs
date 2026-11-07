@@ -360,7 +360,7 @@ fn test_any_dl_device() {
 // Fields only reachable through `Deref`, where `Any::from` is not applicable.
 #[repr(C)]
 struct FieldHolderObj {
-    base: Object,
+    base_: Object,
     lhs: String,
     rhs: Option<String>,
     count: i64,
@@ -375,7 +375,7 @@ unsafe impl ObjectCore for FieldHolderObj {
     }
     #[inline]
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
-        Object::object_header_mut(&mut this.base)
+        Object::object_header_mut(&mut this.base_)
     }
 }
 
@@ -419,7 +419,7 @@ fn test_to_any_matches_from_value() {
 fn test_to_any_from_borrowed_object_field() {
     let lhs = String::from("hello world this is a long string");
     let holder = ObjectArc::new(FieldHolderObj {
-        base: Object::new(),
+        base_: Object::new(),
         lhs: lhs.clone(),
         rhs: Some(lhs.clone()),
         count: 11,

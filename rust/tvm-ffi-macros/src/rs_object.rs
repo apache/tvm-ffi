@@ -107,8 +107,8 @@ impl Parse for RsObjectArgs {
     }
 }
 
-const EXPECTED_BASE: &str =
-    "the first field holds the parent's object: `base: Object` at the root, else `base: ParentObj`";
+const EXPECTED_BASE: &str = "the first field holds the parent's object: \
+     `base_: Object` at the root, else `base_: ParentObj`";
 
 fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> {
     if !item.generics.params.is_empty() || item.generics.where_clause.is_some() {
@@ -134,8 +134,15 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
         }
     };
     let (base, fields) = match fields.split_first() {
-        Some((base, fields)) if base.ident.as_ref().is_some_and(|id| id.unraw() == "base") => {
+        Some((base, fields)) if base.ident.as_ref().is_some_and(|id| id.unraw() == "base_") => {
             (*base, fields)
+        }
+        // The trailing `_` marks plumbing, so a reflected field can be named `base`.
+        Some((field, _)) if field.ident.as_ref().is_some_and(|id| id.unraw() == "base") => {
+            return Err(syn::Error::new_spanned(
+                field,
+                "the parent's object is named `base_`: rename `base` to `base_`",
+            ));
         }
         Some((field, _)) => return Err(syn::Error::new_spanned(field, EXPECTED_BASE)),
         None => return Err(syn::Error::new(item.ident.span(), EXPECTED_BASE)),
@@ -143,7 +150,7 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
     if let Some(attr) = base.attrs.iter().find(|a| a.path.is_ident("reflect")) {
         return Err(syn::Error::new_spanned(
             attr,
-            "`base` is the parent's object, whose fields the parent reflects",
+            "`base_` is the parent's object, whose fields the parent reflects",
         ));
     }
     let base_id = &base.ident;
