@@ -24,7 +24,7 @@
 // The `MapObj` header mirrors C++ `MapBaseObj`, so `Map::len` reads `size`
 // directly (no FFI). The hash-table storage itself is an implementation detail,
 // so lookups and iteration are delegated to the global functions the C++ runtime
-// registers (`ffi.MapGetItem`, `ffi.MapForwardIterFunctor`, ...): there is no
+// registers (`ffi.MapGetItemOrMissing`, `ffi.MapForwardIterFunctor`, ...): there is no
 // Map-specific C ABI, and a Rust re-implementation would have to replicate the
 // hashing (`AnyHash`/`AnyEqual`) and dense/small probing, just as the Python
 // bindings also delegate.
@@ -35,6 +35,7 @@ use std::ops::Deref;
 
 use crate::any::TryFromTemp;
 use crate::derive::Object;
+use crate::extra::cold_init_lazy_lock::ColdInitLazyLock;
 use crate::function::Function;
 use crate::object::IntoObjectRef;
 use crate::object::{Object, ObjectArc};
@@ -51,6 +52,16 @@ pub(crate) fn element_view<T: ContainerElement>(value: &T) -> AnyView<'_> {
         AnyView::from_raw_ffi_any(data)
     }
 }
+
+/// The address of the runtime's missing-value sentinel, which
+/// `ffi.MapGetItemOrMissing` returns for an absent key. The sentinel lives for
+/// the whole process, so its address identifies it.
+static MISSING_OBJECT: ColdInitLazyLock<usize> = ColdInitLazyLock::new(|| {
+    let missing = Function::get_global("ffi.GetInvalidObject")
+        .and_then(|f| f.call_packed(&[]))
+        .expect("ffi.GetInvalidObject failed");
+    unsafe { missing.as_raw_ffi_any().data_union.v_obj as usize }
+});
 
 fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
     unsafe {
@@ -233,8 +244,7 @@ where
     }
 
     /// Returns whether `key` is present, propagating any FFI error (e.g. a key
-    /// the runtime cannot hash) rather than panicking. Backs both
-    /// [`Map::contains_key`] and [`Map::get`].
+    /// the runtime cannot hash) rather than panicking.
     fn try_contains_key(&self, key: &K) -> Result<bool> {
         let result = crate::cached_global_func!("ffi.MapCount")
             .call_packed(&[AnyView::from(self), element_view(key)])?;
@@ -243,7 +253,7 @@ where
 
     /// In debug builds, panics if `K` does not match the map's actual key type,
     /// checked against one stored key. Compiles to nothing in release, so
-    /// [`Map::get`] / [`Map::contains_key`] keep their single-FFI-call fast path.
+    /// [`Map::get`] and [`Map::contains_key`] stay one FFI call there.
     ///
     /// A pure key lookup *hashes* the key rather than retrieving one, so a wrong
     /// `K` simply fails to match and reads as "absent" — unlike [`Map::iter`],
@@ -296,14 +306,15 @@ where
     /// unspecified: it currently reads as absent, since a lookup hashes the key
     /// instead of reading a stored one. Debug builds assert against it.
     pub fn get(&self, key: &K) -> Result<Option<V>> {
-        // The map is immutable, so the existence check and `ffi.MapGetItem`
-        // cannot race.
-        if !self.try_contains_key(key)? {
+        let result = crate::cached_global_func!("ffi.MapGetItemOrMissing")
+            .call_packed(&[AnyView::from(self), element_view(key)])?;
+        let raw = result.as_raw_ffi_any();
+        if raw.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32
+            && unsafe { raw.data_union.v_obj } as usize == *MISSING_OBJECT
+        {
             self.debug_assert_key_type();
             return Ok(None);
         }
-        let result = crate::cached_global_func!("ffi.MapGetItem")
-            .call_packed(&[AnyView::from(self), element_view(key)])?;
         let value = element_from_any(result)?;
         Ok(Some(value))
     }
