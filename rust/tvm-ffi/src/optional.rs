@@ -80,8 +80,6 @@ impl_optional_compatible!(
     crate::big_int::BigInt,
 );
 
-unsafe impl<T: OptionalCompatible> OptionalCompatible for Option<T> {}
-
 /// An optional value that is not an object, stored in place as one 16-byte
 /// cell holding the value or `None`. See the [module docs](self).
 #[repr(transparent)]
