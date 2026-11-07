@@ -1336,6 +1336,9 @@ def _register_fields(type_info, fields, structure_kind=None):
     if structure_kind is not None and structure_kind != 0:
         _register_type_metadata(type_index, total_size, structure_kind)
 
+    # 9. Publish finality last, as C++ ObjectDef does: a py_class admits subclasses.
+    _register_type_attr(type_index, "__ffi_type_final__", False)
+
     return type_fields
 
 
