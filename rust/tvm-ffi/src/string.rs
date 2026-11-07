@@ -576,10 +576,9 @@ unsafe impl AnyCompatible for String {
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFIRawStr as i32 {
-            // 1. Create a CStr wrapper from the raw pointer.
             let c_str =
                 std::ffi::CStr::from_ptr(data.data_union.v_c_str as *const std::os::raw::c_char);
-            Ok(Self::from(c_str.to_str().expect("Invalid UTF-8")))
+            c_str.to_str().map(Self::from).map_err(|_| ())
         } else if data.type_index == TypeIndex::kTVMFFISmallStr as i32 {
             Ok(Self { data: *data })
         } else if data.type_index == TypeIndex::kTVMFFIStr as i32 {

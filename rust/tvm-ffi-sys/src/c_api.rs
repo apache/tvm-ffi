@@ -246,7 +246,11 @@ impl TVMFFIByteArray {
     ///
     /// # Returns
     /// * `&str` - The converted str view.
-    pub fn as_str(&self) -> &str {
+    ///
+    /// # Safety
+    /// `data` must be null or point to `size` bytes of UTF-8 text that stay
+    /// valid and unchanged while the result is used.
+    pub unsafe fn as_str(&self) -> &str {
         // An empty array may hold a null pointer, as the type table stores an
         // empty doc string.
         if self.data.is_null() {

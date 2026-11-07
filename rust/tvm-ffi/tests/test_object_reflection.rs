@@ -177,7 +177,10 @@ fn register_types() {
 fn test_reflected_fields_are_registered_with_the_type() {
     register_types();
     let info = type_info::<PointObj>();
-    let names: Vec<&str> = fields(info).iter().map(|f| f.name.as_str()).collect();
+    let names: Vec<&str> = fields(info)
+        .iter()
+        .map(|f| unsafe { f.name.as_str() })
+        .collect();
     assert_eq!(names, ["x", "y", "label"]);
 
     let [x, y, label] = fields(info) else {
@@ -187,7 +190,7 @@ fn test_reflected_fields_are_registered_with_the_type() {
     assert_eq!(x.offset, std::mem::offset_of!(PointObj, x) as i64);
     assert_eq!(x.field_static_type_index, TypeIndex::kTVMFFIInt as i32);
     assert_eq!(
-        x.metadata.as_str(),
+        unsafe { x.metadata.as_str() },
         r#"{"type_schema":"{\"type\":\"int\"}"}"#
     );
     assert_eq!(
@@ -212,10 +215,13 @@ fn test_reflected_fields_are_registered_with_the_type() {
 
     // The subtype registers only its own fields, and inherits the kind.
     let info = type_info::<Point3Obj>();
-    let names: Vec<&str> = fields(info).iter().map(|f| f.name.as_str()).collect();
+    let names: Vec<&str> = fields(info)
+        .iter()
+        .map(|f| unsafe { f.name.as_str() })
+        .collect();
     assert_eq!(names, ["z", "labels", "type"]);
     assert_eq!(
-        fields(info)[1].metadata.as_str(),
+        unsafe { fields(info)[1].metadata.as_str() },
         r#"{"type_schema":"{\"type\":\"ffi.Array\",\"args\":[{\"type\":\"ffi.String\"}]}"}"#
     );
     assert_eq!(
@@ -230,12 +236,12 @@ fn test_field_docs_come_from_doc_comments_or_reflect() {
     let [x, y, label] = fields(type_info::<PointObj>()) else {
         unreachable!()
     };
-    assert_eq!(x.doc.as_str(), "The x coordinate.\n\nSigned.");
-    assert_eq!(y.doc.as_str(), "The y coordinate.");
-    assert_eq!(label.doc.as_str(), "");
+    assert_eq!(unsafe { x.doc.as_str() }, "The x coordinate.\n\nSigned.");
+    assert_eq!(unsafe { y.doc.as_str() }, "The y coordinate.");
+    assert_eq!(unsafe { label.doc.as_str() }, "");
     // A renamed field keeps its Rust type and offset.
     let labels = &fields(type_info::<Point3Obj>())[1];
-    assert_eq!(labels.name.as_str(), "labels");
+    assert_eq!(unsafe { labels.name.as_str() }, "labels");
     assert_eq!(labels.offset, std::mem::offset_of!(Point3Obj, tags) as i64);
     let p3 = point3(1, 2);
     let getter = FieldGetter::new(Point3Obj::type_index(), "labels").unwrap();
@@ -247,29 +253,32 @@ fn test_field_docs_come_from_doc_comments_or_reflect() {
 fn test_methods_are_registered_with_the_type() {
     register_types();
     let info = type_info::<PointObj>();
-    let names: Vec<&str> = methods(info).iter().map(|m| m.name.as_str()).collect();
+    let names: Vec<&str> = methods(info)
+        .iter()
+        .map(|m| unsafe { m.name.as_str() })
+        .collect();
     assert_eq!(names, ["norm1", "shifted", "origin"]);
     let [norm1, shifted, origin] = methods(info) else {
         unreachable!()
     };
     assert_eq!(norm1.flags, 0);
-    assert_eq!(norm1.doc.as_str(), "The L1 norm.");
-    assert_eq!(shifted.doc.as_str(), "");
+    assert_eq!(unsafe { norm1.doc.as_str() }, "The L1 norm.");
+    assert_eq!(unsafe { shifted.doc.as_str() }, "");
     assert_eq!(
         origin.flags,
         TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskIsStaticMethod as i64
     );
-    assert_eq!(origin.doc.as_str(), "The origin.");
+    assert_eq!(unsafe { origin.doc.as_str() }, "The origin.");
     // Each method records its type schema, as C++ `ObjectDef::def` does.
     let point = r#"{"type":"testing.rust.ReflectedPoint"}"#;
     assert_eq!(
-        shifted.metadata.as_str(),
+        unsafe { shifted.metadata.as_str() },
         metadata_of(&format!(
             r#"{{"type":"ffi.Function","named_args":{{"return":[{point}],"params":[{point},{{"type":"int"}}]}}}}"#
         ))
     );
     assert_eq!(
-        origin.metadata.as_str(),
+        unsafe { origin.metadata.as_str() },
         metadata_of(&format!(
             r#"{{"type":"ffi.Function","named_args":{{"return":[{point}],"params":[]}}}}"#
         ))
