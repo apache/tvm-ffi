@@ -27,7 +27,7 @@ use std::sync::atomic::AtomicU64;
 use crate::any::AnyView;
 use crate::derive::ObjectRef;
 use crate::type_traits::AnyCompatible;
-pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
 // Type registration: writes to the runtime's type table from Rust, and the
@@ -199,7 +199,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     ///
     /// `this` points to an `ObjectArc<T>` or to all-zero bytes.
     #[inline]
-    pub unsafe fn is_null(this: *const Self) -> bool {
+    pub(crate) unsafe fn is_null(this: *const Self) -> bool {
         (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
     }
 

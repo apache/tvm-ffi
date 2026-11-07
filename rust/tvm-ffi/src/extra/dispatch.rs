@@ -77,6 +77,7 @@ use std::{borrow::BorrowMut, marker::PhantomData};
 /// Entry points infer one marker from the input. Callback markers select argument
 /// matching and a leading argument count; tuple markers contain each link's marker.
 /// Normalization stores the input once, before traversal, without cloning it.
+#[doc(hidden)]
 pub mod marker {
     use std::marker::PhantomData;
     /// Store an owned dispatcher with the exact target argument and result types.

@@ -256,6 +256,7 @@ impl Function {
     /// # Errors
     ///
     /// Returns the error that the function raises.
+    #[doc(hidden)]
     pub fn call_tuple_with_len<const LEN: usize, TupleType>(
         &self,
         tuple_args: TupleType,
