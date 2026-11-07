@@ -83,6 +83,10 @@ pub use crate::error::{
 };
 pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
+pub use crate::extra::structural_eq_hash::{
+    get_first_structural_mismatch, get_first_structural_mismatch_with, structural_equal,
+    structural_equal_with, structural_hash, structural_hash_with, StructuralOptions,
+};
 pub use crate::extra::structural_map::structural_map;
 pub use crate::extra::structural_mutate::{
     structural_mutate, InplaceMode, MutationView, StructuralMutateEngine, StructuralMutatorBase,
