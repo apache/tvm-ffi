@@ -38,6 +38,21 @@
 //! assert_eq!(i64::try_from(total)?, 6);
 //! # Ok::<(), tvm_ffi::Error>(())
 //! ```
+//!
+//! # FFI contracts
+//!
+//! Some guarantees rest on contracts every language keeps, which Rust cannot
+//! check:
+//!
+//! * An `ffi.String` holds UTF-8, so [`String::as_str`] does not validate it.
+//! * Types, functions and attributes register during static initialization,
+//!   such as in a [`static_init_block!`], before other threads read them:
+//!   readers of the runtime's tables take no lock.
+//! * A type key describes the same type in every library that declares it;
+//!   see [`rs_object`].
+//! * A [`TensorView`] received as a function argument is valid only during
+//!   the call, and so is an [`Any`] holding a `DLTensor*` converted from it
+//!   or from an [`AnyView`].
 #![warn(missing_docs)]
 
 // Lets macro-generated `::tvm_ffi` paths resolve inside this crate too.
@@ -266,16 +281,22 @@ pub use tvm_ffi_macros::match_any;
 /// A field takes `#[reflect(writable, seq_hash_ignore, ...)]` for the
 /// [`FieldFlags`](crate::reflection::FieldFlags) of those names, and `name = "..."` or `doc = "..."` to
 /// register it under another name or with a doc string, by default its `///`
-/// comment.
+/// comment. As a C++ `def_rw` field, a `writable` field can be replaced
+/// through reflection, such as from Python, while the object is shared.
 ///
 /// # Requirements
 ///
 /// A field's type must implement `AnyCompatible` and `Clone`; an `init_off`
-/// field's type must take all-zero bytes as a value. The parent's object must
+/// field's type must take all-zero bytes as a value. An optional field is an
+/// `Option` of an object reference or an [`Optional`] of any other value. The parent's object must
 /// implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and non-final
 /// types bound by `tvm-ffi-stubgen` do. The type registers on its first
 /// `type_index()`, with its fields, methods, `__ffi_new__` and, unless the
 /// methods define it, `__ffi_init__`.
+///
+/// A key already registered, by another library or a binding, must describe
+/// the same type: `type_index()` checks its parent, depth and size, not its
+/// fields.
 ///
 /// # Examples
 ///

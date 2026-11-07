@@ -81,7 +81,13 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// also gets `ShallowCopy`, which shallow-copies the parent and clones every
 /// other field, so the parent must implement `ShallowCopy` (`Object` and
 /// reflected Rust types do) and the fields must be `Clone`; a reflected
-/// field's type must implement `AnyCompatible`.
+/// field's type must implement `AnyCompatible`. As a C++ `def_rw` field, a
+/// `writable` field can be replaced through reflection, such as from Python,
+/// while the object is shared.
+///
+/// A key registered more than once, by `#[type_register]` types or bindings
+/// in different libraries, must describe the same type each time:
+/// `type_index()` checks the parent, depth and size, not the fields.
 ///
 /// [`FieldFlags`]: ../tvm_ffi/reflection/struct.FieldFlags.html
 /// [`SEqHashKind`]: ../tvm_ffi/reflection/enum.SEqHashKind.html

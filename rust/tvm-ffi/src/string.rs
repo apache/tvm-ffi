@@ -247,6 +247,9 @@ impl Debug for Bytes {
 /// An immutable UTF-8 string, passed across languages as `ffi.String`
 /// (Python `str`).
 ///
+/// An `ffi.String` holds UTF-8 by contract, which other languages keep, so
+/// [`as_str`](Self::as_str) does not validate strings received through FFI.
+///
 /// Short strings are stored inline in an [`Any`](crate::Any) without an
 /// allocation.
 ///

@@ -60,6 +60,10 @@ pub struct AnyView<'a> {
 /// it with `From`; `TryFrom` (converting), [`downcast_ref`](Self::downcast_ref)
 /// (borrowing) and [`match_any!`](crate::match_any) read it back. Borrow it as an [`AnyView`] to pass it without retaining.
 ///
+/// The one value it does not own is a `DLTensor*` converted from an
+/// [`AnyView`], as in C++: that `Any` borrows the tensor and must not outlive
+/// it.
+///
 /// # Examples
 ///
 /// ```
@@ -436,7 +440,18 @@ pub(crate) fn is_plain_inline(type_index: i32) -> bool {
         || type_index == TypeIndex::kTVMFFIUnchanged as i32
 }
 
-// convert AnyView to Any
+/// Takes ownership of the viewed value: objects gain a reference, borrowed
+/// strings and bytes are copied, and an [`RValueRef`](crate::rvalue_ref::RValueRef)
+/// gives up its object.
+///
+/// A `DLTensor*` has no reference count to take, so it is kept as is, as in
+/// C++: the `Any` borrows the tensor and must not outlive it. Convert it to a
+/// [`Tensor`](crate::Tensor) to own the tensor.
+///
+/// # Panics
+///
+/// Panics if the view holds an `RValueRef` whose object an earlier conversion
+/// already took.
 impl From<AnyView<'_>> for Any {
     #[inline]
     fn from(value: AnyView<'_>) -> Self {

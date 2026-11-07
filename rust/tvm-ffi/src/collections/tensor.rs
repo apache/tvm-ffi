@@ -478,9 +478,9 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// read a tensor's metadata and data.
 ///
 /// The view does not keep anything alive: its lifetime `'a` ties it to what
-/// it borrows, which for an argument of an exported function is the call. For
-/// the same reason, a view cannot be moved into an owned [`Any`](crate::Any),
-/// which could outlive it; use [`Tensor`] instead. Neither misuse compiles:
+/// it borrows. For the same reason, a view cannot be moved into an owned
+/// [`Any`](crate::Any), which could outlive it; use [`Tensor`] instead.
+/// Neither misuse compiles:
 ///
 /// ```compile_fail
 /// use tvm_ffi::{Tensor, TensorView};
@@ -496,6 +496,11 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// let tensor = Tensor::from_slice(&[1.0_f32], &[1]).unwrap();
 /// let _ = Any::from(TensorView::from(&tensor));
 /// ```
+///
+/// A view received as an argument of an exported function is valid only
+/// during the call. The function may name any lifetime for it,
+/// `TensorView<'static>` included, so the compiler does not stop it from
+/// being kept past the call; doing so is undefined behavior.
 #[derive(Clone, Copy, Debug)]
 pub struct TensorView<'a> {
     tensor: *const DLTensor,
@@ -653,8 +658,8 @@ impl<'a> TryFrom<AnyView<'a>> for TensorView<'a> {
     }
 }
 
-// A typed function argument. A closure `|t: TensorView| ..` is generic over
-// the view's lifetime, so the view cannot be kept past the call.
+// A typed function argument, valid only during the call; the lifetime is not
+// checked against it (see the type docs).
 impl crate::type_traits::TypeSchema for TensorView<'_> {
     fn type_schema() -> String {
         crate::type_traits::type_schema("DLTensor*", &[])
