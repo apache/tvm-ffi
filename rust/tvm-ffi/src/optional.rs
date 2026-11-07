@@ -34,7 +34,6 @@ use crate::type_traits::AnyCompatible;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use tvm_ffi_sys::TVMFFIAny;
-use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 
 /// Marker for the types whose optional the ABI stores as one 16-byte
 /// `TVMFFIAny` cell, the types [`Optional<T>`] accepts.
@@ -124,7 +123,7 @@ impl<T: OptionalCompatible> Optional<T> {
     /// Whether a value is present.
     #[inline]
     pub fn is_some(&self) -> bool {
-        self.data.type_index() != TypeIndex::kTVMFFINone as i32
+        !self.data.is_none()
     }
 
     /// Whether the optional is empty.

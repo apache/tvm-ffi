@@ -196,5 +196,5 @@ fn test_array_copy_on_write() {
 
     assert!(array.set(3, s("q")).is_err());
     assert!(array.insert(4, s("q")).is_err());
-    assert!(Array::<String>::new().pop().is_err());
+    assert!(Array::<String>::new().pop().is_none());
 }

@@ -145,19 +145,15 @@ pub struct Tensor {
 
 impl Tensor {
     /// The data pointer, as in the `DLTensor`; `byte_offset` is not applied.
-    pub fn data_ptr(&self) -> *const core::ffi::c_void {
-        self.data.dltensor.data
-    }
-
-    /// The data pointer for writing, as in the `DLTensor`.
     ///
     /// A tensor is a shared handle, so `&mut self` would not make writes
     /// exclusive; getting the pointer is safe, and writing through it is the
     /// caller's `unsafe` responsibility, as for
     /// [`data_as_slice_mut`](Self::data_as_slice_mut).
-    pub fn data_ptr_mut(&self) -> *mut core::ffi::c_void {
+    pub fn data_ptr(&self) -> *mut core::ffi::c_void {
         self.data.dltensor.data
     }
+
     /// Whether the elements are laid out in row-major order without gaps; see
     /// [`TensorView::is_contiguous`].
     pub fn is_contiguous(&self) -> bool {

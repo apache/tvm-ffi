@@ -104,7 +104,7 @@ impl<'a> ErrorKind<'a> {
     /// # Returns
     ///
     /// The name, such as `"ValueError"`.
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &'a str {
         self.0
     }
 }
@@ -241,7 +241,9 @@ impl Error {
     }
 
     /// Create a new error by moving from the error that the last failed FFI call
-    /// raised on this thread.
+    /// raised on this thread, as set by [`Error::set_raised`]. An associated
+    /// function rather than a constructor from a value: it takes the thread's
+    /// state.
     ///
     /// # Returns
     ///
@@ -263,8 +265,10 @@ impl Error {
         }
     }
 
-    /// Set the error as raised on this thread, for the caller of an FFI function to
-    /// take.
+    /// Set `error` as the raised error of the calling thread, for the caller of
+    /// an `extern "C"` function, which then returns `-1`, to take with
+    /// [`Error::from_raised`]. An associated function rather than a method: it
+    /// changes the thread's state, not `error`.
     ///
     /// # Arguments
     ///
@@ -364,14 +368,13 @@ impl Error {
     ///
     /// # Arguments
     ///
-    /// * `this` - The error to append the backtrace to.
     /// * `backtrace` - The backtrace to append.
     ///
     /// # Returns
     ///
     /// The error with the appended backtrace.
-    pub fn with_appended_backtrace(mut this: Self, backtrace: &str) -> Self {
-        let error = this.make_mut();
+    pub fn with_appended_backtrace(mut self, backtrace: &str) -> Self {
+        let error = self.make_mut();
         // SAFETY: `make_mut` made this handle the only reference to `error`.
         unsafe {
             let backtrace_data = TVMFFIByteArray::from_str(backtrace);
@@ -381,7 +384,7 @@ impl Error {
                 kTVMFFIBacktraceUpdateModeAppend as i32,
             );
         }
-        this
+        self
     }
 
     /// Make this handle the only reference to its error, copying a shared one, as

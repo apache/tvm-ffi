@@ -327,17 +327,14 @@ impl<T: ContainerElement + Clone> Array<T> {
         Ok(())
     }
 
-    /// Remove and return the last element.
-    ///
-    /// # Errors
-    ///
-    /// Returns an `IndexError` if the array is empty.
+    /// Remove and return the last element, or `None` if the array is empty,
+    /// as [`Vec::pop`].
     ///
     /// See also [`List::pop`](crate::List::pop).
-    pub fn pop(&mut self) -> Result<T, crate::Error> {
+    pub fn pop(&mut self) -> Option<T> {
         let size = self.len();
         if size == 0 {
-            crate::bail!(crate::error::INDEX_ERROR, "Array pop on an empty array");
+            return None;
         }
         let container = self.make_mut(size);
         container.size -= 1;
@@ -346,7 +343,7 @@ impl<T: ContainerElement + Clone> Array<T> {
         unsafe {
             let mut cell = std::ptr::read((container.data as *const TVMFFIAny).add(size - 1));
             debug_assert!(T::container_check_any_strict(&cell));
-            Ok(T::container_move_from_any_after_check(&mut cell))
+            Some(T::container_move_from_any_after_check(&mut cell))
         }
     }
 

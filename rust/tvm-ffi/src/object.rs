@@ -273,9 +273,13 @@ impl<T: ObjectCore> ObjectArc<T> {
         unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
-    /// Whether this is the only reference, so it may be mutated in place.
+    /// Whether this is the only reference, strong and with no weak one, so the
+    /// object may be mutated in place.
+    ///
+    /// # Arguments
+    /// * `this` - The handle.
     #[inline]
-    pub(crate) fn is_unique(this: &Self) -> bool {
+    pub fn is_unique(this: &Self) -> bool {
         unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 

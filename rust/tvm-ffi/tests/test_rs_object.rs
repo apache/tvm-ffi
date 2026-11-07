@@ -469,7 +469,7 @@ fn test_cpp_structural_equality_and_deep_copy_see_the_fields() {
 #[test]
 fn test_shallow_copy_and_finality_are_type_attributes() {
     let attr = |type_index, name| {
-        TypeAttrColumn::new(name)
+        TypeAttrColumn::lookup(name)
             .and_then(|column| column.get(type_index))
             .unwrap()
     };
@@ -521,7 +521,7 @@ fn test_crate_path_names_a_reexported_tvm_ffi() {
 
 fn type_attr_function(type_index: i32, name: &str) -> Function {
     Function::try_from(
-        TypeAttrColumn::new(name)
+        TypeAttrColumn::lookup(name)
             .and_then(|column| column.get(type_index))
             .unwrap(),
     )
@@ -582,7 +582,7 @@ fn test_init_constructs_the_type_from_its_fields() {
     assert_eq!(tags_count(), 1);
 
     // A type's own `__ffi_init__` is a method, which C++ generates none over.
-    assert!(TypeAttrColumn::new("__ffi_init__")
+    assert!(TypeAttrColumn::lookup("__ffi_init__")
         .and_then(|column| column.get(RsOwnInitObj::type_index()))
         .is_none());
     let own_init =

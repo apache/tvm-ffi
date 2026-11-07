@@ -137,6 +137,12 @@ impl<'a> AnyView<'a> {
         self.data.type_index
     }
 
+    /// Whether the value is None.
+    #[inline(always)]
+    pub fn is_none(&self) -> bool {
+        self.data.type_index == TypeIndex::kTVMFFINone as i32
+    }
+
     /// Borrow the raw ABI representation.
     /// Copying it does not retain referenced data or extend its lifetime.
     #[inline(always)]
@@ -283,6 +289,12 @@ impl Any {
         self.data.type_index
     }
 
+    /// Whether the value is None.
+    #[inline(always)]
+    pub fn is_none(&self) -> bool {
+        self.data.type_index == TypeIndex::kTVMFFINone as i32
+    }
+
     /// Borrow the raw ABI representation, which this value owns.
     /// Copying it does not retain referenced data or extend its lifetime.
     #[inline(always)]
@@ -331,8 +343,8 @@ impl Any {
     /// `Box::into_raw` does. Rebuild it with [`from_raw_ffi_any`](Self::from_raw_ffi_any)
     /// to release it.
     #[inline(always)]
-    pub fn into_raw_ffi_any(this: Self) -> TVMFFIAny {
-        let this = std::mem::ManuallyDrop::new(this);
+    pub fn into_raw_ffi_any(self) -> TVMFFIAny {
+        let this = std::mem::ManuallyDrop::new(self);
         this.data
     }
 

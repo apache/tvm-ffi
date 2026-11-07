@@ -46,11 +46,36 @@ unsafe impl Sync for TypeAttrColumn {}
 
 impl TypeAttrColumn {
     /// Look up a registered type-attribute column by name.
-    pub fn new(name: &str) -> Option<Self> {
+    pub fn lookup(name: &str) -> Option<Self> {
         unsafe {
             let name = TVMFFIByteArray::from_str(name);
             NonNull::new(TVMFFIGetTypeAttrColumn(&name).cast_mut()).map(Self)
         }
+    }
+
+    /// The column `name`, created if no type registered it yet. Call it during
+    /// static initialization, like any registration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot create the column.
+    pub fn ensure(name: &str) -> Result<Self> {
+        {
+            let _registering = crate::object::lock_type_registration();
+            // A value for the None type index only creates the column.
+            super::registry::register_type_attr(
+                TVMFFITypeIndex::kTVMFFINone as i32,
+                name,
+                Any::new(),
+            )?;
+        }
+        Self::lookup(name).ok_or_else(|| {
+            Error::new(
+                crate::INTERNAL_ERROR,
+                &format!("type attribute column `{name}` was not created"),
+                "",
+            )
+        })
     }
 
     /// The attribute of `type_index`, as an owned value, or `None` if unset.
