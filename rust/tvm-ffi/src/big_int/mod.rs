@@ -139,6 +139,7 @@ impl BigInt {
     ///
     /// Redundant sign-extension words are pruned and a value that fits `i64`
     /// is stored inline; an empty slice is zero.
+    #[doc(hidden)]
     #[inline]
     pub fn from_words(words: &[i64]) -> Self {
         let size = int_ops::normalized_len(words);
@@ -200,6 +201,7 @@ impl BigInt {
     /// Borrow the canonical two's-complement words, least-significant word first.
     ///
     /// The slice is never empty and its last word carries the sign.
+    #[doc(hidden)]
     pub fn words(&self) -> &[i64] {
         unsafe {
             if self.data.type_index == TypeIndex::kTVMFFIInt as i32 {

@@ -185,6 +185,7 @@ impl<'a> AnyView<'a> {
 
     /// The strong reference count of the held object, for tests and debugging;
     /// `None` if the value is not an object.
+    #[doc(hidden)]
     pub fn debug_strong_count(&self) -> Option<usize> {
         unsafe {
             if self.data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
@@ -349,6 +350,7 @@ impl Any {
 
     /// The strong reference count of the held object, for tests and debugging;
     /// `None` if the value is not an object.
+    #[doc(hidden)]
     pub fn debug_strong_count(&self) -> Option<usize> {
         unsafe {
             if self.data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {

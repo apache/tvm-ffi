@@ -777,9 +777,6 @@ macro_rules! __tvm_ffi_dll_export_doc {
     };
 }
 
-///-----------------------------------------------------------
-/// into_typed_fn
-///
 /// Wrap a [`Function`](crate::Function) as a typed closure with the given
 /// signature: `into_typed_fn!(func, Fn(A, B) -> Result<R>)`.
 ///
