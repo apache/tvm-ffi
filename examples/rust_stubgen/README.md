@@ -118,6 +118,20 @@ wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
 and `upcast` adds a conversion to a hand-written typed view
 (`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`).
 
+When the C++ side fixes the value set in its ABI, `closed` before the member
+list makes `enum` emit a `#[repr(i32)]` Rust enum instead. Reading a value
+outside the set is undefined behavior, so the set should include 0, the value of
+a field never set:
+
+```rust
+// tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) closed { Unordered=0, Ordered=1 }
+```
+
+A crate built with `#![warn(missing_docs)]` adds
+`// tvm-ffi-stubgen(missing-docs): allow` to a file: every generated type and
+`impl` in it gets `#[allow(missing_docs)]`, and docs written above a block
+still document its first item.
+
 ## Partial generation
 
 Every type an object refers to (its parent, its ancestors, the types of its

@@ -16,7 +16,8 @@
 # under the License.
 """The Rust backend's one-line directives: payload grammar and per-file storage.
 
-Three address one reflected field as ``<type_key>.<field>``, three address a type::
+Three address one reflected field as ``<type_key>.<field>``, three address a type,
+and one applies to the whole file::
 
     // tvm-ffi-stubgen(field): tirx.Add.a -> PrimExpr
     // tvm-ffi-stubgen(nullable): ir.Expr.span
@@ -24,14 +25,18 @@ Three address one reflected field as ``<type_key>.<field>``, three address a typ
     // tvm-ffi-stubgen(opaque): ir.SourceName
     // tvm-ffi-stubgen(upcast): tirx.Add -> PrimExpr
     // tvm-ffi-stubgen(custom-new): tirx.Add
+    // tvm-ffi-stubgen(missing-docs): allow
 
 ``field`` sets the field's Rust type (a name in scope, or a ``::`` path to
 ``use``); on a field inherited from an ancestor it narrows the allocator
 parameter instead. ``nullable`` wraps it in ``Option``; ``enum`` declares an open
-integer newtype for it; ``opaque`` keeps a type opaque even when its layout is
-reproducible. ``upcast`` adds a typed view outside the ancestor chain;
-``custom-new`` says the wrapper's ``new`` is hand-written; the generated one is
-named ``from_fields`` instead.
+integer newtype for it, or with ``closed`` before the member list a
+``#[repr(<int>)]`` enum of exactly those members; ``opaque`` keeps a type opaque
+even when its layout is reproducible. ``upcast`` adds an upcast to a reference
+outside the ancestor chain; ``custom-new`` says the wrapper's ``new`` is
+hand-written; the generated one is named ``from_fields`` instead.
+``missing-docs: allow`` puts ``#[allow(missing_docs)]`` on the file's generated
+types and ``impl`` blocks.
 """
 
 from __future__ import annotations
@@ -41,18 +46,24 @@ import re
 
 _ENUM_RE = re.compile(
     r"^(?P<target>\S+)\s*->\s*(?P<name>[A-Za-z_]\w*)\((?P<repr>[iu](?:8|16|32|64))\)"
-    r"\s*(?:\{(?P<body>[^{}]*)\})?$"
+    r"\s*(?:(?P<closed>closed\s*)?\{(?P<body>[^{}]*)\})?$"
 )
 _MEMBER_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<value>-?\d+)$")
 
 
 @dataclasses.dataclass(frozen=True)
 class EnumSpec:
-    """An ``enum`` directive: the newtype's name, its integer repr, and its members."""
+    """An ``enum`` directive: the type's name, its integer repr, and its members.
+
+    ``closed`` emits a Rust ``enum``: reading any other value from a mirrored field is
+    undefined behavior, so it is for value sets fixed by the ABI that include 0, the
+    value of a field an object zero-filled at creation never set.
+    """
 
     name: str
     repr: str
     members: tuple[tuple[str, int], ...]
+    closed: bool = False
 
 
 @dataclasses.dataclass
@@ -65,6 +76,7 @@ class Directives:
     opaque: set[str] = dataclasses.field(default_factory=set)
     upcasts: dict[str, list[str]] = dataclasses.field(default_factory=dict)
     custom_new: set[str] = dataclasses.field(default_factory=set)
+    allow_missing_docs: bool = False
 
     def add(self, name: str, payload: str, lineno: int) -> None:
         """Parse and store one directive; raise ``ValueError`` on a malformed payload."""
@@ -83,6 +95,10 @@ class Directives:
             self.upcasts.setdefault(_type_target(name, lhs, lineno), []).append(rust_type)
         elif name == "custom-new":
             self.custom_new.add(_type_target(name, payload, lineno))
+        elif name == "missing-docs":
+            if payload.strip() != "allow":  # the one level so far
+                raise _invalid(name, lineno, "allow")
+            self.allow_missing_docs = True
         else:
             raise ValueError(f"Unknown directive `{name}` at line {lineno}")
 
@@ -116,8 +132,11 @@ def _split_arrow(name: str, payload: str, lineno: int, expected: str) -> tuple[s
 
 
 def _parse_enum(payload: str, lineno: int) -> tuple[str, EnumSpec]:
-    """Parse ``<type_key>.<field> -> Name(i32) { A=0, B=1 }`` (the member list is optional)."""
-    expected = "<type_key>.<field> -> Name(i32) { A=0, B=1 }"
+    """Parse ``<type_key>.<field> -> Name(i32) [closed] { A=0, B=1 }``.
+
+    The member list is optional unless ``closed``.
+    """
+    expected = "<type_key>.<field> -> Name(i32) [closed] { A=0, B=1 }"
     match = _ENUM_RE.match(payload.strip())
     if match is None:
         raise _invalid("enum", lineno, expected)
@@ -129,5 +148,9 @@ def _parse_enum(payload: str, lineno: int) -> tuple[str, EnumSpec]:
         if member is None:
             raise _invalid("enum", lineno, expected)
         members.append((member.group("name"), int(member.group("value"))))
+    closed = match.group("closed") is not None
+    if closed and not members:
+        raise _invalid("enum", lineno, expected)
     target = _field_target("enum", match.group("target"), lineno)
-    return target, EnumSpec(match.group("name"), match.group("repr"), tuple(members))
+    spec = EnumSpec(match.group("name"), match.group("repr"), tuple(members), closed)
+    return target, spec
