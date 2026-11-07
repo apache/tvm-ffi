@@ -126,6 +126,7 @@ pub unsafe fn unsafe_init<T: UnsafeInit>() -> ObjectRef {
 /// The deleter of an object that [`unsafe_init`] made, which may go before
 /// reflection sets every field, as when a JSON graph lacks one.
 unsafe extern "C" fn unsafe_init_deleter<T: UnsafeInit>(ptr: *mut c_void, flags: i32) {
+    // Objects made here drop field by field and never run the struct's `Drop::drop`.
     unsafe {
         if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
             T::drop_defined_fields(ptr.cast::<T>());

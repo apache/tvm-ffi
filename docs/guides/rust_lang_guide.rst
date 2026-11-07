@@ -307,8 +307,8 @@ Defining Reflected Object Types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An object type defined in Rust registers its type key with ``#[type_register]``
-and its fields with ``#[reflect]``. The registration runs on the type's
-first ``type_index()``, which allocating an instance calls:
+and its fields with ``#[reflect]``. The registration runs when the library
+that defines the type loads, as for a C++ type:
 
 .. code-block:: rust
 
@@ -419,8 +419,13 @@ and any other field from anything that converts into it, as the ``new`` of a typ
 bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object
 (``#[object_ref(skip_deref)]`` opts out), and its private ``from_object`` wraps a new
 object for the type's constructors. The reference also converts into ``parent``,
-and every reference converts into ``ObjectRef``; ``unsafe_impl_object_ref_upcast!``
-converts it into the references to further ancestors.
+whose object the reference's object must embed, directly or through its own
+parents, which the derive checks at compile time. A parent that promises more than
+its object type, a generic one such as ``Array<T>`` or one with a custom
+``ObjectRefAnyCompatible``, is written ``unsafe parent = ...``: the caller promises
+that every value of the reference is a valid parent. Every reference converts into
+``ObjectRef``; ``impl_object_ref_upcast!(unsafe Point3 => Point)``
+declares further conversions without that check.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads
@@ -853,7 +858,8 @@ context for that invocation. Contexts do not own or retain a second reference to
 the dispatcher. They cannot escape the callback or move to another thread.
 
 Default descent uses registered structural hooks, then reflection for types
-without a hook.
+without a hook. A hook uses the visitor only through its arguments, during the
+call, and must not keep it or call it outside them.
 
 ``AnyView<'_>`` is passed by value to catch-all visit, walk, and map callbacks;
 mutation dispatch consumes ``MutationView<'_>`` instead. Copying an ``AnyView``
@@ -940,7 +946,8 @@ Default recursion uses the registered type attributes: it calls
 falls back to ``__s_mutate__``. Each hook receives the active Rust-backed
 mutator and can recurse through its language-independent vtable. This lets the
 implementation that registered the type own its storage and mutation rules.
-When a type has no hook, object-backed values use reflected fields.
+A hook uses the mutator only through its arguments, during the call, and must
+not keep it or call it outside them. When a type has no hook, object-backed values use reflected fields.
 
 Callbacks may return ``Result<T>`` for any ``T`` convertible into ``Any``; for
 example, an integer handler can return ``Result<i64>`` to report failures and use

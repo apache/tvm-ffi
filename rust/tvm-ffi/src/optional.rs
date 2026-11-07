@@ -23,13 +23,17 @@
 //! layout of an optional non-object value in every language. An optional
 //! object is one nullable pointer, which [`std::option::Option<X>`] already
 //! is, so `Optional<X>` of an object type is rejected at compile time.
+//!
+//! A reflected field holding an optional non-object value is an `Optional<T>`;
+//! an `Option<T>` there is rejected at registration, since it is laid out as
+//! neither form.
 
 use crate::any::Any;
 use crate::string::{Bytes, String};
 use crate::type_traits::AnyCompatible;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
-use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+use tvm_ffi_sys::TVMFFIAny;
 
 /// Marker for the types whose optional the ABI stores as one 16-byte
 /// `TVMFFIAny` cell, the types [`Optional<T>`] accepts.
@@ -80,8 +84,6 @@ impl_optional_compatible!(
     crate::big_int::BigInt,
 );
 
-unsafe impl<T: OptionalCompatible> OptionalCompatible for Option<T> {}
-
 /// An optional value that is not an object, stored in place as one 16-byte
 /// cell holding the value or `None`. See the [module docs](self).
 #[repr(transparent)]
@@ -121,7 +123,7 @@ impl<T: OptionalCompatible> Optional<T> {
     /// Whether a value is present.
     #[inline]
     pub fn is_some(&self) -> bool {
-        self.data.type_index() != TypeIndex::kTVMFFINone as i32
+        !self.data.is_none()
     }
 
     /// Whether the optional is empty.
@@ -204,6 +206,46 @@ impl Optional<String> {
         } else {
             None
         }
+    }
+}
+
+// Converts as `Option<T>` does; the cell itself is the `Any` form, which makes
+// `Optional<T>` a reflected field laid out as C++ `ffi::Optional<T>`.
+unsafe impl<T: OptionalCompatible> AnyCompatible for Optional<T> {
+    fn type_str() -> std::string::String {
+        Option::<T>::type_str()
+    }
+
+    fn type_schema() -> std::string::String {
+        Option::<T>::type_schema()
+    }
+
+    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+        *data = *src.data.as_raw_ffi_any();
+    }
+
+    unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
+        *data = Any::into_raw_ffi_any(src.data);
+    }
+
+    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
+        Option::<T>::check_any_strict(data)
+    }
+
+    unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+        Option::<T>::match_constraints(data)
+    }
+
+    unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+        Option::<T>::copy_from_any_view_after_check(data).into()
+    }
+
+    unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+        Option::<T>::move_from_any_after_check(data).into()
+    }
+
+    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+        Option::<T>::try_cast_from_any_view(data).map(Self::from)
     }
 }
 

@@ -125,7 +125,7 @@ impl Default for StructuralVisitorObj {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.VisitInterrupt"]
-#[type_index(TVMFFITypeIndex::kTVMFFIVisitInterrupt)]
+#[type_index(unsafe TVMFFITypeIndex::kTVMFFIVisitInterrupt)]
 #[type_final]
 pub struct VisitInterruptObj {
     base_: Object,
@@ -380,7 +380,8 @@ impl<D, Base: StructuralVisitorBase> StructuralVisitorView<'_, D, Base> {
     /// `value` itself again.
     ///
     /// Children are found by the type's registered visit hook or its reflected
-    /// fields. The visit stops at the first child that returns an interrupt.
+    /// fields. A hook uses the visitor only through its arguments, during the
+    /// call, and must not keep it or call it outside them. The visit stops at the first child that returns an interrupt.
     ///
     /// # Arguments
     ///
@@ -797,7 +798,7 @@ impl StructuralVisitorObj {
         let halted = unsafe {
             for_each_field_info(type_info, &mut |field| {
                 let result = Self::visit_reflected_field(runtime, object, field, def_region_kind);
-                if result.type_index() == TVMFFITypeIndex::kTVMFFINone as i32 {
+                if result.is_none() {
                     ControlFlow::Continue(())
                 } else {
                     ControlFlow::Break(result)
@@ -1024,7 +1025,7 @@ fn with_field_error_context(result: Any, name: &str) -> Any {
 // Columns are process-lifetime registry entries; a missing per-type cell still
 // falls back to reflected traversal. A missing required column is an error.
 static STRUCTURAL_VISIT_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
-    TypeAttrColumn::new(STRUCTURAL_VISIT_ATTR).expect("missing __s_visit__ column")
+    TypeAttrColumn::lookup(STRUCTURAL_VISIT_ATTR).expect("missing __s_visit__ column")
 });
 
 /// Return the shared visit-hook column without caching optional per-type cells.

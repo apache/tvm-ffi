@@ -40,8 +40,11 @@ use std::mem::{align_of, size_of};
 use std::ops::BitOr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use super::NativeFunction;
 use crate::function_internal::AsPackedCallable;
-use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
+use crate::object::{
+    lock_type_registration, Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore,
+};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter,
     TVMFFIGetTypeInfo, TVMFFIMethodInfo, TVMFFIObject, TVMFFIObjectCreator, TVMFFIObjectHandle,
@@ -158,7 +161,8 @@ impl BitOr for FieldFlags {
 ///
 /// That function runs under the registration lock, before `N::type_index()`
 /// returns, so it must not call `type_index()` of `N` or of another Rust type
-/// that is not registered yet. When `N` already has metadata in the type
+/// that is not registered yet, nor register attributes with [`TypeAttrDef`]
+/// or [`EnumDef`](super::EnumDef). When `N` already has metadata in the type
 /// table, every call is a no-op.
 ///
 /// # Examples
@@ -283,6 +287,14 @@ impl<N: ObjectCore> ObjectDef<N> {
                 F::type_str()
             );
         }
+        let type_str = F::type_str();
+        crate::ensure!(
+            F::has_field_layout(),
+            TYPE_ERROR,
+            "field `{name}` of `{}`: `Option` of a non-object value (`{type_str}`) has no FFI \
+             field layout; use `tvm_ffi::Optional<T>`",
+            N::TYPE_KEY
+        );
         let metadata = type_schema_metadata(&F::type_schema());
         let info = TVMFFIFieldInfo {
             name: unsafe { TVMFFIByteArray::from_str(name) },
@@ -295,7 +307,7 @@ impl<N: ObjectCore> ObjectDef<N> {
             getter: Some(field_getter::<F>),
             setter: field_setter::<F> as TVMFFIFieldSetter as *mut c_void,
             default_value_or_factory: TVMFFIAny::new(),
-            field_static_type_index: field_static_type_index(&F::type_str()),
+            field_static_type_index: field_static_type_index(&type_str),
         };
         // The table copies the strings before returning.
         crate::check_safe_call!(unsafe { TVMFFITypeRegisterField(self.type_index, &info) })?;
@@ -377,6 +389,15 @@ impl<N: ObjectCore> ObjectDef<N> {
             };
             crate::check_safe_call!(TVMFFITypeRegisterMethod(self.type_index, &info))
         };
+        // A static `__ffi_init__` is also the type's `__ffi_init__` attribute, which
+        // other languages call to construct it, as C++ `ObjectDef::def(init)` registers.
+        let registered = registered.and_then(|()| {
+            if is_static && name == "__ffi_init__" {
+                register_type_attr(self.type_index, name, Any::from(func))
+            } else {
+                Ok(())
+            }
+        });
         if let Err(error) = registered {
             self.error = Some(Error::new(
                 error.kind(),
@@ -399,6 +420,8 @@ impl<N: ObjectCore> ObjectDef<N> {
             return Ok(());
         }
         if let Some(creator) = self.creator {
+            // Objects from this creator start zeroed: another language must set
+            // every field before Rust code reads it.
             let new = Function::from_typed(move || -> Result<ObjectRef> {
                 let mut handle: TVMFFIObjectHandle = std::ptr::null_mut();
                 crate::check_safe_call!(unsafe { creator(&mut handle) })?;
@@ -430,7 +453,8 @@ impl<N: ObjectCore> ObjectDef<N> {
 /// # Safety
 ///
 /// As `ObjectDef::registering`; `fields` registers fields of `N` as
-/// [`ObjectDef::field`] requires.
+/// [`ObjectDef::field`] requires. Like every registration, it runs during
+/// static initialization, before other threads read the type.
 #[doc(hidden)]
 pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
     type_index: i32,
@@ -447,6 +471,11 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 /// Registers type attributes of the object type `T`, each as soon as
 /// [`attr`](Self::attr) names it, for every language to read with
 /// [`TypeAttrColumn`](crate::reflection::TypeAttrColumn).
+///
+/// As in C++, attributes register during static initialization, such as in a
+/// [`static_init_block!`](crate::static_init_block), before other threads
+/// read them: registrations from Rust lock each other out, but readers take
+/// no lock.
 ///
 /// # Examples
 ///
@@ -466,7 +495,7 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 ///
 /// TypeAttrDef::<MyPairObj>::new().attr("my_ext.arity", 2_i64)?;
 ///
-/// let column = TypeAttrColumn::new("my_ext.arity").unwrap();
+/// let column = TypeAttrColumn::lookup("my_ext.arity").unwrap();
 /// let arity: i64 = column.get(MyPairObj::type_index()).unwrap().try_into()?;
 /// assert_eq!(arity, 2);
 /// # Ok::<(), tvm_ffi::Error>(())
@@ -487,7 +516,30 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     /// # Arguments
     ///
     /// * `name` - The name of the attribute.
-    /// * `value` - The value of the attribute.
+    /// * `value` - The value of the attribute, `Send + Sync` since every
+    ///   thread reads it.
+    ///
+    /// # Returns
+    ///
+    /// The builder, for the next attribute.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `T` already has the attribute `name`, or a
+    /// `TypeError` if `value` is an opaque pointer: register a native hook
+    /// with [`native_fn_attr`](Self::native_fn_attr).
+    pub fn attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
+        let value = value.into();
+        ensure_not_opaque_ptr(name, &value)?;
+        self.register(name, value)
+    }
+
+    /// Register the native hook `f` as the type attribute `name` of `T`.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the attribute.
+    /// * `f` - The hook.
     ///
     /// # Returns
     ///
@@ -496,10 +548,38 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     /// # Errors
     ///
     /// Returns an error if `T` already has the attribute `name`.
-    pub fn attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
-        register_type_attr(T::type_index(), name, value.into())?;
+    ///
+    /// # Safety
+    ///
+    /// Every caller of the column `name` calls its hooks with exactly `Args`
+    /// and reads `R`: a native caller calls the function pointer unchecked.
+    pub unsafe fn native_fn_attr<Args, R>(
+        self,
+        name: &str,
+        f: NativeFunction<Args, R>,
+    ) -> Result<Self> {
+        self.register(name, f.into_any())
+    }
+
+    fn register(self, name: &str, value: Any) -> Result<Self> {
+        // Before the lock, which a first `type_index()` takes to register `T`.
+        let type_index = T::type_index();
+        let _registering = lock_type_registration();
+        register_type_attr(type_index, name, value)?;
         Ok(self)
     }
+}
+
+/// Native callers of an attribute call an opaque pointer as a function, so
+/// only [`NativeFunction`] may store one, through an `unsafe` registration.
+pub(super) fn ensure_not_opaque_ptr(name: &str, value: &Any) -> Result<()> {
+    crate::ensure!(
+        value.type_index() != TVMFFITypeIndex::kTVMFFIOpaquePtr as i32,
+        TYPE_ERROR,
+        "attribute `{name}` cannot be an opaque pointer; register a native hook through \
+         `NativeFunction`"
+    );
+    Ok(())
 }
 
 /// The structural kind of the nearest ancestor of `info` with metadata.
@@ -543,7 +623,8 @@ fn object_type_key(object: &ObjectRef) -> String {
     unsafe { (*info).type_key.as_str().to_string() }
 }
 
-fn register_type_attr(type_index: i32, name: &str, mut value: Any) -> Result<()> {
+/// The caller holds the registration lock.
+pub(super) fn register_type_attr(type_index: i32, name: &str, mut value: Any) -> Result<()> {
     let name = unsafe { TVMFFIByteArray::from_str(name) };
     // The table takes its own reference to the value.
     let value = Any::as_raw_ffi_any_mut(&mut value);
@@ -621,7 +702,7 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
 /// The static type index of a field, from the Rust type's `type_str()` (the names
 /// `AnyCompatible` reports, such as `int`, `ffi.String`, `Array<my.Node>`).
 // As C++ `TypeTraits<T>::field_static_type_index` states it.
-fn field_static_type_index(type_str: &str) -> i32 {
+pub(crate) fn field_static_type_index(type_str: &str) -> i32 {
     use TVMFFITypeIndex::*;
     /// The static index of a field holding any value (`kTVMFFIAny`).
     const ANY: i32 = -1;

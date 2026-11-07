@@ -370,6 +370,7 @@ struct FieldHolderObj {
 }
 
 unsafe impl ObjectCore for FieldHolderObj {
+    type Parent = Object;
     const TYPE_KEY: &'static str = Object::TYPE_KEY;
     const TYPE_DEPTH: i32 = Object::TYPE_DEPTH;
     #[inline]

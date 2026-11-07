@@ -27,14 +27,58 @@ use std::sync::atomic::AtomicU64;
 use crate::any::AnyView;
 use crate::derive::ObjectRef;
 use crate::type_traits::AnyCompatible;
-pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
-/// Held while `#[derive(Object)]` with `#[type_register]` registers a type, so
-/// that registrations from Rust do not race each other: the runtime does not
-/// lock its type table and leaves that to callers.
+// Type registration: writes to the runtime's type table from Rust, and the
+// check that a key registered elsewhere matches its Rust declaration.
+
+/// Held around every write to the type table from Rust, so that registrations
+/// from Rust do not race each other: the runtime does not lock its type table
+/// and leaves that to callers.
+static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Holds the lock around every write to the type table from Rust. A panic in
+/// another registration leaves the table consistent, so a poisoned lock is
+/// still taken.
 #[doc(hidden)]
-pub static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub fn lock_type_registration() -> std::sync::MutexGuard<'static, ()> {
+    TYPE_REGISTRATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Panics unless `type_index`, the index `#[derive(Object)]` registered or
+/// bound for `T`'s key, describes `T`: a key registered by another library or
+/// another type must have the same parent and depth and, if it has metadata,
+/// the same size, or for a `binding` no larger, since an opaque binding
+/// declares only its parent.
+///
+/// # Safety
+///
+/// `type_index` is registered and `parent` is the type index of `T::Parent`.
+#[doc(hidden)]
+pub unsafe fn assert_registered_type_matches<T: ObjectCore>(
+    type_index: i32,
+    parent: i32,
+    binding: bool,
+) {
+    let info = &*TVMFFIGetTypeInfo(type_index);
+    let depth = T::TYPE_DEPTH;
+    let same_parent = info.type_depth == depth
+        && depth > 0
+        && (**info.type_acenstors.add(depth as usize - 1)).type_index == parent;
+    let size = std::mem::size_of::<T>();
+    let same_size = info.metadata.is_null() || {
+        let registered = (*info.metadata).total_size as usize;
+        size == registered || (binding && size < registered)
+    };
+    assert!(
+        same_parent && same_size,
+        "Type key {} is already registered with another parent, depth or size",
+        T::TYPE_KEY
+    );
+}
 
 /// The root object type, `ffi.Object`: just the object header.
 ///
@@ -56,6 +100,7 @@ impl Object {
 }
 
 unsafe impl ObjectCore for Object {
+    type Parent = ();
     const TYPE_KEY: &'static str = "ffi.Object";
     const TYPE_DEPTH: i32 = 0;
     #[inline]
@@ -154,7 +199,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     ///
     /// `this` points to an `ObjectArc<T>` or to all-zero bytes.
     #[inline]
-    pub unsafe fn is_null(this: *const Self) -> bool {
+    pub(crate) unsafe fn is_null(this: *const Self) -> bool {
         (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
     }
 
@@ -228,9 +273,13 @@ impl<T: ObjectCore> ObjectArc<T> {
         unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
-    /// Whether this is the only reference, so it may be mutated in place.
+    /// Whether this is the only reference, strong and with no weak one, so the
+    /// object may be mutated in place.
+    ///
+    /// # Arguments
+    /// * `this` - The handle.
     #[inline]
-    pub(crate) fn is_unique(this: &Self) -> bool {
+    pub fn is_unique(this: &Self) -> bool {
         unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
@@ -281,7 +330,8 @@ impl<T: ObjectCore> Clone for ObjectArc<T> {
 /// No code may mutate an instance while it is shared: changes go through
 /// copy-on-write, in place only on a uniquely held instance (one strong
 /// reference, no weak ones). This holds for every type not registered as
-/// mutable (`_type_mutable`), in any language.
+/// mutable (`_type_mutable`), in any language. Every subclass must also be
+/// immutable while shared, with thread-safe fields.
 pub unsafe trait ImmutableObject: ObjectCore {}
 
 // SAFETY: `T` is never mutated while shared, its fields are thread-safe, and the
@@ -304,15 +354,20 @@ pub struct ObjectRef {
 ///
 /// # Safety
 /// `Self` must have a compatible C layout with a valid `TVMFFIObject` prefix
-/// at offset zero. Its registered type, inheritance and payload must describe
-/// that layout correctly, including for foreign declarations.
+/// at offset zero, and embed a `Self::Parent` there unless it is the root.
+/// Its registered type, inheritance and payload must describe that layout
+/// correctly, including for foreign declarations.
 ///
 /// A live managed object and its header must remain at their original allocation
 /// address until destruction. Safe APIs must not move, replace or expose mutable
 /// access to that header while managed; payload mutation must preserve its type
 /// invariants. Preallocation builders and values moved out during destruction
 /// are not live managed objects and cannot be borrowed as `AnyView`.
+#[diagnostic::on_unimplemented(message = "`{Self}` is not an object type")]
 pub unsafe trait ObjectCore: Sized + 'static {
+    /// The parent's object type, which `Self` embeds at offset zero; `()` for
+    /// the root [`Object`].
+    type Parent;
     /// The type key, such as `"ffi.Array"`.
     const TYPE_KEY: &'static str;
     /// Depth of this type in the object inheritance tree.
@@ -337,6 +392,39 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// The caller must have exclusive access to the header and preserve the
     /// managed allocation's address, reference counts, deleter and dynamic type.
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject;
+}
+
+// Object hierarchy: a compile-time check that one object type derives from
+// another, which `#[object_ref(parent = ...)]` relies on.
+
+/// The object type `Self` is `A` or derives from it through its chain of
+/// [`ObjectCore::Parent`]s, so a `Self` is a valid `A`.
+///
+/// `Depth` is the number of parent steps from `Self` to `A`, a type from
+/// [`marker`] that the compiler infers.
+///
+/// # Safety
+///
+/// The blanket implementations are the only sound ones: do not implement it.
+#[diagnostic::on_unimplemented(message = "`{Self}` does not derive from `{A}`")]
+pub unsafe trait ObjectDerivesFrom<A, Depth> {}
+
+/// Inferred depths for [`ObjectDerivesFrom`].
+pub mod marker {
+    /// `A` is the object type itself.
+    pub enum Itself {}
+    /// `A` is reached through one more [`Parent`](super::ObjectCore::Parent).
+    pub struct Parent<Depth>(std::marker::PhantomData<fn() -> Depth>);
+}
+
+// SAFETY: every type is itself.
+unsafe impl<T: ObjectCore> ObjectDerivesFrom<T, marker::Itself> for T {}
+
+// SAFETY: `T` embeds `T::Parent` at offset zero, so whatever the parent
+// derives from, `T` does.
+unsafe impl<T: ObjectCore, A, Depth> ObjectDerivesFrom<A, marker::Parent<Depth>> for T where
+    T::Parent: ObjectDerivesFrom<A, Depth>
+{
 }
 
 /// An object type whose allocation is followed by a run of extra items, such
@@ -584,6 +672,22 @@ pub unsafe trait ObjectRefAnyCompatible: ObjectRefCore {
     }
 }
 
+/// An object reference that accepts every object of its type and promises
+/// nothing more, so any object type that derives from it may claim it as
+/// `#[object_ref(parent = ...)]`. `#[derive(ObjectRef)]` implements it for a
+/// non-generic reference with the default checks.
+///
+/// # Safety
+///
+/// Every object of `Self::ContainerType`, or of a type derived from it, is a
+/// valid `Self`.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` promises more than its object type (generic or custom checks)",
+    note = "write `#[object_ref(unsafe parent = ...)]` and keep that promise for every value"
+)]
+pub unsafe trait PlainObjectRef: ObjectRefCore {}
+
 // The object cell encoding, with the strict check `is_instance_of` then
 // `extra_check`, and `convert_fallback` after it in converting casts.
 unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
@@ -658,7 +762,7 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
 ///
 /// An owned reference converts into an owned `T`, and a borrowed one borrows
 /// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
-/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_ref_upcast!`](crate::unsafe_impl_object_ref_upcast)
+/// `Vec` but borrows from a `&Vec`. [`impl_object_ref_upcast!`](crate::impl_object_ref_upcast)
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes

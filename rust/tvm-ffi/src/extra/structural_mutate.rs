@@ -179,6 +179,8 @@ unsafe impl StructuralMutatorBase for StructuralMutatorObj {
         // Prefix-only: remaps go through the vtable, so any base may reuse this.
         let raw = value.value;
         // Registered hooks own their remapping policy; reflection handles its own.
+        // A hook that rewrites fields keeps the rebuilt object valid for the
+        // refined references that point at it.
         if let Some(attr) = Self::structural_mutate_hook(raw, value.mode) {
             return Self::call_structural_mutate_hook_raw(runtime, raw, attr);
         }
@@ -429,8 +431,8 @@ impl<'a, T> MutationView<'a, T> {
 
     /// Narrow the matched type without acquiring an owning reference.
     ///
-    /// The check is the strict one of [`Any::downcast_ref`], and the view keeps its
-    /// mode.
+    /// The check is the strict one of `match_any!`: only a value that fits `U` as
+    /// is, elements included, matches. The view keeps its mode.
     ///
     /// # Returns
     ///
@@ -446,7 +448,10 @@ impl<'a, T> MutationView<'a, T> {
     ) -> std::result::Result<MutationView<'a, U>, Self> {
         // SAFETY: the input owner keeps the borrowed value live for this handle's
         // lifetime. This only checks its type and does not acquire ownership.
-        if unsafe { U::container_check_any_strict(&self.value) } {
+        if unsafe {
+            U::container_check_any_strict(&self.value)
+                && U::container_match_constraints(&self.value)
+        } {
             Ok(MutationView::from_raw(self.value, self.mode))
         } else {
             Err(self)
@@ -686,9 +691,10 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
     /// `value` itself again.
     ///
     /// Children are found by the type's registered mutation hook or its reflected
-    /// fields. The result is unchanged when no child changed; otherwise it is a
-    /// node with the new children, made in place when `value` allows it and is
-    /// uniquely owned.
+    /// fields. A hook uses the mutator only through its arguments, during the
+    /// call, and must not keep it or call it outside them. The result is
+    /// unchanged when no child changed; otherwise it is a node with the new
+    /// children, made in place when `value` allows it and is uniquely owned.
     ///
     /// # Arguments
     ///
@@ -1683,12 +1689,12 @@ fn raw_ffi_any_to_owned_any(raw: TVMFFIAny) -> Result<Any> {
 // Cache registry columns, not their optional per-type cells. Absent cells retain
 // the normal hook/reflection fallback.
 static STRUCTURAL_MUTATE_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
-    TypeAttrColumn::new(STRUCTURAL_MUTATE_ATTR).expect("missing __s_mutate__ column")
+    TypeAttrColumn::lookup(STRUCTURAL_MUTATE_ATTR).expect("missing __s_mutate__ column")
 });
 
 static STRUCTURAL_MAYBE_INPLACE_MUTATE_COLUMN: ColdInitLazyLock<TypeAttrColumn> =
     ColdInitLazyLock::new(|| {
-        TypeAttrColumn::new(STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR)
+        TypeAttrColumn::lookup(STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR)
             .expect("missing __s_maybe_inplace_mutate__ column")
     });
 
@@ -1704,7 +1710,7 @@ fn structural_mutate_column<const INPLACE: bool>() -> TypeAttrColumn {
 }
 
 static SHALLOW_COPY_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
-    TypeAttrColumn::new(SHALLOW_COPY_ATTR).expect("missing __ffi_shallow_copy__ column")
+    TypeAttrColumn::lookup(SHALLOW_COPY_ATTR).expect("missing __ffi_shallow_copy__ column")
 });
 
 // -----------------------------------------------------------------------------

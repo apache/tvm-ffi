@@ -70,10 +70,7 @@ fn test_tensor_view_from_tensor_object() {
     let view = TensorView::from(&tensor);
     assert_eq!(view.shape(), tensor.shape());
     assert_eq!(view.strides(), tensor.strides());
-    assert_eq!(
-        view.data_ptr() as *const core::ffi::c_void,
-        tensor.data_ptr()
-    );
+    assert_eq!(view.data_ptr(), tensor.data_ptr());
 }
 
 #[test]
@@ -120,10 +117,7 @@ fn test_tensor_view_try_from_any_view() {
     let tensor = Tensor::from_slice(&[5.0f32, 1., 2., 3., 4., 5.], &[2, 3]).unwrap();
     let object = AnyView::from(&tensor);
     let view = TensorView::try_from(object).unwrap();
-    assert_eq!(
-        view.data_ptr() as *const core::ffi::c_void,
-        tensor.data_ptr()
-    );
+    assert_eq!(view.data_ptr(), tensor.data_ptr());
     assert_eq!(view.shape(), tensor.shape());
 
     // From a DLTensor*.

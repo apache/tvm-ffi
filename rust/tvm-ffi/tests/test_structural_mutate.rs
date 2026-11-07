@@ -1115,13 +1115,27 @@ fn callback_errors_preserve_message_and_add_object_context() {
             Any::from(payload.clone()),
         ],
     );
+    #[repr(C)]
+    #[derive(tvm_ffi::derive::Object)]
+    #[type_key = "ffi.VisitErrorContext"]
+    struct VisitErrorContextObj {
+        base_: Object,
+    }
+    #[derive(Clone, tvm_ffi::derive::ObjectRef)]
+    struct VisitErrorContext {
+        data: ObjectArc<VisitErrorContextObj>,
+    }
+    // SAFETY: the context is not mutated while shared.
+    unsafe impl Send for VisitErrorContext {}
+    // SAFETY: as for `Send`.
+    unsafe impl Sync for VisitErrorContext {}
     let cause = Error::new(RUNTIME_ERROR, "cause", "");
     let source = Error::new_with_cause_and_extra_context(
         RUNTIME_ERROR,
         "callback failed",
         "origin",
         Some(&cause),
-        Some(&ObjectRef::try_from(context.clone()).unwrap()),
+        Some(&VisitErrorContext::try_from(context.clone()).unwrap()),
     );
     let mut errors = Vec::new();
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {

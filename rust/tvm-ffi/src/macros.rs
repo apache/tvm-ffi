@@ -32,7 +32,7 @@ macro_rules! function_name {
         // dummy function to get the name of the function
         fn f() {}
         fn type_name_of<T>(_: T) -> &'static str {
-            std::any::type_name::<T>()
+            ::core::any::type_name::<T>()
         }
         let name = type_name_of(f);
         // remove the f() from the name
@@ -65,7 +65,11 @@ macro_rules! cached_global_func {
             $crate::function::Function,
         > = $crate::extra::cold_init_lazy_lock::ColdInitLazyLock::new(|| {
             $crate::function::Function::get_global($name).unwrap_or_else(|_| {
-                panic!(concat!("global function `", $name, "` is not registered"))
+                ::core::panic!(::core::concat!(
+                    "global function `",
+                    $name,
+                    "` is not registered"
+                ))
             })
         });
         &*FUNC
@@ -80,10 +84,10 @@ macro_rules! check_safe_call {
     ($expr:expr) => {{
         let ret_code = $expr;
         if ret_code == 0 {
-            Ok(())
+            ::core::result::Result::Ok(())
         } else {
             let error = $crate::error::Error::from_raised();
-            Err(error)
+            ::core::result::Result::Err(error)
         }
     }};
 }
@@ -123,13 +127,13 @@ macro_rules! check_safe_call {
 #[macro_export]
 macro_rules! bail {
     ($error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
-        let context = format!(
+        let context = ::std::format!(
             "  File \"{}\", line {}, in {}\n",
-            file!(),
-            line!(),
+            ::core::file!(),
+            ::core::line!(),
             $crate::function_name!()
         );
-        return Err($crate::error::Error::new($error_kind, &format!($fmt $(, $args)*), &context));
+        return ::core::result::Result::Err($crate::error::Error::new($error_kind, &::std::format!($fmt $(, $args)*), &context));
     }};
 }
 
@@ -204,15 +208,15 @@ macro_rules! ensure {
 macro_rules! attach_context {
     ($error:expr) => {{
         match $error {
-            Ok(value) => Ok(value),
-            Err(error) => {
-                let context = format!(
+            ::core::result::Result::Ok(value) => ::core::result::Result::Ok(value),
+            ::core::result::Result::Err(error) => {
+                let context = ::std::format!(
                     "  File \"{}\", line {}, in {}\n",
-                    file!(),
-                    line!(),
+                    ::core::file!(),
+                    ::core::line!(),
                     $crate::function_name!()
                 );
-                Err($crate::error::Error::with_appended_backtrace(
+                ::core::result::Result::Err($crate::error::Error::with_appended_backtrace(
                     error, &context,
                 ))
             }
@@ -236,14 +240,16 @@ macro_rules! attach_context {
 ///
 /// # Safety
 ///
-/// The declaration is trusted, as an `unsafe impl` is, hence the `unsafe_`
-/// name: `target` must be a registered base of `source`, and every `source`
-/// must satisfy the target reference invariants. An incorrect declaration makes
-/// the generated safe conversions unsound. The Rust stub generator writes these
-/// from the registered type hierarchy.
+/// The leading `unsafe` is a required marker: writing it, the caller promises
+/// that `target` is a registered base of `source` and every `source` satisfies
+/// the target reference invariants. An
+/// incorrect declaration makes the generated safe conversions unsound. The
+/// Rust stub generator writes these from the registered type hierarchy;
+/// `#[object_ref(parent = ...)]` checks the hierarchy at compile time instead.
+/// A call reads `impl_object_ref_upcast!(unsafe Add => BinaryOp, Add => Expr);`.
 #[macro_export]
-macro_rules! unsafe_impl_object_ref_upcast {
-    ($($source:ty => $target:ty),+ $(,)?) => {
+macro_rules! impl_object_ref_upcast {
+    (unsafe $($source:ty => $target:ty),+ $(,)?) => {
         $(
             impl ::std::convert::From<$source> for $target {
                 #[inline]
@@ -270,7 +276,7 @@ macro_rules! unsafe_impl_object_ref_upcast {
             impl ::std::convert::From<&$source> for $target {
                 #[inline]
                 fn from(value: &$source) -> Self {
-                    value.clone().into()
+                    ::core::convert::Into::into(::core::clone::Clone::clone(value))
                 }
             }
 
@@ -297,7 +303,7 @@ macro_rules! unsafe_impl_object_ref_upcast {
             impl ::core::convert::AsRef<$target> for $source {
                 #[inline(always)]
                 fn as_ref(&self) -> &$target {
-                    const _: () = assert!(
+                    const _: () = ::core::assert!(
                         ::core::mem::size_of::<$source>() == ::core::mem::size_of::<$target>()
                             && ::core::mem::align_of::<$source>()
                                 == ::core::mem::align_of::<$target>(),
@@ -348,7 +354,8 @@ macro_rules! unsafe_impl_object_ref_upcast {
 ///
 /// # Safety
 ///
-/// Each type is `repr(transparent)` over one object pointer, and its
+/// The leading `unsafe` is a required marker: writing it, the caller promises
+/// that each type is `repr(transparent)` over one object pointer, and its
 /// [`AnyCompatible::check_any_strict`](crate::AnyCompatible::check_any_strict)
 /// accepts exactly the objects that are a valid value of it.
 ///
@@ -356,7 +363,7 @@ macro_rules! unsafe_impl_object_ref_upcast {
 ///
 /// ```
 /// use tvm_ffi::derive::ObjectRef;
-/// use tvm_ffi::{rs_object, unsafe_impl_object_ref_downcast_ref, Any};
+/// use tvm_ffi::{rs_object, impl_object_ref_downcast_ref, Any};
 /// use tvm_ffi::{Object, ObjectArc, ObjectRefAnyCompatible, ObjectRefCore};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
@@ -394,14 +401,14 @@ macro_rules! unsafe_impl_object_ref_upcast {
 ///         pair.first > 0
 ///     }
 /// }
-/// unsafe_impl_object_ref_downcast_ref!(PositivePair);
+/// impl_object_ref_downcast_ref!(unsafe PositivePair);
 ///
 /// let pair = Any::from(MyPair::from_object(MyPairObj::new(Object::new(), 1, 2)));
 /// assert!(pair.downcast_ref::<PositivePair>().is_some());
 /// ```
 #[macro_export]
-macro_rules! unsafe_impl_object_ref_downcast_ref {
-    ($($name:ty),+ $(,)?) => {
+macro_rules! impl_object_ref_downcast_ref {
+    (unsafe $($name:ty),+ $(,)?) => {
         $(
             // SAFETY: the macro declaration promises that `$name` is one object
             // pointer whose `check_any_strict` is its type check.
@@ -411,7 +418,7 @@ macro_rules! unsafe_impl_object_ref_downcast_ref {
                     cell: &$crate::tvm_ffi_sys::TVMFFIAny,
                 ) -> &Self {
                     const {
-                        assert!(
+                        ::core::assert!(
                             ::core::mem::size_of::<$name>()
                                 == ::core::mem::size_of::<*mut $crate::tvm_ffi_sys::TVMFFIObject>()
                                 && ::core::mem::align_of::<$name>()
@@ -455,7 +462,7 @@ macro_rules! unsafe_impl_object_ref_downcast_ref {
 ///
 /// `#[derive(ObjectRef)]` calls it; a type that implements `AnyCompatible` by hand
 /// calls it after that impl. See also
-/// [`unsafe_impl_object_ref_downcast_ref!`](crate::unsafe_impl_object_ref_downcast_ref)
+/// [`impl_object_ref_downcast_ref!`](crate::impl_object_ref_downcast_ref)
 /// for an object reference implemented by hand.
 #[macro_export]
 macro_rules! impl_any_compatible_conversions {
@@ -472,36 +479,36 @@ macro_rules! impl_any_compatible_conversions {
 macro_rules! impl_try_from_any {
     ($($t:ty),* $(,)?) => {
         $(
-            impl<'a> TryFrom<$crate::any::AnyView<'a>> for $t {
+            impl<'a> ::core::convert::TryFrom<$crate::any::AnyView<'a>> for $t {
                 type Error = $crate::error::Error;
                 #[inline(always)]
                 fn try_from(
                     value: $crate::any::AnyView<'a>
-                ) -> Result<Self, Self::Error> {
+                ) -> ::core::result::Result<Self, Self::Error> {
                     type TryFromTemp = $crate::any::TryFromTemp<$t>;
-                    return TryFromTemp::try_from(value).map(TryFromTemp::into_value);
+                    return <TryFromTemp as ::core::convert::TryFrom<_>>::try_from(value).map(TryFromTemp::into_value);
                 }
             }
 
-            impl TryFrom<$crate::any::Any> for $t {
+            impl ::core::convert::TryFrom<$crate::any::Any> for $t {
                 type Error = $crate::error::Error;
                 #[inline(always)]
                 fn try_from(
                     value: $crate::any::Any
-                ) -> Result<Self, Self::Error> {
+                ) -> ::core::result::Result<Self, Self::Error> {
                     type TryFromTemp = $crate::any::TryFromTemp<$t>;
-                    return TryFromTemp::try_from(value).map(TryFromTemp::into_value);
+                    return <TryFromTemp as ::core::convert::TryFrom<_>>::try_from(value).map(TryFromTemp::into_value);
                 }
             }
 
-            impl<'a> TryFrom<&'a $crate::any::Any> for $t {
+            impl<'a> ::core::convert::TryFrom<&'a $crate::any::Any> for $t {
                 type Error = $crate::error::Error;
                 #[inline(always)]
                 fn try_from(
                     value: &'a $crate::any::Any
-                ) -> Result<Self, Self::Error> {
+                ) -> ::core::result::Result<Self, Self::Error> {
                     type TryFromTemp = $crate::any::TryFromTemp<$t>;
-                    return TryFromTemp::try_from(value).map(TryFromTemp::into_value);
+                    return <TryFromTemp as ::core::convert::TryFrom<_>>::try_from(value).map(TryFromTemp::into_value);
                 }
             }
         )*
@@ -513,32 +520,41 @@ macro_rules! impl_try_from_any {
 #[macro_export]
 macro_rules! impl_try_from_any_for_parametric {
     ($generic_type:ident<$param:ident>) => {
-        impl<'a, $param: AnyCompatible> TryFrom<$crate::any::AnyView<'a>>
+        impl<'a, $param: $crate::type_traits::AnyCompatible>
+            ::core::convert::TryFrom<$crate::any::AnyView<'a>> for $generic_type<$param>
+        {
+            type Error = $crate::error::Error;
+            #[inline(always)]
+            fn try_from(
+                value: $crate::any::AnyView<'a>,
+            ) -> ::core::result::Result<Self, Self::Error> {
+                type TryFromTemp<T> = $crate::any::TryFromTemp<$generic_type<$param>>;
+                return <TryFromTemp<T> as ::core::convert::TryFrom<_>>::try_from(value)
+                    .map(TryFromTemp::<T>::into_value);
+            }
+        }
+
+        impl<$param: $crate::type_traits::AnyCompatible> ::core::convert::TryFrom<$crate::any::Any>
             for $generic_type<$param>
         {
             type Error = $crate::error::Error;
             #[inline(always)]
-            fn try_from(value: $crate::any::AnyView<'a>) -> Result<Self, Self::Error> {
+            fn try_from(value: $crate::any::Any) -> ::core::result::Result<Self, Self::Error> {
                 type TryFromTemp<T> = $crate::any::TryFromTemp<$generic_type<$param>>;
-                return TryFromTemp::<T>::try_from(value).map(TryFromTemp::<T>::into_value);
+                return <TryFromTemp<T> as ::core::convert::TryFrom<_>>::try_from(value)
+                    .map(TryFromTemp::<T>::into_value);
             }
         }
 
-        impl<$param: AnyCompatible> TryFrom<$crate::any::Any> for $generic_type<$param> {
+        impl<'a, $param: $crate::type_traits::AnyCompatible>
+            ::core::convert::TryFrom<&'a $crate::any::Any> for $generic_type<$param>
+        {
             type Error = $crate::error::Error;
             #[inline(always)]
-            fn try_from(value: $crate::any::Any) -> Result<Self, Self::Error> {
+            fn try_from(value: &'a $crate::any::Any) -> ::core::result::Result<Self, Self::Error> {
                 type TryFromTemp<T> = $crate::any::TryFromTemp<$generic_type<$param>>;
-                return TryFromTemp::<T>::try_from(value).map(TryFromTemp::<T>::into_value);
-            }
-        }
-
-        impl<'a, $param: AnyCompatible> TryFrom<&'a $crate::any::Any> for $generic_type<$param> {
-            type Error = $crate::error::Error;
-            #[inline(always)]
-            fn try_from(value: &'a $crate::any::Any) -> Result<Self, Self::Error> {
-                type TryFromTemp<T> = $crate::any::TryFromTemp<$generic_type<$param>>;
-                return TryFromTemp::<T>::try_from(value).map(TryFromTemp::<T>::into_value);
+                return <TryFromTemp<T> as ::core::convert::TryFrom<_>>::try_from(value)
+                    .map(TryFromTemp::<T>::into_value);
             }
         }
     };
@@ -636,7 +652,7 @@ macro_rules! tvm_ffi_dll_export_typed_func {
             // `[dependencies]`.
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<__tvm_ffi_ $name>](
-                _handle: *mut std::ffi::c_void,
+                _handle: *mut ::core::ffi::c_void,
                 args: *const $crate::tvm_ffi_sys::TVMFFIAny,
                 num_args: i32,
                 result: *mut $crate::tvm_ffi_sys::TVMFFIAny,
@@ -645,15 +661,15 @@ macro_rules! tvm_ffi_dll_export_typed_func {
                 let ret_value = match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
                     $crate::function_internal::call_packed_callable($func, packed_args)
                 })) {
-                    Ok(ret_value) => ret_value,
-                    Err(payload) => Err($crate::function_internal::panic_to_error(payload)),
+                    ::core::result::Result::Ok(ret_value) => ret_value,
+                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::function_internal::panic_to_error(payload)),
                 };
                 match ret_value {
-                    Ok(value) => {
+                    ::core::result::Result::Ok(value) => {
                         *result = $crate::any::Any::into_raw_ffi_any(value);
                         0
                     }
-                    Err(error) => {
+                    ::core::result::Result::Err(error) => {
                         $crate::error::Error::set_raised(&error);
                         -1
                     }
@@ -708,7 +724,7 @@ macro_rules! __tvm_ffi_dll_export_metadata {
         $crate::macros::paste::paste! {
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<__tvm_ffi__metadata_ $name>](
-                _handle: *mut std::ffi::c_void,
+                _handle: *mut ::core::ffi::c_void,
                 _args: *const $crate::tvm_ffi_sys::TVMFFIAny,
                 _num_args: i32,
                 result: *mut $crate::tvm_ffi_sys::TVMFFIAny,
@@ -716,8 +732,8 @@ macro_rules! __tvm_ffi_dll_export_metadata {
                 let metadata = match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
                     $crate::function_internal::exported_metadata(&$func)
                 })) {
-                    Ok(metadata) => metadata,
-                    Err(payload) => Err($crate::function_internal::panic_to_error(payload)),
+                    ::core::result::Result::Ok(metadata) => metadata,
+                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::function_internal::panic_to_error(payload)),
                 };
                 $crate::function_internal::write_exported_str(metadata, result)
             }
@@ -740,13 +756,13 @@ macro_rules! __tvm_ffi_dll_export_doc {
         $crate::macros::paste::paste! {
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<__tvm_ffi__doc_ $name>](
-                _handle: *mut std::ffi::c_void,
+                _handle: *mut ::core::ffi::c_void,
                 _args: *const $crate::tvm_ffi_sys::TVMFFIAny,
                 _num_args: i32,
                 result: *mut $crate::tvm_ffi_sys::TVMFFIAny,
             ) -> i32 {
                 const DOC: &str = $doc;
-                $crate::function_internal::write_exported_str(Ok(DOC.to_string()), result)
+                $crate::function_internal::write_exported_str(::core::result::Result::Ok(::std::string::ToString::to_string(DOC)), result)
             }
         }
     };
@@ -761,9 +777,6 @@ macro_rules! __tvm_ffi_dll_export_doc {
     };
 }
 
-///-----------------------------------------------------------
-/// into_typed_fn
-///
 /// Wrap a [`Function`](crate::Function) as a typed closure with the given
 /// signature: `into_typed_fn!(func, Fn(A, B) -> Result<R>)`.
 ///
@@ -788,9 +801,8 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident() -> $ret_ty:ty) => {{
         let _f = $f;
         move || -> $ret_ty {
-            _f.call_tuple_with_len::<0, _>(())?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<0, _>(())?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 1 argument
@@ -799,9 +811,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0,).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<1, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<1, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 2 arguments
@@ -810,9 +821,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<2, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<2, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 3 arguments
@@ -821,9 +831,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<3, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<3, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 4 arguments
@@ -832,9 +841,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<4, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<4, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 5 arguments
@@ -843,9 +851,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<5, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<5, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 6 arguments
@@ -854,9 +861,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<6, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<6, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 7 arguments
@@ -866,9 +872,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5, a6).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<7, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<7, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
     // Case for 8 arguments
@@ -878,9 +883,8 @@ macro_rules! into_typed_fn {
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6, a7: $t7| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7).into_arg_holder_tuple();
-            _f.call_tuple_with_len::<8, _>(tuple_args)?
-                .try_into()
-                .map_err(Into::into)
+            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<8, _>(tuple_args)?)
+                .map_err(::core::convert::Into::into)
         }
     }};
 }

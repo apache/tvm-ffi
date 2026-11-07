@@ -36,10 +36,17 @@ pub use tvm_ffi_macros::Object;
 ///
 /// `#[object_ref(...)]` takes:
 ///
-/// * `parent = Ref` - The reference to the parent's object; `Self` converts
-///   into it by [`unsafe_impl_object_ref_upcast!`](crate::unsafe_impl_object_ref_upcast),
-///   whose requirement it carries. A further ancestor takes its own
-///   `unsafe_impl_object_ref_upcast!`.
+/// * `parent = Ref` - The reference to the parent's object, or to a further
+///   ancestor's; `Self` converts into it. The object type must embed that
+///   object type through its chain of parents
+///   ([`ObjectDerivesFrom`](crate::object::ObjectDerivesFrom)), so a wrong parent does not
+///   compile. Any other ancestor takes
+///   [`impl_object_ref_upcast!`](crate::impl_object_ref_upcast).
+/// * `unsafe parent = Ref` - As `parent`, for a reference that promises more
+///   than its object type: a generic one (`Array<T>`, `Map<K, V>`,
+///   `Optional<T>`) or one with a custom `ObjectRefAnyCompatible`. The caller
+///   promises that every value of `Self` is a valid `Ref`; `parent` alone
+///   does not compile for such a reference.
 /// * `skip_deref` - No `Deref`, for a reference whose object is internal.
 /// * `skip_debug` - `Debug` is written by hand.
 /// * `skip_display` - `Display` is written by hand.
@@ -88,5 +95,25 @@ pub use tvm_ffi_macros::Object;
 /// let triple = MyTriple::new(1, 2, 3);
 /// assert_eq!(triple.first + triple.third, 4);
 /// let _pair: MyPair = triple.into();
+/// ```
+///
+/// A `MyPairObj` does not embed an `ArrayObj`, so it cannot claim `Array` as
+/// its parent:
+///
+/// ```compile_fail
+/// use tvm_ffi::derive::ObjectRef;
+/// use tvm_ffi::{rs_object, Array, Object, ObjectArc};
+///
+/// #[rs_object("my_ext.MyPair")]
+/// pub struct MyPairObj {
+///     base_: Object,
+///     pub first: i64,
+/// }
+///
+/// #[derive(Clone, ObjectRef)]
+/// #[object_ref(unsafe parent = Array<i64>)]
+/// pub struct MyPair {
+///     data: ObjectArc<MyPairObj>,
+/// }
 /// ```
 pub use tvm_ffi_macros::ObjectRef;

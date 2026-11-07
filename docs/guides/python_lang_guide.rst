@@ -399,7 +399,7 @@ The above code shows an example where an error is raised in C++, resulting in th
      raise error.py_error()
      ^^^
    File "src/ffi/extra/testing.cc", line 60, in void tvm::ffi::TestRaiseError(tvm::ffi::String, tvm::ffi::String)
-     throw ffi::Error(kind, msg, TVMFFITraceback(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
+     throw ffi::Error(kind, msg, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
 
 We register common error kinds. You can also register extra error dispatch via the :py:func:`tvm_ffi.register_error` function.
 

@@ -307,26 +307,8 @@ fn deep_copy<T: AnyCompatible + Clone + TryFrom<Any, Error = Error>>(value: &T) 
     T::try_from(call("ffi.DeepCopy", &[AnyView::from(&any)])).unwrap()
 }
 
-// A type registers on first use, and the runtime does not guard its type table
-// against readers on other threads, so each test registers every type here
-// before it reads the table.
-fn register_types() {
-    static REGISTERED: std::sync::Once = std::sync::Once::new();
-    REGISTERED.call_once(|| {
-        RsPointObj::type_index();
-        RsPoint3Obj::type_index();
-        RsMarkerObj::type_index();
-        RsScalarsObj::type_index();
-        RsCxxChildObj::type_index();
-        RsOwnInitObj::type_index();
-        RsInitOffObj::type_index();
-        reexported::ReexportedObj::type_index();
-    });
-}
-
 #[test]
 fn test_fields_are_registered_with_their_flags() {
-    register_types();
     assert_eq!(field_names::<RsPointObj>(), ["x", "label"]);
     let [x, label] = fields(type_info::<RsPointObj>()) else {
         unreachable!()
@@ -366,7 +348,6 @@ fn test_fields_are_registered_with_their_flags() {
 
 #[test]
 fn test_reflection_registers_methods() {
-    register_types();
     let info = type_info::<RsPointObj>();
     assert_eq!(info.num_methods, 1);
     let method = unsafe { &*info.methods };
@@ -387,7 +368,6 @@ fn test_reflection_registers_methods() {
 
 #[test]
 fn test_constructors_deref_and_upcast() {
-    register_types();
     let p3 = point3(1, 3);
     // Through `RsPoint3Obj` to `RsPointObj`.
     assert_eq!((p3.x, p3.label.as_str()), (1, "p3"));
@@ -415,7 +395,6 @@ fn test_constructors_deref_and_upcast() {
 
 #[test]
 fn test_containers_upcast_without_a_copy() {
-    register_types();
     fn keep_array(value: impl Into<Array<RsPoint>>) -> Array<RsPoint> {
         value.into()
     }
@@ -453,7 +432,6 @@ fn test_containers_upcast_without_a_copy() {
 
 #[test]
 fn test_new_takes_literals_of_the_field_types() {
-    register_types();
     let scalars =
         RsScalars::from_object(RsScalarsObj::new(Object::new(), 5_000_000_000, 1, 2, 0.5));
     assert_eq!(
@@ -468,7 +446,6 @@ fn test_new_takes_literals_of_the_field_types() {
 
 #[test]
 fn test_cpp_structural_equality_and_deep_copy_see_the_fields() {
-    register_types();
     // `label` is ignored.
     assert!(structural_equal(&point(1, "a"), &point(1, "b")));
     assert!(!structural_equal(&point(1, "a"), &point(2, "a")));
@@ -491,9 +468,8 @@ fn test_cpp_structural_equality_and_deep_copy_see_the_fields() {
 
 #[test]
 fn test_shallow_copy_and_finality_are_type_attributes() {
-    register_types();
     let attr = |type_index, name| {
-        TypeAttrColumn::new(name)
+        TypeAttrColumn::lookup(name)
             .and_then(|column| column.get(type_index))
             .unwrap()
     };
@@ -516,7 +492,6 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
 
 #[test]
 fn test_subtype_of_a_cpp_type() {
-    register_types();
     let child = cxx_child(7, 8, "c");
     assert_eq!((child.v_i64, child.v_i32, child.name.as_str()), (7, 8, "c"));
     // The C++ fields are reflected under the subtype.
@@ -538,7 +513,6 @@ fn test_subtype_of_a_cpp_type() {
 
 #[test]
 fn test_crate_path_names_a_reexported_tvm_ffi() {
-    register_types();
     let value = reexported::Reexported::new(5);
     assert_eq!(value.v, 5);
     assert!(ObjectRef::from(&value).same_as(&value));
@@ -547,7 +521,7 @@ fn test_crate_path_names_a_reexported_tvm_ffi() {
 
 fn type_attr_function(type_index: i32, name: &str) -> Function {
     Function::try_from(
-        TypeAttrColumn::new(name)
+        TypeAttrColumn::lookup(name)
             .and_then(|column| column.get(type_index))
             .unwrap(),
     )
@@ -556,7 +530,6 @@ fn type_attr_function(type_index: i32, name: &str) -> Function {
 
 #[test]
 fn test_new_makes_the_object_with_its_fields_undefined() {
-    register_types();
     let new = type_attr_function(RsPoint3Obj::type_index(), "__ffi_new__");
     let object = ObjectRef::try_from(new.call_packed(&[]).unwrap()).unwrap();
     assert_eq!(
@@ -581,7 +554,6 @@ fn test_new_makes_the_object_with_its_fields_undefined() {
 
 #[test]
 fn test_init_constructs_the_type_from_its_fields() {
-    register_types();
     // The fields of the parent come first, as for a C++ type.
     let init = type_attr_function(RsPoint3Obj::type_index(), "__ffi_init__");
     let label = || tvm_ffi::String::from("l");
@@ -609,19 +581,19 @@ fn test_init_constructs_the_type_from_its_fields() {
     );
     assert_eq!(tags_count(), 1);
 
-    // A type's own `__ffi_init__` is a method, which C++ generates none over.
-    assert!(TypeAttrColumn::new("__ffi_init__")
-        .and_then(|column| column.get(RsOwnInitObj::type_index()))
-        .is_none());
+    // A type's own `__ffi_init__` is a method and its `__ffi_init__` attribute,
+    // which C++ generates none over.
     let own_init =
         tvm_ffi::reflection::get_method("testing.rust.RsOwnInit", "__ffi_init__").unwrap();
+    let own = RsOwnInit::try_from(own_init.call_tuple((3_i64,)).unwrap()).unwrap();
+    assert_eq!(own.v, 6);
+    let own_init = type_attr_function(RsOwnInitObj::type_index(), "__ffi_init__");
     let own = RsOwnInit::try_from(own_init.call_tuple((3_i64,)).unwrap()).unwrap();
     assert_eq!(own.v, 6);
 }
 
 #[test]
 fn test_json_graph_reads_back_the_fields() {
-    register_types();
     let round_trip = |value: Any| {
         let json = call(
             "ffi.ToJSONGraphString",
@@ -647,15 +619,14 @@ fn test_json_graph_reads_back_the_fields() {
 
 #[test]
 fn test_init_off_fields_take_all_zero_bytes_as_a_value() {
-    register_types();
     let init = type_attr_function(RsInitOffObj::type_index(), "__ffi_init__");
     let value = RsInitOff::try_from(init.call_tuple((5_i64,)).unwrap()).unwrap();
     assert_eq!((value.v, value.count), (5, 0));
     assert!(value.point.is_none());
 
-    let registered = std::panic::catch_unwind(RsInitOffReferenceObj::type_index);
-    let message = registered.err().unwrap();
-    let message = message.downcast_ref::<std::string::String>().unwrap();
+    // The other type fails to register when the test binary loads.
+    let error = tvm_ffi::run_static_init_blocks().unwrap_err();
+    let message = error.message();
     assert!(
         message.contains("`init_off` field `items` of `testing.rust.RsInitOffReference`"),
         "{message}"

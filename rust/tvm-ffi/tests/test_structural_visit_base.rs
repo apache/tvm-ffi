@@ -118,7 +118,7 @@ unsafe impl StructuralVisitorBase for CountingBase {
         }
         // Exercise the shared resolved-hook entry as well as ordinary fallback.
         if value.downcast_ref::<Array<Any>>().cloned().is_some() {
-            let hook = TypeAttrColumn::new("__s_visit__")
+            let hook = TypeAttrColumn::lookup("__s_visit__")
                 .and_then(|column| column.get(value.type_index()))
                 .unwrap();
             return StructuralVisitorObj::call_structural_visit_hook_raw(

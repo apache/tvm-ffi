@@ -60,6 +60,10 @@ pub struct AnyView<'a> {
 /// it with `From`; `TryFrom` (converting), [`downcast_ref`](Self::downcast_ref)
 /// (borrowing) and [`match_any!`](crate::match_any) read it back. Borrow it as an [`AnyView`] to pass it without retaining.
 ///
+/// The one value it does not own is a `DLTensor*` converted from an
+/// [`AnyView`], as in C++: that `Any` borrows the tensor and must not outlive
+/// it.
+///
 /// # Examples
 ///
 /// ```
@@ -133,6 +137,12 @@ impl<'a> AnyView<'a> {
         self.data.type_index
     }
 
+    /// Whether the value is None.
+    #[inline(always)]
+    pub fn is_none(&self) -> bool {
+        self.data.type_index == TypeIndex::kTVMFFINone as i32
+    }
+
     /// Borrow the raw ABI representation.
     /// Copying it does not retain referenced data or extend its lifetime.
     #[inline(always)]
@@ -181,6 +191,7 @@ impl<'a> AnyView<'a> {
 
     /// The strong reference count of the held object, for tests and debugging;
     /// `None` if the value is not an object.
+    #[doc(hidden)]
     pub fn debug_strong_count(&self) -> Option<usize> {
         unsafe {
             if self.data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
@@ -278,6 +289,12 @@ impl Any {
         self.data.type_index
     }
 
+    /// Whether the value is None.
+    #[inline(always)]
+    pub fn is_none(&self) -> bool {
+        self.data.type_index == TypeIndex::kTVMFFINone as i32
+    }
+
     /// Borrow the raw ABI representation, which this value owns.
     /// Copying it does not retain referenced data or extend its lifetime.
     #[inline(always)]
@@ -326,8 +343,8 @@ impl Any {
     /// `Box::into_raw` does. Rebuild it with [`from_raw_ffi_any`](Self::from_raw_ffi_any)
     /// to release it.
     #[inline(always)]
-    pub fn into_raw_ffi_any(this: Self) -> TVMFFIAny {
-        let this = std::mem::ManuallyDrop::new(this);
+    pub fn into_raw_ffi_any(self) -> TVMFFIAny {
+        let this = std::mem::ManuallyDrop::new(self);
         this.data
     }
 
@@ -345,6 +362,7 @@ impl Any {
 
     /// The strong reference count of the held object, for tests and debugging;
     /// `None` if the value is not an object.
+    #[doc(hidden)]
     pub fn debug_strong_count(&self) -> Option<usize> {
         unsafe {
             if self.data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
@@ -436,7 +454,18 @@ pub(crate) fn is_plain_inline(type_index: i32) -> bool {
         || type_index == TypeIndex::kTVMFFIUnchanged as i32
 }
 
-// convert AnyView to Any
+/// Takes ownership of the viewed value: objects gain a reference, borrowed
+/// strings and bytes are copied, and an [`RValueRef`](crate::rvalue_ref::RValueRef)
+/// gives up its object.
+///
+/// A `DLTensor*` has no reference count to take, so it is kept as is, as in
+/// C++: the `Any` borrows the tensor and must not outlive it. Convert it to a
+/// [`Tensor`](crate::Tensor) to own the tensor.
+///
+/// # Panics
+///
+/// Panics if the view holds an `RValueRef` whose object an earlier conversion
+/// already took.
 impl From<AnyView<'_>> for Any {
     #[inline]
     fn from(value: AnyView<'_>) -> Self {

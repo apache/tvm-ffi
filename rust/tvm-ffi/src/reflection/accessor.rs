@@ -46,11 +46,36 @@ unsafe impl Sync for TypeAttrColumn {}
 
 impl TypeAttrColumn {
     /// Look up a registered type-attribute column by name.
-    pub fn new(name: &str) -> Option<Self> {
+    pub fn lookup(name: &str) -> Option<Self> {
         unsafe {
             let name = TVMFFIByteArray::from_str(name);
             NonNull::new(TVMFFIGetTypeAttrColumn(&name).cast_mut()).map(Self)
         }
+    }
+
+    /// The column `name`, created if no type registered it yet. Call it during
+    /// static initialization, like any registration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot create the column.
+    pub fn ensure(name: &str) -> Result<Self> {
+        {
+            let _registering = crate::object::lock_type_registration();
+            // A value for the None type index only creates the column.
+            super::registry::register_type_attr(
+                TVMFFITypeIndex::kTVMFFINone as i32,
+                name,
+                Any::new(),
+            )?;
+        }
+        Self::lookup(name).ok_or_else(|| {
+            Error::new(
+                crate::INTERNAL_ERROR,
+                &format!("type attribute column `{name}` was not created"),
+                "",
+            )
+        })
     }
 
     /// The attribute of `type_index`, as an owned value, or `None` if unset.
@@ -203,10 +228,6 @@ pub fn get_method(type_key: &str, method_name: &str) -> Result<Function> {
 /// under the reserved name `__ffi_init__`. For instance methods, the first
 /// argument is the object itself.
 ///
-/// `type_index` must be a registered type index, obtained for example from a
-/// live object via `Any::type_index` or from a type key; the C API treats an
-/// unregistered index as a fatal error.
-///
 /// # Arguments
 ///
 /// * `type_index` - The type index of the type that owns the method.
@@ -218,18 +239,19 @@ pub fn get_method(type_key: &str, method_name: &str) -> Result<Function> {
 ///
 /// # Errors
 ///
-/// Returns an error if the type has no method `method_name`.
+/// Returns a `TypeError` if `type_index` is not registered or the type has no
+/// method `method_name`.
 pub fn get_method_by_index(type_index: i32, method_name: &str) -> Result<Function> {
+    // The C API aborts the process on an unregistered index.
+    if !is_registered(type_index) {
+        crate::bail!(
+            crate::error::TYPE_ERROR,
+            "Cannot find type info for type_index={}",
+            type_index
+        );
+    }
     unsafe {
-        let type_info = TVMFFIGetTypeInfo(type_index);
-        if type_info.is_null() {
-            crate::bail!(
-                crate::error::TYPE_ERROR,
-                "Cannot find type info for type_index={}",
-                type_index
-            );
-        }
-        let type_info = &*type_info;
+        let type_info = &*TVMFFIGetTypeInfo(type_index);
         for i in 0..type_info.num_methods as usize {
             let method_info = &*type_info.methods.add(i);
             if method_info.name.as_str() != method_name {
@@ -268,15 +290,21 @@ pub struct FieldGetter {
 
 impl FieldGetter {
     /// Resolve a reflected field declared by `type_index` or one of its bases.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TypeError` if `type_index` is not registered or the type has
+    /// no reflected field `field_name` with a getter.
     pub fn new(type_index: i32, field_name: &str) -> Result<Self> {
-        let type_info = unsafe { TVMFFIGetTypeInfo(type_index) };
-        if type_info.is_null() {
+        // The C API aborts the process on an unregistered index.
+        if !is_registered(type_index) {
             return Err(Error::new(
                 TYPE_ERROR,
                 &format!("Cannot find type info for type_index={type_index}"),
                 "",
             ));
         }
+        let type_info = unsafe { TVMFFIGetTypeInfo(type_index) };
 
         let field = unsafe { find_field(type_info, field_name) }.ok_or_else(|| {
             let type_key = unsafe { (*type_info).type_key.as_str() };
