@@ -142,7 +142,7 @@ def _split_arrow(name: str, payload: str, lineno: int, expected: str) -> tuple[s
 def _parse_enum(payload: str, lineno: int) -> tuple[str, EnumSpec]:
     """Parse ``<type_key>.<field> -> Name(i32) [closed] { A=0, B=1 }``.
 
-    The member list is optional unless ``closed``.
+    The member list is optional unless ``closed``, which needs a member equal to 0.
     """
     expected = "<type_key>.<field> -> Name(i32) [closed] { A=0, B=1 }"
     match = _ENUM_RE.match(payload.strip())
@@ -159,6 +159,11 @@ def _parse_enum(payload: str, lineno: int) -> tuple[str, EnumSpec]:
     closed = match.group("closed") is not None
     if closed and not members:
         raise _invalid("enum", lineno, expected)
+    if closed and all(value != 0 for _, value in members):
+        raise ValueError(
+            f"Closed `enum` directive at line {lineno} has no member equal to 0, the value of "
+            "a field an object zero-filled at creation never set"
+        )
     target = _field_target("enum", match.group("target"), lineno)
     spec = EnumSpec(match.group("name"), match.group("repr"), tuple(members), closed)
     return target, spec

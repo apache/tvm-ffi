@@ -967,6 +967,8 @@ def test_allow_missing_docs_and_closed_enum() -> None:
     assert text.count("#[allow(missing_docs)]\n") == 5
     with pytest.raises(ValueError, match="closed"):
         Directives().add("enum", "demo.Pair.kind -> Kind(i32) closed {}", 3)
+    with pytest.raises(ValueError, match="no member equal to 0"):
+        Directives().add("enum", "demo.Pair.kind -> Kind(i32) closed { A=1 }", 4)
     for payload in ("", "warn"):
         with pytest.raises(
             ValueError, match=r"`missing-docs` directive at line 4\. Expected `allow`"
