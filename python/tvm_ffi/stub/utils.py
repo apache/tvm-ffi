@@ -25,6 +25,7 @@ generator (e.g. :mod:`tvm_ffi.stub.python_generator.codegen`).
 from __future__ import annotations
 
 import dataclasses
+import json
 from typing import TYPE_CHECKING, Any
 
 from tvm_ffi.core import MISSING, TypeInfo, TypeSchema, _lookup_type_attr
@@ -106,6 +107,10 @@ class NamedTypeSchema(TypeSchema):
     - ``structural_eq``: the decoded structural-equality flag
       (``"ignore"``, ``"def-pattern"``, ``"def-simple"`` or ``None``).
     - ``frozen``: ``True`` for read-only (``def_ro``) fields.
+    - ``std_container``: ``True`` when the native type is, or holds, a C++ standard
+      library type (``std::optional``, ``std::vector``, ``std::string``, ...). The
+      schema folds those into the tvm-ffi origins they convert to (``Optional``,
+      ``Array``, ``str``, ...), whose bytes they do not share.
     """
 
     name: str
@@ -116,6 +121,7 @@ class NamedTypeSchema(TypeSchema):
     default_is_factory: bool = False
     structural_eq: str | None = None
     frozen: bool = False
+    std_container: bool = False
 
     def __init__(
         self,
@@ -129,6 +135,7 @@ class NamedTypeSchema(TypeSchema):
         default_is_factory: bool = False,
         structural_eq: str | None = None,
         frozen: bool = False,
+        std_container: bool = False,
     ) -> None:
         """Initialize a `NamedTypeSchema` with the given name, schema and field facts."""
         super().__init__(
@@ -147,14 +154,16 @@ class NamedTypeSchema(TypeSchema):
         self.default_is_factory = default_is_factory
         self.structural_eq = structural_eq
         self.frozen = frozen
+        self.std_container = std_container
 
     @staticmethod
     def from_type_field(field: TypeField) -> NamedTypeSchema:
         """Construct a `NamedTypeSchema` from a reflected :class:`~tvm_ffi.core.TypeField`."""
         is_factory = field.c_default_factory is not MISSING
+        raw = field.metadata["type_schema"]
         return NamedTypeSchema(
             name=field.name,
-            schema=_parse_type_schema(field.metadata["type_schema"]),
+            schema=_parse_type_schema(raw),
             size=field.size,
             alignment=field.alignment,
             offset=field.offset,
@@ -162,7 +171,20 @@ class NamedTypeSchema(TypeSchema):
             default_is_factory=is_factory,
             structural_eq=field.c_structural_eq,
             frozen=field.frozen,
+            std_container=_names_std_type(json.loads(raw) if isinstance(raw, str) else raw),
         )
+
+
+def _names_std_type(raw: Any) -> bool:
+    """Whether a raw JSON type schema names a ``std::`` type anywhere."""
+    if isinstance(raw, dict):
+        origin = raw.get("type")
+        if isinstance(origin, str) and origin.startswith("std::"):
+            return True
+        return any(_names_std_type(value) for value in raw.values())
+    if isinstance(raw, list):
+        return any(_names_std_type(value) for value in raw)
+    return False
 
 
 @dataclasses.dataclass

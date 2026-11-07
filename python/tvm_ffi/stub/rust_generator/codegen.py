@@ -36,9 +36,13 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   the C ABI getter. Nothing allocates it.
 
 A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, an
-``ffi.*`` type the default ``ty-map`` does not list, ...) makes the type opaque
-and is read as ``Any``; an ``opaque`` directive vetoes a reproducible layout; a
-scalar width named by a directive is checked against the reflected field size.
+``ffi.*`` type the default ``ty-map`` does not list, a C++ standard-library type
+such as ``std::optional``, an integer narrower than 8 bytes, whose signedness the
+schema does not record, or any field whose reflected size or alignment is not its
+mirror's) makes the type opaque and is read through its getter; a ``field`` or
+``enum`` directive types a narrow integer; an ``opaque`` directive vetoes a
+reproducible layout; a scalar width named by a directive is checked against the
+reflected field size.
 A builtin parent the crate defines (``ffi.Enum``: ``tvm_ffi::EnumObj``) is
 embedded as it is. Any other builtin parent (``ffi.IntEnum``, say) has no
 ``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
@@ -161,6 +165,17 @@ def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int
             f"Directive on `{target}` maps a {field.size}-byte field to `{rust_type}` "
             f"({width} bytes)"
         )
+
+
+def _layout_matches(field: NamedTypeSchema) -> bool:
+    """Whether the reflected bytes of ``field`` are those of its schema's mirror."""
+    if field.type_key == "ffi.BigInt":
+        layout = C_RUST.RUST_MIRROR_LAYOUTS["Any"]
+    elif field.origin == "float":
+        layout = (field.size, field.size) if field.size in (4, 8) else (0, 0)
+    else:
+        layout = C_RUST.RUST_MIRROR_LAYOUTS.get(field.origin, C_RUST.RUST_POINTER_LAYOUT)
+    return field.size in (None, layout[0]) and field.alignment in (None, layout[1])
 
 
 def _allow_non_snake_case(idents: Iterable[str]) -> list[str]:
@@ -324,9 +339,18 @@ class _ObjectRenderer:
         """Render the ``#[repr(C)]`` mirror type of ``field``, or ``None``.
 
         Directives win; then scalars by reflected width, ``Optional`` by C++ layout, else schema.
+        A C++ standard-library field has none, and so has a field whose reflected size or
+        alignment is not its mirror's.
         """
         directives = self.imports.directives
         target = f"{owner}.{field.name}"
+        if target in directives.nullable and field.size not in (None, C_RUST.RUST_POINTER_SIZE):
+            raise ValueError(
+                f"`nullable` directive on `{target}`: the field is {field.size} bytes, "
+                "not a pointer-sized object reference"
+            )
+        if field.std_container:
+            return None
         enum = directives.enums.get(target)
         if enum is not None:
             _check_width(target, field, enum.repr, C_RUST.RUST_SCALAR_WIDTHS[enum.repr])
@@ -339,17 +363,14 @@ class _ObjectRenderer:
             mirror: str | None = imports.record(override) if "::" in override else override
         elif field.origin == "Optional":
             mirror = self._optional_mirror(field, imports)
+        elif not _layout_matches(field):
+            return None
         else:
             narrowed = C_RUST.RUST_SCALAR_BY_SIZE.get((field.origin, field.size))
             mirror = narrowed or render_rust_type(field, lambda o, k: self._resolve(o, imports, k))
         if mirror is None:
             return None
         if target in directives.nullable and not mirror.startswith("Option<"):
-            if field.size not in (None, C_RUST.RUST_POINTER_SIZE):
-                raise ValueError(
-                    f"`nullable` directive on `{target}`: the field is {field.size} bytes, "
-                    "not a pointer-sized object reference"
-                )
             mirror = f"Option<{mirror}>"
         return mirror
 
@@ -375,7 +396,7 @@ class _ObjectRenderer:
             if any_backed
             else C_RUST.RUST_OBJECT_OPTIONAL_FIELD_SIZE
         )
-        if field.size not in (None, expected):
+        if field.size not in (None, expected) or field.alignment not in (None, 8):
             return None
         if any_backed:
             return f"{imports.record(C_RUST.RUST_OPTIONAL_PATH)}<{inner}>"

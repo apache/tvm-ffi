@@ -70,15 +70,30 @@ RUST_TY_MAP_DEFAULTS = {
 #: Origins without a crate mirror; such a field is read as ``tvm_ffi::Any``.
 RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "Union", "tuple"})
 
-#: Mirror scalar by ``(origin, reflected size)``: the schema erases widths and signedness.
+#: Mirror scalar by ``(origin, reflected size)``. The schema erases integer widths and
+#: signedness, so only an 8-byte integer, which the field getter also reads as ``i64``, is
+#: mirrored; a narrower one (``uint32_t``, ``int32_t``, ...) needs a ``field`` or ``enum``
+#: directive, else its type stays opaque.
 RUST_SCALAR_BY_SIZE = {
-    ("int", 1): "i8",
-    ("int", 2): "i16",
-    ("int", 4): "i32",
     ("int", 8): "i64",
     ("float", 4): "f32",
     ("float", 8): "f64",
 }
+
+#: ``(size, alignment)`` of the mirror of a field by schema origin; any other mirror is
+#: one object pointer (:data:`RUST_POINTER_LAYOUT`). A field whose reflected bytes differ
+#: has no mirror.
+RUST_MIRROR_LAYOUTS = {
+    "int": (8, 8),
+    "bool": (1, 1),
+    "str": (16, 8),
+    "bytes": (16, 8),
+    "Any": (16, 8),
+    "Device": (8, 4),
+    "dtype": (4, 2),
+    "DataType": (4, 2),
+}
+RUST_POINTER_LAYOUT = (8, 8)
 
 #: Byte width of the scalars a ``field`` / ``enum`` directive may name; checked against the field.
 RUST_SCALAR_WIDTHS = {

@@ -699,6 +699,14 @@ def _span() -> ObjectInfo:
     )
 
 
+def _span_imports() -> RustImports:
+    """Type the narrow integer fields by directive: the schema erases signedness."""
+    imports = RUST.new_imports()
+    for lineno, name in enumerate(("line", "column", "end_line", "end_column"), 1):
+        RUST.add_directive(imports, "field", f"ir.Span.{name} -> i32", lineno)
+    return imports
+
+
 def _expr() -> ObjectInfo:
     return _info(
         "ir.Expr",
@@ -856,6 +864,8 @@ def test_render_complete_add_golden() -> None:
 def test_render_complete_span_and_prim_type() -> None:
     """Scalars take their reflected width; alignment padding is reported, not mirrored."""
     text, _ = _render(_span())
+    assert "/// Opaque: field 'line' (int) has no native mirror." in text
+    text, _ = _render(_span(), _span_imports())
     assert (
         "pub struct SpanObj {\n"
         "    base_: Object,\n"
@@ -1126,6 +1136,15 @@ def test_registry_big_int_fields_are_mirrored(big_int_holder: ObjectInfo) -> Non
     [
         _field("x", TypeSchema("Optional", (TypeSchema("Any"),)), 24, 16),
         _field("x", TypeSchema("Optional", (TypeSchema("int"),)), 24, 8),  # not the 16-byte cell
+        NamedTypeSchema(  # `std::optional<int64_t>`: 16 bytes, but not a `TVMFFIAny` cell
+            "x",
+            TypeSchema("Optional", (TypeSchema("int"),)),
+            offset=24,
+            size=16,
+            alignment=8,
+            std_container=True,
+        ),
+        _field("x", "str", 24, 32),  # `std::string`
         _field("x", TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))), 24, 16),
         _field("x", "ctypes.c_void_p", 24, 8),
         _field("x", "ffi.VisitInterrupt", 24, 8),
@@ -1206,6 +1225,7 @@ def test_wrapper_allocator_takes_object_references_as_into_object_ref() -> None:
     RUST.add_directive(imports, "field", "demo.Node.buffer -> crate::typed::BufferVar", 1)
     RUST.add_directive(imports, "nullable", "demo.Node.span", 2)
     RUST.add_directive(imports, "enum", "demo.Node.kind -> Kind(i64) { A=0 }", 3)
+    RUST.add_directive(imports, "field", "demo.Node.count -> i32", 4)
     text, imports = _render(info, imports)
     assert (
         "    pub fn new(\n"
@@ -1295,11 +1315,11 @@ def test_upcast_directive_adds_typed_views() -> None:
 
 
 def test_opaque_directive_vetoes_a_complete_type() -> None:
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "opaque", "ir.Span", 1)
+    imports = _span_imports()
+    RUST.add_directive(imports, "opaque", "ir.Span", 5)
     text, _ = _render(_span(), imports)
     assert "/// Opaque: vetoed by directive although the layout is reproducible." in text
-    assert "pub fn line(&self) -> Result<i64> {" in text
+    assert "pub fn line(&self) -> Result<i32> {" in text
 
 
 def test_builtin_parent_keeps_the_type_opaque() -> None:
@@ -1403,8 +1423,15 @@ def test_finalize_module_tree(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _cxx_class_imports() -> RustImports:
+    """Type the narrow integer ``v_i32`` by directive."""
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "field", "testing.TestCxxClassBase.v_i32 -> i32", 1)
+    return imports
+
+
 def test_registry_complete_chain_is_mirrored() -> None:
-    base, _ = _render(object_info_from_type_key("testing.TestCxxClassBase"))
+    base, _ = _render(object_info_from_type_key("testing.TestCxxClassBase"), _cxx_class_imports())
     assert (
         "/// Complete: reflected fields fill [24, 40) exactly (alignment padding [36, 40))." in base
     )
@@ -1416,7 +1443,9 @@ def test_registry_complete_chain_is_mirrored() -> None:
     assert "FieldGetter" not in base
     assert "    pub fn new(v_i64: i64, v_i32: i32) -> Self {" in base
 
-    dd, imports = _render(object_info_from_type_key("testing.TestCxxClassDerivedDerived"))
+    dd, imports = _render(
+        object_info_from_type_key("testing.TestCxxClassDerivedDerived"), _cxx_class_imports()
+    )
     assert (
         "    base_: TestCxxClassDerivedObj,\n    pub v_str: String,\n    pub v_bool: bool,\n}" in dd
     )
@@ -1514,7 +1543,10 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
         "use tvm_ffi::reflection::FieldGetter;" in text
     )  # the opaque fixtures read through getters
     assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
-    assert "    base_: TestCxxClassDerivedObj,\n    pub v_str: String," in text
+    # Without a directive for the narrow `v_i32`, the chain is opaque.
+    assert (
+        "pub struct TestCxxClassDerivedDerivedObj {\n    base_: TestCxxClassDerivedObj,\n}" in text
+    )
     assert (
         "tvm_ffi::impl_object_ref_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
@@ -1788,7 +1820,8 @@ def test_allocator_hands_a_ty_map_parent_its_own_types() -> None:
     )
     ty_map = {**RUST.default_ty_map(), "demo.Base": "crate::hand::Base"}
     imports = RUST.new_imports()
-    RUST.add_directive(imports, "field", "demo.Child.kind -> Kind", 1)
+    RUST.add_directive(imports, "field", "demo.Base.kind -> i32", 1)
+    RUST.add_directive(imports, "field", "demo.Child.kind -> Kind", 2)
     block = _object_block("demo.Child")
     generate_rust_object(block, ty_map, imports, Options(), info, _declared("demo.Child"))
     text = "\n".join(block.lines[1:-1])
@@ -1822,7 +1855,8 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
         _stage_3(info, Options(dry_run=True), RUST.default_ty_map(), {}, RUST, declared)
     # A `ty-map` names a hand-written parent; its `<Name>Obj` becomes the base slot.
     mapped = f"{C.RUST_SYNTAX.ty_map} testing.TestCxxClassBase -> crate::hand::TestCxxClassBase"
-    src.write_text("\n".join([mapped, *blocks]), encoding="utf-8")
+    narrow = f"{C.RUST_SYNTAX.directive('field')} testing.TestCxxClassBase.v_i32 -> i32"
+    src.write_text("\n".join([mapped, narrow, *blocks]), encoding="utf-8")
     info = FileInfo.from_file(src)
     assert info is not None
     ty_map = RUST.default_ty_map()
