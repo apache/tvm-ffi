@@ -353,6 +353,7 @@ def test_generator_declares_its_directives_and_records_imports() -> None:
         "opaque",
         "upcast",
         "custom-new",
+        "missing-docs",
     }
     imports = RUST.new_imports()
     RUST.add_directive(imports, "import-object", "tvm_ffi.libinfo.Foo;False;_Foo", 1)
@@ -953,6 +954,42 @@ def test_render_complete_enum_field() -> None:
     assert "    pub fn new(a: i64, kind: impl Into<Kind>) -> Self {" in text
     assert {"tvm_ffi::Result", "tvm_ffi::Error", "tvm_ffi::VALUE_ERROR"} <= _uses(imports)
     assert "tvm_ffi::FieldGetter" not in _uses(imports)
+
+
+def test_allow_missing_docs_and_closed_enum() -> None:
+    """`missing-docs: allow` marks every generated type and `impl`; `closed` emits a Rust enum."""
+    info = _info(
+        "demo.Pair",
+        (_field("a", "int", 24, 8), _field("kind", "int", 32, 4)),
+        total_size=40,
+        is_final=True,
+    )
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "missing-docs", " allow ", 1)
+    RUST.add_directive(imports, "enum", "demo.Pair.kind -> Kind(i32) closed { A=0, B=-1 }", 2)
+    text, _ = _render(info, imports)
+    assert text.startswith(
+        "#[allow(missing_docs)]\n"
+        "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n"
+        "#[repr(i32)]\n"
+        "pub enum Kind {\n    A = 0,\n    B = -1,\n}\n"
+    )
+    assert (
+        "        match value {\n"
+        "            0 => Ok(Self::A),\n"
+        "            -1 => Ok(Self::B),\n"
+        '            _ => Err(Error::new(VALUE_ERROR, &format!("Kind has no value {value}"), "")),\n'
+        "        }\n"
+    ) in text
+    # The enum, the object struct, the wrapper and both allocator `impl`s.
+    assert text.count("#[allow(missing_docs)]\n") == 5
+    with pytest.raises(ValueError, match="closed"):
+        Directives().add("enum", "demo.Pair.kind -> Kind(i32) closed {}", 3)
+    for payload in ("", "warn"):
+        with pytest.raises(
+            ValueError, match=r"`missing-docs` directive at line 4\. Expected `allow`"
+        ):
+            Directives().add("missing-docs", payload, 4)
 
 
 def test_complete_optional_field_mirrors() -> None:

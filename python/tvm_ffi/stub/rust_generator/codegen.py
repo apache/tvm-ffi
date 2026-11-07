@@ -330,6 +330,10 @@ class _ObjectRenderer:
 
     # --- pieces ------------------------------------------------------------
 
+    def _allow_missing_docs(self) -> list[str]:
+        """``#[allow(missing_docs)]`` under ``missing-docs: allow``, for a crate that warns on it."""
+        return ["#[allow(missing_docs)]"] if self.imports.directives.allow_missing_docs else []
+
     def _accessor_lines(self, field: NamedTypeSchema) -> list[str]:
         """One ``pub fn <field>(&self) -> Result<T>`` through the C ABI getter.
 
@@ -375,15 +379,41 @@ class _ObjectRenderer:
         ]
 
     def _enum_lines(self, spec: EnumSpec) -> list[str]:
-        """Render the open integer newtype an ``enum`` directive declares."""
+        """Render the type an ``enum`` directive declares: an open integer newtype, or a closed enum."""
         error = self.imports.record("tvm_ffi::Error")
         value_error = self.imports.record("tvm_ffi::VALUE_ERROR")
         result = self.imports.record("tvm_ffi::Result")
+        allow = self._allow_missing_docs()
+        if spec.closed:
+            message = f'&format!("{spec.name} has no value {{value}}")'
+            rejected = _call_lines(
+                f"            _ => Err({error}::new(", [value_error, message, '""'], ")),"
+            )
+            return [
+                *allow,
+                "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]",
+                f"#[repr({spec.repr})]",
+                f"pub enum {spec.name} {{",
+                *[f"    {member} = {value}," for member, value in spec.members],
+                "}",
+                "",
+                f"impl TryFrom<i64> for {spec.name} {{",
+                f"    type Error = {error};",
+                f"    fn try_from(value: i64) -> {result}<Self> {{",
+                "        match value {",
+                *[f"            {value} => Ok(Self::{member})," for member, value in spec.members],
+                *rejected,
+                "        }",
+                "    }",
+                "}",
+            ]
         return [
+            *allow,
             "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]",
             "#[repr(transparent)]",
             f"pub struct {spec.name}({spec.repr});",
             "",
+            *allow,
             "#[allow(non_upper_case_globals)]",
             f"impl {spec.name} {{",
             *[f"    pub const {member}: Self = Self({value});" for member, value in spec.members],
@@ -435,6 +465,7 @@ class _ObjectRenderer:
     def _struct_lines(self, verdict: Verdict, base: str) -> list[str]:
         """Render the object struct: every field when complete, the parent alone when opaque."""
         header = [
+            *self._allow_missing_docs(),
             "#[repr(C)]",
             "#[derive(tvm_ffi::derive::Object)]",
             f'#[type_key = "{self.type_key}"]',
@@ -546,8 +577,10 @@ class _ObjectRenderer:
         ]
         own = [rust_ident(name) for name, _ in params[len(inherited) :]]
         forward = [_forward(rust_ident(name), rust_type) for name, rust_type in params]
+        allow = self._allow_missing_docs()
         sections = [
             [
+                *allow,
                 f"impl {self.obj_struct} {{",
                 *self._fn_lines(
                     "pub(crate) fn new" if self.info.is_final else "pub fn new",
@@ -561,6 +594,7 @@ class _ObjectRenderer:
         custom = self.type_key in self.imports.directives.custom_new
         sections.append(
             [
+                *allow,
                 f"impl {self.leaf} {{",
                 "    /// Lossless complete-field allocation.",
                 *self._fn_lines(
@@ -677,6 +711,7 @@ class _ObjectRenderer:
         sections.append(self._struct_lines(verdict, base))
         sections.append(
             [
+                *self._allow_missing_docs(),
                 "#[repr(C)]",
                 "#[derive(tvm_ffi::derive::ObjectRef, Clone)]",
                 f"pub struct {self.leaf} {{",
@@ -694,6 +729,7 @@ class _ObjectRenderer:
                 accessors += self._accessor_lines(field)
             sections.append(
                 [
+                    *self._allow_missing_docs(),
                     f"impl {self.obj_struct} {{",
                     *[f"    {line}" if line else "" for line in accessors],
                     "}",
