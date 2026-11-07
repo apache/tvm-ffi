@@ -130,6 +130,9 @@ unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
     ptr::write(cell, raw);
 }
 
+/// The most elements a list buffer can hold: its byte size must fit in `isize`.
+const MAX_CAPACITY: usize = isize::MAX as usize / std::mem::size_of::<TVMFFIAny>();
+
 // The error paths stay out of line so the hot paths are small enough to inline.
 #[cold]
 #[inline(never)]
@@ -474,7 +477,7 @@ impl<T: ContainerElement> List<T> {
     /// Makes room for at least `additional` more elements without
     /// reallocating again, like `Vec::reserve`.
     pub fn reserve(&self, additional: usize) -> Result<()> {
-        let total = self.len() + additional;
+        let total = self.len().saturating_add(additional);
         if total > self.capacity() {
             self.grow_to(total)?;
         }
@@ -486,8 +489,9 @@ impl<T: ContainerElement> List<T> {
     #[inline]
     fn reserve_for(&self, extra: usize) -> Result<()> {
         let (size, capacity) = (self.len(), self.capacity());
-        if size + extra > capacity {
-            self.grow_to((capacity * 2).max(size + extra))?;
+        let needed = size.saturating_add(extra);
+        if needed > capacity {
+            self.grow_to((capacity * 2).min(MAX_CAPACITY).max(needed))?;
         }
         Ok(())
     }
@@ -497,6 +501,14 @@ impl<T: ContainerElement> List<T> {
     #[cold]
     #[inline(never)]
     fn grow_to(&self, capacity: usize) -> Result<()> {
+        if capacity > MAX_CAPACITY {
+            crate::bail!(
+                crate::error::VALUE_ERROR,
+                "List capacity {} exceeds the maximum {}",
+                capacity,
+                MAX_CAPACITY
+            );
+        }
         crate::cached_global_func!("ffi.ListReserve")
             .call_packed(&[AnyView::from(self), AnyView::from(&(capacity as i64))])?;
         Ok(())
