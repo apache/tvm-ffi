@@ -46,7 +46,7 @@ unsafe impl Sync for TypeAttrColumn {}
 
 impl TypeAttrColumn {
     /// Look up a registered type-attribute column by name.
-    pub fn new(name: &str) -> Option<Self> {
+    pub fn lookup(name: &str) -> Option<Self> {
         unsafe {
             let name = TVMFFIByteArray::from_str(name);
             NonNull::new(TVMFFIGetTypeAttrColumn(&name).cast_mut()).map(Self)

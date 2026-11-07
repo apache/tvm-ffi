@@ -484,7 +484,7 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 ///
 /// TypeAttrDef::<MyPairObj>::new().attr("my_ext.arity", 2_i64)?;
 ///
-/// let column = TypeAttrColumn::new("my_ext.arity").unwrap();
+/// let column = TypeAttrColumn::lookup("my_ext.arity").unwrap();
 /// let arity: i64 = column.get(MyPairObj::type_index()).unwrap().try_into()?;
 /// assert_eq!(arity, 2);
 /// # Ok::<(), tvm_ffi::Error>(())

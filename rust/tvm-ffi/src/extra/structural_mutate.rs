@@ -1683,12 +1683,12 @@ fn raw_ffi_any_to_owned_any(raw: TVMFFIAny) -> Result<Any> {
 // Cache registry columns, not their optional per-type cells. Absent cells retain
 // the normal hook/reflection fallback.
 static STRUCTURAL_MUTATE_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
-    TypeAttrColumn::new(STRUCTURAL_MUTATE_ATTR).expect("missing __s_mutate__ column")
+    TypeAttrColumn::lookup(STRUCTURAL_MUTATE_ATTR).expect("missing __s_mutate__ column")
 });
 
 static STRUCTURAL_MAYBE_INPLACE_MUTATE_COLUMN: ColdInitLazyLock<TypeAttrColumn> =
     ColdInitLazyLock::new(|| {
-        TypeAttrColumn::new(STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR)
+        TypeAttrColumn::lookup(STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR)
             .expect("missing __s_maybe_inplace_mutate__ column")
     });
 
@@ -1704,7 +1704,7 @@ fn structural_mutate_column<const INPLACE: bool>() -> TypeAttrColumn {
 }
 
 static SHALLOW_COPY_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
-    TypeAttrColumn::new(SHALLOW_COPY_ATTR).expect("missing __ffi_shallow_copy__ column")
+    TypeAttrColumn::lookup(SHALLOW_COPY_ATTR).expect("missing __ffi_shallow_copy__ column")
 });
 
 // -----------------------------------------------------------------------------

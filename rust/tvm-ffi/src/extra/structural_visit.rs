@@ -797,7 +797,7 @@ impl StructuralVisitorObj {
         let halted = unsafe {
             for_each_field_info(type_info, &mut |field| {
                 let result = Self::visit_reflected_field(runtime, object, field, def_region_kind);
-                if result.type_index() == TVMFFITypeIndex::kTVMFFINone as i32 {
+                if result.is_none() {
                     ControlFlow::Continue(())
                 } else {
                     ControlFlow::Break(result)
@@ -1024,7 +1024,7 @@ fn with_field_error_context(result: Any, name: &str) -> Any {
 // Columns are process-lifetime registry entries; a missing per-type cell still
 // falls back to reflected traversal. A missing required column is an error.
 static STRUCTURAL_VISIT_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
-    TypeAttrColumn::new(STRUCTURAL_VISIT_ATTR).expect("missing __s_visit__ column")
+    TypeAttrColumn::lookup(STRUCTURAL_VISIT_ATTR).expect("missing __s_visit__ column")
 });
 
 /// Return the shared visit-hook column without caching optional per-type cells.

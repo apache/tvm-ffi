@@ -302,7 +302,7 @@ pub(crate) struct EnumState {
 
 /// The registry of the enum type `type_index`, or `None` before its first value.
 pub(crate) fn enum_state(type_index: i32) -> Result<Option<EnumState>> {
-    let Some(column) = TypeAttrColumn::new(ENUM_STATE_ATTR) else {
+    let Some(column) = TypeAttrColumn::lookup(ENUM_STATE_ATTR) else {
         return Ok(None);
     };
     column.get(type_index).map(EnumState::try_from).transpose()

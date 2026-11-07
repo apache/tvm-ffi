@@ -325,7 +325,7 @@ fn test_types_with_only_methods_register_their_reflection() {
     assert!(!info.metadata.is_null());
     assert_eq!(methods(info).len(), 1);
     assert!(bool::try_from(
-        TypeAttrColumn::new("__ffi_type_final__")
+        TypeAttrColumn::lookup("__ffi_type_final__")
             .and_then(|column| column.get(TallyObj::type_index()))
             .unwrap()
     )
@@ -435,7 +435,7 @@ fn test_repr_and_deep_copy_see_reflected_fields() {
 fn test_shallow_copy_and_finality_are_type_attributes() {
     let original = point(1, 2.0, "p");
     let shallow_copy = Function::try_from(
-        TypeAttrColumn::new("__ffi_shallow_copy__")
+        TypeAttrColumn::lookup("__ffi_shallow_copy__")
             .and_then(|column| column.get(PointObj::type_index()))
             .unwrap(),
     )
@@ -463,7 +463,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
 
     let is_final = |type_index| {
         bool::try_from(
-            TypeAttrColumn::new("__ffi_type_final__")
+            TypeAttrColumn::lookup("__ffi_type_final__")
                 .and_then(|column| column.get(type_index))
                 .unwrap(),
         )
@@ -496,7 +496,7 @@ fn test_types_without_reflect_register_no_reflection() {
     let info = type_info::<CounterObj>();
     assert_eq!(info.num_fields, 0);
     assert!(info.metadata.is_null());
-    assert!(TypeAttrColumn::new("__ffi_shallow_copy__")
+    assert!(TypeAttrColumn::lookup("__ffi_shallow_copy__")
         .and_then(|column| column.get(CounterObj::type_index()))
         .is_none());
 }
@@ -574,7 +574,7 @@ fn test_duplicate_method_names_fail_the_registration() {
 fn test_native_function() -> Result<()> {
     // A big integer object registers a native `__any_equal__` hook.
     let big = |value: i128| Any::from(BigInt::from(value));
-    let column = TypeAttrColumn::new("__any_equal__").expect("the column is registered");
+    let column = TypeAttrColumn::lookup("__any_equal__").expect("the column is registered");
     let hook = column
         .get(big(1 << 100).type_index())
         .expect("the hook is registered");
@@ -610,7 +610,7 @@ fn test_native_function() -> Result<()> {
     let hook = NativeFunction::<(&PointObj,), i64>::from(x_of);
     // SAFETY: `testing.x_of` holds `i64(const PointObj*)` hooks.
     unsafe { TypeAttrDef::<PointObj>::new().native_fn_attr("testing.x_of", hook)? };
-    let stored = TypeAttrColumn::new("testing.x_of")
+    let stored = TypeAttrColumn::lookup("testing.x_of")
         .unwrap()
         .get(PointObj::type_index());
     // SAFETY: as above.

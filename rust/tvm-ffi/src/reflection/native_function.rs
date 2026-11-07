@@ -72,7 +72,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.
 /// unsafe { TypeAttrDef::<MyPairObj>::new().native_fn_attr("my_ext.sum", hook)? };
 ///
-/// let stored = TypeAttrColumn::new("my_ext.sum").unwrap().get(MyPairObj::type_index()).unwrap();
+/// let stored = TypeAttrColumn::lookup("my_ext.sum").unwrap().get(MyPairObj::type_index()).unwrap();
 /// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.
 /// let sum: NativeFunction<(&MyPairObj,), i64> = unsafe { NativeFunction::from_any(stored)? };
 /// let pair = ObjectArc::new(MyPairObj { base_: Object::new(), first: 1, second: 2 });
