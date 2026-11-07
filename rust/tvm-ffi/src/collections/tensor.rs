@@ -281,6 +281,7 @@ impl Tensor {
     }
 }
 
+#[repr(C)]
 struct TensorObjFromNDAlloc<TNDAlloc>
 where
     TNDAlloc: NDAllocator,

@@ -97,6 +97,11 @@ pub(crate) fn expand_object(
                 && get_attr(derive_input, "type_child_slots_can_overflow").is_none()),
         "#[type_child_slots] and #[type_child_slots_can_overflow] need #[type_register]"
     );
+    // Upcasts reinterpret a pointer to the object as one to its parent, which
+    // only `repr(C)` keeps at offset zero.
+    if !derive_input.attrs.iter().any(is_repr_c) {
+        abort!(struct_name, "#[derive(Object)] needs #[repr(C)]");
+    }
     // we expect base always to be the first field
     let base_ty = match &derive_input.data {
         syn::Data::Struct(s) => s.fields.iter().next().map(|f| f.ty.clone()),
@@ -252,8 +257,19 @@ pub(crate) fn expand_object(
         _ => panic!("First field must be `<base_name>: <ObjectCoreType>`"),
     };
 
+    let base_id = match &derive_input.data {
+        syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| f.ident.clone()),
+        _ => None,
+    }
+    .expect("First field must be `<base_name>: <ObjectCoreType>`");
+
     quote! {
         #final_parent_check
+
+        const _: () = ::core::assert!(
+            ::core::mem::offset_of!(#struct_name, #base_id) == 0,
+            "the parent object must be the first field"
+        );
 
         unsafe impl #tvm_ffi_crate::object::ObjectCore for #struct_name {
             const TYPE_KEY: &'static str = #type_key;
@@ -715,6 +731,17 @@ pub(crate) fn expand_object_ref(
         });
     }
     expanded
+}
+
+/// Whether `attr` is a `#[repr(...)]` that includes `C`.
+fn is_repr_c(attr: &syn::Attribute) -> bool {
+    let Ok(syn::Meta::List(list)) = attr.parse_meta() else {
+        return false;
+    };
+    list.path.is_ident("repr")
+        && list.nested.iter().any(|item| {
+            matches!(item, syn::NestedMeta::Meta(syn::Meta::Path(path)) if path.is_ident("C"))
+        })
 }
 
 /// `T` of a field type spelled `ObjectArc<T>`.

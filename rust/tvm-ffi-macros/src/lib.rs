@@ -42,7 +42,8 @@ pub fn match_any(input: TokenStream) -> TokenStream {
     match_any::expand(input)
 }
 
-/// Derive `ObjectCore` for an object struct whose first field is its parent.
+/// Derive `ObjectCore` for a `#[repr(C)]` object struct whose first field is
+/// its parent, so that a pointer to the object is one to its parent.
 ///
 /// `#[type_key = "..."]` names the type, and `#[type_index(unsafe ...)]` gives
 /// it a static index; the `unsafe` marks the caller's promise that the runtime

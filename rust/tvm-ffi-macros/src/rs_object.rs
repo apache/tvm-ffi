@@ -211,6 +211,7 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
         }
     });
     let object_input: DeriveInput = syn::parse2(quote! {
+        #[repr(C)]
         #(#derive_attrs)*
         #vis struct #obj {
             #base,
