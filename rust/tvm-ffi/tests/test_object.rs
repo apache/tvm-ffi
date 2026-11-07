@@ -53,6 +53,7 @@ impl Drop for TestIntObj {
 }
 
 unsafe impl ObjectCore for TestIntObj {
+    type Parent = Object;
     const TYPE_KEY: &'static str = Object::TYPE_KEY;
     const TYPE_DEPTH: i32 = Object::TYPE_DEPTH;
     #[inline]
@@ -210,6 +211,7 @@ struct HeaderOnlyObj<const N: usize> {
 }
 
 unsafe impl<const N: usize> ObjectCore for HeaderOnlyObj<N> {
+    type Parent = Object;
     const TYPE_KEY: &'static str = Object::TYPE_KEY;
     const TYPE_DEPTH: i32 = Object::TYPE_DEPTH;
     #[inline]

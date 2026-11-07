@@ -66,7 +66,7 @@ unsafe impl Sync for BigInt {}
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.BigInt"]
-#[type_index(TypeIndex::kTVMFFIBigInt)]
+#[type_index(unsafe TypeIndex::kTVMFFIBigInt)]
 #[type_final]
 struct BigIntObj {
     object: Object,

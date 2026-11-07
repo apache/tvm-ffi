@@ -56,6 +56,7 @@ impl Object {
 }
 
 unsafe impl ObjectCore for Object {
+    type Parent = ();
     const TYPE_KEY: &'static str = "ffi.Object";
     const TYPE_DEPTH: i32 = 0;
     #[inline]
@@ -304,15 +305,20 @@ pub struct ObjectRef {
 ///
 /// # Safety
 /// `Self` must have a compatible C layout with a valid `TVMFFIObject` prefix
-/// at offset zero. Its registered type, inheritance and payload must describe
-/// that layout correctly, including for foreign declarations.
+/// at offset zero, and embed a `Self::Parent` there unless it is the root.
+/// Its registered type, inheritance and payload must describe that layout
+/// correctly, including for foreign declarations.
 ///
 /// A live managed object and its header must remain at their original allocation
 /// address until destruction. Safe APIs must not move, replace or expose mutable
 /// access to that header while managed; payload mutation must preserve its type
 /// invariants. Preallocation builders and values moved out during destruction
 /// are not live managed objects and cannot be borrowed as `AnyView`.
+#[diagnostic::on_unimplemented(message = "`{Self}` is not an object type")]
 pub unsafe trait ObjectCore: Sized + 'static {
+    /// The parent's object type, which `Self` embeds at offset zero; `()` for
+    /// the root [`Object`].
+    type Parent;
     /// The type key, such as `"ffi.Array"`.
     const TYPE_KEY: &'static str;
     /// Depth of this type in the object inheritance tree.
@@ -337,6 +343,39 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// The caller must have exclusive access to the header and preserve the
     /// managed allocation's address, reference counts, deleter and dynamic type.
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject;
+}
+
+// Object hierarchy: a compile-time check that one object type derives from
+// another, which `#[object_ref(parent = ...)]` relies on.
+
+/// The object type `Self` is `A` or derives from it through its chain of
+/// [`ObjectCore::Parent`]s, so a `Self` is a valid `A`.
+///
+/// `Depth` is the number of parent steps from `Self` to `A`, a type from
+/// [`marker`] that the compiler infers.
+///
+/// # Safety
+///
+/// The blanket implementations are the only sound ones: do not implement it.
+#[diagnostic::on_unimplemented(message = "`{Self}` does not derive from `{A}`")]
+pub unsafe trait ObjectDerivesFrom<A, Depth> {}
+
+/// Inferred depths for [`ObjectDerivesFrom`].
+pub mod marker {
+    /// `A` is the object type itself.
+    pub enum Itself {}
+    /// `A` is reached through one more [`Parent`](super::ObjectCore::Parent).
+    pub struct Parent<Depth>(std::marker::PhantomData<fn() -> Depth>);
+}
+
+// SAFETY: every type is itself.
+unsafe impl<T: ObjectCore> ObjectDerivesFrom<T, marker::Itself> for T {}
+
+// SAFETY: `T` embeds `T::Parent` at offset zero, so whatever the parent
+// derives from, `T` does.
+unsafe impl<T: ObjectCore, A, Depth> ObjectDerivesFrom<A, marker::Parent<Depth>> for T where
+    T::Parent: ObjectDerivesFrom<A, Depth>
+{
 }
 
 /// An object type whose allocation is followed by a run of extra items, such
@@ -584,6 +623,22 @@ pub unsafe trait ObjectRefAnyCompatible: ObjectRefCore {
     }
 }
 
+/// An object reference that accepts every object of its type and promises
+/// nothing more, so any object type that derives from it may claim it as
+/// `#[object_ref(parent = ...)]`. `#[derive(ObjectRef)]` implements it for a
+/// non-generic reference with the default checks.
+///
+/// # Safety
+///
+/// Every object of `Self::ContainerType`, or of a type derived from it, is a
+/// valid `Self`.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` promises more than its object type (generic or custom checks)",
+    note = "write `#[object_ref(unsafe parent = ...)]` and keep that promise for every value"
+)]
+pub unsafe trait PlainObjectRef: ObjectRefCore {}
+
 // The object cell encoding, with the strict check `is_instance_of` then
 // `extra_check`, and `convert_fallback` after it in converting casts.
 unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
@@ -658,7 +713,7 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
 ///
 /// An owned reference converts into an owned `T`, and a borrowed one borrows
 /// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
-/// `Vec` but borrows from a `&Vec`. [`unsafe_impl_object_ref_upcast!`](crate::unsafe_impl_object_ref_upcast)
+/// `Vec` but borrows from a `&Vec`. [`impl_object_ref_upcast!`](crate::impl_object_ref_upcast)
 /// implements it for each derived reference and its reference into the base,
 /// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
 /// the value borrows the output with `.borrow()`; one that keeps it takes

@@ -254,7 +254,7 @@ impl ContainerElement for Any {}
 /// and [`Map::upcast`](crate::Map::upcast) use it.
 ///
 /// It holds for every type and itself, and for a base object reference and
-/// each derived one, which [`unsafe_impl_object_ref_upcast!`](crate::unsafe_impl_object_ref_upcast)
+/// each derived one, which [`impl_object_ref_upcast!`](crate::impl_object_ref_upcast)
 /// declares.
 ///
 /// # Safety
@@ -269,7 +269,7 @@ unsafe impl<T: ?Sized> TypeSubsumes<T> for T {}
 /// cell, as [`Array`](crate::Array) indexing does.
 ///
 /// A reference type implemented by hand gets it from
-/// [`unsafe_impl_object_ref_downcast_ref!`](crate::unsafe_impl_object_ref_downcast_ref).
+/// [`impl_object_ref_downcast_ref!`](crate::impl_object_ref_downcast_ref).
 ///
 /// # Safety
 ///

@@ -419,8 +419,13 @@ and any other field from anything that converts into it, as the ``new`` of a typ
 bound by ``tvm-ffi-stubgen`` does. The reference dereferences to the object
 (``#[object_ref(skip_deref)]`` opts out), and its private ``from_object`` wraps a new
 object for the type's constructors. The reference also converts into ``parent``,
-and every reference converts into ``ObjectRef``; ``unsafe_impl_object_ref_upcast!``
-converts it into the references to further ancestors.
+whose object the reference's object must embed, directly or through its own
+parents, which the derive checks at compile time. A parent that promises more than
+its object type, a generic one such as ``Array<T>`` or one with a custom
+``ObjectRefAnyCompatible``, is written ``unsafe parent = ...``: the caller promises
+that every value of the reference is a valid parent. Every reference converts into
+``ObjectRef``; ``impl_object_ref_upcast!(unsafe Point3 => Point)``
+declares further conversions without that check.
 
 The type also registers a creator, and from it ``__ffi_new__`` and ``__ffi_init__``
 (unless ``reflection = path`` defines ``__ffi_init__``), so that a JSON graph reads

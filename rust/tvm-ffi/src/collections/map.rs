@@ -86,7 +86,7 @@ fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Map"]
-#[type_index(TypeIndex::kTVMFFIMap)]
+#[type_index(unsafe TypeIndex::kTVMFFIMap)]
 pub struct MapObj {
     pub(crate) object: Object,
     /// Pointer to the (opaque) key/value storage region (`MapBaseObj::data_`).

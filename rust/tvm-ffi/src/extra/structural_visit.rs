@@ -125,7 +125,7 @@ impl Default for StructuralVisitorObj {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.VisitInterrupt"]
-#[type_index(TVMFFITypeIndex::kTVMFFIVisitInterrupt)]
+#[type_index(unsafe TVMFFITypeIndex::kTVMFFIVisitInterrupt)]
 #[type_final]
 pub struct VisitInterruptObj {
     base_: Object,

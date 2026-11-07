@@ -35,7 +35,7 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Array"]
-#[type_index(TypeIndex::kTVMFFIArray)]
+#[type_index(unsafe TypeIndex::kTVMFFIArray)]
 pub struct ArrayObj {
     pub(crate) object: Object,
     /// The element buffer, `capacity` `TVMFFIAny` cells.

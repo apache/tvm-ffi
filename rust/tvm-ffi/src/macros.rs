@@ -236,14 +236,16 @@ macro_rules! attach_context {
 ///
 /// # Safety
 ///
-/// The declaration is trusted, as an `unsafe impl` is, hence the `unsafe_`
-/// name: `target` must be a registered base of `source`, and every `source`
-/// must satisfy the target reference invariants. An incorrect declaration makes
-/// the generated safe conversions unsound. The Rust stub generator writes these
-/// from the registered type hierarchy.
+/// The leading `unsafe` is a required marker: writing it, the caller promises
+/// that `target` is a registered base of `source` and every `source` satisfies
+/// the target reference invariants. An
+/// incorrect declaration makes the generated safe conversions unsound. The
+/// Rust stub generator writes these from the registered type hierarchy;
+/// `#[object_ref(parent = ...)]` checks the hierarchy at compile time instead.
+/// A call reads `impl_object_ref_upcast!(unsafe Add => BinaryOp, Add => Expr);`.
 #[macro_export]
-macro_rules! unsafe_impl_object_ref_upcast {
-    ($($source:ty => $target:ty),+ $(,)?) => {
+macro_rules! impl_object_ref_upcast {
+    (unsafe $($source:ty => $target:ty),+ $(,)?) => {
         $(
             impl ::std::convert::From<$source> for $target {
                 #[inline]
@@ -348,7 +350,8 @@ macro_rules! unsafe_impl_object_ref_upcast {
 ///
 /// # Safety
 ///
-/// Each type is `repr(transparent)` over one object pointer, and its
+/// The leading `unsafe` is a required marker: writing it, the caller promises
+/// that each type is `repr(transparent)` over one object pointer, and its
 /// [`AnyCompatible::check_any_strict`](crate::AnyCompatible::check_any_strict)
 /// accepts exactly the objects that are a valid value of it.
 ///
@@ -356,7 +359,7 @@ macro_rules! unsafe_impl_object_ref_upcast {
 ///
 /// ```
 /// use tvm_ffi::derive::ObjectRef;
-/// use tvm_ffi::{rs_object, unsafe_impl_object_ref_downcast_ref, Any};
+/// use tvm_ffi::{rs_object, impl_object_ref_downcast_ref, Any};
 /// use tvm_ffi::{Object, ObjectArc, ObjectRefAnyCompatible, ObjectRefCore};
 ///
 /// #[rs_object("my_ext.MyPair", final)]
@@ -394,14 +397,14 @@ macro_rules! unsafe_impl_object_ref_upcast {
 ///         pair.first > 0
 ///     }
 /// }
-/// unsafe_impl_object_ref_downcast_ref!(PositivePair);
+/// impl_object_ref_downcast_ref!(unsafe PositivePair);
 ///
 /// let pair = Any::from(MyPair::from_object(MyPairObj::new(Object::new(), 1, 2)));
 /// assert!(pair.downcast_ref::<PositivePair>().is_some());
 /// ```
 #[macro_export]
-macro_rules! unsafe_impl_object_ref_downcast_ref {
-    ($($name:ty),+ $(,)?) => {
+macro_rules! impl_object_ref_downcast_ref {
+    (unsafe $($name:ty),+ $(,)?) => {
         $(
             // SAFETY: the macro declaration promises that `$name` is one object
             // pointer whose `check_any_strict` is its type check.
@@ -455,7 +458,7 @@ macro_rules! unsafe_impl_object_ref_downcast_ref {
 ///
 /// `#[derive(ObjectRef)]` calls it; a type that implements `AnyCompatible` by hand
 /// calls it after that impl. See also
-/// [`unsafe_impl_object_ref_downcast_ref!`](crate::unsafe_impl_object_ref_downcast_ref)
+/// [`impl_object_ref_downcast_ref!`](crate::impl_object_ref_downcast_ref)
 /// for an object reference implemented by hand.
 #[macro_export]
 macro_rules! impl_any_compatible_conversions {

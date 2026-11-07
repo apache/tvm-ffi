@@ -35,7 +35,7 @@ use tvm_ffi_sys::{
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Function"]
-#[type_index(TVMFFITypeIndex::kTVMFFIFunction)]
+#[type_index(unsafe TVMFFITypeIndex::kTVMFFIFunction)]
 pub struct FunctionObj {
     object: Object,
     cell: TVMFFIFunctionCell,
@@ -139,6 +139,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> CallbackFunctionO
 unsafe impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> ObjectCore
     for CallbackFunctionObjImpl<F>
 {
+    type Parent = FunctionObj;
     const TYPE_KEY: &'static str = FunctionObj::TYPE_KEY;
     const TYPE_DEPTH: i32 = FunctionObj::TYPE_DEPTH;
     fn type_index() -> i32 {

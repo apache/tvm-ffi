@@ -100,7 +100,7 @@ struct Point3 {
     data: ObjectArc<Point3Obj>,
 }
 
-tvm_ffi::unsafe_impl_object_ref_upcast!(Point3 => Point);
+tvm_ffi::impl_object_ref_upcast!(unsafe Point3 => Point);
 
 fn point_obj(x: i64, y: f64, label: &str) -> PointObj {
     PointObj {
@@ -531,7 +531,7 @@ mod no_imports {
     #[derive(tvm_ffi::derive::Object)]
     #[type_key = "testing.rust.ReflectedNoImports"]
     #[type_register]
-    pub struct LeafObj {
+    pub(super) struct LeafObj {
         base_: super::PointObj,
         #[reflect]
         pub w: i64,
@@ -539,11 +539,11 @@ mod no_imports {
 
     #[repr(C)]
     #[derive(tvm_ffi::derive::ObjectRef, Clone)]
-    pub struct Leaf {
+    pub(super) struct Leaf {
         pub data: tvm_ffi::ObjectArc<LeafObj>,
     }
 
-    pub fn leaf(w: i64) -> Leaf {
+    pub(super) fn leaf(w: i64) -> Leaf {
         Leaf {
             data: tvm_ffi::ObjectArc::new(LeafObj {
                 base_: super::point_obj(0, 0.0, ""),

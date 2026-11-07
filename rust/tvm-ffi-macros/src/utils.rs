@@ -59,17 +59,3 @@ pub(crate) fn attr_to_str(attr: &syn::Attribute) -> syn::LitStr {
         Err(e) => panic!("{}", e),
     }
 }
-
-/// Convert an attribute to an integer
-///
-/// # Arguments
-/// * `attr` - The attribute to convert
-///
-/// # Returns
-/// * `syn::Result<syn::Expr>` - The integer value of the attribute
-pub(crate) fn attr_to_expr(attr: &syn::Attribute) -> syn::Result<syn::Expr> {
-    let parser = |input: syn::parse::ParseStream| {
-        input.parse::<syn::Expr>() // parse expression after '='
-    };
-    syn::parse::Parser::parse2(parser, attr.tokens.clone())
-}

@@ -55,7 +55,7 @@ unsafe impl Sync for Bytes {}
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Bytes"]
-#[type_index(TypeIndex::kTVMFFIBytes)]
+#[type_index(unsafe TypeIndex::kTVMFFIBytes)]
 pub(crate) struct BytesObj {
     object: Object,
     data: TVMFFIByteArray,
@@ -273,7 +273,7 @@ unsafe impl Sync for String {}
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.String"]
-#[type_index(TypeIndex::kTVMFFIStr)]
+#[type_index(unsafe TypeIndex::kTVMFFIStr)]
 pub(crate) struct StringObj {
     object: Object,
     data: TVMFFIByteArray,

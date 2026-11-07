@@ -32,7 +32,7 @@ use tvm_ffi_sys::{
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Error"]
-#[type_index(TVMFFITypeIndex::kTVMFFIError)]
+#[type_index(unsafe TVMFFITypeIndex::kTVMFFIError)]
 pub struct ErrorObj {
     object: Object,
     cell: TVMFFIErrorCell,

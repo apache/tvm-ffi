@@ -44,10 +44,12 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 
 /// Derive `ObjectCore` for an object struct whose first field is its parent.
 ///
-/// `#[type_key = "..."]` names the type, and `#[type_index(...)]` gives it a
-/// static index. Otherwise a type defined in Rust declares `#[type_register]`:
-/// it is registered under its parent on first use of `type_index()`, or takes
-/// the index its key already has, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does.
+/// `#[type_key = "..."]` names the type, and `#[type_index(unsafe ...)]` gives
+/// it a static index; the `unsafe` marks the caller's promise that the runtime
+/// gives that index to this type. Otherwise a type defined in Rust declares
+/// `#[type_register]`: it is registered under its parent on first use of
+/// `type_index()`, or takes the index its key already has, as C++
+/// `TVM_FFI_DECLARE_OBJECT_INFO` does.
 /// Without `#[type_register]`, the type binds a key its defining library,
 /// usually C++, has registered, and `type_index()` panics if that library is
 /// not loaded yet, so a binding never registers a key with the wrong child

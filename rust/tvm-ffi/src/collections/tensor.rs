@@ -112,7 +112,7 @@ fn data_size(tensor: &DLTensor) -> usize {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.Tensor"]
-#[type_index(TypeIndex::kTVMFFITensor)]
+#[type_index(unsafe TypeIndex::kTVMFFITensor)]
 pub struct TensorObj {
     object: Object,
     dltensor: DLTensor,
@@ -290,6 +290,7 @@ where
 }
 
 unsafe impl<TNDAlloc: NDAllocator> ObjectCore for TensorObjFromNDAlloc<TNDAlloc> {
+    type Parent = TensorObj;
     const TYPE_KEY: &'static str = TensorObj::TYPE_KEY;
     const TYPE_DEPTH: i32 = TensorObj::TYPE_DEPTH;
     fn type_index() -> i32 {
