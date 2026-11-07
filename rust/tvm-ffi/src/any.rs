@@ -444,6 +444,23 @@ impl std::fmt::Display for Any {
     }
 }
 
+/// Formats the type key and the `repr`, such as `AnyView(int: 1)`.
+impl std::fmt::Debug for AnyView<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let key = object::type_key_of_index(self.type_index());
+        write!(f, "AnyView({key}: {self})")
+    }
+}
+
+/// Formats the type key and the `repr`, such as `Any(int: 1)`.
+impl std::fmt::Debug for Any {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let view = AnyView::from(self);
+        let key = object::type_key_of_index(view.type_index());
+        write!(f, "Any({key}: {view})")
+    }
+}
+
 /// Whether a `TVMFFIAny` cell owns everything it holds, so its owning form is a
 /// bitwise copy.
 #[inline]
