@@ -96,10 +96,30 @@ RUST_SCALAR_WIDTHS = {
 }
 
 #: Parameters of the wrapper's allocator taken as their own type, as ``#[rs_object]``'s
-#: ``new`` takes them: a literal infers only from its exact type. Any other parameter is
-#: ``impl Into<T>``; ``<Leaf>Obj::new`` takes every one as its own type.
+#: ``new`` takes them: a literal infers only from its exact type. An object reference is
+#: ``impl IntoObjectRef<T>`` and any other parameter ``impl Into<T>``; ``<Leaf>Obj::new``
+#: takes every one as its own type.
 RUST_EXACT_PARAMS = frozenset(
     {"bool", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "f32", "f64"}
+)
+
+#: Builtin origins whose Rust type is an object reference, taken as ``impl IntoObjectRef<T>``.
+#: A type key outside ``ffi.*`` is one too: a generated or ``ty-map``'d binding. ``Shape``,
+#: like ``Array`` / ``List`` / ``Map``, is a container taken as ``impl Into<T>``, which also
+#: accepts what it is built from (``From<impl AsRef<[i64]>>``).
+RUST_OBJECT_REF_ORIGINS = frozenset(
+    {
+        "Object",
+        "Tensor",
+        "Callable",
+        "ffi.Object",
+        "ffi.Tensor",
+        "ffi.Function",
+        "ffi.Module",
+        "ffi.Error",
+        "ffi.reflection.AccessPath",
+        "ffi.reflection.AccessStep",
+    }
 )
 
 #: Size of an object reference field; ``nullable`` may only wrap those.

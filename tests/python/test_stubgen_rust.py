@@ -748,8 +748,8 @@ impl ExprObj {
 
 impl Expr {
     /// Lossless complete-field allocation.
-    pub fn new(span: impl Into<Option<Span>>, ty: impl Into<Type>) -> Self {
-        let obj = ExprObj::new(span.into(), ty.into());
+    pub fn new(span: impl Into<Option<Span>>, ty: impl IntoObjectRef<Type>) -> Self {
+        let obj = ExprObj::new(span.into(), ty.into_owned_object_ref());
         Self { data_: ObjectArc::new(obj) }
     }
 }
@@ -817,11 +817,16 @@ impl Add {
     /// Lossless complete-field allocation.
     pub fn new(
         span: impl Into<Option<Span>>,
-        ty: impl Into<PrimType>,
-        a: impl Into<PrimExpr>,
-        b: impl Into<PrimExpr>,
+        ty: impl IntoObjectRef<PrimType>,
+        a: impl IntoObjectRef<PrimExpr>,
+        b: impl IntoObjectRef<PrimExpr>,
     ) -> Self {
-        let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());
+        let obj = AddObj::new(
+            span.into(),
+            ty.into_owned_object_ref(),
+            a.into_owned_object_ref(),
+            b.into_owned_object_ref(),
+        );
         Self { data_: ObjectArc::new(obj) }
     }
 }
@@ -838,6 +843,7 @@ def test_render_complete_expr_golden() -> None:
     assert _uses(imports) == {
         "std::ptr::addr_of_mut",
         "tvm_ffi::Object",
+        "tvm_ffi::IntoObjectRef",
         "tvm_ffi::ObjectArc",
         "tvm_ffi::reflection::ShallowCopy",
         "tvm_ffi::reflection::UnsafeInit",
@@ -876,6 +882,7 @@ def test_render_complete_add_golden() -> None:
     assert text == ADD_EXPECTED
     assert _uses(imports) == {
         "std::ops::Deref",
+        "tvm_ffi::IntoObjectRef",
         "tvm_ffi::ObjectArc",
         "crate::ir::ExprObj",
         "crate::ir::Expr",
@@ -1216,16 +1223,110 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
     assert (
         "impl Add {\n    /// Lossless complete-field allocation.\n"
         "    pub fn from_fields(\n"
-        "        span: impl Into<Span>,\n"
-        "        ty: impl Into<Type>,\n"
-        "        a: impl Into<Expr>,\n"
-        "        b: impl Into<Expr>,\n"
+        "        span: impl IntoObjectRef<Span>,\n"
+        "        ty: impl IntoObjectRef<Type>,\n"
+        "        a: impl IntoObjectRef<Expr>,\n"
+        "        b: impl IntoObjectRef<Expr>,\n"
         "    ) -> Self {\n"
-        "        let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());\n"
+        "        let obj = AddObj::new(\n"
+        "            span.into_owned_object_ref(),\n"
+        "            ty.into_owned_object_ref(),\n"
+        "            a.into_owned_object_ref(),\n"
+        "            b.into_owned_object_ref(),\n"
+        "        );\n"
         "        Self { data_: ObjectArc::new(obj) }\n"
         "    }\n}"
     ) in text
     assert "    pub fn new(" not in text
+
+
+def test_wrapper_allocator_takes_object_references_as_into_object_ref() -> None:
+    """An object reference is `impl IntoObjectRef`, a value `impl Into`, a scalar itself.
+
+    A `field` directive narrowing an object reference keeps it one; `nullable` makes it an
+    `Option`, a value. `Shape` is a container, taken as `impl Into` like `Array`.
+    """
+    optional_var = TypeSchema("Optional", (TypeSchema("demo.Var"),))
+    info = _info(
+        "demo.Node",
+        (
+            _field("tensor", "Tensor", 24, 8),
+            _field("owner", "Object", 32, 8),
+            _field("callback", "Callable", 40, 8),
+            _field("module", "ffi.Module", 48, 8),
+            _field("var", "demo.Var", 56, 8),
+            _field("buffer", "demo.Var", 64, 8),
+            _field("span", "demo.Span", 72, 8),
+            _field("name", "str", 80, 16),
+            _field("items", "Array", 96, 8),
+            _field("attrs", "Map", 104, 8),
+            _field("shape", "Shape", 112, 8),
+            _field("value", "Any", 120, 16),
+            _field("kind", "int", 136, 8),
+            _field("parent", optional_var, 144, 8),
+            _field("dtype", "dtype", 152, 4, 2),
+            _field("count", "int", 156, 4),
+        ),
+        total_size=160,
+        is_final=True,
+    )
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "field", "demo.Node.buffer -> crate::typed::BufferVar", 1)
+    RUST.add_directive(imports, "nullable", "demo.Node.span", 2)
+    RUST.add_directive(imports, "enum", "demo.Node.kind -> Kind(i64) { A=0 }", 3)
+    text, imports = _render(info, imports)
+    assert (
+        "    pub fn new(\n"
+        "        tensor: impl IntoObjectRef<Tensor>,\n"
+        "        owner: impl IntoObjectRef<ObjectRef>,\n"
+        "        callback: impl IntoObjectRef<Function>,\n"
+        "        module: impl IntoObjectRef<Module>,\n"
+        "        var: impl IntoObjectRef<Var>,\n"
+        "        buffer: impl IntoObjectRef<BufferVar>,\n"
+        "        span: impl Into<Option<Span>>,\n"
+        "        name: impl Into<String>,\n"
+        "        items: impl Into<Array<Any>>,\n"
+        "        attrs: impl Into<Map<Any, Any>>,\n"
+        "        shape: impl Into<Shape>,\n"
+        "        value: impl Into<Any>,\n"
+        "        kind: impl Into<Kind>,\n"
+        "        parent: impl Into<Option<Var>>,\n"
+        "        dtype: impl Into<DLDataType>,\n"
+        "        count: i32,\n"
+        "    ) -> Self {\n"
+        "        let obj = NodeObj::new(\n"
+        "            tensor.into_owned_object_ref(),\n"
+        "            owner.into_owned_object_ref(),\n"
+        "            callback.into_owned_object_ref(),\n"
+        "            module.into_owned_object_ref(),\n"
+        "            var.into_owned_object_ref(),\n"
+        "            buffer.into_owned_object_ref(),\n"
+        "            span.into(),\n"
+        "            name.into(),\n"
+        "            items.into(),\n"
+        "            attrs.into(),\n"
+        "            shape.into(),\n"
+        "            value.into(),\n"
+        "            kind.into(),\n"
+        "            parent.into(),\n"
+        "            dtype.into(),\n"
+        "            count,\n"
+        "        );\n"
+    ) in text, text
+    assert "tvm_ffi::IntoObjectRef" in _uses(imports)
+
+
+def test_wrapper_allocator_without_object_references_does_not_import_into_object_ref() -> None:
+    info = _info(
+        "demo.Pair",
+        (_field("name", "str", 24, 16), _field("count", "int", 40, 8)),
+        total_size=48,
+        is_final=True,
+    )
+    text, imports = _render(info)
+    assert "    pub fn new(name: impl Into<String>, count: i64) -> Self {" in text
+    assert "IntoObjectRef" not in text
+    assert "tvm_ffi::IntoObjectRef" not in _uses(imports)
 
 
 def test_allocator_body_wraps_like_rustfmt() -> None:
