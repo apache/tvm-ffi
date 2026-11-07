@@ -289,10 +289,10 @@ impl<N: ObjectCore> ObjectDef<N> {
         }
         let type_str = F::type_str();
         crate::ensure!(
-            !is_option_of_value(&type_str),
+            F::has_field_layout(),
             TYPE_ERROR,
             "field `{name}` of `{}`: `Option` of a non-object value (`{type_str}`) has no FFI \
-             field layout; only `Option` of an object reference can be reflected",
+             field layout; use `tvm_ffi::Optional<T>`",
             N::TYPE_KEY
         );
         let metadata = type_schema_metadata(&F::type_schema());
@@ -690,7 +690,7 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
 /// The static type index of a field, from the Rust type's `type_str()` (the names
 /// `AnyCompatible` reports, such as `int`, `ffi.String`, `Array<my.Node>`).
 // As C++ `TypeTraits<T>::field_static_type_index` states it.
-fn field_static_type_index(type_str: &str) -> i32 {
+pub(crate) fn field_static_type_index(type_str: &str) -> i32 {
     use TVMFFITypeIndex::*;
     /// The static index of a field holding any value (`kTVMFFIAny`).
     const ANY: i32 = -1;
@@ -714,18 +714,6 @@ fn field_static_type_index(type_str: &str) -> i32 {
         // Any other object reference, `Map` included, is typed `Object` statically.
         _ => kTVMFFIStaticObjectBegin as i32,
     }
-}
-
-/// Whether `type_str` is a Rust `Option` of a non-object value. Readers take an
-/// `Optional` field as an object pointer or a `TVMFFIAny` cell, and such an
-/// `Option` is laid out as neither.
-fn is_option_of_value(type_str: &str) -> bool {
-    type_str
-        .strip_prefix("Optional<")
-        .and_then(|inner| inner.strip_suffix('>'))
-        .is_some_and(|inner| {
-            field_static_type_index(inner) < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
-        })
 }
 
 #[cfg(test)]

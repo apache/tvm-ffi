@@ -34,6 +34,7 @@ pub use accessor::{
 };
 pub use enum_def::{EnumAttrMap, EnumDef};
 pub use native_function::{NativeArgs, NativeFunction};
+pub(crate) use registry::field_static_type_index;
 #[doc(hidden)]
 pub use registry::register_object;
 pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrDef};
