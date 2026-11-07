@@ -519,7 +519,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     ///
     /// ```
     /// # use tvm_ffi::*;
-    /// # use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
+    /// # use tvm_ffi::StructuralMutatorView;
     /// # #[rs_object("my_ext.MyPair", final)]
     /// # pub struct MyPairObj { base_: Object, pub first: Array<i64>, pub second: Array<i64> }
     /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
@@ -818,7 +818,7 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 ///
 /// ```
 /// use tvm_ffi::{dispatch, structural_mutate, Any, Array, MutationView, Result, UnchangedOr};
-/// use tvm_ffi::extra::structural_mutate::StructuralMutatorView;
+/// use tvm_ffi::StructuralMutatorView;
 ///
 /// struct Double;
 ///

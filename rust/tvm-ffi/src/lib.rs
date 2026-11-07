@@ -108,8 +108,12 @@ pub use crate::extra::structural_eq_hash::{
     structural_equal_with, structural_hash, structural_hash_with, StructuralOptions,
 };
 pub use crate::extra::structural_map::structural_map;
-pub use crate::extra::structural_mutate::{structural_mutate, MutationView};
-pub use crate::extra::structural_visit::{structural_visit, VisitInterrupt};
+pub use crate::extra::structural_mutate::{
+    structural_mutate, InplaceMode, MutationView, StructuralMutatorView,
+};
+pub use crate::extra::structural_visit::{
+    structural_visit, DefRegionKind, StructuralVisitorView, VisitInterrupt,
+};
 pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
