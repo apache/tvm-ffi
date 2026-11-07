@@ -180,7 +180,8 @@ where
 ///
 /// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
 /// value it receives or one of that value's ancestors: the traversal borrows
-/// their cells while the callback runs.
+/// their cells while the callback runs. A callback that returns an `Error`
+/// object as its value fails the traversal with a `TypeError`.
 ///
 /// # Arguments
 ///

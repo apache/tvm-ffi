@@ -51,8 +51,8 @@ use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
     field_def_region, for_each_field_info, free_var_child_region, missing_field_getter_error,
-    raw_ffi_any_into_result, raw_ffi_any_same_as, registered_type_index, result_into_raw_ffi_any,
-    runtime_error, seq_hash_kind, with_structural_error_context,
+    raw_ffi_any_into_result, raw_ffi_any_same_as, registered_type_index, reject_error_value,
+    result_into_raw_ffi_any, runtime_error, seq_hash_kind, with_structural_error_context,
     with_structural_field_error_context, wrong_dispatcher, FLAG_SEQ_HASH_IGNORE,
     FLAG_SETTER_IS_FUNCTION,
 };
@@ -796,7 +796,8 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 ///
 /// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
 /// value it receives or one of that value's ancestors: the traversal borrows
-/// their cells while the callback runs.
+/// their cells while the callback runs. A callback that returns an `Error`
+/// object as its value fails the traversal with a `TypeError`.
 ///
 /// # Arguments
 ///
@@ -1013,7 +1014,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
             // Map adapters attribute errors to their possibly replaced value;
             // direct mutation attributes callback failures to this input.
             Some(result) => {
-                let result = result.map(Any::from);
+                let result = result.map(Any::from).and_then(reject_error_value);
                 result_into_raw_ffi_any(if CALLBACK_CONTEXT {
                     result.map_err(|error| with_mutation_error_context(error, raw, "mutate"))
                 } else {

@@ -19,7 +19,7 @@
 
 use super::structural_visit::DefRegionKind;
 use crate::any::Any;
-use crate::error::{Error, Result, RUNTIME_ERROR};
+use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
 use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashDefPattern, kTVMFFIFieldFlagBitMaskSEqHashDefSimple,
     kTVMFFIFieldFlagBitMaskSEqHashIgnore, kTVMFFIFieldFlagBitSetterIsFunctionObj,
@@ -118,6 +118,21 @@ pub(crate) fn result_into_raw_ffi_any(result: Result<Any>) -> TVMFFIAny {
         Ok(value) => Any::into_raw_ffi_any(value),
         Err(error) => Any::into_raw_ffi_any(Any::from(error)),
     }
+}
+
+/// Reject a handler's successful result that is an Error object, which the
+/// hook protocol would read as a failure; C++ rejects it at compile time.
+#[inline(always)]
+pub(crate) fn reject_error_value(value: Any) -> Result<Any> {
+    if value.as_raw_ffi_any().type_index != TVMFFITypeIndex::kTVMFFIError as i32 {
+        return Ok(value);
+    }
+    core::hint::cold_path();
+    Err(Error::new(
+        TYPE_ERROR,
+        "a structural handler returned an Error as a value; return it as Err to fail",
+        "",
+    ))
 }
 
 /// Take ownership of one value returned by a structural traversal ABI hook.
