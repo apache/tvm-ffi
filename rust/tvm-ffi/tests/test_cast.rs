@@ -30,6 +30,7 @@ use tvm_ffi::*;
 #[derive(Object)]
 #[type_key = "testing.rust.CastBase"]
 #[type_register]
+#[type_immutable]
 struct TestBaseObj {
     base_: Object,
     value: i64,
@@ -284,8 +285,6 @@ fn test_any_conversion_preserves_runtime_subtype() {
 }
 
 // `TestBaseObj` opts in; `TestDerivedObj` does not, so only `TestBase` crosses threads.
-// SAFETY: test objects are never mutated after construction.
-unsafe impl tvm_ffi::ImmutableObject for TestBaseObj {}
 
 #[test]
 fn test_thread_safe_object_handles() {

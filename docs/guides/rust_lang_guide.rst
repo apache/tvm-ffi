@@ -374,6 +374,9 @@ Defining Object Types from Their Fields
 ``py_class``. The first field, ``base_``, is the parent's object; every other field
 is reflected, and ``#[reflect(...)]`` sets its flags, name and doc string.
 ``reflection = path`` after the type key is ``#[type_reflection(path)]``.
+``immutable`` declares that shared objects of the type are never mutated
+(``ImmutableObject``), so its references cross threads when its fields can; its
+fields cannot be ``writable``.
 ``#[derive(ObjectRef)]`` declares the reference, and ``#[object_ref(parent = Point)]``
 names the reference to the parent's object:
 

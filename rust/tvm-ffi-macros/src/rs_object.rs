@@ -38,6 +38,7 @@ pub(crate) fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
 struct RsObjectArgs {
     type_key: LitStr,
     type_final: bool,
+    immutable: bool,
     s_eq_hash_kind: Option<LitStr>,
     child_slots: Option<LitInt>,
     child_slots_can_overflow: Option<LitBool>,
@@ -56,6 +57,7 @@ impl Parse for RsObjectArgs {
         let mut args = RsObjectArgs {
             type_key,
             type_final: false,
+            immutable: false,
             s_eq_hash_kind: None,
             child_slots: None,
             child_slots_can_overflow: None,
@@ -74,11 +76,12 @@ impl Parse for RsObjectArgs {
             if seen.contains(&key) {
                 return Err(syn::Error::new(name.span(), format!("duplicate `{key}`")));
             }
-            if key != "final" {
+            if key != "final" && key != "immutable" {
                 input.parse::<Token![=]>()?;
             }
             match key.as_str() {
                 "final" => args.type_final = true,
+                "immutable" => args.immutable = true,
                 "s_eq_hash_kind" => args.s_eq_hash_kind = Some(input.parse()?),
                 "child_slots" => args.child_slots = Some(input.parse()?),
                 "child_slots_can_overflow" => args.child_slots_can_overflow = Some(input.parse()?),
@@ -87,7 +90,7 @@ impl Parse for RsObjectArgs {
                 _ => {
                     return Err(syn::Error::new(
                         name.span(),
-                        "expected `final`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
+                        "expected `final`, `immutable`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
                          `child_slots_can_overflow = <bool>`, `reflection = <path>` or \
                          `crate = <path>`",
                     ));
@@ -190,6 +193,9 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
     let mut derive_attrs = vec![quote!(#[type_key = #key]), quote!(#[type_register])];
     if args.type_final {
         derive_attrs.push(quote!(#[type_final]));
+    }
+    if args.immutable {
+        derive_attrs.push(quote!(#[type_immutable]));
     }
     if let Some(kind) = &args.s_eq_hash_kind {
         derive_attrs.push(quote!(#[type_s_eq_hash_kind = #kind]));

@@ -268,6 +268,10 @@ pub use tvm_ffi_macros::match_any;
 ///
 /// * `"type.Key"` - The type key.
 /// * `final` - The type has no subtypes.
+/// * `immutable` - Shared objects of the type are never mutated, so its
+///   references cross threads when its fields can
+///   ([`ImmutableObject`]); a field cannot be
+///   `writable`.
 /// * `s_eq_hash_kind = "TreeNode"` - The [`SEqHashKind`](crate::reflection::SEqHashKind) of structural
 ///   equality; by default the parent's.
 /// * `child_slots = N`, `child_slots_can_overflow = bool` - Type indices kept

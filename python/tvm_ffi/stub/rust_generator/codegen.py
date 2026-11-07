@@ -536,6 +536,7 @@ class _ObjectRenderer:
             "#[derive(tvm_ffi::derive::Object)]",
             f'#[type_key = "{self.type_key}"]',
             *(["#[type_final]"] if self.info.is_final else []),
+            *(["#[type_immutable]"] if self._is_immutable() else []),
             f"pub struct {self.obj_struct} {{",
             f"    base_: {base},",  # a reflected `base_` is rejected (`rust_ident`)
         ]
@@ -710,16 +711,22 @@ class _ObjectRenderer:
         )
         return sections
 
-    def _immutable_object_lines(self) -> list[str] | None:
-        """``ImmutableObject`` for a class that C++ declares not ``_type_mutable``.
+    def _is_immutable(self) -> bool:
+        """Whether C++ declares the class not ``_type_mutable`` and no field along its chain writable.
 
         Such a class only hands out const access and changes through copy-on-write,
-        so its handles may cross threads when its fields can. A mutable class, or one
-        whose mutability is not registered, stays single-threaded.
+        so its handles may cross threads when its fields can. A mutable class, one
+        whose mutability is not registered, or one with a ``def_rw`` field stays
+        single-threaded.
         """
         if self.info.is_mutable is not False:
-            return None
-        return [f"unsafe impl tvm_ffi::object::ImmutableObject for {self.obj_struct} {{}}"]
+            return False
+        chain = [
+            object_info_from_type_key(key)
+            for key in self.info.ancestors
+            if self._provider(key) in ("generated", "mapped")
+        ]
+        return all(field.frozen for info in [*chain, self.info] for field in info.fields)
 
     def _shallow_copy_lines(self) -> list[str] | None:
         """``ShallowCopy``, which a subtype defined in Rust needs of its parent's object.
@@ -787,8 +794,8 @@ class _ObjectRenderer:
         ]
 
     def _impl_sections(self, is_enum: bool) -> list[list[str]]:
-        """``ImmutableObject``, ``EnumRef`` and the upcasts, each that applies."""
-        sections = [self._immutable_object_lines()]
+        """``EnumRef`` and the upcasts, each that applies."""
+        sections: list[list[str]] = []
         if is_enum:
             sections.append([f"impl tvm_ffi::EnumRef for {self.leaf} {{}}"])
         sections.append(self._upcast_lines())

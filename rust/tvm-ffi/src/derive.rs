@@ -40,6 +40,11 @@
 /// binding that declares only part of its object must not be constructed:
 /// keep its fields private.
 ///
+/// `#[type_immutable]` implements
+/// [`ImmutableObject`](crate::object::ImmutableObject), as for a C++ type not
+/// registered as `_type_mutable`; a `writable` field does not compile with it,
+/// and every subtype must be immutable too.
+///
 /// `#[type_final]`, and with `#[type_register]` `#[type_child_slots = N]` and
 /// `#[type_child_slots_can_overflow = bool]`, mirror C++ `_type_final`,
 /// `_type_child_slots` (default 0) and `_type_child_slots_can_overflow`

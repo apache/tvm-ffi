@@ -53,6 +53,12 @@ pub(crate) fn expand_object(
         None => false,
     };
 
+    let type_immutable = match get_attr(derive_input, "type_immutable") {
+        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(_) => panic!("Expect #[type_immutable] attribute"),
+        None => false,
+    };
+
     // Whether this type is defined here, so that it registers its key, as C++
     // `TVM_FFI_DECLARE_OBJECT_INFO` does. Without it, the type binds a key
     // that its defining library, usually C++, has registered.
@@ -110,6 +116,25 @@ pub(crate) fn expand_object(
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
     let reflection = Reflection::parse(derive_input, rs_object);
+    if type_immutable {
+        let writable = reflection
+            .iter()
+            .flat_map(|reflection| &reflection.reflected)
+            .find(|field| field.flags.iter().any(|flag| flag == "writable"));
+        if let Some(field) = writable {
+            abort!(
+                field.id,
+                "an immutable type cannot have a #[reflect(writable)] field"
+            );
+        }
+    }
+    let immutable_impl = if type_immutable {
+        quote! {
+            unsafe impl #tvm_ffi_crate::object::ImmutableObject for #struct_name {}
+        }
+    } else {
+        quote! {}
+    };
     assert!(
         reflection.is_none() || (type_register && get_attr(derive_input, "type_index").is_none()),
         "#[reflect], #[type_s_eq_hash_kind] and #[type_reflection] need #[type_register] and no \
@@ -339,6 +364,8 @@ pub(crate) fn expand_object(
         }
 
         #shallow_copy_impl
+
+        #immutable_impl
 
         #register_at_load
     }

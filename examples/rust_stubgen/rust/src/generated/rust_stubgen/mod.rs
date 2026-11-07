@@ -76,6 +76,7 @@ impl TryFrom<i64> for PairKind {
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "rust_stubgen.IntPair"]
 #[type_final]
+#[type_immutable]
 pub struct IntPairObj {
     base_: Object,
     pub a: i64,
@@ -102,8 +103,6 @@ impl IntPair {
         Self { data_: ObjectArc::new(obj) }
     }
 }
-
-unsafe impl tvm_ffi::object::ImmutableObject for IntPairObj {}
 // tvm-ffi-stubgen(end)
 
 // Hand-written code lives outside the blocks; the generator never touches it.
