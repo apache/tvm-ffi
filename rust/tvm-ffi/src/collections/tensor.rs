@@ -361,13 +361,17 @@ impl Tensor {
         unsafe {
             let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
             // The fresh allocation is unique and has not been exposed.
-            let object = &mut *ObjectArc::as_mut_ptr(&mut obj_arc);
-            object.base_.dltensor.shape =
-                TensorObjFromNDAlloc::extra_items(object).as_ptr() as *mut i64;
-            object.base_.dltensor.strides = object.base_.dltensor.shape.add(shape.len());
-            let extra_items = TensorObjFromNDAlloc::extra_items_mut(object);
-            extra_items[..shape.len()].copy_from_slice(shape);
-            Shape::fill_strides_from_shape(shape, &mut extra_items[shape.len()..]);
+            let object = ObjectArc::as_mut_ptr(&mut obj_arc);
+            let items = TensorObjFromNDAlloc::extra_items_ptr(object);
+            std::ptr::copy_nonoverlapping(shape.as_ptr(), items, shape.len());
+            let strides = items.add(shape.len());
+            Shape::fill_strides_from_shape(
+                shape,
+                std::slice::from_raw_parts_mut(strides, shape.len()),
+            );
+            let object = &mut *object;
+            object.base_.dltensor.shape = items;
+            object.base_.dltensor.strides = strides;
             let dltensor_ptr = &object.base_.dltensor as *const DLTensor;
             object.base_.dltensor.data = object.alloc.alloc_data(&*dltensor_ptr);
             Self {

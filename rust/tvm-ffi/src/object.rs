@@ -155,7 +155,12 @@ impl<T: ObjectCore> ObjectArc<T> {
     }
 
     /// Allocate a stable object followed by its type's extra item storage.
-    pub fn new_with_extra_items<U>(data: T) -> Self
+    ///
+    /// # Safety
+    /// The extra items start uninitialized: the caller writes each of them,
+    /// through [`ObjectCoreWithExtraItems::extra_items_ptr`] of
+    /// [`as_mut_ptr`](Self::as_mut_ptr), before the object is read or shared.
+    pub unsafe fn new_with_extra_items<U>(data: T) -> Self
     where
         T: ObjectCoreWithExtraItems<ExtraItem = U>,
     {
@@ -441,35 +446,39 @@ unsafe impl<T: ObjectCore, A, Depth> ObjectDerivesFrom<A, marker::Parent<Depth>>
 /// An object type whose allocation is followed by a run of extra items, such
 /// as the dimensions of a [`Shape`](crate::Shape).
 ///
+/// The items lie past `Self`, so a pointer to them is derived from a pointer
+/// to the whole allocation, such as [`ObjectArc::as_ptr`], never from a
+/// `&Self`, which covers `Self` only.
+///
 /// # Safety
-/// Every allocation of `Self` must be followed by `extra_items_count` initialized
-/// `ExtraItem`s, as `ObjectArc::new_with_extra_items` lays them out.
+/// Every allocation of `Self` is followed by `extra_items_count` `ExtraItem`s,
+/// as [`ObjectArc::new_with_extra_items`] lays them out. The count stays the
+/// same for the object's life, and the items are never dropped.
 pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
     /// The type of the items that follow the object.
     type ExtraItem;
     /// The number of extra items.
     fn extra_items_count(this: &Self) -> usize;
+    /// A pointer to the first extra item.
+    ///
+    /// # Safety
+    /// `this` points to an allocation that carries its extra items, and its
+    /// provenance covers them.
+    unsafe fn extra_items_ptr(this: *mut Self) -> *mut Self::ExtraItem {
+        unsafe { this.cast::<u8>().add(std::mem::size_of::<Self>()).cast() }
+    }
     /// The extra items.
     ///
     /// # Safety
-    /// `this` must be an allocation that carries its extra items.
-    unsafe fn extra_items(this: &Self) -> &[Self::ExtraItem] {
-        let extra_items_ptr = (this as *const Self as *const u8).add(std::mem::size_of::<Self>());
-        std::slice::from_raw_parts(
-            extra_items_ptr as *const Self::ExtraItem,
-            Self::extra_items_count(this),
-        )
-    }
-    /// The extra items, mutably.
-    ///
-    /// # Safety
-    /// `this` must be an allocation that carries its extra items.
-    unsafe fn extra_items_mut(this: &mut Self) -> &mut [Self::ExtraItem] {
-        let extra_items_ptr = (this as *mut Self as *mut u8).add(std::mem::size_of::<Self>());
-        std::slice::from_raw_parts_mut(
-            extra_items_ptr as *mut Self::ExtraItem,
-            Self::extra_items_count(this),
-        )
+    /// As [`extra_items_ptr`](Self::extra_items_ptr), with the items
+    /// initialized and not written for `'a`.
+    unsafe fn extra_items<'a>(this: *const Self) -> &'a [Self::ExtraItem] {
+        unsafe {
+            std::slice::from_raw_parts(
+                Self::extra_items_ptr(this.cast_mut()),
+                Self::extra_items_count(&*this),
+            )
+        }
     }
 }
 
