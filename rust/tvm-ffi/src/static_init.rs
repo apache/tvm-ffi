@@ -81,13 +81,13 @@ macro_rules! static_init_block {
             #[linkme(crate = $crate::static_init::linkme)]
             static BLOCK: $crate::static_init::StaticInitBlock =
                 $crate::static_init::StaticInitBlock::__new(
-                    module_path!(),
-                    line!(),
-                    match option_env!("CARGO_PKG_VERSION") {
-                        Some(version) => version,
-                        None => "",
+                    ::core::module_path!(),
+                    ::core::line!(),
+                    match ::core::option_env!("CARGO_PKG_VERSION") {
+                        ::core::option::Option::Some(version) => version,
+                        ::core::option::Option::None => "",
                     },
-                    stringify!($($body)*),
+                    ::core::stringify!($($body)*),
                     __tvm_ffi_static_init_block_body,
                 );
             // A function item rather than a closure, to carry the attribute: a body that diverges,
