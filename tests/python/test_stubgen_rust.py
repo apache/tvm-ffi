@@ -384,23 +384,33 @@ pub struct PairObj {{
 
 impl PairObj {{
     pub fn a(&self) -> Result<i64> {{
-        FieldGetter::new(Self::type_index(), "a")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "a"));
+        GETTER.clone()?.get(self)
     }}
 
     pub fn tag(&self) -> Result<Option<String>> {{
-        FieldGetter::new(Self::type_index(), "tag")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "tag"));
+        GETTER.clone()?.get(self)
     }}
 
     pub fn items(&self) -> Result<Array<Any>> {{
-        FieldGetter::new(Self::type_index(), "items")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "items"));
+        GETTER.clone()?.get(self)
     }}
 
     pub fn owner(&self) -> Result<ObjectRef> {{
-        FieldGetter::new(Self::type_index(), "owner")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "owner"));
+        GETTER.clone()?.get(self)
     }}
 
     pub fn r#type(&self) -> Result<Any> {{
-        FieldGetter::new(Self::type_index(), "type")?.get_any(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "type"));
+        GETTER.clone()?.get_any(self)
     }}
 }}"""
 
@@ -425,6 +435,7 @@ def test_render_root_object() -> None:
         "tvm_ffi::ObjectCore",
         "tvm_ffi::reflection::FieldGetter",
         "tvm_ffi::Result",
+        "tvm_ffi::extra::cold_init_lazy_lock::ColdInitLazyLock",
         "tvm_ffi::String",
         "tvm_ffi::Array",
         "tvm_ffi::Any",
@@ -605,24 +616,34 @@ impl Deref for IterVarObj {{
 
 impl IterVarObj {{
     pub fn dom(&self) -> Result<Option<Range>> {{
-        FieldGetter::new(Self::type_index(), "dom")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "dom"));
+        GETTER.clone()?.get(self)
     }}
 
     pub fn var(&self) -> Result<PrimVar> {{
-        FieldGetter::new(Self::type_index(), "var")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "var"));
+        GETTER.clone()?.get(self)
     }}
 
     pub fn iter_type(&self) -> Result<IterVarType> {{
-        let raw: i64 = FieldGetter::new(Self::type_index(), "iter_type")?.get(self)?;
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "iter_type"));
+        let raw: i64 = GETTER.clone()?.get(self)?;
         IterVarType::try_from(raw)
     }}
 
     pub fn thread_tag(&self) -> Result<String> {{
-        FieldGetter::new(Self::type_index(), "thread_tag")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "thread_tag"));
+        GETTER.clone()?.get(self)
     }}
 
     pub fn span(&self) -> Result<Option<Span>> {{
-        FieldGetter::new(Self::type_index(), "span")?.get(self)
+        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
+            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "span"));
+        GETTER.clone()?.get(self)
     }}
 }}
 
@@ -919,7 +940,7 @@ def test_reflected_base_and_data_keep_their_names() -> None:
     RUST.add_directive(imports, "visibility", "demo.Node.cache_ -> pub(crate)", 1)
     text, _ = _render(_info("demo.Node", (_field("base", "int"), _field("cache_", "int"))), imports)
     assert (
-        'pub fn base(&self) -> Result<i64> {\n        FieldGetter::new(Self::type_index(), "base")'
+        "pub fn base(&self) -> Result<i64> {\n        static GETTER: ColdInitLazyLock<Result<FieldGetter>> ="
         in text
     )
     assert "    pub(crate) fn cache_(&self) -> Result<i64> {" in text
@@ -1883,7 +1904,9 @@ def test_ffi_field_type_off_the_default_ty_map_reads_as_any() -> None:
     text, imports = _render(_info("demo.Doc", (_field("interrupt", "ffi.VisitInterrupt"),)))
     assert (
         "    pub fn interrupt(&self) -> Result<Any> {\n"
-        '        FieldGetter::new(Self::type_index(), "interrupt")?.get_any(self)\n'
+        "        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =\n"
+        '            ColdInitLazyLock::new(|| FieldGetter::new(DocObj::type_index(), "interrupt"));\n'
+        "        GETTER.clone()?.get_any(self)\n"
     ) in text
     assert not any("VisitInterrupt" in path for path in _uses(imports))
 
@@ -1903,7 +1926,9 @@ def test_any_field_of_an_opaque_type_reads_through_get_any() -> None:
     text, _ = _render(_info("demo.Literal", (_field("value", "Any"),)))
     assert (
         "    pub fn value(&self) -> Result<Any> {\n"
-        '        FieldGetter::new(Self::type_index(), "value")?.get_any(self)\n'
+        "        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =\n"
+        '            ColdInitLazyLock::new(|| FieldGetter::new(LiteralObj::type_index(), "value"));\n'
+        "        GETTER.clone()?.get_any(self)\n"
     ) in text
 
 
