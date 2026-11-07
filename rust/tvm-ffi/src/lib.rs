@@ -53,6 +53,9 @@
 //! * A [`TensorView`] received as a function argument is valid only during
 //!   the call, and so is an [`Any`] holding a `DLTensor*` converted from it
 //!   or from an [`AnyView`].
+//! * A registered structural visit or mutate hook uses the visitor or
+//!   mutator only through its arguments, during the call, and does not keep
+//!   it.
 #![warn(missing_docs)]
 
 // Lets macro-generated `::tvm_ffi` paths resolve inside this crate too.
@@ -265,7 +268,9 @@ pub use tvm_ffi_macros::match_any;
 ///   ([`ImmutableObject`](crate::object::ImmutableObject)); a field, own or
 ///   inherited, cannot be `writable`. Every subtype must be `immutable` too.
 /// * `s_eq_hash_kind = "TreeNode"` - The [`SEqHashKind`](crate::reflection::SEqHashKind) of structural
-///   equality; by default the parent's.
+///   equality; by default the parent's. Structural equality and hashing see
+///   the fields only when the type or an ancestor has one, and otherwise fail
+///   with a `TypeError`.
 /// * `child_slots = N`, `child_slots_can_overflow = bool` - Type indices kept
 ///   for subtypes; 0 and `true` by default.
 /// * `reflection = path` - A `fn(&mut ObjectDef<Self>)` that registers the

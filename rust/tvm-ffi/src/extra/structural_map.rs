@@ -178,6 +178,9 @@ where
 /// this function consumes `root`, an error does not return the partly mapped
 /// root to the caller.
 ///
+/// Callbacks must report failures through [`Result`] and must not panic: a panic
+/// reaching the non-unwinding native callback boundary aborts the process.
+///
 /// A callback must not modify an `ffi.List` or `ffi.Dict` that holds the
 /// value it receives or one of that value's ancestors: the traversal borrows
 /// their cells while the callback runs. A callback that returns an `Error`
