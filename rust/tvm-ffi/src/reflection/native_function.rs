@@ -161,6 +161,8 @@ impl<Args, R> NativeFunction<Args, R> {
     ///
     /// See also [`NativeFunction`].
     pub unsafe fn from_any(value: Any) -> Result<Self> {
+        // Every writer of a hook slot vouches for its signature, including
+        // writes through a container-valued column.
         let raw = value.as_raw_ffi_any();
         // SAFETY: `v_ptr` is the payload of an opaque pointer.
         let native = raw.type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32

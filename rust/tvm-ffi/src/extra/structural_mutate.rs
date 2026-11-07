@@ -179,6 +179,8 @@ unsafe impl StructuralMutatorBase for StructuralMutatorObj {
         // Prefix-only: remaps go through the vtable, so any base may reuse this.
         let raw = value.value;
         // Registered hooks own their remapping policy; reflection handles its own.
+        // A hook that rewrites fields keeps the rebuilt object valid for the
+        // refined references that point at it.
         if let Some(attr) = Self::structural_mutate_hook(raw, value.mode) {
             return Self::call_structural_mutate_hook_raw(runtime, raw, attr);
         }
@@ -689,9 +691,10 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
     /// `value` itself again.
     ///
     /// Children are found by the type's registered mutation hook or its reflected
-    /// fields. The result is unchanged when no child changed; otherwise it is a
-    /// node with the new children, made in place when `value` allows it and is
-    /// uniquely owned.
+    /// fields. A hook uses the mutator only through its arguments, during the
+    /// call, and must not keep it or call it outside them. The result is
+    /// unchanged when no child changed; otherwise it is a node with the new
+    /// children, made in place when `value` allows it and is uniquely owned.
     ///
     /// # Arguments
     ///

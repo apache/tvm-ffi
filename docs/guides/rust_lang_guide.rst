@@ -858,7 +858,8 @@ context for that invocation. Contexts do not own or retain a second reference to
 the dispatcher. They cannot escape the callback or move to another thread.
 
 Default descent uses registered structural hooks, then reflection for types
-without a hook.
+without a hook. A hook uses the visitor only through its arguments, during the
+call, and must not keep it or call it outside them.
 
 ``AnyView<'_>`` is passed by value to catch-all visit, walk, and map callbacks;
 mutation dispatch consumes ``MutationView<'_>`` instead. Copying an ``AnyView``
@@ -945,7 +946,8 @@ Default recursion uses the registered type attributes: it calls
 falls back to ``__s_mutate__``. Each hook receives the active Rust-backed
 mutator and can recurse through its language-independent vtable. This lets the
 implementation that registered the type own its storage and mutation rules.
-When a type has no hook, object-backed values use reflected fields.
+A hook uses the mutator only through its arguments, during the call, and must
+not keep it or call it outside them. When a type has no hook, object-backed values use reflected fields.
 
 Callbacks may return ``Result<T>`` for any ``T`` convertible into ``Any``; for
 example, an integer handler can return ``Result<i64>`` to report failures and use
