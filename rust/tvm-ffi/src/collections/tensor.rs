@@ -36,8 +36,9 @@ use tvm_ffi_sys::{TVMFFIEnvTensorAlloc, TVMFFIObjectHandle};
 /// Allocates the data buffer of a tensor made by [`Tensor::from_nd_alloc`].
 ///
 /// # Safety
-/// `alloc_data` must return a pointer aligned to `MIN_ALIGN` and valid for
-/// `numel() * item_size()` bytes of the prototype, and `free_data` must release
+/// `alloc_data` must return a pointer aligned to `MIN_ALIGN` and valid for the
+/// prototype's data, `numel() * bits * lanes` bits rounded up to whole bytes
+/// (sub-byte types are packed), and `free_data` must release
 /// exactly what `alloc_data` returned.
 pub unsafe trait NDAllocator: 'static {
     /// The minimum alignment of the allocated data, in bytes.
@@ -96,11 +97,14 @@ fn checked_numel(shape: &[i64]) -> Option<usize> {
     })
 }
 
-/// The bytes of `tensor`'s data; it fits in `isize`, as an allocation must.
+/// The bytes of `tensor`'s data, with sub-byte types packed as C++
+/// `GetDataSize` does; it fits in `isize`, as an allocation must.
 fn data_size(tensor: &DLTensor) -> usize {
+    let bits = tensor.dtype.bits as usize * tensor.dtype.lanes as usize;
     tensor
         .numel()
-        .checked_mul(tensor.item_size())
+        .checked_mul(bits)
+        .map(|total| total.div_ceil(8))
         .filter(|&size| size <= isize::MAX as usize)
         .expect("tensor byte size overflows isize")
 }
