@@ -68,6 +68,9 @@ pub unsafe trait NDAllocator: 'static {
 /// Size queries on a `DLTensor`.
 pub trait DLTensorExt {
     /// The number of elements: the product of the shape, 1 for a scalar.
+    ///
+    /// # Panics
+    /// If an extent is negative or the product overflows `usize`.
     fn numel(&self) -> usize;
     /// The bytes of one element: `bits * lanes`, rounded up to whole bytes.
     fn item_size(&self) -> usize;
@@ -79,16 +82,29 @@ impl DLTensorExt for DLTensor {
         if self.ndim <= 0 {
             return 1;
         }
-        unsafe {
-            std::slice::from_raw_parts(self.shape, self.ndim as usize)
-                .iter()
-                .product::<i64>() as usize
-        }
+        let shape = unsafe { std::slice::from_raw_parts(self.shape, self.ndim as usize) };
+        checked_numel(shape).expect("tensor shape has a negative extent or overflows usize")
     }
 
     fn item_size(&self) -> usize {
         (self.dtype.bits as usize * self.dtype.lanes as usize).div_ceil(8)
     }
+}
+
+/// The product of `shape`; `None` if an extent is negative or it overflows.
+fn checked_numel(shape: &[i64]) -> Option<usize> {
+    shape.iter().try_fold(1usize, |numel, &extent| {
+        numel.checked_mul(usize::try_from(extent).ok()?)
+    })
+}
+
+/// The bytes of `tensor`'s data; it fits in `isize`, as an allocation must.
+fn data_size(tensor: &DLTensor) -> usize {
+    tensor
+        .numel()
+        .checked_mul(tensor.item_size())
+        .filter(|&size| size <= isize::MAX as usize)
+        .expect("tensor byte size overflows isize")
 }
 
 //-----------------------------------------------------
@@ -243,6 +259,9 @@ impl Tensor {
     }
 
     /// The number of elements.
+    ///
+    /// # Panics
+    /// As [`DLTensorExt::numel`].
     pub fn numel(&self) -> usize {
         self.data.dltensor.numel()
     }
@@ -320,6 +339,9 @@ impl Tensor {
     ///
     /// # Returns
     /// The new tensor, with row-major strides.
+    ///
+    /// # Panics
+    /// If an extent of `shape` is negative or the byte size overflows `isize`.
     pub fn from_nd_alloc<TNDAlloc>(
         alloc: TNDAlloc,
         shape: &[i64],
@@ -329,17 +351,23 @@ impl Tensor {
     where
         TNDAlloc: NDAllocator,
     {
+        let dltensor = DLTensor {
+            data: std::ptr::null_mut(),
+            device,
+            ndim: shape.len() as i32,
+            dtype,
+            shape: shape.as_ptr() as *mut i64,
+            strides: std::ptr::null_mut(),
+            byte_offset: 0,
+        };
+        // Allocators size the data from the shape, so check it before allocating.
+        data_size(&dltensor);
         let tensor_obj = TensorObjFromNDAlloc {
             base_: TensorObj {
                 object: Object::new(),
                 dltensor: DLTensor {
-                    data: std::ptr::null_mut(),
-                    device,
-                    ndim: shape.len() as i32,
-                    dtype,
                     shape: std::ptr::null_mut(),
-                    strides: std::ptr::null_mut(),
-                    byte_offset: 0,
+                    ..dltensor
                 },
             },
             alloc,
@@ -409,14 +437,15 @@ impl Tensor {
     /// The new tensor, allocated with [`CPUNDAlloc`].
     ///
     /// # Errors
-    /// A `ValueError` if `slice` does not have as many elements as `shape`.
+    /// A `ValueError` if `slice` does not have as many elements as `shape`,
+    /// or `shape` has a negative extent.
     pub fn from_slice<T: AsDLDataType>(slice: &[T], shape: &[i64]) -> Result<Self> {
+        if checked_numel(shape) != Some(slice.len()) {
+            crate::bail!(crate::error::VALUE_ERROR, "Slice length mismatch");
+        }
         let dtype = T::DL_DATA_TYPE;
         let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
         let tensor = Tensor::from_nd_alloc(CPUNDAlloc, shape, dtype, device);
-        if tensor.numel() != slice.len() {
-            crate::bail!(crate::error::VALUE_ERROR, "Slice length mismatch");
-        }
         // SAFETY: the tensor was just allocated, so nothing else can access it.
         unsafe { tensor.data_as_slice_mut::<T>()? }.copy_from_slice(slice);
         Ok(tensor)
@@ -432,9 +461,7 @@ unsafe impl NDAllocator for CPUNDAlloc {
     const MIN_ALIGN: usize = 64;
 
     unsafe fn alloc_data(&mut self, prototype: &DLTensor) -> *mut core::ffi::c_void {
-        let numel = prototype.numel();
-        let item_size = prototype.item_size();
-        let size = numel * item_size;
+        let size = data_size(prototype);
         // A zero-size allocation is undefined behavior; an empty tensor gets an
         // aligned dangling pointer, which `free_data` does not release.
         if size == 0 {
@@ -449,9 +476,7 @@ unsafe impl NDAllocator for CPUNDAlloc {
     }
 
     unsafe fn free_data(&mut self, tensor: &DLTensor) {
-        let numel = tensor.numel();
-        let item_size = tensor.item_size();
-        let size = numel * item_size;
+        let size = data_size(tensor);
         if size == 0 {
             return;
         }
@@ -546,8 +571,11 @@ impl<'a> TensorView<'a> {
     }
 
     /// The number of elements.
+    ///
+    /// # Panics
+    /// As [`DLTensorExt::numel`].
     pub fn numel(&self) -> usize {
-        self.shape().iter().product::<i64>() as usize
+        self.dltensor().numel()
     }
 
     /// The strides, in elements.
