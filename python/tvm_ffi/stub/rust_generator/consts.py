@@ -123,6 +123,13 @@ RUST_MOD_MAP = {
 #: Root of the object hierarchy.
 RUST_ROOT_TYPE_KEY = "ffi.Object"
 
+#: Builtin types whose object struct the crate defines; a subtype embeds it as ``base_``.
+RUST_CRATE_OBJECTS = {"ffi.Enum": "tvm_ffi::EnumObj"}
+
+#: Root of the enum types: their registry allocates the values, and their references
+#: implement ``tvm_ffi::EnumRef``.
+RUST_ENUM_TYPE_KEY = "ffi.Enum"
+
 #: Keywords a field name may collide with: spelled ``r#name``, or ``name_`` for the four
 #: that cannot be raw identifiers.
 RUST_KEYWORDS = frozenset(

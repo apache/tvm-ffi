@@ -475,7 +475,7 @@ def test_render_derived_object_cross_module() -> None:
 
 
 def test_render_object_under_builtin_parent() -> None:
-    """A builtin parent is embedded via header-only stand-ins so `TYPE_DEPTH` matches the registry."""
+    """A builtin parent the crate lacks is a header-only stand-in, so `TYPE_DEPTH` matches."""
     info = _info(
         "demo.Color",
         (_field("value", "int"),),
@@ -484,13 +484,12 @@ def test_render_object_under_builtin_parent() -> None:
     )
     text, imports = _render(info)
     assert "    base_: FfiIntEnumObj," in text
-    # One stand-in per builtin ancestor below `ffi.Object`, chained through `base`.
-    assert imports.builtin_mirrors == {"ffi.Enum": "Object", "ffi.IntEnum": "FfiEnumObj"}
-    assert "tvm_ffi::Object" in _uses(imports)
-    # No Deref, upcast or crate import for the stand-ins.
+    # One stand-in per builtin ancestor below the crate's `EnumObj`, chained through `base`.
+    assert imports.builtin_mirrors == {"ffi.IntEnum": "EnumObj"}
+    assert "tvm_ffi::EnumObj" in _uses(imports)
+    # No Deref or upcast for the stand-ins.
     assert "impl Deref for ColorObj" not in text
     assert "unsafe_impl_object_ref_upcast" not in text
-    assert not any("Enum" in path for path in _uses(imports))
     # A child of `ffi.Object` embeds the crate's header.
     text, imports = _render(_info("demo.Root"))
     assert "    base_: Object," in text
@@ -507,17 +506,8 @@ def test_render_object_under_builtin_parent() -> None:
 
 
 BUILTIN_MIRRORS_EXPECTED = """\
-use tvm_ffi::Object;
+use tvm_ffi::EnumObj;
 use tvm_ffi::ObjectArc;
-
-/// Header-only stand-in for the builtin `ffi.Enum`; it only carries the ancestor depth.
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(tvm_ffi::derive::Object)]
-#[type_key = "ffi.Enum"]
-struct FfiEnumObj {
-    base_: Object,
-}
 
 /// Header-only stand-in for the builtin `ffi.IntEnum`; it only carries the ancestor depth.
 #[allow(dead_code)]
@@ -525,7 +515,7 @@ struct FfiEnumObj {
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ffi.IntEnum"]
 struct FfiIntEnumObj {
-    base_: FfiEnumObj,
+    base_: EnumObj,
 }
 
 /// Header-only stand-in for the builtin `ffi.StrEnum`; it only carries the ancestor depth.
@@ -534,7 +524,7 @@ struct FfiIntEnumObj {
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ffi.StrEnum"]
 struct FfiStrEnumObj {
-    base_: FfiEnumObj,
+    base_: EnumObj,
 }"""
 
 
@@ -1279,19 +1269,16 @@ def test_opaque_directive_vetoes_a_complete_type() -> None:
 
 
 def test_builtin_parent_keeps_the_type_opaque() -> None:
-    """The crate never mirrors a builtin's bytes: the header-only stand-in cannot be complete."""
-    # Fieldless under `ffi.Enum` (48 bytes): the fill criterion alone would call this complete.
-    info = _info(
-        "demo.Flag", parent="ffi.Enum", ancestors=["ffi.Object", "ffi.Enum"], total_size=48
-    )
-    text, _ = _render(info)
-    assert "/// Opaque: parent 'ffi.Enum' is opaque (no-mirror)." in text
-    assert "    base_: FfiEnumObj," in text
-    assert "const _: () =" not in text
+    """The crate's `EnumObj` is a complete parent; a builtin stand-in cannot be one."""
+    # An enum type embeds `EnumObj`; its registry allocates the values, so there is no `new`.
+    text, _ = _render(object_info_from_type_key("testing.TestEnumVariant"))
+    assert "/// Complete: reflected fields fill [48, 48) exactly." in text
+    assert "    base_: EnumObj," in text
+    assert "size_of::<TestEnumVariantObj>() == 48" in text
     assert "fn new(" not in text
-    # The registry fixtures under `ffi.Enum` / `ffi.IntEnum` / `ffi.StrEnum` follow the same rule.
+    assert "impl tvm_ffi::EnumRef for TestEnumVariant {}" in text
+    # The crate never mirrors the bytes of `ffi.IntEnum` / `ffi.StrEnum`.
     for type_key, parent in (
-        ("testing.TestEnumVariant", "ffi.Enum"),
         ("testing.TestCxxIntEnum", "ffi.IntEnum"),
         ("testing.TestCxxStrEnum", "ffi.StrEnum"),
     ):
@@ -1299,6 +1286,7 @@ def test_builtin_parent_keeps_the_type_opaque() -> None:
         assert f"/// Opaque: parent '{parent}' is opaque (no-mirror)." in text
         assert "const _: () =" not in text
         assert "fn new(" not in text
+        assert f"impl tvm_ffi::EnumRef for {type_key.rpartition('.')[2]} {{}}" in text
 
 
 def test_opaque_parent_keeps_the_child_opaque() -> None:
@@ -1506,11 +1494,11 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     ) in text
     # Builtin ancestors are mirrored once, in the import section; enum fixtures embed the last one.
-    assert text.count("struct FfiEnumObj {\n    base_: Object,\n}") == 1
-    assert text.count("struct FfiIntEnumObj {\n    base_: FfiEnumObj,\n}") == 1
-    assert text.count("struct FfiStrEnumObj {\n    base_: FfiEnumObj,\n}") == 1
+    assert "struct FfiEnumObj" not in text
+    assert text.count("struct FfiIntEnumObj {\n    base_: EnumObj,\n}") == 1
+    assert text.count("struct FfiStrEnumObj {\n    base_: EnumObj,\n}") == 1
     assert text.index("struct FfiIntEnumObj") < text.index(f"{C.RUST_SYNTAX.begin} object/")
-    assert "pub struct TestEnumVariantObj {\n    base_: FfiEnumObj,\n}" in text
+    assert "pub struct TestEnumVariantObj {\n    base_: EnumObj,\n}" in text
     assert "pub struct TestCxxIntEnumObj {\n    base_: FfiIntEnumObj,\n}" in text
     assert "pub struct TestCxxStrEnumObj {\n    base_: FfiStrEnumObj,\n}" in text
     # Running again over the generated tree is a no-op.

@@ -38,10 +38,13 @@ A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, an
 ``ffi.*`` type the default ``ty-map`` does not list, ...) makes the type opaque
 and is read as ``Any``; an ``opaque`` directive vetoes a reproducible layout; a
 scalar width named by a directive is checked against the reflected field size.
-A builtin parent (``ffi.IntEnum``, say) has no
+A builtin parent the crate defines (``ffi.Enum``: ``tvm_ffi::EnumObj``) is
+embedded as it is. Any other builtin parent (``ffi.IntEnum``, say) has no
 ``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
-per builtin ancestor so ``derive(Object)`` computes the registry's
+per such ancestor so ``derive(Object)`` computes the registry's
 ``TYPE_DEPTH``, and everything under such a parent stays opaque (``no-mirror``).
+An enum type (under ``ffi.Enum``) has no allocator, since its registry
+allocates the values, and its reference implements ``tvm_ffi::EnumRef``.
 
 Every type key an object refers to (parent, ancestors, field types) must be
 provided in the same run: ``ffi.*`` by the crate, a ``ty-map`` by a hand-written
@@ -223,8 +226,9 @@ class _ObjectRenderer:
     def _base_type(self) -> tuple[str, bool]:
         """Resolve the ``base_`` struct and whether it is a generated or ``ty-map``'d parent.
 
-        A builtin parent below ``ffi.Object`` is embedded as its header-only
-        stand-in (see :meth:`RustImports.record_builtin_base`).
+        A builtin parent below ``ffi.Object`` is embedded as the crate's object
+        struct, or as its header-only stand-in over the deepest builtin ancestor the
+        crate defines (see :meth:`RustImports.record_builtin_base`).
         """
         parent = self.info.parent_type_key
         if parent is not None:
@@ -237,7 +241,11 @@ class _ObjectRenderer:
         if parent not in (None, C_RUST.RUST_ROOT_TYPE_KEY, *chain):
             chain.append(parent)
         assert all(self._provider(key) == "crate" for key in chain), (self.type_key, chain)
-        return self.imports.record_builtin_base(chain), False
+        root = "tvm_ffi::Object"
+        for i, key in enumerate(chain):
+            if key in C_RUST.RUST_CRATE_OBJECTS:
+                root, chain = C_RUST.RUST_CRATE_OBJECTS[key], chain[i + 1 :]
+        return self.imports.record_builtin_base(chain, root), False
 
     # --- classification ----------------------------------------------------
 
@@ -251,11 +259,14 @@ class _ObjectRenderer:
         def renderable(field: NamedTypeSchema) -> bool:
             return self._field_mirror(owner_of[id(field)], field, scratch) is not None
 
-        # Builtin ancestors are header-only stand-ins (`_base_type`): none below is complete.
+        # Builtin ancestors the crate does not define are header-only stand-ins
+        # (`_base_type`): none below is complete.
         unmirrored = {
             key
             for key in self.info.ancestors
-            if key != C_RUST.RUST_ROOT_TYPE_KEY and self._provider(key) == "crate"
+            if key != C_RUST.RUST_ROOT_TYPE_KEY
+            and key not in C_RUST.RUST_CRATE_OBJECTS
+            and self._provider(key) == "crate"
         }
         verdicts = classify(
             infos,
@@ -721,6 +732,14 @@ class _ObjectRenderer:
             "}",
         ]
 
+    def _impl_sections(self, is_enum: bool) -> list[list[str]]:
+        """``ImmutableObject``, ``EnumRef`` and the upcasts, each that applies."""
+        sections = [self._immutable_object_lines()]
+        if is_enum:
+            sections.append([f"impl tvm_ffi::EnumRef for {self.leaf} {{}}"])
+        sections.append(self._upcast_lines())
+        return [section for section in sections if section]
+
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
         self.imports.reserved.update((self.leaf, self.obj_struct))
@@ -731,6 +750,7 @@ class _ObjectRenderer:
         if has_parent:
             self.imports.record("std::ops::Deref")
         fields = self.info.fields
+        is_enum = C_RUST.RUST_ENUM_TYPE_KEY in self.info.ancestors
         has_accessors = bool(fields) and not verdict.is_complete
         if has_accessors:
             self.imports.record("tvm_ffi::ObjectCore")  # `Self::type_index()`
@@ -771,18 +791,13 @@ class _ObjectRenderer:
                     "}",
                 ]
             )
-        elif verdict.is_complete:
+        elif verdict.is_complete and not is_enum:
             sections += self._allocator_sections(base, has_parent)
             shallow_copy = self._shallow_copy_lines()
             if shallow_copy:
                 sections.append(shallow_copy)
                 sections.append(self._unsafe_init_lines())
-        thread_safe = self._immutable_object_lines()
-        if thread_safe:
-            sections.append(thread_safe)
-        upcasts = self._upcast_lines()
-        if upcasts:
-            sections.append(upcasts)
+        sections += self._impl_sections(is_enum)
 
         lines: list[str] = []
         for i, section in enumerate(sections):
