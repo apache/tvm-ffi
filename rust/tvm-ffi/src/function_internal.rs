@@ -38,12 +38,12 @@ pub fn panic_to_error(payload: Box<dyn std::any::Any + Send>) -> Error {
 /// The arguments of a packed call from C.
 ///
 /// # Safety
-/// `num_args` is not negative, and if it is positive, `args` must point to
-/// `num_args` valid arguments that outlive `'a`.
+/// If `num_args` is positive, `args` must point to `num_args` valid
+/// arguments that outlive `'a`.
 #[doc(hidden)]
 #[inline(always)]
 pub unsafe fn packed_args<'a>(args: *const TVMFFIAny, num_args: i32) -> &'a [AnyView<'a>] {
-    if num_args == 0 {
+    if num_args <= 0 {
         // A predicted branch: a select would make the argument loads depend
         // on `num_args`.
         core::hint::cold_path();
