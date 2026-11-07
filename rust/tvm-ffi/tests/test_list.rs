@@ -226,14 +226,14 @@ fn test_list_reserve() {
 #[test]
 fn test_list_ends() {
     let list: List<i64> = List::new();
-    assert!(list.first().is_err());
-    assert!(list.last().is_err());
-    assert!(list.pop().is_err());
+    assert_eq!(list.first().unwrap(), None);
+    assert_eq!(list.last().unwrap(), None);
+    assert_eq!(list.pop().unwrap(), None);
     list.extend([1i64, 2, 3]).unwrap();
-    assert_eq!(list.first().unwrap(), 1);
-    assert_eq!(list.last().unwrap(), 3);
-    assert_eq!(list.pop().unwrap(), 3);
-    assert_eq!(list.pop().unwrap(), 2);
+    assert_eq!(list.first().unwrap(), Some(1));
+    assert_eq!(list.last().unwrap(), Some(3));
+    assert_eq!(list.pop().unwrap(), Some(3));
+    assert_eq!(list.pop().unwrap(), Some(2));
     assert_eq!(list.len(), 1);
 }
 

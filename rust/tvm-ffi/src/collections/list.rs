@@ -382,28 +382,30 @@ impl<T: ContainerElement> List<T> {
         unsafe { ListObj::truncate(self.obj(), 0) }
     }
 
-    /// Returns the first element, or an `INDEX_ERROR` if the list is empty.
-    pub fn first(&self) -> Result<T> {
-        if self.is_empty() {
-            return index_error("first");
-        }
-        self.get(0)
-    }
-
-    /// Returns the last element, or an `INDEX_ERROR` if the list is empty.
-    pub fn last(&self) -> Result<T> {
+    /// Returns the first element, or `None` if the list is empty; a
+    /// `TYPE_ERROR` as [`get`](Self::get) gives it.
+    pub fn first(&self) -> Result<Option<T>> {
         match self.len() {
-            0 => index_error("last"),
-            len => self.get(len - 1),
+            0 => Ok(None),
+            _ => self.get(0).map(Some),
         }
     }
 
-    /// Removes and returns the last element, or an `INDEX_ERROR` if the list
-    /// is empty.
-    pub fn pop(&self) -> Result<T> {
+    /// Returns the last element, or `None` if the list is empty; a
+    /// `TYPE_ERROR` as [`get`](Self::get) gives it.
+    pub fn last(&self) -> Result<Option<T>> {
         match self.len() {
-            0 => index_error("pop"),
-            len => self.remove(len - 1),
+            0 => Ok(None),
+            len => self.get(len - 1).map(Some),
+        }
+    }
+
+    /// Removes and returns the last element, or `None` if the list is empty;
+    /// a `TYPE_ERROR` as [`remove`](Self::remove) gives it.
+    pub fn pop(&self) -> Result<Option<T>> {
+        match self.len() {
+            0 => Ok(None),
+            len => self.remove(len - 1).map(Some),
         }
     }
 
@@ -523,9 +525,9 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Returns a double-ended iterator over the elements, yielding
-    /// `Result<T>`; see [`ListIterator`].
-    pub fn iter(&self) -> ListIterator<'_, T> {
-        ListIterator {
+    /// `Result<T>`; see [`Iter`].
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
             list: self,
             index: 0,
             back: usize::MAX,
@@ -571,7 +573,7 @@ impl<T: ContainerElement> FromIterator<T> for List<T> {
 /// it there), and then moves on to the next element. It re-reads the length
 /// on every step, so it stays in bounds if the list is mutated meanwhile;
 /// iterating from the back (`rev`) pins the end at the first back step.
-pub struct ListIterator<'a, T> {
+pub struct Iter<'a, T> {
     list: &'a List<T>,
     index: usize,
     /// One past the last position still to visit from the back; `usize::MAX`
@@ -579,7 +581,7 @@ pub struct ListIterator<'a, T> {
     back: usize,
 }
 
-impl<T: ContainerElement> ListIterator<'_, T> {
+impl<T: ContainerElement> Iter<'_, T> {
     #[inline]
     fn end(&self) -> usize {
         self.back.min(self.list.len())
@@ -594,7 +596,7 @@ impl<T: ContainerElement> ListIterator<'_, T> {
     }
 }
 
-impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
+impl<T: ContainerElement> Iterator for Iter<'_, T> {
     type Item = Result<T>;
 
     #[inline]
@@ -613,7 +615,7 @@ impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
     }
 }
 
-impl<T: ContainerElement> DoubleEndedIterator for ListIterator<'_, T> {
+impl<T: ContainerElement> DoubleEndedIterator for Iter<'_, T> {
     #[inline]
     fn next_back(&mut self) -> Option<Result<T>> {
         let end = self.end();
@@ -627,7 +629,7 @@ impl<T: ContainerElement> DoubleEndedIterator for ListIterator<'_, T> {
 
 impl<'a, T: ContainerElement> IntoIterator for &'a List<T> {
     type Item = Result<T>;
-    type IntoIter = ListIterator<'a, T>;
+    type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
