@@ -164,6 +164,9 @@ impl<T: ObjectCore> ObjectArc<T> {
     where
         T: ObjectCoreWithExtraItems<ExtraItem = U>,
     {
+        // `data` may describe items it does not hold yet, so a panic before
+        // the write leaks it rather than dropping it.
+        let data = std::mem::ManuallyDrop::new(data);
         unsafe {
             // ensure strict alignment requirements
             // so we can have { T, U*extra_items } layout
@@ -176,7 +179,7 @@ impl<T: ObjectCore> ObjectArc<T> {
                 std::alloc::handle_alloc_error(layout);
             }
             let ptr = raw_data_ptr as *mut T;
-            std::ptr::write(ptr, data);
+            std::ptr::write(ptr, std::mem::ManuallyDrop::into_inner(data));
             // now override the header directly
             std::ptr::write(
                 ptr as *mut TVMFFIObject,
@@ -1162,10 +1165,16 @@ pub mod unsafe_ {
 
     /// Layout of a `T` followed by `count` extra items, kept at least one word past the
     /// header: once a weak reference outlives the data, the deleter stores `count` there.
+    /// Panics with "capacity overflow" (like `Vec`) when the size does not fit in `isize`.
     pub(crate) fn extra_items_layout<T, U>(count: usize) -> std::alloc::Layout {
-        let size = std::mem::size_of::<T>() + count * std::mem::size_of::<U>();
+        use std::alloc::Layout;
         let min_size = std::mem::size_of::<TVMFFIObject>() + std::mem::size_of::<u64>();
-        std::alloc::Layout::from_size_align(size.max(min_size), std::mem::align_of::<T>()).unwrap()
+        Layout::array::<U>(count)
+            .and_then(|items| Layout::new::<T>().extend(items))
+            .and_then(|(layout, _)| {
+                Layout::from_size_align(layout.size().max(min_size), layout.align())
+            })
+            .expect("capacity overflow")
     }
 
     pub(crate) unsafe extern "C" fn object_deleter_for_new_with_extra_items<T, U>(
