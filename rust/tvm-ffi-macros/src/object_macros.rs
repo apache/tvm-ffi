@@ -174,7 +174,7 @@ pub(crate) fn expand_object(
                                 parent,
                             );
                             if tindex < 0 {
-                                panic!(
+                                ::core::panic!(
                                     "Failed to get or allocate type index for type key: {}",
                                     #type_key
                                 );
@@ -203,7 +203,7 @@ pub(crate) fn expand_object(
                                 &type_key_arg, &mut tindex
                             );
                             if ret != 0 {
-                                panic!(
+                                ::core::panic!(
                                     "Type key {} is not registered: load the library that defines \
                                      it first, or add #[type_register] if this crate defines it",
                                     #type_key
@@ -486,8 +486,8 @@ impl Reflection {
     ) -> proc_macro2::TokenStream {
         let reflection = quote!(#tvm_ffi_crate::reflection);
         let kind = match &self.kind {
-            Some(kind) => quote!(Some(#reflection::SEqHashKind::#kind)),
-            None => quote!(None),
+            Some(kind) => quote!(::core::option::Option::Some(#reflection::SEqHashKind::#kind)),
+            None => quote!(::core::option::Option::None),
         };
         let fields = self.reflected.iter().map(|field| {
             let ReflectedField {
@@ -525,9 +525,9 @@ impl Reflection {
         });
         let methods = methods.unwrap_or_else(|| quote!(|_| {}));
         let creator = if self.unsafe_init {
-            quote!(Some(#reflection::unsafe_init_creator::<#struct_name>))
+            quote!(::core::option::Option::Some(#reflection::unsafe_init_creator::<#struct_name>))
         } else {
-            quote!(None)
+            quote!(::core::option::Option::None)
         };
         quote! {
             let registered = #reflection::register_object::<#struct_name>(
@@ -536,12 +536,12 @@ impl Reflection {
                 #creator,
                 |def| {
                     #(#fields)*
-                    Ok(def)
+                    ::core::result::Result::Ok(def)
                 },
                 #methods,
             );
-            if let Err(error) = registered {
-                panic!("Failed to register the reflection of type key {}: {}", #type_key, error);
+            if let ::core::result::Result::Err(error) = registered {
+                ::core::panic!("Failed to register the reflection of type key {}: {}", #type_key, error);
             }
         }
     }
@@ -636,7 +636,7 @@ pub(crate) fn expand_object_ref(
         // payload word holds, so an `Array` cell can lend `&Self` in place.
         const _: () = {
             type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType;
-            assert!(
+            ::core::assert!(
                 ::core::mem::size_of::<#struct_name>()
                     == ::core::mem::size_of::<#tvm_ffi_crate::object::ObjectArc<ContainerType>>()
                     && ::core::mem::offset_of!(#struct_name, #data_id) == 0,
@@ -675,7 +675,7 @@ pub(crate) fn expand_object_ref(
         impl ::std::convert::From<&#struct_name> for #struct_name {
             #[inline]
             fn from(value: &#struct_name) -> Self {
-                value.clone()
+                ::core::clone::Clone::clone(value)
             }
         }
     };
