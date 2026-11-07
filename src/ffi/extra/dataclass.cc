@@ -2183,14 +2183,16 @@ void PyClassRegisterTypeAttrColumns(int32_t type_index, int32_t total_size) {
         refl::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
           void* dst = reinterpret_cast<char*>(obj_ptr) + finfo->offset;
           const void* field_src = reinterpret_cast<const char*>(src) + finfo->offset;
-          int32_t ti = finfo->field_static_type_index;
-          if (ti == TypeIndex::kTVMFFIAny) {
-            new (dst) Any(*reinterpret_cast<const Any*>(field_src));
-          } else if (ti >= TypeIndex::kTVMFFIStaticObjectBegin) {
-            new (dst) ObjectRef(*reinterpret_cast<const ObjectRef*>(field_src));
-          } else {
-            // POD: memcpy
-            std::memcpy(dst, field_src, static_cast<size_t>(finfo->size));
+          switch (GetPyClassFieldStorageKind(finfo)) {
+            case PyClassFieldStorageKind::kAny:
+              new (dst) Any(*reinterpret_cast<const Any*>(field_src));
+              break;
+            case PyClassFieldStorageKind::kObjectRef:
+              new (dst) ObjectRef(*reinterpret_cast<const ObjectRef*>(field_src));
+              break;
+            case PyClassFieldStorageKind::kPOD:
+              std::memcpy(dst, field_src, static_cast<size_t>(finfo->size));
+              break;
           }
         });
         Object* obj = reinterpret_cast<Object*>(obj_ptr);
