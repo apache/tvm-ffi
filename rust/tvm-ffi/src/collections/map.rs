@@ -403,7 +403,7 @@ where
 /// Formats the map as its `repr`; see [`AnyView`].
 impl<K: ContainerElement, V: ContainerElement> std::fmt::Display for Map<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        AnyView::from_object(&**ObjectRefCore::data(self)).fmt(f)
+        std::fmt::Display::fmt(&AnyView::from_object(&**ObjectRefCore::data(self)), f)
     }
 }
 

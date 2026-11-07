@@ -555,7 +555,7 @@ impl<T> Debug for List<T> {
 /// Formats the list as its `repr`; see [`AnyView`].
 impl<T: ContainerElement> std::fmt::Display for List<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        AnyView::from_object(&**ObjectRefCore::data(self)).fmt(f)
+        std::fmt::Display::fmt(&AnyView::from_object(&**ObjectRefCore::data(self)), f)
     }
 }
 

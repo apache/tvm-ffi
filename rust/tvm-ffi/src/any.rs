@@ -422,7 +422,7 @@ impl std::fmt::Display for AnyView<'_> {
 /// Formats the value as its `repr`; see [`AnyView`].
 impl std::fmt::Display for Any {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        AnyView::from(self).fmt(f)
+        std::fmt::Display::fmt(&AnyView::from(self), f)
     }
 }
 
