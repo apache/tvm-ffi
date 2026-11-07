@@ -160,38 +160,18 @@ impl Tensor {
         TensorView::from(self).is_contiguous()
     }
 
-    /// The elements as a slice.
+    /// The elements as a slice, starting `byte_offset` bytes into the data.
     ///
     /// # Errors
     /// A `TypeError` if `T` is not the tensor's dtype, and a `RuntimeError`
-    /// if the tensor is not on the CPU or not contiguous.
+    /// if the tensor is not on the CPU, not contiguous, or its data is not
+    /// aligned for `T`.
     pub fn data_as_slice<T: AsDLDataType>(&self) -> Result<&[T]> {
-        let dtype = T::DL_DATA_TYPE;
-        if self.dtype() != dtype {
-            crate::bail!(
-                crate::error::TYPE_ERROR,
-                "Data type mismatch {} vs {}",
-                self.dtype().to_string(),
-                dtype.to_string()
-            );
-        }
-        if self.device().device_type != DLDeviceType::kDLCPU as i32 {
-            crate::bail!(crate::error::RUNTIME_ERROR, "Tensor is not on CPU");
-        }
-        crate::ensure!(
-            self.is_contiguous(),
-            crate::error::RUNTIME_ERROR,
-            "Tensor is not contiguous"
-        );
-
-        unsafe {
-            Ok(crate::util::slice_from_nullable_raw_parts(
-                self.data.dltensor.data as *const T,
-                self.numel(),
-            ))
-        }
+        let (data, len) = self.cpu_elements::<T>()?;
+        unsafe { Ok(crate::util::slice_from_nullable_raw_parts(data, len)) }
     }
-    /// The elements as a mutable slice.
+    /// The elements as a mutable slice, starting `byte_offset` bytes into the
+    /// data.
     ///
     /// It takes `&self`: a tensor is a shared handle, and kernels write the
     /// data of tensors they receive by shared reference, so `&mut self` would
@@ -209,6 +189,12 @@ impl Tensor {
     /// `std::slice::from_raw_parts_mut` cannot check it for a raw pointer.
     #[allow(clippy::wrong_self_convention, clippy::mut_from_ref)]
     pub unsafe fn data_as_slice_mut<T: AsDLDataType>(&self) -> Result<&mut [T]> {
+        let (data, len) = self.cpu_elements::<T>()?;
+        unsafe { Ok(crate::util::slice_from_nullable_raw_parts_mut(data, len)) }
+    }
+
+    /// The first element and element count, checked for a slice of `T`.
+    fn cpu_elements<T: AsDLDataType>(&self) -> Result<(*mut T, usize)> {
         let dtype = T::DL_DATA_TYPE;
         if self.dtype() != dtype {
             crate::bail!(
@@ -226,12 +212,21 @@ impl Tensor {
             crate::error::RUNTIME_ERROR,
             "Tensor is not contiguous"
         );
-        unsafe {
-            Ok(crate::util::slice_from_nullable_raw_parts_mut(
-                self.data.dltensor.data as *mut T,
-                self.numel(),
-            ))
-        }
+        let len = self.numel();
+        let t = &self.data.dltensor;
+        let data = t
+            .data
+            .cast::<u8>()
+            .wrapping_add(t.byte_offset as usize)
+            .cast::<T>();
+        // Imported DLPack data may sit at any address.
+        crate::ensure!(
+            len == 0 || data.is_aligned(),
+            crate::error::RUNTIME_ERROR,
+            "Tensor data is not aligned for {}",
+            dtype.to_string()
+        );
+        Ok((data, len))
     }
 
     /// The extent of each dimension.
