@@ -623,9 +623,14 @@ fn test_native_function() -> Result<()> {
     // SAFETY: an integer is rejected before any call.
     assert!(unsafe { NativeFunction::<()>::from_any(Any::from(1_i64)) }.is_err());
     // A raw pointer is no hook.
-    let pointer = Any::from(std::ptr::null_mut::<std::ffi::c_void>());
+    struct RawPointer;
+    impl From<RawPointer> for Any {
+        fn from(_: RawPointer) -> Any {
+            Any::from(std::ptr::null_mut::<std::ffi::c_void>())
+        }
+    }
     let error = TypeAttrDef::<PointObj>::new()
-        .attr("testing.raw", pointer)
+        .attr("testing.raw", RawPointer)
         .err()
         .unwrap();
     assert_eq!(error.kind(), TYPE_ERROR);

@@ -505,7 +505,8 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     /// # Arguments
     ///
     /// * `name` - The name of the attribute.
-    /// * `value` - The value of the attribute.
+    /// * `value` - The value of the attribute, `Send + Sync` since every
+    ///   thread reads it.
     ///
     /// # Returns
     ///
@@ -516,7 +517,7 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     /// Returns an error if `T` already has the attribute `name`, or a
     /// `TypeError` if `value` is an opaque pointer: register a native hook
     /// with [`native_fn_attr`](Self::native_fn_attr).
-    pub fn attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
+    pub fn attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
         let value = value.into();
         ensure_not_opaque_ptr(name, &value)?;
         self.register(name, value)
