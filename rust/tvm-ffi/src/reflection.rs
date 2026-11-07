@@ -26,6 +26,8 @@ mod registry;
 mod unsafe_init;
 pub use access_path::{AccessKind, AccessPath, AccessPathObj, AccessStep, AccessStepObj};
 pub use accessor::{get_method, get_method_by_index, FieldGetter, TypeAttrColumn};
+#[doc(hidden)]
+pub use registry::register_object;
 pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy};
 #[doc(hidden)]
 pub use unsafe_init::{drop_if_defined, unsafe_init_creator};

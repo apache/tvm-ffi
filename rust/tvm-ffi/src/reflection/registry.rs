@@ -215,8 +215,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// The caller holds `TYPE_REGISTRATION` for the builder's lifetime, and
     /// `type_index` is `N`'s. `creator` returns an owned handle of an object of
     /// `N` that the field setters can fill.
-    #[doc(hidden)]
-    pub unsafe fn registering(
+    unsafe fn registering(
         type_index: i32,
         kind: Option<SEqHashKind>,
         creator: Option<TVMFFIObjectCreator>,
@@ -304,8 +303,7 @@ impl<N: ObjectCore> ObjectDef<N> {
 
     /// Registers `__ffi_shallow_copy__` from [`ShallowCopy`], which reflected
     /// mutation (copy on write through the field setters) needs.
-    #[doc(hidden)]
-    pub fn shallow_copy(self) -> Result<Self>
+    fn shallow_copy(self) -> Result<Self>
     where
         N: ShallowCopy,
     {
@@ -392,8 +390,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// `__ffi_init__` from the fields unless the type defines its own, then
     /// `__ffi_type_final__`, which no other registered metadata exposes; and
     /// reports the first failed method registration.
-    #[doc(hidden)]
-    pub fn finish(self) -> Result<()> {
+    fn finish(self) -> Result<()> {
         if let Some(error) = self.error {
             return Err(error);
         }
@@ -423,6 +420,27 @@ impl<N: ObjectCore> ObjectDef<N> {
             Any::from(N::TYPE_FINAL),
         )
     }
+}
+
+/// Registers the reflection of `N` for `#[derive(Object)]`: its metadata,
+/// then `fields` its fields, its `__ffi_shallow_copy__`, then `methods` its
+/// methods, then its type attributes.
+///
+/// # Safety
+///
+/// As `ObjectDef::registering`; `fields` registers fields of `N` as
+/// [`ObjectDef::field`] requires.
+#[doc(hidden)]
+pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
+    type_index: i32,
+    kind: Option<SEqHashKind>,
+    creator: Option<TVMFFIObjectCreator>,
+    fields: impl FnOnce(ObjectDef<N>) -> Result<ObjectDef<N>>,
+    methods: impl FnOnce(&mut ObjectDef<N>),
+) -> Result<()> {
+    let mut def = fields(ObjectDef::registering(type_index, kind, creator)?)?.shallow_copy()?;
+    methods(&mut def);
+    def.finish()
 }
 
 /// The structural kind of the nearest ancestor of `info` with metadata.
