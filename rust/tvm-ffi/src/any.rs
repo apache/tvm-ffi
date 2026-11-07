@@ -393,6 +393,39 @@ impl<'a> From<&'a Any> for AnyView<'a> {
     }
 }
 
+/// Formats the value as its `repr`, the text the runtime printer gives in
+/// every language, such as `(1, 2)` for an array or `"hi"` for a string.
+/// Object references format the same way.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{AnyView, Array};
+///
+/// let xs = Array::from_vec(vec![1_i64, 2]);
+/// assert_eq!(AnyView::from(&xs).to_string(), "(1, 2)");
+/// assert_eq!(xs.to_string(), "(1, 2)");
+/// ```
+impl std::fmt::Display for AnyView<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let repr = crate::cached_global_func!("ffi.ReprPrint")
+            .call_packed(&[*self])
+            .and_then(crate::String::try_from);
+        match repr {
+            Ok(text) => f.write_str(text.as_str()),
+            // Formatting cannot fail, so a printer error falls back to the type key.
+            Err(_) => f.write_str(&object::type_key_of_index(self.type_index())),
+        }
+    }
+}
+
+/// Formats the value as its `repr`; see [`AnyView`].
+impl std::fmt::Display for Any {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&AnyView::from(self), f)
+    }
+}
+
 /// Whether a `TVMFFIAny` cell owns everything it holds, so its owning form is a
 /// bitwise copy.
 #[inline]

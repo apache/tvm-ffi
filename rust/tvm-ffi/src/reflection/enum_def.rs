@@ -85,8 +85,10 @@ impl<E: EnumRef> EnumDef<E> {
     /// # Errors
     ///
     /// Returns a `ValueError` if `E` already has a value named `name`, or a
-    /// `TypeError` if `E` is not an enum type or is an integer enum
-    /// (`ffi.IntEnum`), whose values name their own indices.
+    /// `TypeError` if `E` is not an enum type, is an integer enum
+    /// (`ffi.IntEnum`), whose values name their own indices, or registers an
+    /// object size other than that of [`EnumObj`]: an enum type whose objects
+    /// have fields of their own.
     pub fn new(name: &str) -> Result<Self> {
         const {
             assert!(
@@ -104,6 +106,24 @@ impl<E: EnumRef> EnumDef<E> {
                 "",
             ));
         }
+        // The assert above sees only the Rust mirror, which may be opaque: a
+        // registered object size must be exactly that of the `EnumObj`
+        // allocated below. A type registered without one (such as by
+        // `#[derive(Object)]`) is laid out as its Rust struct.
+        // SAFETY: the type is registered, and its information is static.
+        let metadata = unsafe { (*TVMFFIGetTypeInfo(type_index)).metadata };
+        // SAFETY: registered metadata is static.
+        let total_size = unsafe { metadata.as_ref() }.map_or(0, |metadata| metadata.total_size);
+        if total_size != 0 && total_size as usize != size_of::<EnumObj>() {
+            return Err(Error::new(
+                TYPE_ERROR,
+                &format!(
+                    "`{type_key}` objects have fields beyond `ffi.Enum`, so Rust cannot \
+                     register its values"
+                ),
+                "",
+            ));
+        }
         let state = ensure_state::<E>()?;
         let index = state.entries.len() as i64;
         let key = String::from(name);
@@ -118,7 +138,7 @@ impl<E: EnumRef> EnumDef<E> {
             ));
         }
         let object = ObjectArc::into_raw(ObjectArc::new(EnumObj::new(index, name)));
-        // SAFETY: `E`'s object is an `EnumObj` with `E`'s type index (asserted
+        // SAFETY: `E`'s object is an `EnumObj` with `E`'s type index (checked
         // above), and the object is not shared yet. The deleter stays that of
         // `EnumObj`, which drops the same fields.
         let value = unsafe {

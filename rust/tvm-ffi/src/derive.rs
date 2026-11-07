@@ -28,7 +28,8 @@ pub use tvm_ffi_macros::Object;
 /// [`ObjectRefAnyCompatible`](crate::ObjectRefAnyCompatible) (conversions to
 /// and from [`Any`](crate::Any), in-place downcasts, typed function
 /// arguments), the upcast to [`ObjectRef`](crate::object::ObjectRef),
-/// `Deref<Target = FooObj>` for field reads, `Debug`, and a private
+/// `Deref<Target = FooObj>` for field reads, `Debug`, `Display` (the runtime
+/// `repr`, as [`AnyView`](crate::AnyView) formats it), and a private
 /// `fn from_object(object: FooObj) -> Self` for the type's constructors.
 ///
 /// # Options
@@ -41,6 +42,7 @@ pub use tvm_ffi_macros::Object;
 ///   `unsafe_impl_object_ref_upcast!`.
 /// * `skip_deref` - No `Deref`, for a reference whose object is internal.
 /// * `skip_debug` - `Debug` is written by hand.
+/// * `skip_display` - `Display` is written by hand.
 /// * `skip_any_compatible` - `ObjectRefAnyCompatible` is written by hand,
 ///   for a typed reference with a stricter check or fallback conversions.
 /// * `crate = path` - Where the generated code finds tvm-ffi, as for

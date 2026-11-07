@@ -651,6 +651,17 @@ pub(crate) fn expand_object_ref(
             }
         });
     }
+    // The runtime `repr`, as `AnyView` formats it.
+    if !options.skip_display {
+        expanded.extend(quote! {
+            impl ::core::fmt::Display for #struct_name {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    let object = &**#tvm_ffi_crate::object::ObjectRefCore::data(self);
+                    ::core::fmt::Display::fmt(&#tvm_ffi_crate::AnyView::from_object(object), f)
+                }
+            }
+        });
+    }
     // `ObjectRef` itself skips these: `any.rs` implements them for it.
     if struct_name != "ObjectRef" {
         expanded.extend(quote! {
@@ -705,6 +716,7 @@ struct ObjectRefOptions {
     parent: Option<syn::Type>,
     skip_deref: bool,
     skip_debug: bool,
+    skip_display: bool,
     skip_any_compatible: bool,
 }
 
@@ -748,13 +760,16 @@ fn object_ref_options(derive_input: &DeriveInput) -> ObjectRefOptions {
                 ObjectRefOption::Crate(path) => options.tvm_ffi_crate = Some(path),
                 ObjectRefOption::Flag(flag) if flag == "skip_deref" => options.skip_deref = true,
                 ObjectRefOption::Flag(flag) if flag == "skip_debug" => options.skip_debug = true,
+                ObjectRefOption::Flag(flag) if flag == "skip_display" => {
+                    options.skip_display = true
+                }
                 ObjectRefOption::Flag(flag) if flag == "skip_any_compatible" => {
                     options.skip_any_compatible = true
                 }
                 ObjectRefOption::Flag(flag) => abort!(
                     flag,
                     "unknown `object_ref` option; expected `parent = ...`, `skip_deref`, \
-                     `skip_debug`, `skip_any_compatible` or `crate = ...`"
+                     `skip_debug`, `skip_display`, `skip_any_compatible` or `crate = ...`"
                 ),
             }
         }

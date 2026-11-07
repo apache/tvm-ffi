@@ -440,6 +440,7 @@ pub unsafe fn downcast_ref_from_any_in_place<T: RefFromAnyUnchecked>(
 ///
 /// # Safety
 ///
+/// `Self` must be an object type or exactly one pointer to a live object.
 /// `downcast_ref_from_object` must return `Some` only when the object at
 /// `*place` is a `Self`, with a reference that stays valid while `place` is
 /// borrowed.
@@ -451,10 +452,23 @@ pub unsafe trait DowncastRefFromObject {
     ///
     /// `place` must hold a pointer to a live object.
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self>;
+
+    /// The object that `self` is or refers to.
+    #[inline(always)]
+    fn as_object(&self) -> &crate::object::Object {
+        // SAFETY: a reference type is one pointer to a live object (trait contract).
+        unsafe { &**std::ptr::from_ref(self).cast::<*const crate::object::Object>() }
+    }
 }
 
 // An object type borrows the object itself.
 unsafe impl<T: crate::object::ObjectCore> DowncastRefFromObject for T {
+    #[inline(always)]
+    fn as_object(&self) -> &crate::object::Object {
+        // SAFETY: an object type starts with its object header.
+        unsafe { &*std::ptr::from_ref(self).cast::<crate::object::Object>() }
+    }
+
     #[inline(always)]
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
         let object = *place;
