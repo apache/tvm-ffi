@@ -17,8 +17,8 @@
  * under the License.
  */
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::reflection::TypeAttrColumn;
 use tvm_ffi::reflection::{FieldFlags, FieldGetter, ObjectDef};
+use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn};
 use tvm_ffi::*;
 use tvm_ffi_sys::{
     TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIGetTypeInfo,
@@ -580,4 +580,39 @@ impl DuplicateMethodObj {
 #[should_panic(expected = "duplicate method `same` of `testing.rust.DuplicateMethod`")]
 fn test_duplicate_method_names_fail_the_registration() {
     DuplicateMethodObj::type_index();
+}
+
+#[test]
+fn test_native_function() -> Result<()> {
+    // A big integer object registers a native `__any_equal__` hook.
+    let big = |value: i128| Any::from(BigInt::from(value));
+    let column = TypeAttrColumn::new("__any_equal__").expect("the column is registered");
+    let hook = column
+        .get(big(1 << 100).type_index())
+        .expect("the hook is registered");
+    // SAFETY: C++ registers `__any_equal__` as `bool(const Any&, const Any&)`.
+    let equal: NativeFunction<(&Any, &Any), bool> = unsafe { NativeFunction::from_any(hook)? };
+    assert!(equal.call((&big(1 << 100), &big(1 << 100)))?);
+    assert!(!equal.call((&big(1 << 100), &big(1 << 101)))?);
+    let error = equal
+        .call((&big(1 << 100), &Any::from(String::from("1"))))
+        .unwrap_err();
+    assert_eq!(error.kind(), TYPE_ERROR);
+
+    // A packed function in place of a native hook.
+    let get_x = Function::from_typed(|p: Point| -> Result<i64> { Ok(p.data.x) });
+    // SAFETY: a packed function is called through checked conversions.
+    let hook: NativeFunction<(&PointObj,), i64> =
+        unsafe { NativeFunction::from_any(get_x.clone().into())? };
+    let p = point(3, 0.5, "p");
+    assert_eq!(hook.call((&*p.data,))?, 3);
+    // SAFETY: as above.
+    let mismatch: NativeFunction<(&Point,), String> =
+        unsafe { NativeFunction::from_any(get_x.into())? };
+    let error = mismatch.call((&p,)).unwrap_err();
+    assert_eq!(error.message(), "Packed hook result type mismatch");
+
+    // SAFETY: an integer is rejected before any call.
+    assert!(unsafe { NativeFunction::<()>::from_any(Any::from(1_i64)) }.is_err());
+    Ok(())
 }

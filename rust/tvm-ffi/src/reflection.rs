@@ -19,16 +19,19 @@
 
 //! Object reflection: look up the methods, fields and type attributes of
 //! registered types; register Rust object types with [`ObjectDef`], type
-//! attributes with [`TypeAttrDef`] and enum values with [`EnumDef`].
+//! attributes with [`TypeAttrDef`] and enum values with [`EnumDef`]; call the
+//! typed hooks that attributes hold with [`NativeFunction`].
 
 mod access_path;
 mod accessor;
 pub(crate) mod enum_def;
+mod native_function;
 mod registry;
 mod unsafe_init;
 pub use access_path::{AccessKind, AccessPath, AccessPathObj, AccessStep, AccessStepObj};
 pub use accessor::{get_method, get_method_by_index, FieldGetter, TypeAttrColumn};
 pub use enum_def::{EnumAttrMap, EnumDef};
+pub use native_function::{NativeArgs, NativeFunction};
 #[doc(hidden)]
 pub use registry::register_object;
 pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrDef};
