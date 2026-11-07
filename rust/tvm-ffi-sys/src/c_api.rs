@@ -295,9 +295,6 @@ pub struct TVMFFIFunctionCell {
     pub cxx_call: *mut c_void,
 }
 
-unsafe impl Send for TVMFFIFunctionCell {}
-unsafe impl Sync for TVMFFIFunctionCell {}
-
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TVMFFIBacktraceUpdateMode {

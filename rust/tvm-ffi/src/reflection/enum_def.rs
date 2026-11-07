@@ -99,7 +99,13 @@ impl<E: EnumRef> EnumDef<E> {
     /// (`ffi.IntEnum`), whose values name their own indices, or registers an
     /// object size other than that of [`EnumObj`]: an enum type whose objects
     /// have fields of their own.
-    pub fn new(name: &str) -> Result<Self> {
+    ///
+    /// `E` accepts every object of its type, as a non-generic
+    /// [`#[derive(ObjectRef)]`](crate::derive::ObjectRef) reference does.
+    pub fn new(name: &str) -> Result<Self>
+    where
+        E: crate::object::PlainObjectRef,
+    {
         const {
             assert!(
                 size_of::<E::ContainerType>() == size_of::<EnumObj>()

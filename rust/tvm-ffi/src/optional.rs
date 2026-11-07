@@ -200,7 +200,7 @@ impl Optional<String> {
     pub fn as_str(&self) -> Option<&str> {
         if self.is_some() {
             // SAFETY: an engaged `Optional<String>` cell is byte-identical to a
-            // `String` (both are `#[repr(transparent)]` over the 16-byte cell),
+            // `String` (both are `#[repr(C)]` with the 16-byte cell as their only field),
             // and the borrow is tied to `&self`.
             let s = unsafe { &*(&self.data as *const Any as *const String) };
             Some(s.as_str())
