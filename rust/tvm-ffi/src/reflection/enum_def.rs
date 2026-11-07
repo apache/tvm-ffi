@@ -174,7 +174,8 @@ impl<E: EnumRef> EnumDef<E> {
     /// # Arguments
     ///
     /// * `name` - The name of the attribute.
-    /// * `value` - The value of the attribute.
+    /// * `value` - The value of the attribute, `Send + Sync` since every
+    ///   thread reads it.
     ///
     /// # Returns
     ///
@@ -184,7 +185,7 @@ impl<E: EnumRef> EnumDef<E> {
     ///
     /// Returns a `TypeError` if `value` is an opaque pointer: set a native
     /// hook with [`set_native_fn_attr`](Self::set_native_fn_attr).
-    pub fn set_attr(self, name: &str, value: impl Into<Any>) -> Result<Self> {
+    pub fn set_attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
         let value = value.into();
         ensure_not_opaque_ptr(name, &value)?;
         self.set_attr_any(name, value)

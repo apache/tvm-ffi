@@ -194,7 +194,7 @@ impl Error {
     ///
     /// The error.
     pub fn new(kind: ErrorKind<'_>, message: &str, backtrace: &str) -> Self {
-        Self::new_with_cause_and_extra_context(kind, message, backtrace, None, None)
+        Self::create(kind, message, backtrace, None, std::ptr::null_mut())
     }
 
     /// Create an error retaining its cause and any application-specific context.
@@ -205,17 +205,33 @@ impl Error {
     /// * `message` - The message of the error.
     /// * `backtrace` - The backtrace of the error, most recent call first; may be empty.
     /// * `cause_chain` - The error that caused this one, if any.
-    /// * `extra_context` - An object of application-specific context, if any.
+    /// * `extra_context` - An object of application-specific context, if any;
+    ///   `Send + Sync`, since the error is.
     ///
     /// # Returns
     ///
     /// The error.
-    pub fn new_with_cause_and_extra_context(
+    pub fn new_with_cause_and_extra_context<T: ObjectRefCore + Send + Sync>(
         kind: ErrorKind<'_>,
         message: &str,
         backtrace: &str,
         cause_chain: Option<&Error>,
-        extra_context: Option<&object::ObjectRef>,
+        extra_context: Option<&T>,
+    ) -> Self {
+        let extra_context = extra_context.map_or(std::ptr::null_mut(), |context| {
+            ObjectArc::as_ptr(T::data(context)) as TVMFFIObjectHandle
+        });
+        Self::create(kind, message, backtrace, cause_chain, extra_context)
+    }
+
+    /// As [`Self::new_with_cause_and_extra_context`], with `extra_context` a
+    /// borrowed object handle or null.
+    fn create(
+        kind: ErrorKind<'_>,
+        message: &str,
+        backtrace: &str,
+        cause_chain: Option<&Error>,
+        extra_context: TVMFFIObjectHandle,
     ) -> Self {
         unsafe {
             let kind_data = TVMFFIByteArray::from_str(kind.as_str());
@@ -229,9 +245,7 @@ impl Error {
                 cause_chain.map_or(std::ptr::null_mut(), |cause| {
                     ObjectArc::as_ptr(&cause.data) as TVMFFIObjectHandle
                 }),
-                extra_context.map_or(std::ptr::null_mut(), |context| {
-                    ObjectArc::as_ptr(object::ObjectRef::data(context)) as TVMFFIObjectHandle
-                }),
+                extra_context,
                 &mut error_handle,
             );
             assert_eq!(ret, 0, "Failed to create error object");
@@ -322,6 +336,10 @@ impl Error {
     }
 
     /// The application-specific context object, if present.
+    ///
+    /// The context is shared with every thread the error reaches, so it must be
+    /// safe to share; a context set by another language is the setter's
+    /// responsibility.
     pub fn extra_context(&self) -> Option<&object::ObjectRef> {
         let handle = &self.data.cell.extra_context;
         if handle.is_null() {
@@ -391,12 +409,12 @@ impl Error {
     /// `Arc::make_mut`.
     fn make_mut(&mut self) -> *mut ErrorObj {
         if !ObjectArc::is_unique(&self.data) {
-            *self = Self::new_with_cause_and_extra_context(
+            *self = Self::create(
                 self.kind(),
                 self.message(),
                 self.backtrace(),
                 self.cause_chain(),
-                self.extra_context(),
+                self.data.cell.extra_context,
             );
         }
         ObjectArc::as_mut_ptr(&mut self.data)
