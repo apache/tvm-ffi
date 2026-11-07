@@ -281,7 +281,7 @@ pub(crate) fn expand_object(
                     };
                     if !found {
                         // Discard the error the failed lookup raised.
-                        drop(#tvm_ffi_crate::Error::from_raised());
+                        ::core::mem::drop(#tvm_ffi_crate::Error::from_raised());
                     }
                     found
                 }
