@@ -22,16 +22,14 @@ use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{is_instance_of, ObjectRef};
 use tvm_ffi::*;
 
-// The type keys below are registered by libtvm_ffi_testing with the hierarchy
-// Object <- testing.TestObjectBase <- testing.TestObjectDerived. The Rust-side
-// field layout does not need to match the C++ classes: the objects are created
-// and destroyed purely on the Rust side, and the casts only consult the type
-// index stored in the object header.
+// The hierarchy Object <- testing.rust.CastBase <- testing.rust.CastDerived;
+// the casts only consult the type index stored in the object header.
 
 // must have repr(C) for the object header to stay in the same position
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.TestObjectBase"]
+#[type_key = "testing.rust.CastBase"]
+#[type_register]
 struct TestBaseObj {
     base_: Object,
     value: i64,
@@ -53,7 +51,8 @@ struct TestBase {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.TestObjectDerived"]
+#[type_key = "testing.rust.CastDerived"]
+#[type_register]
 #[type_final]
 struct TestDerivedObj {
     base_: TestBaseObj,
@@ -123,17 +122,38 @@ fn test_is_instance_of() {
     assert!(!is_instance_of::<Object>(TypeIndex::kTVMFFIInt as i32));
 }
 
+// Bindings of the C++ testing.TestObjectBase and testing.TestObjectDerived.
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "testing.TestObjectBase"]
+struct CxxTestBaseObj {
+    base_: Object,
+    v_i64: i64,
+    v_f64: f64,
+    v_str: String,
+}
+
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "testing.TestObjectDerived"]
+#[type_final]
+struct CxxTestDerivedObj {
+    base_: CxxTestBaseObj,
+    v_map: Map<Any, Any>,
+    v_array: Array<Any>,
+}
+
 #[test]
 fn test_field_default() {
     assert_eq!(unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() }, 0);
-    let v_i64 = reflection::field_default::<TestBaseObj>("v_i64").unwrap();
+    let v_i64 = reflection::field_default::<CxxTestBaseObj>("v_i64").unwrap();
     assert_eq!(i64::try_from(v_i64).unwrap(), 10);
-    let v_str = reflection::field_default::<TestBaseObj>("v_str").unwrap();
+    let v_str = reflection::field_default::<CxxTestBaseObj>("v_str").unwrap();
     assert_eq!(String::try_from(v_str).unwrap().as_str(), "hello");
     // no default, unknown, and inherited fields
-    assert!(reflection::field_default::<TestDerivedObj>("v_map").is_none());
-    assert!(reflection::field_default::<TestBaseObj>("missing").is_none());
-    assert!(reflection::field_default::<TestDerivedObj>("v_i64").is_none());
+    assert!(reflection::field_default::<CxxTestDerivedObj>("v_map").is_none());
+    assert!(reflection::field_default::<CxxTestBaseObj>("missing").is_none());
+    assert!(reflection::field_default::<CxxTestDerivedObj>("v_i64").is_none());
 }
 
 #[test]
@@ -227,8 +247,8 @@ fn test_downcast_failure() {
     assert_eq!(base.data.value, 1);
     assert_eq!(ObjectArc::strong_count(&base.data), 1);
     let err = expect_err(TestDerived::try_from(base));
-    assert!(err.message().contains("testing.TestObjectBase"));
-    assert!(err.message().contains("testing.TestObjectDerived"));
+    assert!(err.message().contains("testing.rust.CastBase"));
+    assert!(err.message().contains("testing.rust.CastDerived"));
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
 }
 

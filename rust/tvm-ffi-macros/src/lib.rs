@@ -54,7 +54,9 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// Without `#[type_register]`, the type binds a key its defining library,
 /// usually C++, has registered, and `type_index()` panics if that library is
 /// not loaded yet, so a binding never registers a key with the wrong child
-/// slots.
+/// slots. Either way `type_index()` panics unless the registered key has the
+/// type's parent and depth and, when the type table records a size, the
+/// type's size, or for a binding at least it.
 ///
 /// `#[type_final]`, and with `#[type_register]` `#[type_child_slots = N]` and
 /// `#[type_child_slots_can_overflow = bool]`, mirror C++ `_type_final`,

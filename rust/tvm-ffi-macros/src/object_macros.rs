@@ -179,6 +179,9 @@ pub(crate) fn expand_object(
                                     #type_key
                                 );
                             }
+                            #tvm_ffi_crate::object::assert_registered_type_matches::<#struct_name>(
+                                tindex, parent, false,
+                            );
                             #register_reflection
                             tindex
                         }
@@ -206,6 +209,11 @@ pub(crate) fn expand_object(
                                     #type_key
                                 );
                             }
+                            #tvm_ffi_crate::object::assert_registered_type_matches::<#struct_name>(
+                                tindex,
+                                <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index(),
+                                true,
+                            );
                             tindex
                         }
                     );

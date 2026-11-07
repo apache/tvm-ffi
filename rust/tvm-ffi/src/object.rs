@@ -36,6 +36,38 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT
 #[doc(hidden)]
 pub static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Panics unless `type_index`, the index `#[derive(Object)]` registered or
+/// bound for `T`'s key, describes `T`: a key registered by another library or
+/// another type must have the same parent and depth and, if it has metadata,
+/// the same size, or for a `binding` no larger, since an opaque binding
+/// declares only its parent.
+///
+/// # Safety
+///
+/// `type_index` is registered and `parent` is the type index of `T::Parent`.
+#[doc(hidden)]
+pub unsafe fn assert_registered_type_matches<T: ObjectCore>(
+    type_index: i32,
+    parent: i32,
+    binding: bool,
+) {
+    let info = &*TVMFFIGetTypeInfo(type_index);
+    let depth = T::TYPE_DEPTH;
+    let same_parent = info.type_depth == depth
+        && depth > 0
+        && (**info.type_acenstors.add(depth as usize - 1)).type_index == parent;
+    let size = std::mem::size_of::<T>();
+    let same_size = info.metadata.is_null() || {
+        let registered = (*info.metadata).total_size as usize;
+        size == registered || (binding && size < registered)
+    };
+    assert!(
+        same_parent && same_size,
+        "Type key {} is already registered with another parent, depth or size",
+        T::TYPE_KEY
+    );
+}
+
 /// The root object type, `ffi.Object`: just the object header.
 ///
 /// An object type defined in Rust starts with its parent's object, which for
