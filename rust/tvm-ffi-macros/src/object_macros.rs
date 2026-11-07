@@ -227,12 +227,17 @@ pub(crate) fn expand_object(
                 fn type_index_available() -> bool {
                     let mut tindex = 0;
                     // SAFETY: the key and the index outlive the call.
-                    unsafe {
+                    let found = unsafe {
                         let type_key_arg =
                             #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
                         #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeKeyToIndex(&type_key_arg, &mut tindex)
                             == 0
+                    };
+                    if !found {
+                        // Discard the error the failed lookup raised.
+                        drop(#tvm_ffi_crate::Error::from_raised());
                     }
+                    found
                 }
             }
         }
