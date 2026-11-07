@@ -389,6 +389,15 @@ impl<N: ObjectCore> ObjectDef<N> {
             };
             crate::check_safe_call!(TVMFFITypeRegisterMethod(self.type_index, &info))
         };
+        // A static `__ffi_init__` is also the type's `__ffi_init__` attribute, which
+        // other languages call to construct it, as C++ `ObjectDef::def(init)` registers.
+        let registered = registered.and_then(|()| {
+            if is_static && name == "__ffi_init__" {
+                register_type_attr(self.type_index, name, Any::from(func))
+            } else {
+                Ok(())
+            }
+        });
         if let Err(error) = registered {
             self.error = Some(Error::new(
                 error.kind(),

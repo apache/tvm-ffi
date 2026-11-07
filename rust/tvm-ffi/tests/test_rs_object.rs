@@ -581,12 +581,13 @@ fn test_init_constructs_the_type_from_its_fields() {
     );
     assert_eq!(tags_count(), 1);
 
-    // A type's own `__ffi_init__` is a method, which C++ generates none over.
-    assert!(TypeAttrColumn::lookup("__ffi_init__")
-        .and_then(|column| column.get(RsOwnInitObj::type_index()))
-        .is_none());
+    // A type's own `__ffi_init__` is a method and its `__ffi_init__` attribute,
+    // which C++ generates none over.
     let own_init =
         tvm_ffi::reflection::get_method("testing.rust.RsOwnInit", "__ffi_init__").unwrap();
+    let own = RsOwnInit::try_from(own_init.call_tuple((3_i64,)).unwrap()).unwrap();
+    assert_eq!(own.v, 6);
+    let own_init = type_attr_function(RsOwnInitObj::type_index(), "__ffi_init__");
     let own = RsOwnInit::try_from(own_init.call_tuple((3_i64,)).unwrap()).unwrap();
     assert_eq!(own.v, 6);
 }
