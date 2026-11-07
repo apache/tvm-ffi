@@ -336,10 +336,11 @@ impl Tensor {
     where
         TNDAlloc: NDAllocator,
     {
+        let ndim = i32::try_from(shape.len()).expect("tensor ndim exceeds i32");
         let dltensor = DLTensor {
             data: std::ptr::null_mut(),
             device,
-            ndim: shape.len() as i32,
+            ndim,
             dtype,
             shape: shape.as_ptr() as *mut i64,
             strides: std::ptr::null_mut(),
@@ -397,10 +398,11 @@ impl Tensor {
     /// The error the allocator raises, or a `RuntimeError` when no allocator
     /// is set.
     pub fn from_env_alloc(shape: &[i64], dtype: DLDataType, device: DLDevice) -> Result<Self> {
+        let ndim = i32::try_from(shape.len()).expect("tensor ndim exceeds i32");
         let mut prototype = DLTensor {
             data: std::ptr::null_mut(),
             device,
-            ndim: shape.len() as i32,
+            ndim,
             dtype,
             shape: shape.as_ptr() as *mut i64,
             strides: std::ptr::null_mut(),
