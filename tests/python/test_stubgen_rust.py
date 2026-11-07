@@ -730,6 +730,7 @@ pub struct Expr {
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "ir.Expr"]
+#[type_rs_parent]
 pub struct ExprObj {
     base_: Object,
     pub span: Option<Span>,
@@ -753,26 +754,6 @@ impl Expr {
     pub fn new(span: impl Into<Option<Span>>, ty: impl IntoObjectRef<Type>) -> Self {
         let obj = ExprObj::new(span.into(), ty.into_owned_object_ref());
         Self { data_: ObjectArc::new(obj) }
-    }
-}
-
-impl ShallowCopy for ExprObj {
-    fn shallow_copy(&self) -> Self {
-        Self {
-            base_: ShallowCopy::shallow_copy(&self.base_),
-            span: Clone::clone(&self.span),
-            ty: Clone::clone(&self.ty),
-        }
-    }
-}
-
-unsafe impl UnsafeInit for ExprObj {
-    unsafe fn drop_defined_fields(this: *mut Self) {
-        unsafe {
-            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base_));
-            drop_if_defined(addr_of_mut!((*this).span));
-            drop_if_defined(addr_of_mut!((*this).ty));
-        }
     }
 }"""
 
@@ -843,28 +824,7 @@ def test_render_complete_expr_golden() -> None:
     RUST.add_directive(imports, "nullable", "ir.Expr.span", 1)
     text, imports = _render(_expr(), imports)
     assert text == EXPR_EXPECTED
-    assert _uses(imports) == {
-        "std::ptr::addr_of_mut",
-        "tvm_ffi::Object",
-        "tvm_ffi::IntoObjectRef",
-        "tvm_ffi::ObjectArc",
-        "tvm_ffi::reflection::ShallowCopy",
-        "tvm_ffi::reflection::UnsafeInit",
-        "tvm_ffi::reflection::drop_if_defined",
-    }
-
-
-def test_render_shallow_copy_that_fits_is_one_line() -> None:
-    """A `ShallowCopy` within 100 columns is on one line, as rustfmt keeps it."""
-    text, _ = _render(_info("ir.Stmt", (_field("span", "ir.Span", 24, 8),), total_size=32))
-    assert (
-        "impl ShallowCopy for StmtObj {\n"
-        "    fn shallow_copy(&self) -> Self {\n"
-        "        Self { base_: ShallowCopy::shallow_copy(&self.base_), "
-        "span: Clone::clone(&self.span) }\n"
-        "    }\n"
-        "}"
-    ) in text
+    assert _uses(imports) == {"tvm_ffi::Object", "tvm_ffi::IntoObjectRef", "tvm_ffi::ObjectArc"}
 
 
 def test_render_complete_add_golden() -> None:
@@ -1032,44 +992,11 @@ def test_complete_optional_field_mirrors() -> None:
     assert "tvm_ffi::Optional" in _uses(imports)
 
 
-def test_unsafe_init_drops_each_field_by_its_all_zero_bytes() -> None:
-    """`UnsafeInit` skips an undefined field; a `TVMFFIAny` cell drops as is, an enum not at all."""
-    info = _info(
-        "demo.Mixed",
-        (
-            _field("count", TypeSchema("Optional", (TypeSchema("int"),)), 24, 16),
-            _field("value", "Any", 40, 16),
-            _field("items", TypeSchema("Optional", (TypeSchema("Array"),)), 56, 8),
-            _field("name", "str", 64, 16),
-            _field("kind", "int", 80, 8),
-        ),
-        total_size=88,
-    )
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "enum", "demo.Mixed.kind -> Kind(i64) { A=0 }", 1)
-    text, imports = _render(info, imports)
-    assert (
-        "unsafe impl UnsafeInit for MixedObj {\n"
-        "    unsafe fn drop_defined_fields(this: *mut Self) {\n"
-        "        unsafe {\n"
-        "            UnsafeInit::drop_defined_fields(addr_of_mut!((*this).base_));\n"
-        "            drop_in_place(addr_of_mut!((*this).count));\n"
-        "            drop_in_place(addr_of_mut!((*this).value));\n"
-        "            drop_if_defined(addr_of_mut!((*this).items));\n"
-        "            drop_if_defined(addr_of_mut!((*this).name));\n"
-        "        }\n"
-        "    }\n"
-        "}"
-    ) in text, text
-    assert {"std::ptr::drop_in_place", "tvm_ffi::reflection::drop_if_defined"} <= _uses(imports)
-
-
 def test_final_type_has_no_unsafe_init() -> None:
     """No Rust type derives from a final type, which needs no `UnsafeInit`."""
     info = _info("demo.Leaf", (_field("a", "int", 24, 8),), total_size=32, is_final=True)
-    text, imports = _render(info)
-    assert "UnsafeInit" not in text
-    assert "tvm_ffi::reflection::UnsafeInit" not in _uses(imports)
+    text, _ = _render(info)
+    assert "#[type_rs_parent]" not in text
 
 
 def test_complete_list_field_mirrors() -> None:
@@ -1516,22 +1443,12 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "            TestCxxClassDerivedDerivedObj::new(v_i64, v_i32, v_f64, v_f32, v_str.into(), v_bool);\n"
     ) in dd
     # Not final, under generated ancestors: a Rust subtype can copy its parent's object.
-    assert (
-        "impl ShallowCopy for TestCxxClassDerivedDerivedObj {\n"
-        "    fn shallow_copy(&self) -> Self {\n"
-        "        Self {\n"
-        "            base_: ShallowCopy::shallow_copy(&self.base_),\n"
-        "            v_str: Clone::clone(&self.v_str),\n"
-        "            v_bool: Clone::clone(&self.v_bool),\n"
-        "        }\n"
-        "    }\n"
-        "}"
-    ) in dd
+    assert "#[type_rs_parent]\npub struct TestCxxClassDerivedDerivedObj {" in dd
     assert dd.endswith(
         "tvm_ffi::impl_object_ref_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     )
-    assert {"tvm_ffi::String", "tvm_ffi::reflection::ShallowCopy"} <= _uses(imports)
+    assert "tvm_ffi::String" in _uses(imports)
 
 
 def test_registry_hidden_field_and_vptr_stay_opaque() -> None:
@@ -1914,7 +1831,7 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
     assert "use crate::hand::TestCxxClassBaseObj;" in text
     # Not final: public `new`; a hand-written parent may lack `ShallowCopy`, so the type has none.
     assert "impl TestCxxClassDerivedObj {\n    pub fn new(" in text
-    assert "ShallowCopy" not in text
+    assert "#[type_rs_parent]" not in text
 
 
 # ---------------------------------------------------------------------------

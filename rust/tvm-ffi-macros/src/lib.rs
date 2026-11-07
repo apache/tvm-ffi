@@ -52,6 +52,7 @@ pub fn match_any(input: TokenStream) -> TokenStream {
         type_index,
         type_final,
         type_immutable,
+        type_rs_parent,
         type_register,
         type_child_slots,
         type_child_slots_can_overflow,

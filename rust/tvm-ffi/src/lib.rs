@@ -293,8 +293,9 @@ pub use tvm_ffi_macros::match_any;
 /// A field's type must implement `AnyCompatible` and `Clone`; an `init_off`
 /// field's type must take all-zero bytes as a value. An optional field is an
 /// `Option` of an object reference or an [`Optional`] of any other value. The parent's object must
-/// implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and non-final
-/// types bound by `tvm-ffi-stubgen` do. The type registers when its library
+/// implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and
+/// `#[type_rs_parent]` bindings, such as the non-final ones `tvm-ffi-stubgen`
+/// generates, do. The type registers when its library
 /// loads, as [`derive(Object)`](derive::Object) describes, with its fields,
 /// methods, `__ffi_new__` and, unless the methods define it, `__ffi_init__`.
 ///

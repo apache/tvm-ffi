@@ -45,6 +45,12 @@
 /// registered as `_type_mutable`; a `writable` field does not compile with it,
 /// and every subtype must be immutable too.
 ///
+/// `#[type_rs_parent]` implements `ShallowCopy` and
+/// [`UnsafeInit`](crate::reflection::UnsafeInit), so an
+/// [`rs_object`](macro@crate::rs_object) can derive from the type. Each field
+/// other than the parent must implement [`AnyCompatible`](crate::AnyCompatible),
+/// be an [`Any`](crate::Any) or have no drop glue, and be `Clone`.
+///
 /// `#[type_final]`, and with `#[type_register]` `#[type_child_slots = N]` and
 /// `#[type_child_slots_can_overflow = bool]`, mirror C++ `_type_final`,
 /// `_type_child_slots` (default 0) and `_type_child_slots_can_overflow`

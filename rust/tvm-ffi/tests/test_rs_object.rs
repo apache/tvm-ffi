@@ -21,9 +21,7 @@ use std::borrow::Borrow;
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{ObjectArc, ObjectRef, ObjectRefCore};
 use tvm_ffi::reflection::TypeAttrColumn;
-use tvm_ffi::reflection::{
-    drop_if_defined, FieldFlags, FieldGetter, ObjectDef, ShallowCopy, UnsafeInit,
-};
+use tvm_ffi::reflection::{FieldFlags, FieldGetter, ObjectDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFITypeInfo};
 
@@ -111,6 +109,7 @@ pub struct RsScalars {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "testing.TestCxxClassBase"]
+#[type_rs_parent]
 pub struct TestCxxClassBaseObj {
     base_: Object,
     pub v_i64: i64,
@@ -124,26 +123,6 @@ impl TestCxxClassBaseObj {
             base_,
             v_i64,
             v_i32,
-        }
-    }
-}
-
-impl ShallowCopy for TestCxxClassBaseObj {
-    fn shallow_copy(&self) -> Self {
-        Self {
-            base_: ShallowCopy::shallow_copy(&self.base_),
-            v_i64: self.v_i64,
-            v_i32: self.v_i32,
-        }
-    }
-}
-
-unsafe impl UnsafeInit for TestCxxClassBaseObj {
-    unsafe fn drop_defined_fields(this: *mut Self) {
-        unsafe {
-            UnsafeInit::drop_defined_fields(std::ptr::addr_of_mut!((*this).base_));
-            drop_if_defined(std::ptr::addr_of_mut!((*this).v_i64));
-            drop_if_defined(std::ptr::addr_of_mut!((*this).v_i32));
         }
     }
 }

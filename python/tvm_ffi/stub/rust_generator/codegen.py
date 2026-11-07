@@ -29,9 +29,9 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   leaves the wrapper's ``new`` to hand-written code and names the generated
   one ``from_fields``. A type that is not final
   can be the parent of a type defined in Rust (``tvm_ffi::rs_object``): its
-  ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` and
-  ``UnsafeInit`` when every ancestor's is generated too (a ``ty-map``'d one is
-  hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
+  ``<Leaf>Obj::new`` is public, and its object derives ``ShallowCopy`` and
+  ``UnsafeInit`` (``#[type_rs_parent]``) when every ancestor's is generated
+  too (a ``ty-map``'d one is hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
@@ -537,6 +537,7 @@ class _ObjectRenderer:
             f'#[type_key = "{self.type_key}"]',
             *(["#[type_final]"] if self.info.is_final else []),
             *(["#[type_immutable]"] if self._is_immutable() else []),
+            *(["#[type_rs_parent]"] if self._is_rs_parent(verdict) else []),
             f"pub struct {self.obj_struct} {{",
             f"    base_: {base},",  # a reflected `base_` is rejected (`rust_ident`)
         ]
@@ -728,70 +729,20 @@ class _ObjectRenderer:
         ]
         return all(field.frozen for info in [*chain, self.info] for field in info.fields)
 
-    def _shallow_copy_lines(self) -> list[str] | None:
-        """``ShallowCopy``, which a subtype defined in Rust needs of its parent's object.
+    def _is_rs_parent(self, verdict: Verdict) -> bool:
+        """Whether the object derives ``ShallowCopy`` and ``UnsafeInit`` (``#[type_rs_parent]``).
 
-        The parent's shallow copy and a clone of every field, as ``derive(Object)``
-        implements it, for a type that is not final and whose ancestors below
-        ``ffi.Object`` are all generated: each of those implements it by this rule,
-        while a ``ty-map``'d one is hand-written and may not.
+        A subtype defined in Rust needs both of its parent's object. They are derived
+        for a complete type that is not final and whose ancestors below ``ffi.Object``
+        are all generated: each of those derives them by this rule, while a
+        ``ty-map``'d one is hand-written and may not.
         """
-        if self.info.is_final:
-            return None
+        if self.info.is_final or not verdict.is_complete:
+            return False
+        if C_RUST.RUST_ENUM_TYPE_KEY in self.info.ancestors:
+            return False
         ancestors = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
-        if not all(self._provider(key) == "generated" for key in ancestors):
-            return None
-        shallow_copy = self.imports.record("tvm_ffi::reflection::ShallowCopy")
-        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
-        init = [
-            f"base_: {shallow_copy}::shallow_copy(&self.base_)",
-            *[f"{name}: Clone::clone(&self.{name})" for name in own],
-        ]
-        return [
-            f"impl {shallow_copy} for {self.obj_struct} {{",
-            "    fn shallow_copy(&self) -> Self {",
-            *_call_lines("        Self { ", init, " }"),
-            "    }",
-            "}",
-        ]
-
-    def _unsafe_init_lines(self) -> list[str]:
-        """``UnsafeInit``, which a subtype defined in Rust needs of its parent's object.
-
-        It drops the defined fields of an object made with every field undefined
-        (all-zero), the parent's first, as the creator of the subtype makes it: a
-        ``TVMFFIAny`` cell (``Any``, an ``Optional`` that is not a pointer) drops as
-        it is, since all-zero bytes are None; an enum newtype has nothing to drop;
-        anything else goes through ``drop_if_defined``, which skips an undefined field.
-        Emitted wherever ``ShallowCopy`` is.
-        """
-        unsafe_init = self.imports.record("tvm_ffi::reflection::UnsafeInit")
-        addr = self.imports.record("std::ptr::addr_of_mut")
-        directives = self.imports.directives
-        drops = [f"{unsafe_init}::drop_defined_fields({addr}!((*this).base_));"]
-        for field in sorted(self.info.fields, key=lambda f: f.offset or 0):
-            target = f"{self.type_key}.{field.name}"
-            if target in directives.enums:
-                continue
-            mirror = self._field_mirror(self.type_key, field, self.imports)
-            assert mirror is not None  # the verdict already ran the renderability check
-            any_cell = target not in directives.field_types and (
-                field.origin == "Any"
-                or (field.origin == "Optional" and not mirror.startswith("Option<"))
-            )
-            drop = self.imports.record(
-                "std::ptr::drop_in_place" if any_cell else "tvm_ffi::reflection::drop_if_defined"
-            )
-            drops.append(f"{drop}({addr}!((*this).{rust_ident(field.name)}));")
-        return [
-            f"unsafe impl {unsafe_init} for {self.obj_struct} {{",
-            "    unsafe fn drop_defined_fields(this: *mut Self) {",
-            "        unsafe {",
-            *[f"            {line}" for line in drops],
-            "        }",
-            "    }",
-            "}",
-        ]
+        return all(self._provider(key) == "generated" for key in ancestors)
 
     def _impl_sections(self, is_enum: bool) -> list[list[str]]:
         """``EnumRef`` and the upcasts, each that applies."""
@@ -854,10 +805,6 @@ class _ObjectRenderer:
             )
         elif verdict.is_complete and not is_enum:
             sections += self._allocator_sections(base, has_parent)
-            shallow_copy = self._shallow_copy_lines()
-            if shallow_copy:
-                sections.append(shallow_copy)
-                sections.append(self._unsafe_init_lines())
         sections += self._impl_sections(is_enum)
 
         lines: list[str] = []

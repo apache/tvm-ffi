@@ -225,23 +225,6 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
         }
     })?;
     let object_impl = expand_object(&object_input, &tvm_ffi, true);
-    // The parent's fields first, then the others in order, as the drop glue drops
-    // them; only through raw pointers, since some may be undefined.
-    let field_ids = fields.iter().map(|field| &field.ident);
-    let unsafe_init_impl = quote! {
-        unsafe impl #tvm_ffi::reflection::UnsafeInit for #obj {
-            unsafe fn drop_defined_fields(this: *mut Self) {
-                unsafe {
-                    <#base_ty as #tvm_ffi::reflection::UnsafeInit>::drop_defined_fields(
-                        ::core::ptr::addr_of_mut!((*this).#base_id),
-                    );
-                    #(#tvm_ffi::reflection::drop_if_defined(
-                        ::core::ptr::addr_of_mut!((*this).#field_ids),
-                    );)*
-                }
-            }
-        }
-    };
     let plain_fields = fields.iter().map(|field| {
         let mut field = (*field).clone();
         field.attrs.retain(|a| !a.path.is_ident("reflect"));
@@ -257,8 +240,6 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
         }
 
         #object_impl
-
-        #unsafe_init_impl
 
         impl ::core::ops::Deref for #obj {
             type Target = #base_ty;

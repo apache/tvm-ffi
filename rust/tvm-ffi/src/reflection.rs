@@ -39,5 +39,5 @@ pub(crate) use registry::field_static_type_index;
 pub use registry::register_object;
 pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrDef};
 #[doc(hidden)]
-pub use unsafe_init::{drop_if_defined, unsafe_init_creator};
+pub use unsafe_init::{field_drop, unsafe_init_creator};
 pub use unsafe_init::{unsafe_init, UnsafeInit};
