@@ -26,6 +26,7 @@ and one applies to the whole file::
     // tvm-ffi-stubgen(opaque): ir.SourceName
     // tvm-ffi-stubgen(upcast): tirx.Add -> PrimExpr
     // tvm-ffi-stubgen(custom-new): tirx.Add
+    // tvm-ffi-stubgen(no-new): ir.Expr
     // tvm-ffi-stubgen(missing-docs): allow
 
 ``field`` sets the field's Rust type (a name in scope, or a ``::`` path to
@@ -36,7 +37,9 @@ integer newtype for it, or with ``closed`` before the member list a
 ``#[repr(<int>)]`` enum of exactly those members; ``opaque`` keeps a type opaque
 even when its layout is reproducible. ``upcast`` adds an upcast to a reference
 outside the ancestor chain; ``custom-new`` says the wrapper's ``new`` is
-hand-written; the generated one is named ``from_fields`` instead.
+hand-written; the generated one is named ``from_fields`` instead. ``no-new``
+skips the wrapper's generated allocator, and for a final type ``<Leaf>Obj::new``
+too, which only that allocator uses.
 ``missing-docs: allow`` puts ``#[allow(missing_docs)]`` on the file's generated
 types and ``impl`` blocks.
 """
@@ -79,6 +82,7 @@ class Directives:
     opaque: set[str] = dataclasses.field(default_factory=set)
     upcasts: dict[str, list[str]] = dataclasses.field(default_factory=dict)
     custom_new: set[str] = dataclasses.field(default_factory=set)
+    no_new: set[str] = dataclasses.field(default_factory=set)
     allow_missing_docs: bool = False
 
     def add(self, name: str, payload: str, lineno: int) -> None:
@@ -103,6 +107,8 @@ class Directives:
             self.upcasts.setdefault(_type_target(name, lhs, lineno), []).append(rust_type)
         elif name == "custom-new":
             self.custom_new.add(_type_target(name, payload, lineno))
+        elif name == "no-new":
+            self.no_new.add(_type_target(name, payload, lineno))
         elif name == "missing-docs":
             if payload.strip() != "allow":  # the one level so far
                 raise _invalid(name, lineno, "allow")

@@ -606,11 +606,11 @@ class _ObjectRenderer:
             f"pub struct {self.obj_struct} {{",
             f"    base_: {base},",  # a reflected `base_` is rejected (`rust_ident`)
         ]
-        summary = [f"/// The object behind [`{self.leaf}`].", "///"]
+        summary = [f"/// The object behind [`{self.leaf}`]."]
         if not verdict.is_complete:
             return [
                 *summary,
-                f"/// Opaque: {verdict.detail}. Fields are read through the C ABI getters.",
+                f"// Opaque: {verdict.detail}. Fields are read through the C ABI getters.",
                 *header,
                 "}",
             ]
@@ -622,7 +622,7 @@ class _ObjectRenderer:
             members.append(f"    {vis} {rust_ident(field.name)}: {mirror},")
         return [
             *summary,
-            f"/// Complete: {verdict.detail}.",
+            f"// Complete: {verdict.detail}.",
             *_allow_non_snake_case(rust_ident(f.name) for f in self.info.fields),
             *header,
             *members,
@@ -727,7 +727,8 @@ class _ObjectRenderer:
         field as its own type, as ``#[rs_object]``'s ``new`` does, an object reference as
         ``impl IntoArg`` and any other as ``impl Into`` (:func:`_param_type`), and
         converts it on the way to ``<Leaf>Obj::new``.
-        ``custom-new`` names the wrapper's allocator ``from_fields`` instead.
+        ``custom-new`` names the wrapper's allocator ``from_fields`` instead; ``no-new``
+        skips it, and ``<Leaf>Obj::new`` of a final type with it.
         ``<Leaf>Obj::new`` of a type that is not final is public: a subtype defined in Rust
         builds its parent's object with it.
         """
@@ -746,6 +747,9 @@ class _ObjectRenderer:
         own = [rust_ident(p.name) for p in params[len(inherited) :]]
         forward = [_forward(p) for p in params]
         allow = self._allow_missing_docs()
+        no_new = self.type_key in self.imports.directives.no_new
+        if no_new and self.info.is_final:
+            return []
         sections = [
             [
                 *allow,
@@ -759,12 +763,14 @@ class _ObjectRenderer:
                 "}",
             ]
         ]
+        if no_new:
+            return sections
         custom = self.type_key in self.imports.directives.custom_new
         sections.append(
             [
                 *allow,
                 f"impl {self.leaf} {{",
-                "    /// Lossless complete-field allocation.",
+                f"    /// Create a `{self.leaf}` from its field values.",
                 *self._fn_lines(
                     "pub fn from_fields" if custom else "pub fn new",
                     params,

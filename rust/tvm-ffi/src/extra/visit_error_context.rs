@@ -25,9 +25,12 @@
 use crate::any::AnyView;
 use crate::collections::array::Array;
 use crate::derive::Object;
-use crate::error::Error;
+use crate::error::{Error, Result};
+use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectRef, ObjectRefCore};
+use crate::reflection::{AccessPath, TypeAttrColumn};
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex};
+use crate::type_traits::AnyCompatible;
 
 /// The payload that `Error::extra_context` carries to name the nodes a failed
 /// visit unwound through, laid out as the C++ `VisitErrorContextObj`.
@@ -40,6 +43,72 @@ pub(crate) struct VisitErrorContextObj {
     reverse_visit_pattern: Array<Option<ObjectRef>>,
     /// The `extra_context` the error carried before this context replaced it.
     prev_error_context: Option<ObjectRef>,
+}
+
+/// The type attribute holding a root type's visit-error enrichment hook,
+/// `(Error, ObjectRef) -> Error`, as C++ `type_attr::kEnrichVisitError`.
+const ENRICH_VISIT_ERROR_ATTR: &str = "__ffi_enrich_visit_error__";
+
+/// `context` as a visit error context, if it is one.
+fn as_context(context: &ObjectRef) -> Option<&VisitErrorContextObj> {
+    let object = ObjectArc::as_ptr(ObjectRef::data(context));
+    // SAFETY: `context` keeps its object alive; the type is checked first.
+    unsafe {
+        object::is_instance_of::<VisitErrorContextObj>((*object.cast::<TVMFFIObject>()).type_index)
+            .then(|| &*object.cast::<VisitErrorContextObj>())
+    }
+}
+
+/// The access paths from `root` to where a failed structural traversal of `root`
+/// stopped, as recorded in `error`'s visit context; empty if `error` has none.
+// As C++ `VisitErrorContext::TryGetFromError` then `FindAccessPaths`, full matches only.
+pub fn find_access_paths<R>(root: &R, error: &Error) -> Result<Array<AccessPath>>
+where
+    R: ObjectRefCore + AnyCompatible,
+{
+    let Some(context) = error
+        .extra_context()
+        .filter(|context| as_context(context).is_some())
+    else {
+        return Ok(Array::default());
+    };
+    Function::get_global("ffi.VisitErrorContext.FindAccessPaths")?
+        .call_packed(&[
+            AnyView::from(root),
+            AnyView::from(context),
+            AnyView::from(&false),
+        ])?
+        .try_into()
+}
+
+/// Pass `error` from a traversal of the borrowed `root` to the hook that
+/// `root`'s exact type registers, if `root` is an object and `error` carries a
+/// visit context. A missing or failing hook keeps the original error.
+// As C++ `VisitErrorContext::EnrichVisitError`, called once per public traversal.
+#[cold]
+#[inline(never)]
+pub(crate) fn enrich_visit_error(error: Error, root: TVMFFIAny) -> Error {
+    if root.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32
+        || error.extra_context().and_then(as_context).is_none()
+    {
+        return error;
+    }
+    // Looked up on each error, so a column or hook registered later is found.
+    let Some(hook) = TypeAttrColumn::lookup(ENRICH_VISIT_ERROR_ATTR)
+        .and_then(|column| column.get(root.type_index))
+        .and_then(|hook| Function::try_from(hook).ok())
+    else {
+        return error;
+    };
+    // SAFETY: the traversal's caller keeps `root` live through this call.
+    let root = unsafe { AnyView::from_raw_ffi_any(root) };
+    match hook
+        .call_packed(&[AnyView::from(&error), root])
+        .and_then(Error::try_from)
+    {
+        Ok(enriched) => enriched,
+        Err(_) => error,
+    }
 }
 
 /// Name the visited object in `raw` in the error's visit context.
@@ -56,16 +125,6 @@ pub(crate) fn update_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Er
     // acquires ownership before the temporary view ends; raw is an object tag.
     let Ok(node) = ObjectRef::try_from(unsafe { AnyView::from_raw_ffi_any(raw) }) else {
         return error;
-    };
-    let as_context = |context: &ObjectRef| {
-        let object = ObjectArc::as_ptr(ObjectRef::data(context));
-        // SAFETY: `context` keeps its object alive; the type is checked first.
-        unsafe {
-            object::is_instance_of::<VisitErrorContextObj>(
-                (*object.cast::<TVMFFIObject>()).type_index,
-            )
-            .then(|| &*object.cast::<VisitErrorContextObj>())
-        }
     };
     // Callback, policy and default descent can report the same frame.
     if let Some(context) = error.extra_context().and_then(as_context)

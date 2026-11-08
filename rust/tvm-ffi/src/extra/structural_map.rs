@@ -22,11 +22,11 @@
 use super::structural_common::raw_ffi_any_same_as;
 use super::structural_mutate::{
     IntoMutateResult, MutationView, StructuralMutateEngine, StructuralMutatorView,
-    with_mutation_error_context,
 };
 use super::structural_visit::DefRegionKind;
 use super::structural_walk::WalkOrder;
 use super::unchanged::{UnchangedOr, is_unchanged};
+use super::visit_error_context::update_visit_error_context;
 use crate::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
 use std::borrow::BorrowMut;
 
@@ -126,7 +126,7 @@ where
                 return mutator.default_mutate(self, value).map(Into::into);
             };
             let mapped: Any = callback_result
-                .map_err(|error| with_mutation_error_context(error, raw, "map"))?
+                .map_err(|error| update_visit_error_context(error, raw))?
                 .into();
             if is_unchanged(&mapped) || raw_ffi_any_same_as(raw, *mapped.as_raw_ffi_any()) {
                 // Drop temporary ownership before default descent checks uniqueness.
@@ -154,9 +154,9 @@ where
             };
             match self.dispatch.dispatch_tuple((current, kind)) {
                 Some(Ok(result)) if result.is_unchanged() => Ok(mapped),
-                Some(result) => result.map(Any::from).map_err(|error| {
-                    with_mutation_error_context(error, *current.as_raw_ffi_any(), "map")
-                }),
+                Some(result) => result
+                    .map(Any::from)
+                    .map_err(|error| update_visit_error_context(error, *current.as_raw_ffi_any())),
                 None => Ok(mapped),
             }
         }

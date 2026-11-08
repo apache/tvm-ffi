@@ -1193,11 +1193,6 @@ fn callback_errors_preserve_message_and_add_object_context() {
     for error in errors {
         assert_eq!(error.message(), "callback failed");
         assert!(error.backtrace().contains("origin"));
-        assert!(
-            error
-                .backtrace()
-                .contains("object `testing.TestObjectBase`")
-        );
         assert!(error.cause_chain().unwrap().same_as(&cause));
         let context = Any::from(error.extra_context().unwrap().clone());
         assert!(reflected_field::<ObjectRef>(&context, "prev_error_context").same_as(&payload));
@@ -1364,7 +1359,12 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
     assert_eq!(source.get(2).unwrap(), Some(20));
     assert_eq!(error.message(), "map mapper failed");
     assert!(error.backtrace().contains("origin"));
-    assert!(error.backtrace().contains("object `ffi.Map`"));
+    let context = Any::from(error.extra_context().unwrap().clone());
+    let records: Pattern = reflected_field(&context, "reverse_visit_pattern");
+    assert_eq!(
+        pattern_pointer(&records, records.len() - 1),
+        any_object_pointer(&Any::from(source))
+    );
 }
 
 #[test]

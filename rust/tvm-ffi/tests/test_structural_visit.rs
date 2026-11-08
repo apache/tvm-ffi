@@ -32,6 +32,18 @@ fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message)
 }
 
+/// Assert that `root` is the outermost node in `error`'s visit context.
+fn assert_visit_context_root(error: &Error, root: impl Into<Any>) {
+    let context = error.extra_context().unwrap();
+    let type_index = Any::from(context.clone()).type_index();
+    let records = FieldGetter::new(type_index, "reverse_visit_pattern")
+        .unwrap()
+        .get::<_, Array<Option<ObjectRef>>>(&**ObjectRef::data(context))
+        .unwrap();
+    let outermost = records.get(records.len() - 1).unwrap().unwrap();
+    assert!(outermost.same_as(&ObjectRef::try_from(root.into()).unwrap()));
+}
+
 // Nested recursion restores regions after normal, interrupt, error and panic exits.
 #[test]
 fn default_descent_scopes_regions_and_restores_after_halts() {
@@ -670,7 +682,7 @@ fn handler_error_crosses_map_traversal() {
         Ok(_) => panic!("map handler unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "map handler failed");
-    assert!(error.backtrace().contains("object `ffi.Map`"));
+    assert_visit_context_root(&error, root.clone());
 }
 
 #[test]
@@ -1113,7 +1125,7 @@ fn handler_errors_include_native_visit_path() {
         Ok(_) => panic!("handler unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "handler failed");
-    assert!(error.backtrace().contains("object `ffi.Array`"));
+    assert_visit_context_root(&error, root.clone());
 }
 
 #[test]
@@ -1147,7 +1159,7 @@ fn visitor_errors_include_native_visit_path() {
         Ok(_) => panic!("visitor unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "visitor failed");
-    assert!(error.backtrace().contains("object `ffi.Array`"));
+    assert_visit_context_root(&error, root.clone());
 
     struct FailingLeaf;
     #[dispatch(
@@ -1169,7 +1181,7 @@ fn visitor_errors_include_native_visit_path() {
         Ok(_) => panic!("callback visitor unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "callback visitor failed");
-    assert!(error.backtrace().contains("object `ffi.Array`"));
+    assert_visit_context_root(&error, root.clone());
 }
 
 #[test]
@@ -1372,7 +1384,7 @@ fn chain_link_errors_include_native_visit_path() {
         Ok(_) => panic!("link unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "link failed");
-    assert!(error.backtrace().contains("object `ffi.Array`"));
+    assert_visit_context_root(&error, root.clone());
 }
 
 #[test]
@@ -2382,6 +2394,6 @@ fn nested_walk_error_keeps_context_and_releases_callback_owner() {
     .err()
     .unwrap();
     assert_eq!(error.message(), "nested owned failure");
-    assert!(error.backtrace().contains("ffi.Array"));
+    assert_visit_context_root(&error, root.clone());
     assert_eq!(owner.debug_strong_count(), Some(1));
 }

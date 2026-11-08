@@ -70,8 +70,7 @@ impl TryFrom<i64> for PairKind {
 }
 
 /// The object behind [`IntPair`].
-///
-/// Complete: reflected fields fill [24, 48) exactly (alignment padding [44, 48)).
+// Complete: reflected fields fill [24, 48) exactly (alignment padding [44, 48)).
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[object(type_key = "rust_stubgen.IntPair", final, immutable)]
@@ -95,7 +94,7 @@ impl IntPairObj {
 }
 
 impl IntPair {
-    /// Lossless complete-field allocation.
+    /// Create a `IntPair` from its field values.
     pub fn from_fields(a: i64, b: i64, kind: impl Into<PairKind>) -> Self {
         let obj = IntPairObj::new(a, b, kind.into());
         Self { data_: ObjectArc::new(obj) }

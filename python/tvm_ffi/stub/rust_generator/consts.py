@@ -29,6 +29,7 @@ RUST_DIRECTIVE_KINDS = frozenset(
         "opaque",
         "upcast",
         "custom-new",
+        "no-new",
         "missing-docs",
     }
 )
