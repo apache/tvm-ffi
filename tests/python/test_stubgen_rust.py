@@ -182,7 +182,7 @@ def _uses(imports: RustImports) -> set[str]:
     return {item.path for item in imports.items}
 
 
-NO_METADATA = "/// Opaque: no metadata of its own: total_size is unknown. Fields are read through the C ABI getters."
+NO_METADATA = "// Opaque: no metadata of its own: total_size is unknown. Fields are read through the C ABI getters."
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +270,7 @@ def test_rust_ident() -> None:
 def test_check_tokens_ignores_spelling() -> None:
     generated = [
         "use super::super::ir::ExprObj;",
-        "/// Complete: every field is mirrored.",
+        "// Complete: every field is mirrored.",
         "#[derive(tvm_ffi::derive::Object)]",
         "pub struct AddObj { base_: ExprObj, pub a: i64, pub b: i64 }",
         "const _: () = assert!(::core::mem::size_of::<AddObj>() == 40);",
@@ -352,6 +352,7 @@ def test_generator_declares_its_directives_and_records_imports() -> None:
         "opaque",
         "upcast",
         "custom-new",
+        "no-new",
         "missing-docs",
     }
     imports = RUST.new_imports()
@@ -373,7 +374,6 @@ pub struct Pair {{
 }}
 
 /// The object behind [`Pair`].
-///
 {NO_METADATA}
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
@@ -585,7 +585,6 @@ impl TryFrom<i64> for IterVarType {{
 }}
 
 /// The object behind [`IterVar`].
-///
 {NO_METADATA}
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
@@ -731,8 +730,7 @@ pub struct Expr {
 }
 
 /// The object behind [`Expr`].
-///
-/// Complete: reflected fields fill [24, 40) exactly.
+// Complete: reflected fields fill [24, 40) exactly.
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[object(type_key = "ir.Expr", rs_parent)]
@@ -755,7 +753,7 @@ impl ExprObj {
 }
 
 impl Expr {
-    /// Lossless complete-field allocation.
+    /// Create a `Expr` from its field values.
     pub fn new(span: impl Into<Option<Span>>, ty: impl IntoArg<Type>) -> Self {
         let obj = ExprObj::new(span.into(), ty.into_owned());
         Self { data_: ObjectArc::new(obj) }
@@ -770,8 +768,7 @@ pub struct Add {
 }
 
 /// The object behind [`Add`].
-///
-/// Complete: reflected fields fill [40, 56) exactly.
+// Complete: reflected fields fill [40, 56) exactly.
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[object(type_key = "tirx.Add", final)]
@@ -801,7 +798,7 @@ impl AddObj {
 }
 
 impl Add {
-    /// Lossless complete-field allocation.
+    /// Create a `Add` from its field values.
     pub fn new(
         span: impl Into<Option<Span>>,
         ty: impl IntoArg<PrimType>,
@@ -855,7 +852,7 @@ def test_render_complete_add_golden() -> None:
 def test_render_complete_span_and_prim_type() -> None:
     """Scalars take their reflected width; alignment padding is reported, not mirrored."""
     text, _ = _render(_span())
-    assert "/// Opaque: field 'line' (int) has no native mirror." in text
+    assert "// Opaque: field 'line' (int) has no native mirror." in text
     text, _ = _render(_span(), _span_imports())
     assert (
         "pub struct SpanObj {\n"
@@ -867,7 +864,7 @@ def test_render_complete_span_and_prim_type() -> None:
         "    pub end_column: i32,\n"
         "}"
     ) in text
-    assert "/// Complete: reflected fields fill [24, 48) exactly." in text
+    assert "// Complete: reflected fields fill [24, 48) exactly." in text
 
     _register(_info("ir.Type", (_field("span", "ir.Span", 24, 8),), total_size=32))
     prim_type = _info(
@@ -879,7 +876,7 @@ def test_render_complete_span_and_prim_type() -> None:
     )
     text, imports = _render(prim_type)
     assert (
-        "/// Complete: reflected fields fill [32, 40) exactly (alignment padding [36, 40))." in text
+        "// Complete: reflected fields fill [32, 40) exactly (alignment padding [36, 40))." in text
     )
     assert "pub struct PrimTypeObj {\n    base_: TypeObj,\n    pub dtype: DLDataType,\n}" in text
     assert "assert!(::core::mem::size_of::<PrimTypeObj>() == 40);" in text
@@ -1145,7 +1142,7 @@ def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> Non
     assert field.size is not None
     info = _info("demo.Holder", (field,), total_size=HEADER + field.size)
     text, _ = _render(info)
-    assert "/// Opaque: field 'x'" in text
+    assert "// Opaque: field 'x'" in text
     assert "has no native mirror" in text
     assert "impl HolderObj {\n    pub fn x(&self) -> Result<" in text
     assert "const _: () =" not in text
@@ -1162,7 +1159,7 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
         in text
     )
     assert (
-        "impl Add {\n    /// Lossless complete-field allocation.\n"
+        "impl Add {\n    /// Create a `Add` from its field values.\n"
         "    pub fn from_fields(\n"
         "        span: impl IntoArg<Span>,\n"
         "        ty: impl IntoArg<Type>,\n"
@@ -1303,7 +1300,7 @@ def test_opaque_directive_vetoes_a_complete_type() -> None:
     imports = _span_imports()
     RUST.add_directive(imports, "opaque", "ir.Span", 5)
     text, _ = _render(_span(), imports)
-    assert "/// Opaque: vetoed by directive although the layout is reproducible." in text
+    assert "// Opaque: vetoed by directive although the layout is reproducible." in text
     assert "pub fn line(&self) -> Result<i32> {" in text
 
 
@@ -1311,7 +1308,7 @@ def test_builtin_parent_keeps_the_type_opaque() -> None:
     """The crate's `EnumObj` is a complete parent; a builtin stand-in cannot be one."""
     # An enum type embeds `EnumObj`; its registry allocates the values, so there is no `new`.
     text, _ = _render(object_info_from_type_key("testing.TestEnumVariant"))
-    assert "/// Complete: reflected fields fill [48, 48) exactly." in text
+    assert "// Complete: reflected fields fill [48, 48) exactly." in text
     assert "    base_: EnumObj," in text
     assert "size_of::<TestEnumVariantObj>() == 48" in text
     assert "fn new(" not in text
@@ -1322,7 +1319,7 @@ def test_builtin_parent_keeps_the_type_opaque() -> None:
         ("testing.TestCxxStrEnum", "ffi.StrEnum"),
     ):
         text, _ = _render(object_info_from_type_key(type_key))
-        assert f"/// Opaque: parent '{parent}' is opaque (no-mirror)." in text
+        assert f"// Opaque: parent '{parent}' is opaque (no-mirror)." in text
         assert "const _: () =" not in text
         assert "fn new(" not in text
         assert f"impl tvm_ffi::EnumRef for {type_key.rpartition('.')[2]} {{}}" in text
@@ -1332,7 +1329,7 @@ def test_opaque_parent_keeps_the_child_opaque() -> None:
     """A child of an opaque type cannot embed a mirror of its parent: it stays opaque."""
     _register(_info("ir.Expr", (_field("span", "ir.Span", 24, 8),), total_size=40))  # hole
     text, _ = _render(_add())
-    assert "/// Opaque: parent 'ir.Expr' is opaque (uncovered-bytes)." in text
+    assert "// Opaque: parent 'ir.Expr' is opaque (uncovered-bytes)." in text
     assert "    base_: ExprObj," in text
     assert "pub fn a(&self) -> Result<Expr> {" in text
 
@@ -1418,7 +1415,7 @@ def _cxx_class_imports() -> RustImports:
 def test_registry_complete_chain_is_mirrored() -> None:
     base, _ = _render(object_info_from_type_key("testing.TestCxxClassBase"), _cxx_class_imports())
     assert (
-        "/// Complete: reflected fields fill [24, 40) exactly (alignment padding [36, 40))." in base
+        "// Complete: reflected fields fill [24, 40) exactly (alignment padding [36, 40))." in base
     )
     assert (
         "pub struct TestCxxClassBaseObj {\n    base_: Object,\n    pub v_i64: i64,\n    pub v_i32: i32,\n}"
@@ -1470,12 +1467,12 @@ def test_registry_complete_chain_is_mirrored() -> None:
 def test_registry_hidden_field_and_vptr_stay_opaque() -> None:
     hidden, _ = _render(object_info_from_type_key("testing.TestCxxClassHiddenField"))
     assert (
-        "/// Opaque: bytes [32, 40) of [24, 48) are not accounted for by reflected fields. "
+        "// Opaque: bytes [32, 40) of [24, 48) are not accounted for by reflected fields. "
         "Fields are read through the C ABI getters."
     ) in hidden
     assert "pub fn v_i32(&self) -> Result<i64> {" in hidden
     poly, _ = _render(object_info_from_type_key("testing.TestCxxClassPolymorphic"))
-    assert "/// Opaque: bytes [32, 40) of [24, 40)" in poly
+    assert "// Opaque: bytes [32, 40) of [24, 40)" in poly
 
 
 def test_stage_3_applies_directives_to_a_registered_type(tmp_path: Path) -> None:
@@ -1617,7 +1614,7 @@ def test_cli_check_ignores_how_a_binding_is_spelled(
         ("use tvm_ffi::String;\n", ""),
         ("use std::ops::Deref;\n", "use std::ops::Deref;\nuse crate::testing::TestCompare;\n"),
         ("    base_: Object,\n", "    base_: tvm_ffi::Object,\n"),
-        ("/// Complete: ", "/// Mirrored: "),
+        ("// Complete: ", "// Mirrored: "),
         (
             "    pub fn new(\n"
             "        p_required: i64,\n"
