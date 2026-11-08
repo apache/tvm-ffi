@@ -160,15 +160,11 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
         let conversion = if can_lookup {
             quote!(if #lookup.is_err() || #lookup == ::core::result::Result::Ok(::core::option::Option::Some(#id)) {
                 #conversion
-            } else { ::core::result::Result::Err(()) })
+            } else { ::core::option::Option::None })
         } else { conversion };
         let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
-        let recovered = Ident::new("__tvm_ffi_match_any_recovered", span);
-        let recover = quote! {
-            if let ::core::result::Result::Ok(#recovered) = #rejected.map(#tvm_ffi::match_any_internal::Matched::recover) {
-                #tvm_ffi::match_any_internal::Restore::restore(&mut #source, #recovered);
-            }
-        };
+        // Drop a rejected value before later arms check uniqueness.
+        let drop_rejected = quote!(#[allow(clippy::drop_non_drop)] ::core::mem::drop(#rejected););
         if let Some(binding) = shared_ref_binding(binding) {
             let holder = Ident::new("__tvm_ffi_match_any_ref_holder", span);
             let converted = Ident::new("__tvm_ffi_match_any_ref_converted", span);
@@ -176,28 +172,28 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
             let test_guard = arm.guard.as_ref().map(|guard| quote!(#guard)).unwrap_or_else(|| quote!(true));
             quote! {{
                 let #converted = #conversion;
-                let #accepted = if let ::core::result::Result::Ok(#holder) = &#converted {
+                let #accepted = if let ::core::option::Option::Some(#holder) = &#converted {
                     #[allow(unused_variables)]
-                    let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(&#holder.value);
+                    let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(#holder);
                     #test_guard
                 } else { false };
                 if #accepted {
                     let #holder = #converted.as_ref().unwrap();
                     #[allow(unused_variables)]
-                    let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(&#holder.value);
+                    let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(#holder);
                     #body
                 } else {
                     let #rejected = #converted;
-                    #recover
+                    #drop_rejected
                     #next
                 }
             }}
         } else {
             quote! {
                 match #conversion {
-                    ::core::result::Result::Ok(#tvm_ffi::match_any_internal::Matched { value: #binding, .. }) #guard => { #body },
+                    ::core::option::Option::Some(#binding) #guard => { #body },
                     #rejected => {
-                        #recover
+                        #drop_rejected
                         #next
                     }
                 }
@@ -253,7 +249,7 @@ fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ide
                     (&&&probe).leaf_pattern()
                 })
             } else {
-                quote!(::core::marker::PhantomData::<#tvm_ffi::match_any_internal::StrictLeaf<#matcher>>)
+                quote!(::core::marker::PhantomData::<#matcher>)
             };
             quote!(#tail.prepend(#metadata))
         },

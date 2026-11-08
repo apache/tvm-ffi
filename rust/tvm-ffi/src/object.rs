@@ -728,7 +728,6 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
     // An overridden hook makes the type inexact; a non-final object type always is.
     const MATCH_ANY_EXACT: bool = <T as ObjectRefAnyCompatible>::MATCH_ANY_EXACT
         && <T::ContainerType as ObjectCore>::TYPE_FINAL;
-    const MATCH_ANY_STRICT_EXACT: bool = <T as AnyCompatible>::MATCH_ANY_EXACT;
 
     #[inline]
     fn match_any_exact_type_index() -> i32 {

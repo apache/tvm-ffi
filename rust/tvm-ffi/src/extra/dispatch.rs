@@ -56,20 +56,6 @@ impl<'a, T> DispatchInput for crate::MutationView<'a, T> {
     type Source = crate::match_any_internal::MutationSource<'a>;
 }
 
-// Generated alias bounds must not make recovery depend on a temporary borrow.
-#[doc(hidden)]
-pub trait DispatchRecovery<S> {
-    type Recovery;
-}
-impl<S, T: crate::type_traits::ContainerElement> DispatchRecovery<S> for T {
-    type Recovery = ();
-}
-impl<'source, 'value> DispatchRecovery<crate::match_any_internal::ViewSource<'source>>
-    for AnyView<'value>
-{
-    type Recovery = ();
-}
-
 use std::{borrow::BorrowMut, marker::PhantomData};
 
 /// Inferred selectors for dispatcher normalization.
