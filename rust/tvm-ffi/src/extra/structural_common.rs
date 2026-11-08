@@ -56,16 +56,6 @@ pub(super) fn missing_field_getter_error(operation: &str, name: &str) -> Error {
     ))
 }
 
-#[cold]
-#[inline(never)]
-pub(super) fn with_structural_field_error_context(
-    error: Error,
-    operation: &str,
-    name: &str,
-) -> Error {
-    with_structural_error_context(error, operation, &format!("field `{name}`"))
-}
-
 /// Consume an owning error carrier while keeping checked-conversion scratch
 /// inside the cold path instead of successful recursive traversal frames.
 ///
@@ -80,15 +70,6 @@ pub(super) unsafe fn structural_error_from_raw(raw: TVMFFIAny) -> Error {
     match Error::try_from(value) {
         Ok(error) | Err(error) => error,
     }
-}
-
-// Perf note: cold marks these error-composition paths as uncommon; inlining
-// within error paths is compiler-selected. Use explicit inline(never) at boundaries
-// where scratch must stay outside recursive callers.
-/// Add one structural traversal frame to an error's backtrace.
-#[cold]
-pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
-    Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
 }
 
 // -----------------------------------------------------------------------------

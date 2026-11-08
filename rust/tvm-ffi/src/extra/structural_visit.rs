@@ -74,9 +74,9 @@ use crate::tvm_ffi_sys::{
 use super::structural_common::{
     FLAG_SEQ_HASH_IGNORE, field_def_region, for_each_field_info, free_var_child_region,
     missing_field_getter_error, registered_type_index, runtime_error, seq_hash_kind,
-    with_structural_error_context, with_structural_field_error_context, wrong_dispatcher,
+    wrong_dispatcher,
 };
-use super::visit_error_context::update_visit_error_context;
+use super::visit_error_context::{enrich_visit_error, update_visit_error_context};
 
 const STRUCTURAL_VISIT_ATTR: &str = "__s_visit__";
 
@@ -723,7 +723,8 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
             unsafe { Any::from_raw_ffi_any(StructuralVisitorObj::call_visitor_raw(runtime, root)) };
         // Trusted hooks have released every temporary strong/weak runtime reference.
         drop(engine);
-        visit_result_from_any(result)
+        // The public traversal boundary, as the C++ `StructuralVisitExpected`.
+        visit_result_from_any(result).map_err(|error| enrich_visit_error(error, root))
     }
 }
 
@@ -758,7 +759,7 @@ impl StructuralVisitorObj {
             // SAFETY: the Error tag establishes the owned object's representation.
             unsafe {
                 let error = take_error(Any::from_raw_ffi_any(result));
-                Any::into_raw_ffi_any(annotate_visit_error(error, value).into())
+                Any::into_raw_ffi_any(update_visit_error_context(error, value).into())
             }
         }
     }
@@ -843,24 +844,14 @@ impl StructuralVisitorObj {
         // Own the getter result so partial writes and recursive borrows drop safely.
         let mut child = Any::new();
         if unsafe { getter(address, Any::as_raw_ffi_any_mut(&mut child)) } != 0 {
-            return unsafe {
-                with_field_error_context(Any::from(Error::from_raised()), field.name.as_str())
-            };
+            return Any::from(Error::from_raised());
         }
 
         let borrowed = AnyView::from(&child);
         let child_region = field_def_region(field, inherited_region);
-        unsafe {
-            with_field_error_context(
-                Self::with_def_region_kind(runtime, child_region, || {
-                    Any::from_raw_ffi_any(Self::call_visitor_raw(
-                        runtime,
-                        *borrowed.as_raw_ffi_any(),
-                    ))
-                }),
-                field.name.as_str(),
-            )
-        }
+        Self::with_def_region_kind(runtime, child_region, || unsafe {
+            Any::from_raw_ffi_any(Self::call_visitor_raw(runtime, *borrowed.as_raw_ffi_any()))
+        })
     }
 
     /// Dispatch borrowed `value` through the runtime's vtable.
@@ -1031,17 +1022,6 @@ unsafe fn take_error(value: Any) -> Error {
     unsafe { Error::move_from_any_after_check(&mut raw) }
 }
 
-#[inline(always)]
-fn with_field_error_context(result: Any, name: &str) -> Any {
-    if result.type_index() == TVMFFITypeIndex::kTVMFFIError as i32 {
-        core::hint::cold_path();
-        // SAFETY: direct tag check establishes the Error representation.
-        with_structural_field_error_context(unsafe { take_error(result) }, "visit", name).into()
-    } else {
-        result
-    }
-}
-
 // Columns are process-lifetime registry entries; a missing per-type cell still
 // falls back to reflected traversal. A missing required column is an error.
 static STRUCTURAL_VISIT_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock::new(|| {
@@ -1072,22 +1052,5 @@ fn invalid_visit_hook_result_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "structural visit hook must return None or ffi.VisitInterrupt",
-    )
-}
-
-/// Consume `error` and annotate it from borrowed input scalar fields. Internal
-/// callers keep that input live; the Error remains owned if formatting unwinds.
-// Perf note: Keep error formatting and context-allocation scratch out of visit frames.
-#[cold]
-#[inline(never)]
-fn annotate_visit_error(error: Error, value: TVMFFIAny) -> Error {
-    let error = update_visit_error_context(error, value);
-    with_structural_error_context(
-        error,
-        "visit",
-        &format!(
-            "object `{}`",
-            crate::object::type_key_of_index(value.type_index)
-        ),
     )
 }

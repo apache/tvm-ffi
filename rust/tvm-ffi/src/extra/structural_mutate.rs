@@ -53,13 +53,12 @@ use super::structural_common::{
     FLAG_SEQ_HASH_IGNORE, FLAG_SETTER_IS_FUNCTION, field_def_region, for_each_field_info,
     free_var_child_region, missing_field_getter_error, raw_ffi_any_into_result,
     raw_ffi_any_same_as, registered_type_index, reject_error_value, result_into_raw_ffi_any,
-    runtime_error, seq_hash_kind, with_structural_error_context,
-    with_structural_field_error_context, wrong_dispatcher,
+    runtime_error, seq_hash_kind, wrong_dispatcher,
 };
 use super::structural_visit::DefRegionKind;
 use super::unchanged::is_unchanged;
 use super::unchanged::{Unchanged, UnchangedOr};
-use super::visit_error_context::update_visit_error_context;
+use super::visit_error_context::{enrich_visit_error, update_visit_error_context};
 
 const STRUCTURAL_MUTATE_ATTR: &str = "__s_mutate__";
 const STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR: &str = "__s_maybe_inplace_mutate__";
@@ -1025,7 +1024,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
             Some(result) => {
                 let result = result.map(Any::from).and_then(reject_error_value);
                 result_into_raw_ffi_any(if CALLBACK_CONTEXT {
-                    result.map_err(|error| with_mutation_error_context(error, raw, "mutate"))
+                    result.map_err(|error| update_visit_error_context(error, raw))
                 } else {
                     result
                 })
@@ -1176,7 +1175,11 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
             StructuralMutatorObj::call_mutator(runtime, *root.as_raw_ffi_any(), InplaceMode::Allow);
         // Native hooks release temporary runtime owners before this synchronous run ends.
         drop(engine);
-        result.map(|value| if is_unchanged(&value) { root } else { value })
+        match result {
+            Ok(value) => Ok(if is_unchanged(&value) { root } else { value }),
+            // The public traversal boundary, as the C++ `StructuralMutateExpected`.
+            Err(error) => Err(enrich_visit_error(error, *root.as_raw_ffi_any())),
+        }
     }
 }
 
@@ -1215,7 +1218,7 @@ impl StructuralMutatorObj {
         unsafe {
             result_into_raw_ffi_any(
                 raw_ffi_any_into_result(result)
-                    .map_err(|error| with_mutation_error_context(error, raw, "mutate")),
+                    .map_err(|error| update_visit_error_context(error, raw)),
             )
         }
     }
@@ -1305,13 +1308,7 @@ impl StructuralMutatorObj {
         // populate an owning result and still report an error.
         let mut child = Any::new();
         if unsafe { getter(source_address, Any::as_raw_ffi_any_mut(&mut child)) } != 0 {
-            return Err(unsafe {
-                with_structural_field_error_context(
-                    Error::from_raised(),
-                    "mutate",
-                    field.name.as_str(),
-                )
-            });
+            return Err(Error::from_raised());
         }
         // Reflection getters return owning values. Keep the child alive for
         // the complete recursive call, then let normal Drop release it.
@@ -1319,19 +1316,12 @@ impl StructuralMutatorObj {
         let child_region = field_def_region(field, inherited_region);
         let mapped = Self::with_def_region_kind(runtime, child_region, |_| {
             Self::call_mutator(runtime, child_raw, InplaceMode::Disallow)
-        })
-        .map_err(|error| unsafe {
-            with_structural_field_error_context(error, "mutate", field.name.as_str())
         })?;
         if is_unchanged(&mapped) || raw_ffi_any_same_as(child_raw, *mapped.as_raw_ffi_any()) {
             return Ok(());
         }
 
-        call_field_setter(field, source_address, mapped.as_raw_ffi_any()).map_err(
-            |error| unsafe {
-                with_structural_field_error_context(error, "mutate", field.name.as_str())
-            },
-        )?;
+        call_field_setter(field, source_address, mapped.as_raw_ffi_any())?;
         *field_changed = true;
         Ok(())
     }
@@ -1424,9 +1414,7 @@ impl StructuralMutatorObj {
             Err(invalid_mutation_hook_error())
         };
         // Preserve successful Error-valued returns until the public conversion.
-        result_into_raw_ffi_any(
-            result.map_err(|error| with_mutation_error_context(error, raw, "mutate")),
-        )
+        result_into_raw_ffi_any(result.map_err(|error| update_visit_error_context(error, raw)))
     }
 
     /// Borrow the live `runtime` as an object argument, without a reference count.
@@ -1494,7 +1482,7 @@ impl StructuralMutatorObj {
             unsafe { std::mem::transmute::<i32, DefRegionKind>(*(*runtime).def_region_mode.get()) };
         result_into_raw_ffi_any(
             Self::mutate_without_hook(runtime, raw, def_region_kind)
-                .map_err(|error| with_mutation_error_context(error, raw, "mutate")),
+                .map_err(|error| update_visit_error_context(error, raw)),
         )
     }
 
@@ -1815,20 +1803,4 @@ fn unregistered_type_error(type_index: i32) -> Error {
     runtime_error(&format!(
         "native structural mutate: unregistered type index {type_index}"
     ))
-}
-
-#[cold]
-pub(super) fn with_mutation_error_context(error: Error, raw: TVMFFIAny, operation: &str) -> Error {
-    if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-        error
-    } else {
-        with_structural_error_context(
-            update_visit_error_context(error, raw),
-            operation,
-            &format!(
-                "object `{}`",
-                crate::object::type_key_of_index(raw.type_index)
-            ),
-        )
-    }
 }
