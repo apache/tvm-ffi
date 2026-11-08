@@ -196,7 +196,7 @@ fn expand(item: &ItemImpl, args: &DispatchArgs) -> syn::Result<TokenStream2> {
         {
             lifetimes.normalize(&mut ty, None);
             generics.make_where_clause().predicates.push(syn::parse_quote!(
-                for<#borrow> #ty: #tvm_ffi::match_any_internal::MatchPattern<&#borrow mut #source>
+                for<#borrow> #ty: #tvm_ffi::match_any_internal::ValuePattern<&#borrow mut #source>
             ));
         }
         patterns.push(ty);
