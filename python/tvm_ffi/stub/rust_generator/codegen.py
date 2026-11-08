@@ -25,7 +25,7 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   width, pinned by a ``const`` size/alignment assertion. ``<Leaf>Obj::new``
   and the wrapper's ``new`` take every field root to leaf: the former each as
   its own type, the latter a scalar as its own type, an object reference as
-  ``impl IntoObjectRef`` and anything else as ``impl Into``. ``custom-new``
+  ``impl IntoArg`` and anything else as ``impl Into``. ``custom-new``
   leaves the wrapper's ``new`` to hand-written code and names the generated
   one ``from_fields``. A type that is not final
   can be the parent of a type defined in Rust (``tvm_ffi::rs_object``): its
@@ -140,13 +140,13 @@ def _is_object_ref(schema: TypeSchema) -> bool:
 def _param_type(param: _Param, imports: RustImports) -> str:
     """Type a parameter of the wrapper's allocator.
 
-    A scalar as itself, an object reference as ``impl IntoObjectRef`` (recording its ``use``,
-    which also brings ``into_owned_object_ref`` into scope), anything else as ``impl Into``.
+    A scalar as itself, an object reference as ``impl IntoArg`` (recording its ``use``,
+    which also brings ``into_owned`` into scope), anything else as ``impl Into``.
     """
     if param.rust_type in C_RUST.RUST_EXACT_PARAMS:
         return param.rust_type
     if param.is_object:
-        return f"impl {imports.record('tvm_ffi::IntoObjectRef')}<{param.rust_type}>"
+        return f"impl {imports.record('tvm_ffi::IntoArg')}<{param.rust_type}>"
     return f"impl Into<{param.rust_type}>"
 
 
@@ -155,7 +155,7 @@ def _forward(param: _Param) -> str:
     ident = rust_ident(param.name)
     if param.rust_type in C_RUST.RUST_EXACT_PARAMS:
         return ident
-    return f"{ident}.into_owned_object_ref()" if param.is_object else f"{ident}.into()"
+    return f"{ident}.into_owned()" if param.is_object else f"{ident}.into()"
 
 
 def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
@@ -694,7 +694,7 @@ class _ObjectRenderer:
     ) -> list[str]:
         """Render ``<head>(<params>) -> Self { let <call>; Self { <init> } }`` in an ``impl`` block.
 
-        ``generic`` takes a parameter that is not a scalar as ``impl IntoObjectRef`` or
+        ``generic`` takes a parameter that is not a scalar as ``impl IntoArg`` or
         ``impl Into`` (:func:`_param_type`).
         """
         plist = [
@@ -716,7 +716,7 @@ class _ObjectRenderer:
         ``<Leaf>Obj::new`` takes every field as its own type, so the parent's, generated
         or hand-written, takes what it hands on. The wrapper's ``new`` takes a scalar
         field as its own type, as ``#[rs_object]``'s ``new`` does, an object reference as
-        ``impl IntoObjectRef`` and any other as ``impl Into`` (:func:`_param_type`), and
+        ``impl IntoArg`` and any other as ``impl Into`` (:func:`_param_type`), and
         converts it on the way to ``<Leaf>Obj::new``.
         ``custom-new`` names the wrapper's allocator ``from_fields`` instead.
         ``<Leaf>Obj::new`` of a type that is not final is public: a subtype defined in Rust

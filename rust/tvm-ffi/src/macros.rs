@@ -232,7 +232,7 @@ macro_rules! attach_context {
 /// its base object-reference types: `From<Source>` and `From<&Source>` into
 /// `Target`, `AsRef<Target>`, which borrows a `&Source` as `&Target`
 /// without touching the reference count, and
-/// [`IntoObjectRef<Target>`](crate::object::IntoObjectRef) for `Source` and `&Source`,
+/// [`IntoArg<Target>`](crate::IntoArg) for `Source` and `&Source`,
 /// and [`TypeSubsumes<Source>`](crate::type_traits::TypeSubsumes) for `Target`, so
 /// [`Array::upcast`](crate::Array::upcast) turns an `Array<Source>` into an
 /// `Array<Target>`. It also implements the strict downcast back, `TryFrom<Target>` and
@@ -290,18 +290,18 @@ macro_rules! impl_object_ref_upcast {
             // `target`, and an object reference never changes its object.
             unsafe impl $crate::type_traits::TypeSubsumes<$source> for $target {}
 
-            impl $crate::object::IntoObjectRef<$target> for $source {
+            impl $crate::IntoArg<$target> for $source {
                 type Output = $target;
                 #[inline(always)]
-                fn into_object_ref(self) -> $target {
+                fn into_arg(self) -> $target {
                     ::core::convert::Into::into(self)
                 }
             }
 
-            impl<'a> $crate::object::IntoObjectRef<$target> for &'a $source {
+            impl<'a> $crate::IntoArg<$target> for &'a $source {
                 type Output = &'a $target;
                 #[inline(always)]
-                fn into_object_ref(self) -> &'a $target {
+                fn into_arg(self) -> &'a $target {
                     ::core::convert::AsRef::<$target>::as_ref(self)
                 }
             }

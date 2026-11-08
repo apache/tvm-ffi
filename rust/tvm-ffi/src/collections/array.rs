@@ -25,8 +25,9 @@ use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
 use crate::object::ObjectCoreWithExtraItems;
-use crate::object::{IntoObjectRef, Object, ObjectArc};
+use crate::object::{Object, ObjectArc};
 use crate::type_traits::{ContainerElement, RefFromAnyUnchecked, TypeSubsumes};
+use crate::IntoArg;
 use crate::{Any, AnyCompatible, AnyView, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -161,20 +162,18 @@ impl<T: ContainerElement + Clone> From<&Array<T>> for Array<T> {
     }
 }
 
-impl<T, U: TypeSubsumes<T>> IntoObjectRef<Array<U>> for Array<T> {
+impl<T, U: TypeSubsumes<T>> IntoArg<Array<U>> for Array<T> {
     type Output = Array<U>;
     #[inline(always)]
-    fn into_object_ref(self) -> Array<U> {
+    fn into_arg(self) -> Array<U> {
         self.upcast()
     }
 }
 
-impl<'a, T, U: TypeSubsumes<T> + ContainerElement + Clone + 'a> IntoObjectRef<Array<U>>
-    for &'a Array<T>
-{
+impl<'a, T, U: TypeSubsumes<T> + ContainerElement + Clone + 'a> IntoArg<Array<U>> for &'a Array<T> {
     type Output = &'a Array<U>;
     #[inline(always)]
-    fn into_object_ref(self) -> &'a Array<U> {
+    fn into_arg(self) -> &'a Array<U> {
         self.upcast_ref()
     }
 }

@@ -379,8 +379,8 @@ fn test_containers_upcast_without_a_copy() {
     fn keep_map(value: impl Into<Map<tvm_ffi::String, RsPoint>>) -> Map<tvm_ffi::String, RsPoint> {
         value.into()
     }
-    fn len(value: impl IntoObjectRef<Array<RsPoint>>) -> usize {
-        value.into_object_ref().borrow().len()
+    fn len(value: impl IntoArg<Array<RsPoint>>) -> usize {
+        value.into_arg().borrow().len()
     }
 
     let (a, b) = (point(1, "a"), point(2, "b"));

@@ -160,7 +160,7 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
     let base_ty = &base.ty;
     // `new` takes a scalar as its own type, so that a literal infers as it, and any
     // other field as `impl Into`. Tokens alone do not tell an object reference from a
-    // value, so this object-level allocator does not take `impl IntoObjectRef` as a
+    // value, so this object-level allocator does not take `impl IntoArg` as a
     // reference's constructor does.
     let params = fields.iter().map(|field| {
         let (name, ty) = (&field.ident, &field.ty);

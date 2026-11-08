@@ -37,9 +37,9 @@ use crate::any::TryFromTemp;
 use crate::derive::Object;
 use crate::extra::cold_init_lazy_lock::ColdInitLazyLock;
 use crate::function::Function;
-use crate::object::IntoObjectRef;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::{ContainerElement, TypeSubsumes};
+use crate::IntoArg;
 use crate::{Any, AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -489,20 +489,20 @@ impl<K, V> Map<K, V> {
     }
 }
 
-impl<K, V, KU: TypeSubsumes<K>, VU: TypeSubsumes<V>> IntoObjectRef<Map<KU, VU>> for Map<K, V> {
+impl<K, V, KU: TypeSubsumes<K>, VU: TypeSubsumes<V>> IntoArg<Map<KU, VU>> for Map<K, V> {
     type Output = Map<KU, VU>;
     #[inline(always)]
-    fn into_object_ref(self) -> Map<KU, VU> {
+    fn into_arg(self) -> Map<KU, VU> {
         self.upcast()
     }
 }
 
-impl<'a, K, V, KU: TypeSubsumes<K> + 'a, VU: TypeSubsumes<V> + 'a> IntoObjectRef<Map<KU, VU>>
+impl<'a, K, V, KU: TypeSubsumes<K> + 'a, VU: TypeSubsumes<V> + 'a> IntoArg<Map<KU, VU>>
     for &'a Map<K, V>
 {
     type Output = &'a Map<KU, VU>;
     #[inline(always)]
-    fn into_object_ref(self) -> &'a Map<KU, VU> {
+    fn into_arg(self) -> &'a Map<KU, VU> {
         self.upcast_ref()
     }
 }

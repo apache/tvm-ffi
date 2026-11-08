@@ -725,18 +725,18 @@ pub(crate) fn expand_object_ref(
             }
         }
 
-        impl #tvm_ffi_crate::object::IntoObjectRef<#struct_name> for #struct_name {
+        impl #tvm_ffi_crate::IntoArg<#struct_name> for #struct_name {
             type Output = Self;
             #[inline(always)]
-            fn into_object_ref(self) -> Self {
+            fn into_arg(self) -> Self {
                 self
             }
         }
 
-        impl<'a> #tvm_ffi_crate::object::IntoObjectRef<#struct_name> for &'a #struct_name {
+        impl<'a> #tvm_ffi_crate::IntoArg<#struct_name> for &'a #struct_name {
             type Output = &'a #struct_name;
             #[inline(always)]
-            fn into_object_ref(self) -> &'a #struct_name {
+            fn into_arg(self) -> &'a #struct_name {
                 self
             }
         }
