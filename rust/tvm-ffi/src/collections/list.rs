@@ -310,20 +310,24 @@ impl<T: ContainerElement> List<T> {
         }
     }
 
-    /// Replaces the element at `index`.
+    /// Replaces the element at `index`, as `vec[index] = value`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= len`.
     #[inline]
-    pub fn set(&self, index: usize, value: T) -> Result<()> {
+    pub fn set(&self, index: usize, value: T) {
         let obj = self.obj();
         unsafe {
-            if index >= (*(*obj).size.get()) as usize {
-                return index_error("set");
+            let size = (*(*obj).size.get()) as usize;
+            if index >= size {
+                panic!("Index out of bounds: the len is {size} but the index is {index}");
             }
             let cell = ListObj::cell(obj, index);
             let old = take_cell(cell);
             write_cell(cell, value);
             drop(old);
         }
-        Ok(())
     }
 
     /// Appends `value` to the end of the list.
@@ -430,32 +434,35 @@ impl<T: ContainerElement> List<T> {
     /// Removes the elements in `range`, shifting the ones after them, as
     /// [`Vec::drain`] does without returning them.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns an `IndexError` if `range` starts after it ends or ends past the
-    /// list.
-    pub fn remove_range(&self, range: impl RangeBounds<usize>) -> Result<()> {
+    /// Panics if `range` starts after it ends or ends past the list.
+    pub fn remove_range(&self, range: impl RangeBounds<usize>) {
         let obj = self.obj();
         unsafe {
             let size = (*(*obj).size.get()) as usize;
             let start = match range.start_bound() {
-                Bound::Included(&start) => Some(start),
-                Bound::Excluded(&start) => start.checked_add(1),
-                Bound::Unbounded => Some(0),
+                Bound::Included(&start) => start,
+                Bound::Excluded(&start) => start
+                    .checked_add(1)
+                    .expect("attempted to index slice from after maximum usize"),
+                Bound::Unbounded => 0,
             };
             let end = match range.end_bound() {
-                Bound::Included(&end) => end.checked_add(1),
-                Bound::Excluded(&end) => Some(end),
-                Bound::Unbounded => Some(size),
+                Bound::Included(&end) => end
+                    .checked_add(1)
+                    .expect("attempted to index slice up to maximum usize"),
+                Bound::Excluded(&end) => end,
+                Bound::Unbounded => size,
             };
-            let (Some(start), Some(end)) = (start, end) else {
-                return index_error("remove_range");
-            };
-            if start > end || end > size {
-                return index_error("remove_range");
+            if start > end {
+                panic!("slice index starts at {start} but ends at {end}");
+            }
+            if end > size {
+                panic!("range end index {end} out of range for slice of length {size}");
             }
             if start == end {
-                return Ok(());
+                return;
             }
             // Rotate the removed cells to the back and drop them from there,
             // so the list is consistent while each element is released.
@@ -463,7 +470,6 @@ impl<T: ContainerElement> List<T> {
                 .rotate_left(end - start);
             ListObj::truncate(obj, size - (end - start));
         }
-        Ok(())
     }
 
     /// Inserts every item of `iter`, in order, at `index`, shifting the
