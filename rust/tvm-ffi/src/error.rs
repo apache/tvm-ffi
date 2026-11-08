@@ -371,9 +371,8 @@ impl Error {
     /// The traceback of the error.
     pub fn traceback_most_recent_call_last(&self) -> String {
         let backtrace = self.backtrace();
-        let backtrace_lines = backtrace.split('\n');
         let mut traceback = String::new();
-        for line in backtrace_lines.rev() {
+        for line in backtrace.split('\n').rev().filter(|line| !line.is_empty()) {
             traceback.push_str(line);
             traceback.push('\n');
         }
@@ -423,24 +422,26 @@ impl Error {
     }
 }
 
+/// Formats the kind and the message, such as `ValueError: bad x`, as C++
+/// `what()`; [`Debug`](std::fmt::Debug) adds the traceback.
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.backtrace().is_empty() {
-            return write!(f, "{}: {}", self.kind().as_str(), self.message());
-        }
-        write!(
-            f,
-            "Traceback (most recent call last):\n{}{}: {}",
-            self.traceback_most_recent_call_last(),
-            self.kind().as_str(),
-            self.message()
-        )
+        write!(f, "{}: {}", self.kind().as_str(), self.message())
     }
 }
 
+/// Formats the traceback, most recent call last, then the kind and the
+/// message, as Python prints an exception; `unwrap` and `expect` print it.
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self, f)
+        if self.backtrace().is_empty() {
+            return std::fmt::Display::fmt(self, f);
+        }
+        write!(
+            f,
+            "Traceback (most recent call last):\n{}{self}",
+            self.traceback_most_recent_call_last(),
+        )
     }
 }
 
