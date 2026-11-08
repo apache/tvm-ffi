@@ -291,13 +291,16 @@ impl<T: ObjectCore> ObjectArc<T> {
         unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
-    /// The number of weak references, as `Arc::weak_count`.
+    /// The number of weak references, as `Arc::weak_count`: the weak
+    /// reference that the strong references hold together is not counted.
     ///
     /// # Arguments
     /// * `this` - The handle.
     #[inline]
     pub fn weak_count(this: &Self) -> usize {
-        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+        // While a strong reference lives, the raw count includes the one weak
+        // reference that all strong references share.
+        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) - 1 }
     }
 }
 

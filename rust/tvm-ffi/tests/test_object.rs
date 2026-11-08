@@ -89,25 +89,25 @@ fn test_object_arc() {
     assert_eq!(view.debug_strong_count(), Some(1));
     assert_eq!(obj_arc.value, 11);
     assert_eq!(ObjectArc::strong_count(&obj_arc), 1);
-    assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
+    assert_eq!(ObjectArc::weak_count(&obj_arc), 0);
 
     let ref1 = obj_arc.clone();
     assert_eq!(ObjectArc::strong_count(&obj_arc), 2);
-    assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
+    assert_eq!(ObjectArc::weak_count(&obj_arc), 0);
 
     let ref2 = obj_arc.clone();
     assert_eq!(ObjectArc::strong_count(&obj_arc), 3);
-    assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
+    assert_eq!(ObjectArc::weak_count(&obj_arc), 0);
     assert_eq!(ref1.value, 11);
     // drop obj_arc
     drop(obj_arc);
     assert_eq!(ObjectArc::strong_count(&ref1), 2);
-    assert_eq!(ObjectArc::weak_count(&ref1), 1);
+    assert_eq!(ObjectArc::weak_count(&ref1), 0);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     // drop ref1
     drop(ref1);
     assert_eq!(ObjectArc::strong_count(&ref2), 1);
-    assert_eq!(ObjectArc::weak_count(&ref2), 1);
+    assert_eq!(ObjectArc::weak_count(&ref2), 0);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     // drop ref2
     drop(ref2);
@@ -121,7 +121,7 @@ fn test_object_arc_with_extra_items() {
         unsafe { ObjectArc::new_with_extra_items(TestIntObj::new(12, delete_counter.clone(), 10)) };
     assert_eq!(obj_arc.value, 12);
     assert_eq!(ObjectArc::strong_count(&obj_arc), 1);
-    assert_eq!(ObjectArc::weak_count(&obj_arc), 1);
+    assert_eq!(ObjectArc::weak_count(&obj_arc), 0);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     unsafe {
         let raw = ObjectArc::as_mut_ptr(&mut obj_arc);
@@ -267,7 +267,7 @@ fn test_object_arc_from_raw() {
         let obj_arc2 = ObjectArc::from_raw(raw_ptr);
         assert_eq!(obj_arc2.value, 11);
         assert_eq!(ObjectArc::strong_count(&obj_arc2), 1);
-        assert_eq!(ObjectArc::weak_count(&obj_arc2), 1);
+        assert_eq!(ObjectArc::weak_count(&obj_arc2), 0);
         assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
         // drop obj_arc2
         drop(obj_arc2);
