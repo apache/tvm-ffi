@@ -70,12 +70,12 @@ The Rust crate depends on the `tvm-ffi` crate of this repository and needs
 The binding file opens with a `prefix` line:
 
 ```rust
-// tvm-ffi-stubgen(prefix): rust_stubgen
+// tvm-ffi-stubgen(file): mod(prefix = rust_stubgen)
 ```
 
 It makes the file own the `rust_stubgen` namespace: every object registered
 directly under it gets an `object/<type_key>` block in this file on the next
-run, and a `skip` line (`// tvm-ffi-stubgen(skip): rust_stubgen.Internal`)
+run, and a `skip` key (`// tvm-ffi-stubgen(object): rust_stubgen.Internal(skip)`)
 leaves one out. Add a second object to `int_pair.cc` and rebuild, and its block
 appears after `IntPair`; delete a block and it comes back, so dropping a binding
 means writing `skip`. Remove the object from the C++ side and its block is
@@ -87,12 +87,12 @@ file the command line points at. This example keeps them under
 
 ## Hand-written constructors
 
-`IntPair::new` is hand-written. The `custom-new` directive makes the generator
+`IntPair::new` is hand-written. The object's `custom_new` key makes the generator
 name its lossless allocator `from_fields` instead of `new`, and the
 hand-written constructor calls it after deriving `kind` from the operands:
 
 ```rust
-// tvm-ffi-stubgen(custom-new): rust_stubgen.IntPair
+// tvm-ffi-stubgen(object): rust_stubgen.IntPair(custom_new)
 
 impl IntPair {
     pub fn new(a: i64, b: i64) -> Self {
@@ -102,37 +102,39 @@ impl IntPair {
 }
 ```
 
-Without the directive the block would define `IntPair::new` too and the crate
+Without the key the block would define `IntPair::new` too and the crate
 would not compile.
 
 ## Directives
 
-The generated file keeps one-line directives the generator reads on every run.
-Besides `prefix` and `custom-new`, this example declares the integer field
-`kind` as an open newtype:
+The generated file keeps one-line directives the generator reads on every run,
+each `<subject>: <target>(<key>, <key> = <value>, ...)` (no parentheses without
+keys). Lines for the same subject and target merge. Besides `prefix` and
+`custom_new`, this example declares the integer field `kind` as an open
+newtype:
 
 ```rust
-// tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) { Unordered=0, Ordered=1 }
+// tvm-ffi-stubgen(enum): PairKind(repr = i32, Unordered = 0, Ordered = 1)
+// tvm-ffi-stubgen(field): rust_stubgen.IntPair.kind(type = PairKind)
 ```
 
-Four more are available: `field` names the Rust type of a field
-(`// tvm-ffi-stubgen(field): rust_stubgen.IntPair.a -> MyInt`), `nullable`
-wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
-`visibility` makes it `pub(crate)` instead of `pub`
-(`// tvm-ffi-stubgen(visibility): rust_stubgen.IntPair.a -> pub(crate)`), and `upcast` adds a conversion to a hand-written typed view
-(`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`).
+A field also takes `type` naming any Rust type
+(`// tvm-ffi-stubgen(field): rust_stubgen.IntPair.a(type = MyInt)`), `nullable`
+to wrap it in `Option`, and `visibility = pub(crate)` instead of `pub`. An
+object takes `upcast = MyView` (repeatable) to add a conversion to a
+hand-written typed view, `opaque` to keep its layout opaque, and `no_new` to
+skip the generated allocator.
 
-When the C++ side fixes the value set in its ABI, `closed` before the member
-list makes `enum` emit a `#[repr(i32)]` Rust enum instead. Reading a value
-outside the set is undefined behavior, so the set should include 0, the value of
-a field never set:
+When the C++ side fixes the value set in its ABI, `closed` makes `enum` emit a
+`#[repr(i32)]` Rust enum instead. Reading a value outside the set is undefined
+behavior, so the set should include 0, the value of a field never set:
 
 ```rust
-// tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) closed { Unordered=0, Ordered=1 }
+// tvm-ffi-stubgen(enum): PairKind(repr = i32, closed, Unordered = 0, Ordered = 1)
 ```
 
 A crate built with `#![warn(missing_docs)]` adds
-`// tvm-ffi-stubgen(missing-docs): allow` to a file: every generated type and
+`// tvm-ffi-stubgen(file): mod(missing_docs = allow)` to a file: every generated type and
 `impl` in it gets `#[allow(missing_docs)]`, and docs written above a block
 still document its first item.
 
@@ -142,9 +144,9 @@ Every type an object refers to (its parent, its ancestors, the types of its
 fields) has to be provided in the same `tvm-ffi-stubgen` run: `ffi.*` types
 come from the `tvm-ffi` crate (a field of an `ffi.*` type the crate does not
 bind is read as `Any`), an `object/<key>` block in any processed file
-generates it, and a `ty-map` points at a hand-written binding whose object
+generates it, and a `ty_map` key points at a hand-written binding whose object
 struct is named `<Name>Obj`
-(`// tvm-ffi-stubgen(ty-map): rust_stubgen.IntPair -> crate::hand::IntPair`).
+(`// tvm-ffi-stubgen(object): rust_stubgen.IntPair(ty_map = crate::hand::IntPair)`).
 Anything else is an error listing the missing keys, so a partial binding never
 references a module that does not exist. A hand-written binding may sit next to
 the generated ones: the file of its own module refers to it by name instead of

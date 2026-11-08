@@ -30,8 +30,8 @@ The stub generator separates two concerns:
 A :class:`Generator` encapsulates concern (2); ``cli.py`` drives concern (1) and
 delegates every act of emitting text — and every act of collecting imports — to
 the active generator. The import collector is opaque to the pipeline: ``cli.py``
-asks the generator to create one, seed it from the one-line directives the
-generator declares, and later render it, but never reaches inside. Adding a
+asks the generator to create one from the file's one-line directives
+(:mod:`.directives`), and later render it, but never reaches inside. Adding a
 language is therefore "implement one more :class:`Generator`" rather than
 forking the pipeline.
 """
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from .directives import Directives, KeyTable
     from .file_utils import CodeBlock
     from .utils import FuncInfo, InitConfig, ObjectInfo, Options
 
@@ -77,10 +78,10 @@ class Generator(Protocol):
     #: Comment-marker syntax for the files this generator emits.
     syntax: C.MarkerSyntax
 
-    #: Names of the one-line directives (``<comment> tvm-ffi-stubgen(<name>): <payload>``)
-    #: this generator consumes. Names in :data:`consts.PIPELINE_DIRECTIVE_KINDS` belong
-    #: to the pipeline; any other undeclared name is an error.
-    directive_kinds: frozenset[str]
+    #: Keys of the one-line directives (``<comment> tvm-ffi-stubgen(<subject>): <target>(...)``)
+    #: this generator reads, per subject; merged with :data:`consts.PIPELINE_DIRECTIVE_KEYS`.
+    #: A subject or key in neither table is an error.
+    directive_keys: KeyTable
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> target-type name map for this language."""
@@ -88,16 +89,11 @@ class Generator(Protocol):
 
     # --- import collection (representation is generator-private) ------------
 
-    def new_imports(self) -> Any:
-        """Create a fresh, empty import collector for one file."""
-        ...
+    def new_imports(self, directives: Directives) -> Any:
+        """Create the import collector for one file, seeded from the file's ``directives``.
 
-    def add_directive(self, imports: Any, name: str, payload: str, lineno: int) -> None:
-        """Record a one-line directive (raw payload) into ``imports``.
-
-        The collector is per file, so a directive applies to the blocks of the
-        file it appears in. ``name`` is always one of :attr:`directive_kinds`;
-        the payload's grammar is the generator's to define.
+        The collector is per file, so a directive applies to the blocks of the file it
+        appears in.
         """
         ...
 

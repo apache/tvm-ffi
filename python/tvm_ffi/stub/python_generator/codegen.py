@@ -64,7 +64,7 @@ class {type_name}({parent_type_name}):
 
 
 def _prompt_import_object(type_key: str, type_name: str, syntax: C.MarkerSyntax) -> str:
-    return f"""{syntax.import_object} {type_key};False;{type_name}\n"""
+    return f"""{syntax.directive("import")} {type_key}(alias = {type_name})\n"""
 
 
 def _prompt_import_section(syntax: C.MarkerSyntax) -> str:
@@ -105,7 +105,7 @@ def _type_suffix_and_record(
 
 
 def _make_input_ty_map(ty_map: dict[str, str]) -> dict[str, str]:
-    """Derive input-side defaults without overriding explicit ty-map entries."""
+    """Derive input-side defaults without overriding explicit ty_map entries."""
     input_ty_map = ty_map.copy()
     for key, input_default in PC.TY_MAP_INPUT_DEFAULTS.items():
         output_default = PC.TY_MAP_DEFAULTS.get(key)

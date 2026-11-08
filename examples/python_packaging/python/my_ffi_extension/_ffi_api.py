@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 # isort: on
 # fmt: on
 # tvm-ffi-stubgen(end)
-# tvm-ffi-stubgen(import-object): tvm_ffi.libinfo.load_lib_module;False;_FFI_LOAD_LIB
+# tvm-ffi-stubgen(import): tvm_ffi.libinfo.load_lib_module(alias = _FFI_LOAD_LIB)
 LIB = _FFI_LOAD_LIB("my_ffi_extension", "my_ffi_extension")
 # tvm-ffi-stubgen(begin): global/my_ffi_extension
 # fmt: off
@@ -37,8 +37,8 @@ if TYPE_CHECKING:
     def raise_error(_0: str, /) -> None: ...
 # fmt: on
 # tvm-ffi-stubgen(end)
-# tvm-ffi-stubgen(import-object): tvm_ffi.register_object;False;_FFI_REG_OBJ
-# tvm-ffi-stubgen(import-object): ffi.Object;False;_ffi_Object
+# tvm-ffi-stubgen(import): tvm_ffi.register_object(alias = _FFI_REG_OBJ)
+# tvm-ffi-stubgen(import): ffi.Object(alias = _ffi_Object)
 @_FFI_REG_OBJ("my_ffi_extension.IntPair")
 class IntPair(_ffi_Object):
     """FFI binding for `my_ffi_extension.IntPair`."""

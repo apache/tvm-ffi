@@ -18,22 +18,6 @@
 
 from __future__ import annotations
 
-#: One-line directives the Rust backend consumes.
-RUST_DIRECTIVE_KINDS = frozenset(
-    {
-        "import-object",
-        "field",
-        "nullable",
-        "visibility",
-        "enum",
-        "opaque",
-        "upcast",
-        "custom-new",
-        "no-new",
-        "missing-docs",
-    }
-)
-
 #: Default FFI-origin -> Rust-type map; ``::`` paths get a ``use``, bare names do not.
 RUST_TY_MAP_DEFAULTS = {
     "int": "i64",
@@ -120,7 +104,7 @@ RUST_EXACT_PARAMS = frozenset(
 )
 
 #: Builtin origins whose Rust type is an object reference, taken as ``impl IntoArg<T>``.
-#: A type key outside ``ffi.*`` is one too: a generated or ``ty-map``'d binding. ``Shape``,
+#: A type key outside ``ffi.*`` is one too: a generated or ``ty_map``'d binding. ``Shape``,
 #: like ``Array`` / ``List`` / ``Map``, is a container taken as ``impl Into<T>``, which also
 #: accepts what it is built from (``From<impl AsRef<[i64]>>``).
 RUST_OBJECT_REF_ORIGINS = frozenset(

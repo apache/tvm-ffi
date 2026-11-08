@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from ..directives import Directives
     from ..file_utils import CodeBlock
     from ..utils import FuncInfo, InitConfig, ObjectInfo, Options
 
@@ -45,7 +46,7 @@ class PythonGenerator:
     name = "python"
     syntax = C.PYTHON_SYNTAX
     source_exts = frozenset({".py", ".pyi"})
-    directive_kinds: frozenset[str] = frozenset({"import-object"})
+    directive_keys = PC.PYTHON_DIRECTIVE_KEYS
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Python-type name map."""
@@ -53,19 +54,16 @@ class PythonGenerator:
 
     # --- import collection (Python representation is private) ---------------
 
-    def new_imports(self) -> PythonImports:
-        """Create an empty import collector."""
-        return PythonImports()
-
-    def add_directive(self, imports: PythonImports, name: str, payload: str, lineno: int) -> None:
-        """Record an ``import-object`` directive (``<full_name>;<type_checking_only>;<alias>``)."""
-        assert name == "import-object", name
-        parts = [part.strip() for part in payload.split(";")]
-        full_name, type_checking_only, alias = parts + [""] * (3 - len(parts))
-        tco = type_checking_only.lower() == "true"
-        imports.items.append(ImportItem(full_name, type_checking_only=tco, alias=alias or None))
-        if alias == "_FFI_LOAD_LIB" or full_name.endswith("libinfo.load_lib_module"):
-            imports.has_lib_load = True
+    def new_imports(self, directives: Directives) -> PythonImports:
+        """Create an import collector holding the file's ``import`` directives."""
+        imports = PythonImports()
+        for full_name, keys in directives.settings["import"].items():
+            alias = str(keys["alias"]) if "alias" in keys else None
+            tco = "type_checking_only" in keys
+            imports.items.append(ImportItem(full_name, type_checking_only=tco, alias=alias))
+            if alias == "_FFI_LOAD_LIB" or full_name.endswith("libinfo.load_lib_module"):
+                imports.has_lib_load = True
+        return imports
 
     def canonical_type_name(self, type_key: str) -> str:
         """Return the canonical (import-comparable) full name for a defined type key."""

@@ -24,6 +24,13 @@ typing assumptions.
 
 from __future__ import annotations
 
+from ..directives import Key, KeyTable
+
+#: ``import: a.b.C(type_checking_only, alias = _C)`` keeps ``a.b.C`` in the import section.
+PYTHON_DIRECTIVE_KEYS: KeyTable = {
+    "import": {"type_checking_only": Key(), "alias": Key(takes_value=True)},
+}
+
 #: Default FFI-origin -> Python-type name map used to seed a render.
 TY_MAP_DEFAULTS = {
     "Any": "typing.Any",

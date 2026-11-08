@@ -27,6 +27,7 @@ from tvm_ffi.core import MISSING, TypeSchema, _lookup_or_register_type_info_from
 from tvm_ffi.dataclasses import py_class
 from tvm_ffi.stub import consts as C
 from tvm_ffi.stub.cli import _stage_1, _stage_2, _stage_3
+from tvm_ffi.stub.directives import Directives, Key
 from tvm_ffi.stub.file_utils import CodeBlock, FileInfo, collect_files, syntax_for
 from tvm_ffi.stub.generator import generator_names, get_generator
 from tvm_ffi.stub.python_generator import PythonGenerator
@@ -45,7 +46,7 @@ from tvm_ffi.stub.python_generator.codegen import (
     render_object_init,
     render_object_methods,
 )
-from tvm_ffi.stub.python_generator.utils import ImportItem
+from tvm_ffi.stub.python_generator.utils import ImportItem, PythonImports
 from tvm_ffi.stub.utils import (
     FuncInfo,
     InitConfig,
@@ -101,10 +102,10 @@ def test_codeblock_from_begin_line_variants() -> None:
 
 
 def test_codeblock_from_begin_line_ty_map_and_unknown() -> None:
-    line = f"{C.PYTHON_SYNTAX.ty_map} custom -> mapped"
+    line = f"{C.PYTHON_SYNTAX.directive('object')} custom(ty_map = mapped)"
     block = CodeBlock.from_begin_line(5, line, C.PYTHON_SYNTAX)
     assert block.kind == "directive"
-    assert block.param == ("ty-map", "custom -> mapped")
+    assert block.param == ("object", "custom(ty_map = mapped)")
     assert block.lineno_start == 5
     assert block.lineno_end == 5
 
@@ -129,7 +130,7 @@ def test_fileinfo_from_file_parses_blocks(tmp_path: Path) -> None:
             f"{C.PYTHON_SYNTAX.begin} global/demo.func",
             "in_stub = True",
             C.PYTHON_SYNTAX.end,
-            f"{C.PYTHON_SYNTAX.ty_map} x -> y",
+            f"{C.PYTHON_SYNTAX.directive('object')} x(ty_map = y)",
         ]
     )
     path = tmp_path / "demo.py"
@@ -154,9 +155,9 @@ def test_fileinfo_from_file_parses_blocks(tmp_path: Path) -> None:
     ]
 
     assert ty_map.kind == "directive"
-    assert ty_map.param == ("ty-map", "x -> y")
+    assert ty_map.param == ("object", "x(ty_map = y)")
     assert ty_map.lineno_start == ty_map.lineno_end == 5
-    assert ty_map.lines == [f"{C.PYTHON_SYNTAX.ty_map} x -> y"]
+    assert ty_map.lines == [f"{C.PYTHON_SYNTAX.directive('object')} x(ty_map = y)"]
 
 
 def test_fileinfo_from_file_error_paths(tmp_path: Path) -> None:
@@ -835,11 +836,12 @@ def test_stage_3_adds_LIB_when_load_lib_imported(tmp_path: Path) -> None:
     )
     import_obj_block = CodeBlock(
         kind="directive",
-        param=("import-object", "tvm_ffi.libinfo.load_lib_module;False;_FFI_LOAD_LIB"),
+        param=("import", "tvm_ffi.libinfo.load_lib_module(alias = _FFI_LOAD_LIB)"),
         lineno_start=1,
         lineno_end=1,
         lines=[
-            f"{C.PYTHON_SYNTAX.import_object} tvm_ffi.libinfo.load_lib_module;False;_FFI_LOAD_LIB"
+            f"{C.PYTHON_SYNTAX.directive('import')} "
+            "tvm_ffi.libinfo.load_lib_module(alias = _FFI_LOAD_LIB)"
         ],
     )
     all_block = CodeBlock(
@@ -945,11 +947,12 @@ def test_generate_ffi_api_with_objects_imports_parents() -> None:
         is_root=False,
         syntax=C.PYTHON_SYNTAX,
     )
-    assert C.PYTHON_SYNTAX.import_object in code  # register_object prompt
+    assert C.PYTHON_SYNTAX.directive("import") in code  # register_object prompt
     assert f"{C.PYTHON_SYNTAX.begin} object/{obj_info.type_key}" in code
     assert parent_key is not None
     parent_import_prompt = (
-        f"{C.PYTHON_SYNTAX.import_object} {parent_key};False;_{parent_key.replace('.', '_')}"
+        f"{C.PYTHON_SYNTAX.directive('import')} {parent_key}"
+        f"(alias = _{parent_key.replace('.', '_')})"
     )
     assert parent_import_prompt in code
 
@@ -1095,7 +1098,7 @@ def test_rust_marker_syntax_parses_rs_file(tmp_path: Path) -> None:
                 f"{C.RUST_SYNTAX.begin} object/demo.Foo",
                 "pub struct Foo;",
                 C.RUST_SYNTAX.end,
-                f"{C.RUST_SYNTAX.ty_map} a -> b",
+                f"{C.RUST_SYNTAX.directive('object')} a(ty_map = b)",
                 "",
             ]
         ),
@@ -1107,7 +1110,7 @@ def test_rust_marker_syntax_parses_rs_file(tmp_path: Path) -> None:
     assert info.syntax is C.RUST_SYNTAX
     assert [block.kind for block in info.code_blocks] == ["object", "directive"]
     assert info.code_blocks[0].param == "demo.Foo"
-    assert info.code_blocks[1].param == ("ty-map", "a -> b")
+    assert info.code_blocks[1].param == ("object", "a(ty_map = b)")
     assert info.code_blocks[0].lines[1] == "pub struct Foo;"
 
     # Python markers are plain text inside a Rust file.
@@ -1141,15 +1144,17 @@ def test_generator_registry_names() -> None:
 
 
 def test_codeblock_from_begin_line_directive() -> None:
-    """``<comment> tvm-ffi-stubgen(<name>): <payload>`` parses into a one-line directive block."""
+    """``<comment> tvm-ffi-stubgen(<subject>): <payload>`` parses into a one-line directive block."""
     for syntax in (C.PYTHON_SYNTAX, C.RUST_SYNTAX):
-        block = CodeBlock.from_begin_line(7, f"{syntax.directive('field')} a.B.c -> D ", syntax)
+        block = CodeBlock.from_begin_line(
+            7, f"{syntax.directive('field')} a.B.c(type = D) ", syntax
+        )
         assert block.kind == "directive"
-        assert block.param == ("field", "a.B.c -> D")
+        assert block.param == ("field", "a.B.c(type = D)")
         assert (block.lineno_start, block.lineno_end) == (7, 7)
         assert block.lines == []
-    empty = CodeBlock.from_begin_line(1, C.PYTHON_SYNTAX.directive("opaque"), C.PYTHON_SYNTAX)
-    assert empty.param == ("opaque", "")
+    empty = CodeBlock.from_begin_line(1, C.PYTHON_SYNTAX.directive("object"), C.PYTHON_SYNTAX)
+    assert empty.param == ("object", "")
 
     # The `name):` shape is required; anything else stays an unknown marker.
     for line in (f"{C.PYTHON_SYNTAX.prefix}field)", f"{C.PYTHON_SYNTAX.prefix}two words): x"):
@@ -1161,7 +1166,7 @@ def test_fileinfo_from_file_keeps_directive_lines(tmp_path: Path) -> None:
     """A directive is parsed as its own block and written back untouched."""
     src = tmp_path / "mod.rs"
     lines = [
-        "  // tvm-ffi-stubgen(nullable):  ir.Expr.span",
+        "  // tvm-ffi-stubgen(field):  ir.Expr.span(nullable)",
         f"{C.RUST_SYNTAX.begin} object/demo.Foo",
         C.RUST_SYNTAX.end,
         f"{C.RUST_SYNTAX.prefix}bogus)",
@@ -1174,28 +1179,28 @@ def test_fileinfo_from_file_keeps_directive_lines(tmp_path: Path) -> None:
     info = FileInfo.from_file(src)
     assert info is not None
     assert [block.kind for block in info.code_blocks] == ["directive", "object"]
-    assert info.code_blocks[0].param == ("nullable", "ir.Expr.span")
+    assert info.code_blocks[0].param == ("field", "ir.Expr.span(nullable)")
     assert info.code_blocks[0].lines == [lines[0]]
     assert info.update(verbose=False, dry_run=False) is False
     assert src.read_text(encoding="utf-8") == "\n".join(lines[:3]) + "\n"
 
 
 def test_stage_3_routes_directives_by_generator_declaration(tmp_path: Path) -> None:
-    """Pipeline-owned names stay in the pipeline; declared names reach the generator."""
+    """Pipeline keys stay in the pipeline; declared subjects and keys reach the generator."""
     path = tmp_path / "demo.py"
     ty_map_directive = CodeBlock(
         kind="directive",
-        param=("ty-map", "demo.Foo -> mapped.Foo"),
+        param=("object", "demo.Foo(ty_map = mapped.Foo)"),
         lineno_start=1,
         lineno_end=1,
-        lines=[f"{C.PYTHON_SYNTAX.ty_map} demo.Foo -> mapped.Foo"],
+        lines=[f"{C.PYTHON_SYNTAX.directive('object')} demo.Foo(ty_map = mapped.Foo)"],
     )
     directive = CodeBlock(
         kind="directive",
-        param=("field", "demo.Foo.x -> Bar"),
+        param=("field", "demo.Foo.x(type = Bar)"),
         lineno_start=2,
         lineno_end=2,
-        lines=[f"{C.PYTHON_SYNTAX.directive('field')} demo.Foo.x -> Bar"],
+        lines=[f"{C.PYTHON_SYNTAX.directive('field')} demo.Foo.x(type = Bar)"],
     )
     all_block = CodeBlock(
         kind="__all__",
@@ -1214,26 +1219,28 @@ def test_stage_3_routes_directives_by_generator_declaration(tmp_path: Path) -> N
             syntax=C.PYTHON_SYNTAX,
         )
 
-    # `ty-map` is pipeline-owned: `_stage_1` consumes it and `_stage_3` skips it.
-    assert "ty-map" in C.PIPELINE_DIRECTIVE_KINDS
+    seen: list[Directives] = []
+
+    keys = {**PythonGenerator.directive_keys, "field": {"type": Key(True)}}
+
+    class FieldAware(PythonGenerator):
+        directive_keys = keys
+
+        def new_imports(self, directives: Directives) -> PythonImports:
+            seen.append(directives)
+            return super().new_imports(directives)
+
+    # `ty_map` is a pipeline key: `_stage_1` reads it.
+    assert "ty_map" in C.PIPELINE_DIRECTIVE_KEYS["object"]
     ty_map: dict[str, str] = {}
-    _stage_1(_file_info(), ty_map)
+    _stage_1(_file_info(), ty_map, FieldAware())
     assert ty_map == {"demo.Foo": "mapped.Foo"}
 
-    # The Python generator does not declare `field`, so the name is unknown to it.
+    # The Python generator does not declare `field`, so the subject is unknown to it.
     python = get_generator("python")
-    assert python.directive_kinds == frozenset({"import-object"})
+    assert set(python.directive_keys) == {"import"}
     with pytest.raises(ValueError, match="Unknown directive `field` at line 2"):
         _stage_3(_file_info(), Options(dry_run=True), _default_ty_map(), {}, python)
 
-    seen: list[tuple[object, str, str, int]] = []
-
-    class FieldAware(PythonGenerator):
-        directive_kinds = frozenset({"field"})
-
-        def add_directive(self, imports: object, name: str, payload: str, lineno: int) -> None:
-            seen.append((imports, name, payload, lineno))
-
     _stage_3(_file_info(), Options(dry_run=True), _default_ty_map(), {}, FieldAware())
-    assert [entry[1:] for entry in seen] == [("field", "demo.Foo.x -> Bar", 2)]
-    assert isinstance(seen[0][0], type(python.new_imports()))
+    assert seen[0].settings["field"] == {"demo.Foo.x": {"type": "Bar"}}

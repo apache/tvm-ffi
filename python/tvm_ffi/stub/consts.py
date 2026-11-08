@@ -23,6 +23,8 @@ from typing import Literal
 
 from typing_extensions import TypeAlias
 
+from .directives import Key, KeyTable
+
 
 @dataclasses.dataclass(frozen=True)
 class MarkerSyntax:
@@ -53,23 +55,13 @@ class MarkerSyntax:
         return f"{self.prefix}end)"
 
     @property
-    def ty_map(self) -> str:
-        """The ``ty-map`` directive marker: ``<comment> tvm-ffi-stubgen(ty-map):``."""
-        return self.directive("ty-map")
-
-    @property
-    def import_object(self) -> str:
-        """The ``import-object`` directive marker: ``<comment> tvm-ffi-stubgen(import-object):``."""
-        return self.directive("import-object")
-
-    @property
     def skip_file(self) -> str:
         """Whole-file opt-out directive: ``<comment> tvm-ffi-stubgen(skip-file)``."""
         return f"{self.prefix}skip-file)"
 
-    def directive(self, name: str) -> str:
-        """One-line directive marker: ``<comment> tvm-ffi-stubgen(<name>):``."""
-        return f"{self.prefix}{name}):"
+    def directive(self, subject: str) -> str:
+        """One-line directive marker: ``<comment> tvm-ffi-stubgen(<subject>):``."""
+        return f"{self.prefix}{subject}):"
 
 
 PYTHON_SYNTAX = MarkerSyntax(comment="#")
@@ -84,10 +76,14 @@ SYNTAX_BY_EXT: dict[str, MarkerSyntax] = {
     ".rs": RUST_SYNTAX,
 }
 
-#: One-line directive names consumed by the language-neutral pipeline. Generators
-#: must not declare these names; every other name must be declared by the active
-#: generator (``Generator.directive_kinds``).
-PIPELINE_DIRECTIVE_KINDS: frozenset[str] = frozenset({"ty-map", "prefix", "skip"})
+#: Directive keys the language-neutral pipeline reads (see :mod:`.directives`): an
+#: ``object`` maps its type key (``ty_map``) or opts out of ``--init`` and ``prefix``
+#: (``skip``); ``file: mod(prefix = <p>)`` asks for a block per object under ``p``.
+#: The active generator declares every other key (``Generator.directive_keys``).
+PIPELINE_DIRECTIVE_KEYS: KeyTable = {
+    "object": {"skip": Key(), "ty_map": Key(takes_value=True)},
+    "file": {"prefix": Key(takes_value=True)},
+}
 
 STUB_BLOCK_KINDS: TypeAlias = Literal[
     "global",
