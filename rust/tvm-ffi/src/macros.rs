@@ -92,6 +92,32 @@ macro_rules! check_safe_call {
     }};
 }
 
+/// Make an [`Error`](crate::Error) of a kind with a formatted message,
+/// recording the source location in the backtrace, as [`bail!`](crate::bail)
+/// does without returning.
+///
+/// ```
+/// use tvm_ffi::{format_err, Result, KEY_ERROR};
+///
+/// fn lookup(names: &[&str], name: &str) -> Result<usize> {
+///     names.iter().position(|n| *n == name).ok_or_else(|| format_err!(KEY_ERROR, "no {name}"))
+/// }
+///
+/// assert_eq!(lookup(&["a"], "b").unwrap_err().to_string(), "KeyError: no b");
+/// ```
+#[macro_export]
+macro_rules! format_err {
+    ($error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
+        let context = ::std::format!(
+            "  File \"{}\", line {}, in {}\n",
+            ::core::file!(),
+            ::core::line!(),
+            $crate::function_name!()
+        );
+        $crate::error::Error::new($error_kind, &::std::format!($fmt $(, $args)*), &context)
+    }};
+}
+
 /// Return an [`Error`](crate::Error) of a kind with a formatted message from
 /// the current function.
 ///
@@ -127,13 +153,7 @@ macro_rules! check_safe_call {
 #[macro_export]
 macro_rules! bail {
     ($error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
-        let context = ::std::format!(
-            "  File \"{}\", line {}, in {}\n",
-            ::core::file!(),
-            ::core::line!(),
-            $crate::function_name!()
-        );
-        return ::core::result::Result::Err($crate::error::Error::new($error_kind, &::std::format!($fmt $(, $args)*), &context));
+        return ::core::result::Result::Err($crate::format_err!($error_kind, $fmt $(, $args)*));
     }};
 }
 
