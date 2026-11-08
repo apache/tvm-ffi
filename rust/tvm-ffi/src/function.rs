@@ -34,8 +34,7 @@ use tvm_ffi_sys::{
 /// The object behind a [`Function`].
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.Function"]
-#[type_index(unsafe TVMFFITypeIndex::kTVMFFIFunction)]
+#[object(type_key = "ffi.Function", unsafe type_index = TVMFFITypeIndex::kTVMFFIFunction)]
 pub struct FunctionObj {
     object: Object,
     cell: TVMFFIFunctionCell,

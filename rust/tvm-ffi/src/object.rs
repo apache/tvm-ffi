@@ -334,7 +334,7 @@ impl<T: ObjectCore> Clone for ObjectArc<T> {
 /// `Send + Sync` when `T`'s fields are.
 ///
 /// Implement it with the `immutable` option of [`rs_object`](crate::rs_object)
-/// or `#[type_immutable]` on [`derive(Object)`](crate::derive::Object), which
+/// or `#[object(immutable)]` on [`derive(Object)`](crate::derive::Object), which
 /// reject `writable` fields.
 ///
 /// # Safety

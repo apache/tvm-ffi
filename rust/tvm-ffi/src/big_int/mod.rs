@@ -65,9 +65,7 @@ unsafe impl Sync for BigInt {}
 // two's-complement words as trailing items. Mirrors C++ `detail::BigIntObj`.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.BigInt"]
-#[type_index(unsafe TypeIndex::kTVMFFIBigInt)]
-#[type_final]
+#[object(type_key = "ffi.BigInt", unsafe type_index = TypeIndex::kTVMFFIBigInt, final)]
 struct BigIntObj {
     object: Object,
     size: usize,

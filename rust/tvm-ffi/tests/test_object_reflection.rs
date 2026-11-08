@@ -25,16 +25,18 @@ use tvm_ffi_sys::{
     TVMFFIMethodInfo, TVMFFISEqHashKind, TVMFFITypeInfo,
 };
 
-// Rust-defined types whose `#[reflect]` fields and `#[type_reflection]`
+// Rust-defined types whose `#[reflect]` fields and `reflection`
 // methods reach the type table, so that the C++ structural engines, `repr`,
 // deep copy and other languages see them.
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.ReflectedPoint"]
-#[type_register]
-#[type_s_eq_hash_kind = "TreeNode"]
-#[type_reflection(PointObj::reflect_methods)]
+#[object(
+    type_key = "testing.rust.ReflectedPoint",
+    register,
+    s_eq_hash_kind = "TreeNode",
+    reflection = PointObj::reflect_methods
+)]
 struct PointObj {
     base_: Object,
     /// The x coordinate.
@@ -81,9 +83,7 @@ struct Point {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.ReflectedPoint3"]
-#[type_register]
-#[type_final]
+#[object(type_key = "testing.rust.ReflectedPoint3", register, final)]
 struct Point3Obj {
     base_: PointObj,
     #[reflect]
@@ -297,10 +297,12 @@ fn test_methods_are_called_through_the_type_table() {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.ReflectedTally"]
-#[type_register]
-#[type_final]
-#[type_reflection(Self::reflect_methods)]
+#[object(
+    type_key = "testing.rust.ReflectedTally",
+    register,
+    final,
+    reflection = Self::reflect_methods
+)]
 struct TallyObj {
     base_: Object,
     count: i64,
@@ -477,9 +479,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.Unreflected"]
-#[type_register]
-#[type_final]
+#[object(type_key = "testing.rust.Unreflected", register, final)]
 struct CounterObj {
     base_: Object,
     count: i64,
@@ -505,8 +505,7 @@ fn test_types_without_reflect_register_no_reflection() {
 mod no_imports {
     #[repr(C)]
     #[derive(tvm_ffi::derive::Object)]
-    #[type_key = "testing.rust.ReflectedNoImports"]
-    #[type_register]
+    #[object(type_key = "testing.rust.ReflectedNoImports", register)]
     pub(super) struct LeafObj {
         base_: super::PointObj,
         #[reflect]
@@ -538,9 +537,7 @@ fn test_derives_need_nothing_in_scope() {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.DuplicateMethod"]
-#[type_register]
-#[type_reflection(Self::reflect_methods)]
+#[object(type_key = "testing.rust.DuplicateMethod", register, reflection = Self::reflect_methods)]
 struct DuplicateMethodObj {
     base_: Object,
 }

@@ -377,7 +377,7 @@ pub struct Pair {{
 {NO_METADATA}
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "demo.Pair"]
+#[object(type_key = "demo.Pair")]
 pub struct PairObj {{
     base_: Object,
 }}
@@ -445,14 +445,14 @@ def test_render_root_object() -> None:
 
 def test_render_object_without_fields_has_no_impl() -> None:
     text, imports = _render(_info("demo.Marker", is_final=True))
-    assert "#[type_final]" in text
+    assert '#[object(type_key = "demo.Marker", final)]' in text
     assert "impl MarkerObj" not in text
     assert "FieldGetter" not in _uses(imports)
 
 
 def test_render_thread_safe_only_when_not_mutable() -> None:
     """A class C++ declares not ``_type_mutable`` is ``ImmutableObject``; others are not."""
-    marker = "#[type_immutable]"
+    marker = ", immutable)]"
     assert marker in _render(_info("demo.Marker", is_final=True, is_mutable=False))[0]
     assert marker not in _render(_info("demo.Marker", is_final=True, is_mutable=True))[0]
     assert marker not in _render(_info("demo.Marker", is_final=True))[0]
@@ -468,7 +468,7 @@ def test_render_derived_object_same_module() -> None:
         is_final=True,
     )
     text, imports = _render(info)
-    assert "#[type_final]\npub struct AddObj {\n    base_: ExprObj,\n}" in text
+    assert ", final)]\npub struct AddObj {\n    base_: ExprObj,\n}" in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
     assert "pub fn a(&self) -> Result<Expr> {" in text
     assert text.endswith("tvm_ffi::impl_object_ref_upcast!(Add => BaseExpr, Add => Expr);")
@@ -525,7 +525,7 @@ use tvm_ffi::enum_ref::EnumObj;
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "ffi.IntEnum"]
+#[object(type_key = "ffi.IntEnum")]
 pub struct FfiIntEnumObj {
     base_: EnumObj,
 }
@@ -535,7 +535,7 @@ pub struct FfiIntEnumObj {
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "ffi.StrEnum"]
+#[object(type_key = "ffi.StrEnum")]
 pub struct FfiStrEnumObj {
     base_: EnumObj,
 }"""
@@ -601,8 +601,7 @@ impl TryFrom<i64> for IterVarType {{
 {NO_METADATA}
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "tirx.IterVar"]
-#[type_final]
+#[object(type_key = "tirx.IterVar", final)]
 pub struct IterVarObj {{
     base_: PrimExprConvertibleObj,
 }}
@@ -758,8 +757,7 @@ pub struct Expr {
 /// Complete: reflected fields fill [24, 40) exactly.
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "ir.Expr"]
-#[type_rs_parent]
+#[object(type_key = "ir.Expr", rs_parent)]
 pub struct ExprObj {
     base_: Object,
     pub span: Option<Span>,
@@ -798,8 +796,7 @@ pub struct Add {
 /// Complete: reflected fields fill [40, 56) exactly.
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "tirx.Add"]
-#[type_final]
+#[object(type_key = "tirx.Add", final)]
 pub struct AddObj {
     base_: ExprObj,
     pub a: PrimExpr,
@@ -1029,7 +1026,7 @@ def test_final_type_has_no_unsafe_init() -> None:
     """No Rust type derives from a final type, which needs no `UnsafeInit`."""
     info = _info("demo.Leaf", (_field("a", "int", 24, 8),), total_size=32, is_final=True)
     text, _ = _render(info)
-    assert "#[type_rs_parent]" not in text
+    assert ", rs_parent)]" not in text
 
 
 def test_complete_list_field_mirrors() -> None:
@@ -1495,7 +1492,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "            TestCxxClassDerivedDerivedObj::new(v_i64, v_i32, v_f64, v_f32, v_str.into(), v_bool);\n"
     ) in dd
     # Not final, under generated ancestors: a Rust subtype can copy its parent's object.
-    assert "#[type_rs_parent]\npub struct TestCxxClassDerivedDerivedObj {" in dd
+    assert ", rs_parent)]\npub struct TestCxxClassDerivedDerivedObj {" in dd
     assert dd.endswith(
         "tvm_ffi::impl_object_ref_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
@@ -1563,7 +1560,7 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert (
         "use tvm_ffi::reflection::FieldGetter;" in text
     )  # the opaque fixtures read through getters
-    assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
+    assert '#[object(type_key = "testing.TestCxxClassDerivedDerived"' in text
     # Without a directive for the narrow `v_i32`, the chain is opaque.
     assert (
         "pub struct TestCxxClassDerivedDerivedObj {\n    base_: TestCxxClassDerivedObj,\n}" in text
@@ -1888,7 +1885,7 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
     assert "use crate::hand::TestCxxClassBaseObj;" in text
     # Not final: public `new`; a hand-written parent may lack `ShallowCopy`, so the type has none.
     assert "impl TestCxxClassDerivedObj {\n    pub fn new(" in text
-    assert "#[type_rs_parent]" not in text
+    assert ", rs_parent)]" not in text
 
 
 # ---------------------------------------------------------------------------

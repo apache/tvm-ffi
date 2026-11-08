@@ -33,8 +33,7 @@ use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// The object behind a [`Shape`].
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.Shape"]
-#[type_index(unsafe TypeIndex::kTVMFFIShape)]
+#[object(type_key = "ffi.Shape", unsafe type_index = TypeIndex::kTVMFFIShape)]
 pub struct ShapeObj {
     object: Object,
     data: TVMFFIShapeCell,

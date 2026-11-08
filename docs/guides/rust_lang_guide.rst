@@ -443,7 +443,7 @@ take all-zero bytes as a value, as a scalar, an ``Option`` of a reference or an
 ``Optional<T>`` does; a reference or
 a string does not, and fails the type's registration. The parent's object must
 implement ``ShallowCopy`` and ``UnsafeInit``, as ``rs_object`` types do, and so
-does a binding with ``#[type_rs_parent]`` on its ``derive(Object)``, such as a
+does a binding with ``#[object(rs_parent)]`` on its ``derive(Object)``, such as a
 non-final type bound by ``tvm-ffi-stubgen``.
 
 Converting Borrowed Values into ``Any``

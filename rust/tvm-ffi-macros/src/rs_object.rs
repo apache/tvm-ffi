@@ -188,26 +188,26 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
     let obj = &item.ident;
     let key = &args.type_key;
 
-    // `derive(Object)` reads the type from these attributes; the struct written out
+    // `derive(Object)` reads the type from these options; the struct written out
     // carries neither them nor `#[reflect]`, which no derive on it would take.
-    let mut derive_attrs = vec![quote!(#[type_key = #key]), quote!(#[type_register])];
+    let mut options = vec![quote!(type_key = #key), quote!(register)];
     if args.type_final {
-        derive_attrs.push(quote!(#[type_final]));
+        options.push(quote!(final));
     }
     if args.immutable {
-        derive_attrs.push(quote!(#[type_immutable]));
+        options.push(quote!(immutable));
     }
     if let Some(kind) = &args.s_eq_hash_kind {
-        derive_attrs.push(quote!(#[type_s_eq_hash_kind = #kind]));
+        options.push(quote!(s_eq_hash_kind = #kind));
     }
     if let Some(slots) = &args.child_slots {
-        derive_attrs.push(quote!(#[type_child_slots = #slots]));
+        options.push(quote!(child_slots = #slots));
     }
     if let Some(overflow) = &args.child_slots_can_overflow {
-        derive_attrs.push(quote!(#[type_child_slots_can_overflow = #overflow]));
+        options.push(quote!(child_slots_can_overflow = #overflow));
     }
     if let Some(reflection) = &args.reflection {
-        derive_attrs.push(quote!(#[type_reflection(#reflection)]));
+        options.push(quote!(reflection = #reflection));
     }
     let reflected_fields = fields.iter().map(|field| {
         if field.attrs.iter().any(|a| a.path.is_ident("reflect")) {
@@ -218,7 +218,7 @@ fn expand(args: &RsObjectArgs, item: &DeriveInput) -> syn::Result<TokenStream2> 
     });
     let object_input: DeriveInput = syn::parse2(quote! {
         #[repr(C)]
-        #(#derive_attrs)*
+        #[object(#(#options),*)]
         #vis struct #obj {
             #base,
             #(#reflected_fields,)*

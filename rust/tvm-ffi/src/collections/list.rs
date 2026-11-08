@@ -64,8 +64,7 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 /// runtime replaces when the list grows.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.List"]
-#[type_index(unsafe TypeIndex::kTVMFFIList)]
+#[object(type_key = "ffi.List", unsafe type_index = TypeIndex::kTVMFFIList)]
 pub struct ListObj {
     pub(crate) object: Object,
     // `List` mutates these through `&self` (`push`, `set`, growth), so they are

@@ -108,8 +108,7 @@ pub struct RsScalars {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.TestCxxClassBase"]
-#[type_rs_parent]
+#[object(type_key = "testing.TestCxxClassBase", rs_parent)]
 pub struct TestCxxClassBaseObj {
     base_: Object,
     pub v_i64: i64,

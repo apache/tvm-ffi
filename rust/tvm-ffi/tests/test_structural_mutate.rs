@@ -189,9 +189,11 @@ impl RecursiveEntryMutator {
 
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "testing.rust.MutationRemapNode"]
-#[type_register]
-#[type_s_eq_hash_kind = "DAGNode"]
+#[object(
+    type_key = "testing.rust.MutationRemapNode",
+    register,
+    s_eq_hash_kind = "DAGNode"
+)]
 struct RemapNodeObj {
     base_: Object,
     #[reflect]
@@ -206,8 +208,7 @@ struct RemapNode {
 
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "testing.rust.MutationFieldNode"]
-#[type_register]
+#[object(type_key = "testing.rust.MutationFieldNode", register)]
 struct FieldNodeObj {
     base_: Object,
     a: Array<i64>,
@@ -1118,7 +1119,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
     );
     #[repr(C)]
     #[derive(tvm_ffi::derive::Object)]
-    #[type_key = "ffi.VisitErrorContext"]
+    #[object(type_key = "ffi.VisitErrorContext")]
     struct VisitErrorContextObj {
         base_: Object,
     }

@@ -25,10 +25,12 @@ use tvm_ffi::{
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.match_any.Expr"]
-#[type_register]
-#[type_child_slots = 20]
-#[type_child_slots_can_overflow = false]
+#[object(
+    type_key = "testing.match_any.Expr",
+    register,
+    child_slots = 20,
+    child_slots_can_overflow = false
+)]
 struct ExprObj {
     base_: ObjectBase,
 }
@@ -44,9 +46,7 @@ macro_rules! define_expr_leaves {
         $(
             #[repr(C)]
             #[derive(Object)]
-            #[type_key = $type_key]
-            #[type_register]
-            #[type_final]
+            #[object(type_key = $type_key, register, final)]
             struct $object {
                 base_: ExprObj,
             }

@@ -32,8 +32,7 @@ use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// The object behind a [`Module`].
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.Module"]
-#[type_index(unsafe TypeIndex::kTVMFFIModule)]
+#[object(type_key = "ffi.Module", unsafe type_index = TypeIndex::kTVMFFIModule)]
 pub struct ModuleObj {
     object: Object,
 }

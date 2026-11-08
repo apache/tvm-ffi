@@ -57,7 +57,7 @@ use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR, VALUE_ERRO
 /// `__ffi_shallow_copy__` returns; fields that are references share their
 /// objects, as `Clone` of an `Arc` does.
 ///
-/// [`rs_object`](crate::rs_object) and `#[type_rs_parent]` on
+/// [`rs_object`](crate::rs_object) and `#[object(rs_parent)]` on
 /// [`derive(Object)`](crate::derive::Object) implement it by copying the
 /// parent with its `ShallowCopy` and cloning every other field. An
 /// `rs_object` needs its parent's object to implement it.
