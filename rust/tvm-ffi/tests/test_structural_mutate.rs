@@ -551,9 +551,9 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         ) -> Result<UnchangedOr<Any>> {
             let mode = self.mode;
             if self.increment {
-                mutator.default_mutate(self, value.with_inplace_mode(mode))
+                mutator.default_mutate(self, value.narrow_inplace_mode(mode))
             } else {
-                let result = mutator.default_mutate(self, value.with_inplace_mode(mode))?;
+                let result = mutator.default_mutate(self, value.narrow_inplace_mode(mode))?;
                 assert!(result.is_unchanged());
                 Ok(result)
             }
@@ -597,7 +597,7 @@ fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
                 ObjectArc::strong_count(<Array<i64> as ObjectRefCore>::data(&source)),
                 1
             );
-            let value = value.with_inplace_mode(InplaceMode::Allow);
+            let value = value.narrow_inplace_mode(InplaceMode::Allow);
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
             let result = mutator.default_mutate(self, value)?;
             let result = Array::<i64>::try_from(
@@ -685,7 +685,7 @@ fn owned_entry_mode_is_forwarded_by_generated_callbacks() {
                 let mut owner: Any = child.into();
                 let alias = self.shared.then(|| owner.clone());
                 let count = if self.shared { 2 } else { 1 };
-                let capability = MutationView::from(&mut owner).with_inplace_mode(self.mode);
+                let capability = MutationView::from(&mut owner).narrow_inplace_mode(self.mode);
                 assert_eq!(capability.inplace_mode(), self.mode);
                 assert_eq!(capability.as_any_view().debug_strong_count(), Some(count));
                 assert_eq!(
@@ -804,7 +804,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
             });
             self.observe(&value);
             mutator
-                .default_mutate(self, value.with_inplace_mode(self.requested))
+                .default_mutate(self, value.narrow_inplace_mode(self.requested))
                 .into_mutate_result()
         }
         fn mutate_integer(
@@ -871,7 +871,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     assert_eq!(a.size, 1);
     assert_eq!(a.inplace_mode(), Allow);
     assert_eq!(a.as_any_view().debug_strong_count(), Some(1));
-    let mut value = value.with_inplace_mode(Disallow);
+    let mut value = value.narrow_inplace_mode(Disallow);
     let b = value.field(|node| &node.b);
     assert_eq!(b.inplace_mode(), Disallow);
     assert_eq!(b.as_any_view().debug_strong_count(), Some(1));
@@ -2321,7 +2321,7 @@ fn mutation_descent_preserves_ownership_and_markers() {
             if self.retain {
                 self.retained = Some(Any::from(value.as_any_view()));
             }
-            let result = mutator.default_mutate(self, value.with_inplace_mode(self.mode))?;
+            let result = mutator.default_mutate(self, value.narrow_inplace_mode(self.mode))?;
             if !self.increment {
                 assert!(result.is_unchanged());
             }

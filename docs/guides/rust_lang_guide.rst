@@ -1020,7 +1020,7 @@ An enclosing Pattern region wins, and the prior region is restored even on error
 or panic. State remains available after the recursive call.
 
 Typed ``MutationView<'_, T>`` inputs work with the same recursive methods.
-Use ``value.with_inplace_mode(InplaceMode::Disallow)`` to restrict permission.
+Use ``value.narrow_inplace_mode(InplaceMode::Disallow)`` to restrict permission.
 Borrow the value in place through ``value.downcast_ref::<Node>()``, as with
 ``AnyView``, or other payloads through ``value.as_any_view()``; finish using those
 borrows before consuming the capability. A typed object capability also dereferences to its shared node.
@@ -1080,7 +1080,7 @@ while retaining typed scalar replacements:
            Ok((value + 1).into())
        }
        fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
-           mutator.default_mutate(self, value.with_inplace_mode(InplaceMode::Disallow))
+           mutator.default_mutate(self, value.narrow_inplace_mode(InplaceMode::Disallow))
        }
    }
 

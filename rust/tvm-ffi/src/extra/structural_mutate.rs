@@ -395,7 +395,7 @@ impl<'a, T> MutationView<'a, T> {
     ///
     /// The view with the restricted mode.
     #[inline(always)]
-    pub fn with_inplace_mode(mut self, requested: InplaceMode) -> Self {
+    pub fn narrow_inplace_mode(mut self, requested: InplaceMode) -> Self {
         if requested == InplaceMode::Disallow {
             self.mode = InplaceMode::Disallow;
         }
