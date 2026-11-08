@@ -45,8 +45,15 @@ pub unsafe fn packed_args<'a>(args: *const TVMFFIAny, num_args: i32) -> &'a [Any
     std::slice::from_raw_parts(args as *const AnyView, num_args as usize)
 }
 
+/// A closure `Fn(T0, ..., Tn) -> Result<O>` with 0 to 8 parameters, which
+/// [`Function::from_typed`](crate::Function::from_typed) and
+/// [`Function::register_global_typed`](crate::Function::register_global_typed)
+/// wrap. Each parameter is any [`AnyCompatible`] type, a
+/// [`TensorView`](crate::TensorView), valid during the call, or an
+/// [`RValueRef<T>`](crate::rvalue_ref::RValueRef); `O` converts into
+/// [`Any`].
 pub trait AsPackedCallable<I, O> {
-    // Call the function in packed convention
+    /// Call the function with packed arguments.
     fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>;
 
     /// The type schema of the function, a JSON description of its signature.

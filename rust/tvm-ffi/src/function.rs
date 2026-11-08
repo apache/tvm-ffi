@@ -19,12 +19,11 @@
 //! [`Function`], a callable shared with C++ and Python, and the global function
 //! registry.
 
-pub use crate::function_internal::{PackedCallArg, PackedCallArgs};
+pub use crate::function_internal::{AsPackedCallable, PackedCallArg, PackedCallArgs};
 
 use crate::any::{Any, AnyView};
 use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
-use crate::function_internal::AsPackedCallable;
 use crate::object::{Object, ObjectArc, ObjectCore};
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
@@ -386,7 +385,9 @@ impl Function {
     ///
     /// # Arguments
     ///
-    /// * `func` - The typed function, of signature `Fn(T0, T1, ...) -> Result<O>`.
+    /// * `func` - The typed function, an [`AsPackedCallable`] such as
+    ///   `Fn(T0, T1, ...) -> Result<O>`; each parameter is an `AnyCompatible`
+    ///   type, a `TensorView` or an `RValueRef<T>`.
     ///
     /// # Returns
     ///
