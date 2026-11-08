@@ -16,29 +16,34 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! [`AnyCompatible`], how a Rust type converts to and from FFI values.
+//! Traits that map Rust types to TVM-FFI values.
 
 use crate::any::{Any, AnyView};
 use std::borrow::Borrow;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
 
-//-----------------------------------------------------
-// AnyCompatible
-//-----------------------------------------------------
-/// A type that an [`Any`] can hold: how its values are stored in, and read
-/// from, a `TVMFFIAny` cell.
+/// A type whose values an FFI cell can hold: how a value is stored in a
+/// `TVMFFIAny` and read back.
 ///
-/// `#[derive(ObjectRef)]` implements it for object references; other types
-/// implement it by hand.
+/// [`AnyView`] and [`TensorView`](crate::TensorView) borrow their value, so
+/// they are not. Containers and generic code bound on [`ContainerElement`] to
+/// also accept [`Any`].
+///
+/// # Implementing
+///
+/// Object references derive it with `#[derive(ObjectRef)]`. Any other type
+/// implements it by hand, then calls
+/// [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions),
+/// which adds its `From`, `TryFrom` and argument conversions. Coherence keeps
+/// those out of this trait, so without the macro the type is stored but not
+/// converted.
 ///
 /// # Safety
-/// Implementations must encode and decode `TVMFFIAny` cells in the layout of
-/// their FFI type index, and every `*_after_check` function must be sound for
-/// each cell that `check_any_strict` accepts. [`is_undefined`](Self::is_undefined)
-/// returns false for every value, and true for all-zero bytes unless they are
-/// a value whose drop does nothing: reflection drops and reads a field it
-/// does not report undefined.
+/// - A value is written in the cell layout of its type index, and read back from it.
+/// - Every `*_after_check` method is sound on each cell that `check_any_strict` accepts.
+/// - `is_undefined` is false for every value. It is true for all-zero bytes,
+///   unless those bytes are a value whose drop does nothing.
 pub unsafe trait AnyCompatible: Sized {
     /// Whether the `AnyView -> Self` conversion matches one exact leaf type.
     ///
@@ -174,97 +179,20 @@ pub unsafe trait AnyCompatible: Sized {
     }
 }
 
-/// The type key of the runtime type index `type_index`.
-pub(crate) fn runtime_type_key(type_index: i32) -> String {
-    unsafe {
-        let info = TVMFFIGetTypeInfo(type_index);
-        assert!(!info.is_null(), "TVMFFIGetTypeInfo returned null");
-        (*info).type_key.as_str().to_string()
-    }
-}
-
-/// Writes a type schema, `{"type":"<origin>"}` or, with type arguments,
-/// `{"type":"<origin>","args":[...]}`.
-pub(crate) fn type_schema(origin: &str, args: &[String]) -> String {
-    if args.is_empty() {
-        format!(r#"{{"type":"{origin}"}}"#)
-    } else {
-        format!(r#"{{"type":"{origin}","args":[{}]}}"#, args.join(","))
-    }
-}
-
-/// The metadata recorded for a function or field of type schema
-/// `type_schema`: `{"type_schema":<type_schema as a JSON string>}`.
-pub(crate) fn type_schema_metadata(type_schema: &str) -> String {
-    format!(r#"{{"type_schema":{}}}"#, escape_string_json(type_schema))
-}
-
-/// `text` as a JSON string literal, escaped so that the metadata matches the
-/// C++ runtime's byte for byte.
-fn escape_string_json(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for ch in text.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '/' => out.push_str("\\/"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if (ch as u32) < 0x20 || ch == '\u{7f}' => {
-                out.push_str(&format!("\\u{:04x}", ch as u32))
-            }
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// The type schema of a function parameter or return type.
+/// A value an FFI container such as [`Array`](crate::Array) holds: every
+/// [`AnyCompatible`] type, and [`Any`].
 ///
-/// This is [`AnyCompatible::type_schema`] for a type that converts through
-/// [`Any`], and `{"type":"Any"}` for `Any` and `AnyView` themselves.
-pub(crate) trait TypeSchema {
-    fn type_schema() -> String;
-}
-
-impl<T: AnyCompatible> TypeSchema for T {
-    fn type_schema() -> String {
-        <T as AnyCompatible>::type_schema()
-    }
-}
-
-impl TypeSchema for Any {
-    fn type_schema() -> String {
-        type_schema("Any", &[])
-    }
-}
-
-impl TypeSchema for AnyView<'_> {
-    fn type_schema() -> String {
-        type_schema("Any", &[])
-    }
-}
-
-/// A value an FFI container such as [`Array`](crate::Array) or
-/// [`Map`](crate::Map) holds: every [`AnyCompatible`] type, and [`Any`].
-///
-/// Use it as the bound of code generic over container elements, as
-/// `Array<T: ContainerElement>` is. The trait is sealed: implement
-/// [`AnyCompatible`] instead, and the type is an element.
+/// Sealed: implement [`AnyCompatible`] to make a type an element.
 pub trait ContainerElement: container_element_ops::Ops {}
 
 impl<T: AnyCompatible> ContainerElement for T {}
 impl ContainerElement for Any {}
 
-/// Every `Source` value is a valid `Self` as stored, so a container of
-/// `Source` is a container of `Self` without a copy, as C++
-/// `type_subsumes_v<Self, Source>`. [`Array::upcast`](crate::Array::upcast)
-/// and [`Map::upcast`](crate::Map::upcast) use it.
+/// `Self` subsumes `Source`: every `Source` value, as stored, is a valid
+/// `Self`, a compile-time fact checked by no code, as C++
+/// `type_subsumes_v<Self, Source>`. So a container of `Source` is a container
+/// of `Self` without a copy, as [`Array::upcast`](crate::Array::upcast) and
+/// [`Map::upcast`](crate::Map::upcast) use.
 ///
 /// It holds for every type and itself, and for a base object reference and
 /// each derived one, which [`impl_object_ref_upcast!`](crate::impl_object_ref_upcast)
@@ -278,13 +206,13 @@ pub unsafe trait TypeSubsumes<Source: ?Sized> {}
 
 unsafe impl<T: ?Sized> TypeSubsumes<T> for T {}
 
-/// A value taken where a `T` is expected: a `T`, a `&T`, or a subtype of `T`
-/// owned or borrowed.
+/// A `T`, a `&T` or a subtype of `T`, taken where a `T` is expected; a `&str`
+/// or `&[u8]` converts into a `String` or `Bytes`.
 ///
-/// [`into_arg`](Self::into_arg) returns a `T` for an owned value and a `&T`
-/// for a borrowed one, without changing a reference count;
+/// [`into_arg`](Self::into_arg) returns a `T` or a `&T` without changing a
+/// reference count, but those two conversions allocate;
 /// [`into_owned`](Self::into_owned) moves an owned value and clones only a
-/// borrowed one, as [`Cow::into_owned`](std::borrow::Cow::into_owned) does.
+/// borrowed one, as [`Cow::into_owned`](std::borrow::Cow::into_owned).
 pub trait IntoArg<T> {
     /// `T` when owned, `&T` when borrowed.
     type Output: Borrow<T>;
@@ -427,13 +355,6 @@ unsafe impl<T: crate::object::ObjectRefCore> RefFromAnyUnchecked for Option<T> {
     }
 }
 
-unsafe impl<T: crate::object::ObjectRefCore> DowncastRefFromAny for Option<T> {
-    #[inline(always)]
-    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-        downcast_ref_from_any_in_place::<Self>(cell)
-    }
-}
-
 /// A type that [`Any::downcast_ref`] and [`AnyView::downcast_ref`] borrow from
 /// an FFI cell in place, without a reference count change: object types
 /// (`ArrayObj`), managed references (`Array<T>`, `String`, any
@@ -441,7 +362,8 @@ unsafe impl<T: crate::object::ObjectRefCore> DowncastRefFromAny for Option<T> {
 /// reference and scalars such as `i64`.
 ///
 /// Name it to bound a generic borrow, as in `fn get<T: DowncastRefFromAny>`.
-/// A reference that implements `ObjectRefCore` by hand implements it with
+/// Object types, derived references and containers implement it, not code by
+/// hand: a reference with a hand-written `ObjectRefCore` calls
 /// [`impl_object_ref_downcast_ref!`](crate::impl_object_ref_downcast_ref).
 ///
 /// # Safety
@@ -490,10 +412,59 @@ pub unsafe fn downcast_ref_from_any_in_place<T: RefFromAnyUnchecked>(
     }
 }
 
+unsafe impl<T: crate::object::ObjectRefCore> DowncastRefFromAny for Option<T> {
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        downcast_ref_from_any_in_place::<Self>(cell)
+    }
+}
+
+macro_rules! impl_downcast_ref_from_any {
+    ($($t:ty),* $(,)?) => {
+        $(unsafe impl DowncastRefFromAny for $t {
+            #[inline(always)]
+            unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+                downcast_ref_from_any_in_place::<Self>(cell)
+            }
+        })*
+    };
+}
+
+// An `&Any` must own what it points at, as an `Any` does: a view's cell may
+// instead borrow a C string, byte array, `DLTensor` or rvalue slot, whose
+// `&Any` would clone into an owner of a borrowed resource. Those are refused;
+// an `Any` or container cell never holds them.
+unsafe impl DowncastRefFromAny for Any {
+    #[inline(always)]
+    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
+        let index = cell.type_index;
+        let borrowed = index == TypeIndex::kTVMFFIRawStr as i32
+            || index == TypeIndex::kTVMFFIByteArrayPtr as i32
+            || index == TypeIndex::kTVMFFIDLTensorPtr as i32
+            || index == TypeIndex::kTVMFFIObjectRValueRef as i32;
+        if borrowed {
+            None
+        } else {
+            Some(Any::ref_from_any_unchecked(cell))
+        }
+    }
+}
+
+impl_downcast_ref_from_any!(
+    crate::String,
+    crate::string::Bytes,
+    i64,
+    f64,
+    crate::big_int::BigInt,
+    tvm_ffi_sys::dlpack::DLDataType,
+    tvm_ffi_sys::dlpack::DLDevice,
+);
+
 /// A type that an object reference's [`ObjectRefCore::downcast_ref`] borrows
 /// from the reference's object pointer: object types (`ArrayObj`), and managed
 /// references that are exactly one object pointer (`Array<T>`, every
-/// `#[derive(ObjectRef)]` type).
+/// `#[derive(ObjectRef)]` type). Object types, derived references and
+/// containers implement it, not code by hand.
 ///
 /// [`ObjectRefCore::downcast_ref`]: crate::object::ObjectRefCore::downcast_ref
 ///
@@ -575,170 +546,9 @@ pub unsafe fn downcast_ref_from_object_in_place<T: RefFromAnyUnchecked>(
     }
 }
 
-macro_rules! impl_downcast_ref_from_any {
-    ($($t:ty),* $(,)?) => {
-        $(unsafe impl DowncastRefFromAny for $t {
-            #[inline(always)]
-            unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-                downcast_ref_from_any_in_place::<Self>(cell)
-            }
-        })*
-    };
-}
-
-// An `&Any` must own what it points at, as an `Any` does: a view's cell may
-// instead borrow a C string, byte array, `DLTensor` or rvalue slot, whose
-// `&Any` would clone into an owner of a borrowed resource. Those are refused;
-// an `Any` or container cell never holds them.
-unsafe impl DowncastRefFromAny for Any {
-    #[inline(always)]
-    unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-        let index = cell.type_index;
-        let borrowed = index == TypeIndex::kTVMFFIRawStr as i32
-            || index == TypeIndex::kTVMFFIByteArrayPtr as i32
-            || index == TypeIndex::kTVMFFIDLTensorPtr as i32
-            || index == TypeIndex::kTVMFFIObjectRValueRef as i32;
-        if borrowed {
-            None
-        } else {
-            Some(Any::ref_from_any_unchecked(cell))
-        }
-    }
-}
-
-impl_downcast_ref_from_any!(
-    crate::String,
-    crate::string::Bytes,
-    i64,
-    f64,
-    crate::big_int::BigInt,
-    tvm_ffi_sys::dlpack::DLDataType,
-    tvm_ffi_sys::dlpack::DLDevice,
-);
-
-mod container_element_ops {
-    use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
-
-    pub trait Ops: Sized {
-        const CONTAINER_IS_ANY: bool = false;
-
-        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
-        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
-        unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool;
-        unsafe fn container_match_constraints(data: &TVMFFIAny) -> bool;
-        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self;
-        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
-        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
-        fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String;
-        fn container_type_str() -> String;
-        fn container_type_schema() -> String;
-    }
-
-    impl<T: AnyCompatible> Ops for T {
-        #[inline]
-        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-            <T as AnyCompatible>::copy_to_any_view(src, data)
-        }
-
-        #[inline]
-        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny) {
-            <T as AnyCompatible>::move_to_any(src, data)
-        }
-
-        #[inline]
-        unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool {
-            <T as AnyCompatible>::check_any_strict(data)
-        }
-        #[inline]
-        unsafe fn container_match_constraints(data: &TVMFFIAny) -> bool {
-            <T as AnyCompatible>::match_constraints(data)
-        }
-
-        #[inline]
-        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-            <T as AnyCompatible>::copy_from_any_view_after_check(data)
-        }
-
-        #[inline]
-        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-            <T as AnyCompatible>::move_from_any_after_check(data)
-        }
-
-        #[inline]
-        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-            <T as AnyCompatible>::try_cast_from_any_view(data)
-        }
-
-        #[inline]
-        fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String {
-            <T as AnyCompatible>::get_mismatch_type_info(data)
-        }
-
-        #[inline]
-        fn container_type_str() -> String {
-            <T as AnyCompatible>::type_str()
-        }
-
-        #[inline]
-        fn container_type_schema() -> String {
-            <T as AnyCompatible>::type_schema()
-        }
-    }
-
-    impl Ops for Any {
-        const CONTAINER_IS_ANY: bool = true;
-
-        #[inline]
-        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-            *data = *src.as_raw_ffi_any();
-        }
-
-        #[inline]
-        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny) {
-            *data = Any::into_raw_ffi_any(src);
-        }
-
-        #[inline]
-        unsafe fn container_check_any_strict(_data: &TVMFFIAny) -> bool {
-            true
-        }
-        #[inline]
-        unsafe fn container_match_constraints(_data: &TVMFFIAny) -> bool {
-            true
-        }
-
-        #[inline]
-        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-            Any::from(AnyView::from_raw_ffi_any(*data))
-        }
-
-        #[inline]
-        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-            Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new()))
-        }
-
-        #[inline]
-        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-            Ok(Any::from(AnyView::from_raw_ffi_any(*data)))
-        }
-
-        #[inline]
-        fn container_get_mismatch_type_info(_data: &TVMFFIAny) -> String {
-            "Any".to_string()
-        }
-
-        #[inline]
-        fn container_type_str() -> String {
-            "Any".to_string()
-        }
-
-        #[inline]
-        fn container_type_schema() -> String {
-            <Any as super::TypeSchema>::type_schema()
-        }
-    }
-}
-
+//-----------------------------------------------------
+// AnyCompatible impls
+//-----------------------------------------------------
 unsafe impl AnyCompatible for bool {
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIBool as i32;
@@ -830,6 +640,61 @@ macro_rules! impl_any_compatible_for_int {
 // Implement AnyCompatible for all integer types
 impl_any_compatible_for_int!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 
+macro_rules! impl_any_compatible_for_float {
+    ($($float_type:ty),* $(,)?) => {
+        $(
+            unsafe impl AnyCompatible for $float_type {
+                fn type_str() -> String {
+                    "float".to_string()
+                }
+
+                unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+                    data.type_index = TypeIndex::kTVMFFIFloat as i32;
+                    data.small_str_len = 0;
+                    data.data_union.v_float64 = *src as f64;
+                }
+
+                unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
+                    data.type_index == TypeIndex::kTVMFFIFloat as i32
+                }
+
+                unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
+                    let value = data.data_union.v_float64;
+                    ((value as $float_type) as f64).to_bits() == value.to_bits()
+                }
+
+                unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+                    data.data_union.v_float64 as $float_type
+                }
+
+                unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
+                    data.type_index = TypeIndex::kTVMFFIFloat as i32;
+                    data.small_str_len = 0;
+                    data.data_union.v_float64 = src as f64;
+                }
+
+                unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+                    data.data_union.v_float64 as $float_type
+                }
+
+                unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+                    if data.type_index == TypeIndex::kTVMFFIFloat as i32 {
+                        Ok(data.data_union.v_float64 as $float_type)
+                    } else if data.type_index == TypeIndex::kTVMFFIInt as i32 ||
+                       data.type_index == TypeIndex::kTVMFFIBool as i32 {
+                        Ok(data.data_union.v_int64 as $float_type)
+                    } else {
+                        Err(())
+                    }
+                }
+            }
+        )*
+    };
+}
+
+// Implement AnyCompatible for all float types
+impl_any_compatible_for_float!(f32, f64);
+
 // Implement AnyCompatible for `Option<T>`
 unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     fn type_str() -> String {
@@ -912,6 +777,45 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     }
 }
 
+// Special rule: we convert () to None
+// This allows us to effectively pass () around as null value
+// note that this is indeed a bit relaxation of the type
+// but it is necessary for us to enable void/none interoperability
+unsafe impl AnyCompatible for () {
+    fn type_str() -> String {
+        // make it consistent with c++ representation
+        "None".to_string()
+    }
+
+    unsafe fn copy_to_any_view(_src: &Self, data: &mut TVMFFIAny) {
+        data.type_index = TypeIndex::kTVMFFINone as i32;
+        data.small_str_len = 0;
+        data.data_union.v_int64 = 0;
+    }
+
+    unsafe fn move_to_any(_src: Self, data: &mut TVMFFIAny) {
+        data.type_index = TypeIndex::kTVMFFINone as i32;
+        data.small_str_len = 0;
+        data.data_union.v_int64 = 0;
+    }
+
+    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
+        data.type_index == TypeIndex::kTVMFFINone as i32
+    }
+
+    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {}
+
+    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {}
+
+    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+        if data.type_index == TypeIndex::kTVMFFINone as i32 {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+}
+
 unsafe impl AnyCompatible for *mut core::ffi::c_void {
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIOpaquePtr as i32;
@@ -951,96 +855,201 @@ unsafe impl AnyCompatible for *mut core::ffi::c_void {
     }
 }
 
-macro_rules! impl_any_compatible_for_float {
-    ($($float_type:ty),* $(,)?) => {
-        $(
-            unsafe impl AnyCompatible for $float_type {
-                fn type_str() -> String {
-                    "float".to_string()
-                }
+mod container_element_ops {
+    use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
 
-                unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-                    data.type_index = TypeIndex::kTVMFFIFloat as i32;
-                    data.small_str_len = 0;
-                    data.data_union.v_float64 = *src as f64;
-                }
+    pub trait Ops: Sized {
+        const CONTAINER_IS_ANY: bool = false;
 
-                unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-                    data.type_index == TypeIndex::kTVMFFIFloat as i32
-                }
+        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
+        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
+        unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool;
+        unsafe fn container_match_constraints(data: &TVMFFIAny) -> bool;
+        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self;
+        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
+        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
+        fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String;
+        fn container_type_str() -> String;
+        fn container_type_schema() -> String;
+    }
 
-                unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-                    let value = data.data_union.v_float64;
-                    ((value as $float_type) as f64).to_bits() == value.to_bits()
-                }
+    impl<T: AnyCompatible> Ops for T {
+        #[inline(always)]
+        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+            <T as AnyCompatible>::copy_to_any_view(src, data)
+        }
 
-                unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-                    data.data_union.v_float64 as $float_type
-                }
+        #[inline(always)]
+        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny) {
+            <T as AnyCompatible>::move_to_any(src, data)
+        }
 
-                unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-                    data.type_index = TypeIndex::kTVMFFIFloat as i32;
-                    data.small_str_len = 0;
-                    data.data_union.v_float64 = src as f64;
-                }
+        #[inline(always)]
+        unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool {
+            <T as AnyCompatible>::check_any_strict(data)
+        }
+        #[inline(always)]
+        unsafe fn container_match_constraints(data: &TVMFFIAny) -> bool {
+            <T as AnyCompatible>::match_constraints(data)
+        }
 
-                unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-                    data.data_union.v_float64 as $float_type
-                }
+        #[inline(always)]
+        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+            <T as AnyCompatible>::copy_from_any_view_after_check(data)
+        }
 
-                unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-                    if data.type_index == TypeIndex::kTVMFFIFloat as i32 {
-                        Ok(data.data_union.v_float64 as $float_type)
-                    } else if data.type_index == TypeIndex::kTVMFFIInt as i32 ||
-                       data.type_index == TypeIndex::kTVMFFIBool as i32 {
-                        Ok(data.data_union.v_int64 as $float_type)
-                    } else {
-                        Err(())
-                    }
-                }
-            }
-        )*
-    };
+        #[inline(always)]
+        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+            <T as AnyCompatible>::move_from_any_after_check(data)
+        }
+
+        #[inline(always)]
+        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+            <T as AnyCompatible>::try_cast_from_any_view(data)
+        }
+
+        #[inline(always)]
+        fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String {
+            <T as AnyCompatible>::get_mismatch_type_info(data)
+        }
+
+        #[inline(always)]
+        fn container_type_str() -> String {
+            <T as AnyCompatible>::type_str()
+        }
+
+        #[inline(always)]
+        fn container_type_schema() -> String {
+            <T as AnyCompatible>::type_schema()
+        }
+    }
+
+    impl Ops for Any {
+        const CONTAINER_IS_ANY: bool = true;
+
+        #[inline(always)]
+        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+            *data = *src.as_raw_ffi_any();
+        }
+
+        #[inline(always)]
+        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny) {
+            *data = Any::into_raw_ffi_any(src);
+        }
+
+        #[inline(always)]
+        unsafe fn container_check_any_strict(_data: &TVMFFIAny) -> bool {
+            true
+        }
+        #[inline(always)]
+        unsafe fn container_match_constraints(_data: &TVMFFIAny) -> bool {
+            true
+        }
+
+        #[inline(always)]
+        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+            Any::from(AnyView::from_raw_ffi_any(*data))
+        }
+
+        #[inline(always)]
+        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+            Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new()))
+        }
+
+        #[inline(always)]
+        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+            Ok(Any::from(AnyView::from_raw_ffi_any(*data)))
+        }
+
+        #[inline(always)]
+        fn container_get_mismatch_type_info(_data: &TVMFFIAny) -> String {
+            "Any".to_string()
+        }
+
+        #[inline(always)]
+        fn container_type_str() -> String {
+            "Any".to_string()
+        }
+
+        #[inline(always)]
+        fn container_type_schema() -> String {
+            <Any as super::TypeSchema>::type_schema()
+        }
+    }
 }
 
-// Implement AnyCompatible for all float types
-impl_any_compatible_for_float!(f32, f64);
-
-// Special rule: we convert () to None
-// This allows us to effectively pass () around as null value
-// note that this is indeed a bit relaxation of the type
-// but it is necessary for us to enable void/none interoperability
-unsafe impl AnyCompatible for () {
-    fn type_str() -> String {
-        // make it consistent with c++ representation
-        "None".to_string()
+/// The type key of the runtime type index `type_index`.
+pub(crate) fn runtime_type_key(type_index: i32) -> String {
+    unsafe {
+        let info = TVMFFIGetTypeInfo(type_index);
+        assert!(!info.is_null(), "TVMFFIGetTypeInfo returned null");
+        (*info).type_key.as_str().to_string()
     }
+}
 
-    unsafe fn copy_to_any_view(_src: &Self, data: &mut TVMFFIAny) {
-        data.type_index = TypeIndex::kTVMFFINone as i32;
-        data.small_str_len = 0;
-        data.data_union.v_int64 = 0;
+/// Writes a type schema, `{"type":"<origin>"}` or, with type arguments,
+/// `{"type":"<origin>","args":[...]}`.
+pub(crate) fn type_schema(origin: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        format!(r#"{{"type":"{origin}"}}"#)
+    } else {
+        format!(r#"{{"type":"{origin}","args":[{}]}}"#, args.join(","))
     }
+}
 
-    unsafe fn move_to_any(_src: Self, data: &mut TVMFFIAny) {
-        data.type_index = TypeIndex::kTVMFFINone as i32;
-        data.small_str_len = 0;
-        data.data_union.v_int64 = 0;
-    }
+/// The metadata recorded for a function or field of type schema
+/// `type_schema`: `{"type_schema":<type_schema as a JSON string>}`.
+pub(crate) fn type_schema_metadata(type_schema: &str) -> String {
+    format!(r#"{{"type_schema":{}}}"#, escape_string_json(type_schema))
+}
 
-    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        data.type_index == TypeIndex::kTVMFFINone as i32
-    }
-
-    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {}
-
-    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {}
-
-    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-        if data.type_index == TypeIndex::kTVMFFINone as i32 {
-            Ok(())
-        } else {
-            Err(())
+/// `text` as a JSON string literal, escaped so that the metadata matches the
+/// C++ runtime's byte for byte.
+fn escape_string_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '/' => out.push_str("\\/"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 || ch == '\u{7f}' => {
+                out.push_str(&format!("\\u{:04x}", ch as u32))
+            }
+            ch => out.push(ch),
         }
+    }
+    out.push('"');
+    out
+}
+
+/// The type schema of a function parameter or return type.
+///
+/// This is [`AnyCompatible::type_schema`] for a type that converts through
+/// [`Any`], and `{"type":"Any"}` for `Any` and `AnyView` themselves.
+pub(crate) trait TypeSchema {
+    fn type_schema() -> String;
+}
+
+impl<T: AnyCompatible> TypeSchema for T {
+    fn type_schema() -> String {
+        <T as AnyCompatible>::type_schema()
+    }
+}
+
+impl TypeSchema for Any {
+    fn type_schema() -> String {
+        type_schema("Any", &[])
+    }
+}
+
+impl TypeSchema for AnyView<'_> {
+    fn type_schema() -> String {
+        type_schema("Any", &[])
     }
 }
