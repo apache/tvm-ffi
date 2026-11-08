@@ -31,7 +31,8 @@ use crate::{AnyView, Error, ObjectRefCore, Result};
 /// in the ABI.
 ///
 /// The callee may take the stored strong reference without incrementing its
-/// count; otherwise this wrapper retains and releases it.
+/// count. If it does not, the wrapper keeps the reference and releases it when
+/// dropped.
 pub struct RValueRef<T>
 where
     T: ObjectRefCore,
@@ -56,6 +57,11 @@ where
     }
 
     /// Take the owned object without copying or incrementing its reference count.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the object was already taken, such as by a callee that moved
+    /// it out of the argument slot.
     pub fn into_inner(mut self) -> T {
         let object = *self.slot.get_mut();
         assert!(!object.is_null(), "RValueRef has already been moved");
