@@ -183,3 +183,5 @@ RUST_GENERATED_MEMBERS = frozenset({"base_", "data_"})
 
 #: ``rustfmt``'s default ``max_width``; a wider allocator signature wraps one parameter per line.
 RUST_MAX_WIDTH = 100
+#: ``rustfmt``'s default ``fn_call_width``; wider call arguments take one line each.
+RUST_FN_CALL_WIDTH = 60

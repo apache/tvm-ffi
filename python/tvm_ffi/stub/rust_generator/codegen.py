@@ -89,6 +89,42 @@ if TYPE_CHECKING:
     from .directives import EnumSpec
 
 
+def _read_lines(head: str, macro: str, args: list[str], read: str) -> list[str]:
+    """``head + macro!(args) + read`` in an accessor body, wrapped as rustfmt does at its depth.
+
+    The accessor sits in an ``impl``, so its lines gain one more indent. Arguments
+    wider than rustfmt's ``fn_call_width`` take one line each; otherwise the read
+    moves to its own line. A ``let`` keeps a column for its ``;``, and first tries
+    its value on the next line.
+    """
+    width = C_RUST.RUST_MAX_WIDTH - 4
+    indent = head[: len(head) - len(head.lstrip())]
+    joined = ", ".join(args)
+    call = f"{macro}!({joined})"
+    if len(joined) > C_RUST.RUST_FN_CALL_WIDTH:
+        *rest, last = args
+        return [
+            f"{head}{macro}!(",
+            *[f"{indent}    {arg}," for arg in rest],
+            f"{indent}    {last}",
+            f"{indent})",
+            f"{indent}{read}",
+        ]
+    let, eq, _ = head.partition(" = ")
+    line = f"{head}{call}{read}"
+    chained = [f"{head}{call}", f"{indent}    {read}"]
+    if not eq:
+        return [line] if len(line) <= width else chained
+    moved = f"{indent}    {call}{read}"
+    if len(line) < width - 1:
+        return [line]
+    if len(moved) < width - 1:
+        return [f"{let} =", moved]
+    if len(f"{head}{call}") < width:
+        return chained
+    return [f"{let} =", f"{indent}    {call}", f"{indent}        {read}"]
+
+
 def _call_lines(open_: str, items: list[str], close: str) -> list[str]:
     """``open_ + items + close`` on one line, or wrapped the way rustfmt does when it would overflow.
 
@@ -421,8 +457,8 @@ class _ObjectRenderer:
         target = f"{self.type_key}.{field.name}"
         name = rust_ident(field.name)
         vis = self._visibility(target)
-        static = self._getter_static_lines(field.name)
-        getter = "GETTER.clone()?"
+        cached = self.imports.record("tvm_ffi::cached_field_getter")
+        args = [self.obj_struct, f'"{field.name}"']
         allow = _allow_non_snake_case([name])
 
         enum = directives.enums.get(target)
@@ -430,8 +466,7 @@ class _ObjectRenderer:
             return [
                 *allow,
                 f"{vis} fn {name}(&self) -> Result<{enum.name}> {{",
-                *static,
-                f"    let raw: i64 = {getter}.get(self)?;",
+                *_read_lines("    let raw: i64 = ", cached, args, ".get(self)?;"),
                 f"    {enum.name}::try_from(raw)",
                 "}",
             ]
@@ -447,8 +482,7 @@ class _ObjectRenderer:
             return [
                 *allow,
                 f"{vis} fn {name}(&self) -> Result<{any_type}> {{",
-                *static,
-                f"    {getter}.get_any(self)",
+                *_read_lines("    ", cached, args, ".get_any(self)"),
                 "}",
             ]
         if target in directives.nullable and not rust_type.startswith("Option<"):
@@ -456,34 +490,9 @@ class _ObjectRenderer:
         return [
             *allow,
             f"{vis} fn {name}(&self) -> Result<{rust_type}> {{",
-            *static,
-            f"    {getter}.get(self)",
+            *_read_lines("    ", cached, args, ".get(self)"),
             "}",
         ]
-
-    def _getter_static_lines(self, field_name: str) -> list[str]:
-        """Declare the accessor's ``static GETTER``, which resolves the field on first use only.
-
-        A fn-local ``static`` cannot name ``Self``, so the owner is spelled out.
-        Wrapped as rustfmt does at the accessor's depth (``impl``, then ``fn``).
-        """
-        lazy = self.imports.record("tvm_ffi::extra::cold_init_lazy_lock::ColdInitLazyLock")
-        static = f"        static GETTER: {lazy}<Result<FieldGetter>> ="
-        owner, key = f"{self.obj_struct}::type_index()", f'"{field_name}"'
-        call = f"FieldGetter::new({owner}, {key})"
-        one_line = f"{static} {lazy}::new(|| {call});"
-        moved = f"            {lazy}::new(|| {call});"
-        if len(one_line) <= C_RUST.RUST_MAX_WIDTH:
-            lines = [one_line]
-        elif len(moved) <= C_RUST.RUST_MAX_WIDTH:
-            lines = [static, moved]
-        else:
-            lines = [
-                f"{static} {lazy}::new(|| {{",
-                *_call_lines("            FieldGetter::new(", [owner, key], ")"),
-                "        });",
-            ]
-        return [line[4:] for line in lines]
 
     def _enum_lines(self, spec: EnumSpec) -> list[str]:
         """Render the type an ``enum`` directive declares: an open integer newtype, or a closed enum."""
@@ -829,8 +838,6 @@ class _ObjectRenderer:
         is_enum = C_RUST.RUST_ENUM_TYPE_KEY in self.info.ancestors
         has_accessors = bool(fields) and not verdict.is_complete
         if has_accessors:
-            self.imports.record("tvm_ffi::ObjectCore")  # `<Obj>::type_index()`
-            self.imports.record("tvm_ffi::reflection::FieldGetter")
             self.imports.record("tvm_ffi::Result")
 
         # The reference comes first, so a `///` written above the block documents it.

@@ -76,6 +76,51 @@ macro_rules! cached_global_func {
     }};
 }
 
+/// Resolve a reflected field of the object type `N` once, and keep its getter
+/// for the process: a `&'static FieldGetter<N>`.
+///
+/// Each call site has its own cache, which later calls read without a lock.
+/// `N` must be a concrete type, not `Self` or a generic parameter. It panics,
+/// naming the field, if `N` has no such field. See also
+/// [`FieldGetter::of`](crate::reflection::FieldGetter::of), which returns an
+/// error instead.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{cached_field_getter, rs_object, Object, ObjectArc};
+///
+/// #[rs_object("my_ext.Point")]
+/// pub struct PointObj {
+///     base_: Object,
+///     x: i64,
+/// }
+///
+/// let point = ObjectArc::new(PointObj { base_: Object::new(), x: 3 });
+/// let x: i64 = cached_field_getter!(PointObj, "x").get(&*point)?;
+/// assert_eq!(x, 3);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+#[macro_export]
+macro_rules! cached_field_getter {
+    ($owner:ty, $name:literal) => {{
+        static GETTER: $crate::extra::cold_init_lazy_lock::ColdInitLazyLock<
+            $crate::reflection::FieldGetter<$owner>,
+        > = $crate::extra::cold_init_lazy_lock::ColdInitLazyLock::new(|| {
+            $crate::reflection::FieldGetter::of::<$owner>($name).unwrap_or_else(|_| {
+                ::core::panic!(::core::concat!(
+                    "`",
+                    ::core::stringify!($owner),
+                    "` has no reflected field `",
+                    $name,
+                    "`"
+                ))
+            })
+        });
+        &*GETTER
+    }};
+}
+
 /// Turn the return code of a safe call into a `Result`, taking the raised
 /// error when it is nonzero: `check_safe_call!(function(args))?`.
 #[doc(hidden)]

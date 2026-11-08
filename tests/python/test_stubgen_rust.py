@@ -384,33 +384,23 @@ pub struct PairObj {{
 
 impl PairObj {{
     pub fn a(&self) -> Result<i64> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "a"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(PairObj, "a").get(self)
     }}
 
     pub fn tag(&self) -> Result<Option<String>> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "tag"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(PairObj, "tag").get(self)
     }}
 
     pub fn items(&self) -> Result<Array<Any>> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "items"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(PairObj, "items").get(self)
     }}
 
     pub fn owner(&self) -> Result<ObjectRef> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "owner"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(PairObj, "owner").get(self)
     }}
 
     pub fn r#type(&self) -> Result<Any> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(PairObj::type_index(), "type"));
-        GETTER.clone()?.get_any(self)
+        cached_field_getter!(PairObj, "type").get_any(self)
     }}
 }}"""
 
@@ -432,10 +422,8 @@ def test_render_root_object() -> None:
     assert _uses(imports) == {
         "tvm_ffi::Object",
         "tvm_ffi::ObjectArc",
-        "tvm_ffi::ObjectCore",
-        "tvm_ffi::reflection::FieldGetter",
+        "tvm_ffi::cached_field_getter",
         "tvm_ffi::Result",
-        "tvm_ffi::extra::cold_init_lazy_lock::ColdInitLazyLock",
         "tvm_ffi::String",
         "tvm_ffi::Array",
         "tvm_ffi::Any",
@@ -447,7 +435,7 @@ def test_render_object_without_fields_has_no_impl() -> None:
     text, imports = _render(_info("demo.Marker", is_final=True))
     assert '#[object(type_key = "demo.Marker", final)]' in text
     assert "impl MarkerObj" not in text
-    assert "FieldGetter" not in _uses(imports)
+    assert "tvm_ffi::cached_field_getter" not in _uses(imports)
 
 
 def test_render_thread_safe_only_when_not_mutable() -> None:
@@ -615,34 +603,24 @@ impl Deref for IterVarObj {{
 
 impl IterVarObj {{
     pub fn dom(&self) -> Result<Option<Range>> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "dom"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(IterVarObj, "dom").get(self)
     }}
 
     pub fn var(&self) -> Result<PrimVar> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "var"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(IterVarObj, "var").get(self)
     }}
 
     pub fn iter_type(&self) -> Result<IterVarType> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "iter_type"));
-        let raw: i64 = GETTER.clone()?.get(self)?;
+        let raw: i64 = cached_field_getter!(IterVarObj, "iter_type").get(self)?;
         IterVarType::try_from(raw)
     }}
 
     pub fn thread_tag(&self) -> Result<String> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "thread_tag"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(IterVarObj, "thread_tag").get(self)
     }}
 
     pub fn span(&self) -> Result<Option<Span>> {{
-        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =
-            ColdInitLazyLock::new(|| FieldGetter::new(IterVarObj::type_index(), "span"));
-        GETTER.clone()?.get(self)
+        cached_field_getter!(IterVarObj, "span").get(self)
     }}
 }}
 
@@ -932,8 +910,7 @@ def test_reflected_base_and_data_keep_their_names() -> None:
     RUST.add_directive(imports, "visibility", "demo.Node.cache_ -> pub(crate)", 1)
     text, _ = _render(_info("demo.Node", (_field("base", "int"), _field("cache_", "int"))), imports)
     assert (
-        "pub fn base(&self) -> Result<i64> {\n        static GETTER: ColdInitLazyLock<Result<FieldGetter>> ="
-        in text
+        'pub fn base(&self) -> Result<i64> {\n        cached_field_getter!(NodeObj, "base")' in text
     )
     assert "    pub(crate) fn cache_(&self) -> Result<i64> {" in text
     with pytest.raises(ValueError, match=r"`visibility` directive at line 2"):
@@ -954,7 +931,7 @@ def test_render_complete_enum_field() -> None:
     assert "    pub kind: Kind,\n" in text
     assert "    pub fn new(a: i64, kind: impl Into<Kind>) -> Self {" in text
     assert {"tvm_ffi::Result", "tvm_ffi::Error", "tvm_ffi::VALUE_ERROR"} <= _uses(imports)
-    assert "tvm_ffi::reflection::FieldGetter" not in _uses(imports)
+    assert "tvm_ffi::cached_field_getter" not in _uses(imports)
 
 
 def test_allow_missing_docs_and_closed_enum() -> None:
@@ -1448,7 +1425,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
         in base
     )
     assert "assert!(::core::mem::size_of::<TestCxxClassBaseObj>() == 40);" in base
-    assert "FieldGetter" not in base
+    assert "cached_field_getter" not in base
     assert "    pub fn new(v_i64: i64, v_i32: i32) -> Self {" in base
 
     dd, imports = _render(
@@ -1547,9 +1524,7 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert (root / "mod.rs").read_text(encoding="utf-8") == "pub mod testing;\n"
     text = (root / "testing" / "mod.rs").read_text(encoding="utf-8")
     assert text.startswith("#![allow(dead_code, unused_imports)]\n")
-    assert (
-        "use tvm_ffi::reflection::FieldGetter;" in text
-    )  # the opaque fixtures read through getters
+    assert "use tvm_ffi::cached_field_getter;" in text  # the opaque fixtures read through getters
     assert '#[object(type_key = "testing.TestCxxClassDerivedDerived"' in text
     # Without a directive for the narrow `v_i32`, the chain is opaque.
     assert (
@@ -1891,9 +1866,7 @@ def test_ffi_field_type_off_the_default_ty_map_reads_as_any() -> None:
     text, imports = _render(_info("demo.Doc", (_field("interrupt", "ffi.VisitInterrupt"),)))
     assert (
         "    pub fn interrupt(&self) -> Result<Any> {\n"
-        "        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =\n"
-        '            ColdInitLazyLock::new(|| FieldGetter::new(DocObj::type_index(), "interrupt"));\n'
-        "        GETTER.clone()?.get_any(self)\n"
+        '        cached_field_getter!(DocObj, "interrupt").get_any(self)\n'
     ) in text
     assert not any("VisitInterrupt" in path for path in _uses(imports))
 
@@ -1913,9 +1886,7 @@ def test_any_field_of_an_opaque_type_reads_through_get_any() -> None:
     text, _ = _render(_info("demo.Literal", (_field("value", "Any"),)))
     assert (
         "    pub fn value(&self) -> Result<Any> {\n"
-        "        static GETTER: ColdInitLazyLock<Result<FieldGetter>> =\n"
-        '            ColdInitLazyLock::new(|| FieldGetter::new(LiteralObj::type_index(), "value"));\n'
-        "        GETTER.clone()?.get_any(self)\n"
+        '        cached_field_getter!(LiteralObj, "value").get_any(self)\n'
     ) in text
 
 

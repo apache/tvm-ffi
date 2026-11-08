@@ -348,10 +348,12 @@ fn test_types_with_only_methods_register_their_reflection() {
 #[test]
 fn test_reflected_fields_read_and_write_through_the_c_abi() {
     let p3 = point3(3, 4);
-    let x = FieldGetter::new(Point3Obj::type_index(), "x").unwrap();
-    let z = FieldGetter::new(Point3Obj::type_index(), "z").unwrap();
-    assert_eq!(x.get::<_, i64>(&*p3.data).unwrap(), 3);
-    assert_eq!(z.get::<_, i64>(&*p3.data).unwrap(), 4);
+    let x = FieldGetter::of::<Point3Obj>("x").unwrap();
+    assert_eq!(x.get::<i64>(&p3.data).unwrap(), 3);
+    let z: i64 = tvm_ffi::cached_field_getter!(Point3Obj, "z")
+        .get(&p3.data)
+        .unwrap();
+    assert_eq!(z, 4);
 
     let p = point(1, 2.0, "p");
     let y = &fields(type_info::<PointObj>())[1];
