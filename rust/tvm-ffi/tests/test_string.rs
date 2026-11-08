@@ -287,7 +287,7 @@ fn test_bytes_debug() {
     let data = b"hello";
     let bytes = Bytes::from(data.as_slice());
     let debug_str = format!("{:?}", bytes);
-    assert!(debug_str.contains("Bytes"));
+    assert_eq!(debug_str, format!("{:?}", data.as_slice()));
 }
 
 #[test]
@@ -295,8 +295,7 @@ fn test_string_debug() {
     let input = "world";
     let s = String::from(input);
     let debug_str = format!("{:?}", s);
-    assert!(debug_str.contains("String"));
-    assert!(debug_str.contains("world"));
+    assert_eq!(debug_str, "\"world\"");
 }
 
 #[test]

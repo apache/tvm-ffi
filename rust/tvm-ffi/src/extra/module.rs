@@ -58,7 +58,7 @@ impl Module {
     /// # Errors
     /// If the library cannot be loaded.
     pub fn load_from_file<Str: AsRef<str>>(file_name: Str) -> Result<Module> {
-        let file_name = crate::string::String::from(file_name);
+        let file_name = crate::string::String::from(file_name.as_ref());
         crate::cached_global_func!("ffi.ModuleLoadFromFile")
             .call_tuple((file_name,))?
             .try_into()
@@ -79,7 +79,7 @@ impl Module {
     /// Returns an error if the module has no function `name`, as Python's
     /// `Module.get_function` raises.
     pub fn get_function<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
-        let name = crate::string::String::from(name);
+        let name = crate::string::String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleGetFunction")
             .call_tuple((self, name, false))?
             .try_into()
@@ -88,7 +88,7 @@ impl Module {
     /// As [`get_function`](Self::get_function), but also searching the modules
     /// this one imports, depth first in import order.
     pub fn get_function_with_imports<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
-        let name = crate::string::String::from(name);
+        let name = crate::string::String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleGetFunction")
             .call_tuple((self, name, true))?
             .try_into()
@@ -104,7 +104,7 @@ impl Module {
     /// # Returns
     /// Whether the function exists.
     pub fn implements_function<Str: AsRef<str>>(&self, name: Str) -> Result<bool> {
-        let name = String::from(name);
+        let name = String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleImplementsFunction")
             .call_tuple((self, name, false))?
             .try_into()
@@ -113,7 +113,7 @@ impl Module {
     /// As [`implements_function`](Self::implements_function), but also searching the modules
     /// this one imports, depth first in import order.
     pub fn implements_function_with_imports<Str: AsRef<str>>(&self, name: Str) -> Result<bool> {
-        let name = String::from(name);
+        let name = String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleImplementsFunction")
             .call_tuple((self, name, true))?
             .try_into()
@@ -133,7 +133,7 @@ impl Module {
     /// # Returns
     /// The metadata as a JSON string, or `None` if the function has none.
     pub fn get_function_metadata<Str: AsRef<str>>(&self, name: Str) -> Result<Option<String>> {
-        let name = String::from(name);
+        let name = String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleGetFunctionMetadata")
             .call_tuple((self, name, false))?
             .try_into()
@@ -145,7 +145,7 @@ impl Module {
         &self,
         name: Str,
     ) -> Result<Option<String>> {
-        let name = String::from(name);
+        let name = String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleGetFunctionMetadata")
             .call_tuple((self, name, true))?
             .try_into()
@@ -164,7 +164,7 @@ impl Module {
     /// # Returns
     /// The doc string, or `None` if the function has none.
     pub fn get_function_doc<Str: AsRef<str>>(&self, name: Str) -> Result<Option<String>> {
-        let name = String::from(name);
+        let name = String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleGetFunctionDoc")
             .call_tuple((self, name, false))?
             .try_into()
@@ -176,7 +176,7 @@ impl Module {
         &self,
         name: Str,
     ) -> Result<Option<String>> {
-        let name = String::from(name);
+        let name = String::from(name.as_ref());
         crate::cached_global_func!("ffi.ModuleGetFunctionDoc")
             .call_tuple((self, name, true))?
             .try_into()
