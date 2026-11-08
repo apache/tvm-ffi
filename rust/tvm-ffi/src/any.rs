@@ -137,6 +137,13 @@ impl<'a> AnyView<'a> {
         self.data.type_index
     }
 
+    /// The registered type key of the viewed value, such as `"int"` or
+    /// `"ffi.Array"`. See also [`Any::type_key`].
+    #[inline]
+    pub fn type_key(&self) -> &'static str {
+        object::registered_type_key(self.data.type_index)
+    }
+
     /// Whether the value is None.
     #[inline(always)]
     pub fn is_none(&self) -> bool {
@@ -187,6 +194,15 @@ impl<'a> AnyView<'a> {
     pub fn downcast_ref<T: crate::type_traits::DowncastRefFromAny>(&self) -> Option<&T> {
         // SAFETY: the view holds a valid cell for as long as it is borrowed.
         unsafe { T::downcast_ref_from_any(&self.data) }
+    }
+
+    /// Whether the viewed value is a `T` as is, by the strict check of
+    /// [`downcast_ref`](Self::downcast_ref), without conversion.
+    /// See also [`Any::is`].
+    #[inline(always)]
+    pub fn is<T: AnyCompatible>(&self) -> bool {
+        // SAFETY: the view holds a valid cell.
+        unsafe { T::check_any_strict(&self.data) }
     }
 
     /// The strong reference count of the held object, for tests and debugging;
@@ -289,6 +305,19 @@ impl Any {
         self.data.type_index
     }
 
+    /// The registered type key of the stored value, such as `"int"` or
+    /// `"ffi.Array"`, as C++ `Any::GetTypeKey`.
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, Array};
+    /// assert_eq!(Any::from(1_i64).type_key(), "int");
+    /// assert_eq!(Any::from(Array::from_vec(vec![1_i64])).type_key(), "ffi.Array");
+    /// ```
+    #[inline]
+    pub fn type_key(&self) -> &'static str {
+        object::registered_type_key(self.data.type_index)
+    }
+
     /// Whether the value is None.
     #[inline(always)]
     pub fn is_none(&self) -> bool {
@@ -326,6 +355,24 @@ impl Any {
     pub fn downcast_ref<T: crate::type_traits::DowncastRefFromAny>(&self) -> Option<&T> {
         // SAFETY: the owned cell stays valid for as long as `self` is borrowed.
         unsafe { T::downcast_ref_from_any(&self.data) }
+    }
+
+    /// Whether the stored value is a `T` as is, by the strict check of
+    /// [`downcast_ref`](Self::downcast_ref), without conversion, as std
+    /// `Any::is`. It covers every [`AnyCompatible`] type, such as `bool`.
+    ///
+    /// ```
+    /// use tvm_ffi::{Any, Array};
+    /// let value = Any::from(Array::from_vec(vec![1_i64, 2]));
+    /// assert!(value.is::<Array<i64>>());
+    /// assert!(!value.is::<Array<f64>>());
+    /// assert!(Any::from(true).is::<bool>());
+    /// assert!(!Any::from(1_i64).is::<f64>());
+    /// ```
+    #[inline(always)]
+    pub fn is<T: AnyCompatible>(&self) -> bool {
+        // SAFETY: the owned cell is valid.
+        unsafe { T::check_any_strict(&self.data) }
     }
 
     /// Return a pointer to the raw ABI representation, for a runtime call that

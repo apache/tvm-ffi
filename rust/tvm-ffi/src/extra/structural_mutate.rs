@@ -436,6 +436,12 @@ impl<'a, T> MutationView<'a, T> {
         unsafe { U::downcast_ref_from_any(&self.value) }
     }
 
+    /// Whether the value is a `U`, as [`Any::is`].
+    #[inline(always)]
+    pub fn is<U: crate::type_traits::AnyCompatible>(&self) -> bool {
+        self.as_any_view().is::<U>()
+    }
+
     /// Narrow the matched type without acquiring an owning reference.
     ///
     /// The check is the strict one of `match_any!`: only a value that fits `U` as
