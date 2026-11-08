@@ -19,6 +19,7 @@
 //! [`AnyCompatible`], how a Rust type converts to and from FFI values.
 
 use crate::any::{Any, AnyView};
+use std::borrow::Borrow;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
 
@@ -277,76 +278,45 @@ pub unsafe trait TypeSubsumes<Source: ?Sized> {}
 
 unsafe impl<T: ?Sized> TypeSubsumes<T> for T {}
 
-/// A value that converts into the object reference `T`, owned or borrowed.
+/// A value taken where a `T` is expected: a `T`, a `&T`, or a subtype of `T`
+/// owned or borrowed.
 ///
-/// An owned reference converts into an owned `T`, and a borrowed one borrows
-/// as `&T` without changing a reference count, as [`IntoIterator`] consumes a
-/// `Vec` but borrows from a `&Vec`. [`impl_object_ref_upcast!`](crate::impl_object_ref_upcast)
-/// implements it for each derived reference and its reference into the base,
-/// and `#[derive(ObjectRef)]` for the type itself. A function that only reads
-/// the value borrows the output with `.borrow()`; one that keeps it takes
-/// ownership with [`into_owned`](Self::into_owned), which clones only a
-/// borrowed reference.
-///
-/// # Examples
-///
-/// ```
-/// use std::borrow::Borrow;
-/// use tvm_ffi::derive::ObjectRef;
-/// use tvm_ffi::object::{ObjectRef, ObjectRefCore};
-/// use tvm_ffi::IntoArg;
-/// use tvm_ffi::{rs_object, Object, ObjectArc};
-///
-/// #[rs_object("my_ext.MyPair", final)]
-/// pub struct MyPairObj {
-///     base_: Object,
-///     pub first: i64,
-///     pub second: i64,
-/// }
-///
-/// #[derive(Clone, ObjectRef)]
-/// pub struct MyPair {
-///     data: ObjectArc<MyPairObj>,
-/// }
-///
-/// fn same(a: impl IntoArg<ObjectRef>, b: &ObjectRef) -> bool {
-///     a.into_arg().borrow().same_as(b)
-/// }
-///
-/// let pair = MyPair::from_object(MyPairObj::new(Object::new(), 1, 2));
-/// let base: ObjectRef = pair.clone().into();
-/// assert!(same(&pair, &base)); // borrowed as `&ObjectRef`, no new reference
-/// assert!(same(pair.clone(), &base)); // moved into an `ObjectRef`
-///
-/// // A function that keeps the value takes ownership.
-/// fn keep(value: impl IntoArg<ObjectRef>) -> ObjectRef {
-///     value.into_owned()
-/// }
-/// assert!(keep(&pair).same_as(&base));
-/// ```
+/// [`into_arg`](Self::into_arg) returns a `T` for an owned value and a `&T`
+/// for a borrowed one, without changing a reference count;
+/// [`into_owned`](Self::into_owned) moves an owned value and clones only a
+/// borrowed one, as [`Cow::into_owned`](std::borrow::Cow::into_owned) does.
 pub trait IntoArg<T> {
-    /// `T` for an owned value, or `&T` for a borrowed one.
-    type Output: std::borrow::Borrow<T> + Into<T>;
+    /// `T` when owned, `&T` when borrowed.
+    type Output: Borrow<T>;
 
-    /// Convert into the reference `T`.
-    ///
-    /// # Returns
-    ///
-    /// The owned or borrowed reference.
+    /// Convert into a `T` or a `&T`.
     fn into_arg(self) -> Self::Output;
 
-    /// Convert into an owned `T`, as [`Cow::into_owned`](std::borrow::Cow::into_owned)
-    /// does: an owned value moves, and only a borrowed reference is cloned.
-    ///
-    /// # Returns
-    ///
-    /// The owned reference.
-    #[inline(always)]
-    fn into_owned(self) -> T
-    where
-        Self: Sized,
-    {
-        self.into_arg().into()
+    /// Convert into an owned `T`, cloning only a borrowed value.
+    fn into_owned(self) -> T;
+}
+
+impl IntoArg<crate::String> for &str {
+    type Output = crate::String;
+    #[inline]
+    fn into_arg(self) -> crate::String {
+        crate::String::from(self)
+    }
+    #[inline]
+    fn into_owned(self) -> crate::String {
+        crate::String::from(self)
+    }
+}
+
+impl IntoArg<crate::string::Bytes> for &[u8] {
+    type Output = crate::string::Bytes;
+    #[inline]
+    fn into_arg(self) -> crate::string::Bytes {
+        crate::string::Bytes::from(self)
+    }
+    #[inline]
+    fn into_owned(self) -> crate::string::Bytes {
+        crate::string::Bytes::from(self)
     }
 }
 

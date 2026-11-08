@@ -168,6 +168,10 @@ impl<T, U: TypeSubsumes<T>> IntoArg<Array<U>> for Array<T> {
     fn into_arg(self) -> Array<U> {
         self.upcast()
     }
+    #[inline(always)]
+    fn into_owned(self) -> Array<U> {
+        self.upcast()
+    }
 }
 
 impl<'a, T, U: TypeSubsumes<T> + ContainerElement + Clone + 'a> IntoArg<Array<U>> for &'a Array<T> {
@@ -175,6 +179,10 @@ impl<'a, T, U: TypeSubsumes<T> + ContainerElement + Clone + 'a> IntoArg<Array<U>
     #[inline(always)]
     fn into_arg(self) -> &'a Array<U> {
         self.upcast_ref()
+    }
+    #[inline(always)]
+    fn into_owned(self) -> Array<U> {
+        self.upcast_ref().clone()
     }
 }
 
@@ -219,7 +227,7 @@ impl<T> Array<T> {
     /// let objects: Array<ObjectRef> = shapes.clone().upcast();
     /// assert!(objects[0].same_as(&shapes[0]));
     /// ```
-    #[inline]
+    #[inline(always)]
     pub fn upcast<U: TypeSubsumes<T>>(self) -> Array<U> {
         Array {
             data: self.data,
@@ -228,7 +236,7 @@ impl<T> Array<T> {
     }
 
     /// Borrow this array as an `Array<U>`, as [`upcast`](Self::upcast) does.
-    #[inline]
+    #[inline(always)]
     pub fn upcast_ref<U: TypeSubsumes<T>>(&self) -> &Array<U> {
         // SAFETY: `Array<T>` and `Array<U>` are both `repr(C)` over one
         // `ObjectArc<ArrayObj>`, and every `T` cell is a valid `U` cell.

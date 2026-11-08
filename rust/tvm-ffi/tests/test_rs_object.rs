@@ -372,6 +372,22 @@ fn test_constructors_deref_and_upcast() {
 }
 
 #[test]
+fn test_into_arg_into_owned_moves_or_clones() {
+    fn keep(value: impl IntoArg<ObjectRef>) -> ObjectRef {
+        value.into_owned()
+    }
+    let pair = point(1, "a");
+    let count = || AnyView::from(&pair).debug_strong_count().unwrap();
+    let base = count();
+    let cloned = keep(&pair);
+    assert!(cloned.same_as(&pair));
+    assert_eq!(count(), base + 1);
+    let moved = keep(pair.clone());
+    assert!(moved.same_as(&pair));
+    assert_eq!(count(), base + 2);
+}
+
+#[test]
 fn test_containers_upcast_without_a_copy() {
     fn keep_array(value: impl Into<Array<RsPoint>>) -> Array<RsPoint> {
         value.into()

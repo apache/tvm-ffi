@@ -296,6 +296,10 @@ macro_rules! impl_object_ref_upcast {
                 fn into_arg(self) -> $target {
                     ::core::convert::Into::into(self)
                 }
+                #[inline(always)]
+                fn into_owned(self) -> $target {
+                    ::core::convert::Into::into(self)
+                }
             }
 
             impl<'a> $crate::IntoArg<$target> for &'a $source {
@@ -303,6 +307,10 @@ macro_rules! impl_object_ref_upcast {
                 #[inline(always)]
                 fn into_arg(self) -> &'a $target {
                     ::core::convert::AsRef::<$target>::as_ref(self)
+                }
+                #[inline(always)]
+                fn into_owned(self) -> $target {
+                    ::core::convert::Into::into(self)
                 }
             }
 
@@ -490,6 +498,7 @@ macro_rules! impl_object_ref_downcast_ref {
 macro_rules! impl_any_compatible_conversions {
     ($($t:ty),* $(,)?) => {
         $crate::impl_try_from_any!($($t),*);
+        $crate::impl_into_arg!($($t),*);
         $crate::impl_arg_into_ref!($($t),*);
         $crate::impl_into_arg_holder_default!($($t),*);
     };
@@ -534,6 +543,40 @@ macro_rules! impl_try_from_any {
                 }
             }
         )*
+    };
+}
+
+/// `IntoArg<T>` for `T` and `&T`; part of [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions).
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_into_arg {
+    ($($t:ty),* $(,)?) => {
+        $($crate::impl_into_arg!(impl[] $t);)*
+    };
+    (impl[$($g:tt)*] $t:ty) => {
+            impl<$($g)*> $crate::IntoArg<$t> for $t {
+                type Output = $t;
+                #[inline(always)]
+                fn into_arg(self) -> $t {
+                    self
+                }
+                #[inline(always)]
+                fn into_owned(self) -> $t {
+                    self
+                }
+            }
+
+            impl<'a, $($g)*> $crate::IntoArg<$t> for &'a $t {
+                type Output = &'a $t;
+                #[inline(always)]
+                fn into_arg(self) -> &'a $t {
+                    self
+                }
+                #[inline(always)]
+                fn into_owned(self) -> $t {
+                    ::core::clone::Clone::clone(self)
+                }
+            }
     };
 }
 

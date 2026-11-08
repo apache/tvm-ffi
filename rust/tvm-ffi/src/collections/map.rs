@@ -472,7 +472,7 @@ impl<K, V> Map<K, V> {
     /// `Map<KU, VU>(const Map<K, V>&)` does for bases `KU` and `VU`.
     ///
     /// It is a method, not `From`, for the reasons on [`Array::upcast`](crate::Array::upcast).
-    #[inline]
+    #[inline(always)]
     pub fn upcast<KU: TypeSubsumes<K>, VU: TypeSubsumes<V>>(self) -> Map<KU, VU> {
         Map {
             data: self.data,
@@ -481,7 +481,7 @@ impl<K, V> Map<K, V> {
     }
 
     /// Borrow this map as a `Map<KU, VU>`, as [`upcast`](Self::upcast) does.
-    #[inline]
+    #[inline(always)]
     pub fn upcast_ref<KU: TypeSubsumes<K>, VU: TypeSubsumes<V>>(&self) -> &Map<KU, VU> {
         // SAFETY: both are `repr(C)` over one `ObjectArc<MapObj>`, and every
         // entry of `Map<K, V>` is a valid entry of `Map<KU, VU>`.
@@ -495,6 +495,10 @@ impl<K, V, KU: TypeSubsumes<K>, VU: TypeSubsumes<V>> IntoArg<Map<KU, VU>> for Ma
     fn into_arg(self) -> Map<KU, VU> {
         self.upcast()
     }
+    #[inline(always)]
+    fn into_owned(self) -> Map<KU, VU> {
+        self.upcast()
+    }
 }
 
 impl<'a, K, V, KU: TypeSubsumes<K> + 'a, VU: TypeSubsumes<V> + 'a> IntoArg<Map<KU, VU>>
@@ -504,6 +508,10 @@ impl<'a, K, V, KU: TypeSubsumes<K> + 'a, VU: TypeSubsumes<V> + 'a> IntoArg<Map<K
     #[inline(always)]
     fn into_arg(self) -> &'a Map<KU, VU> {
         self.upcast_ref()
+    }
+    #[inline(always)]
+    fn into_owned(self) -> Map<KU, VU> {
+        self.upcast_ref().clone()
     }
 }
 

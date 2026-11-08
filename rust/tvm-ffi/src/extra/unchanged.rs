@@ -322,6 +322,8 @@ impl<T: ContainerElement> Clone for UnchangedOr<T> {
     }
 }
 
+crate::impl_into_arg!(impl[T: ContainerElement] UnchangedOr<T>);
+
 impl<'b, T: ContainerElement> TryFrom<&'b Any> for UnchangedOr<T> {
     type Error = Error;
     #[inline]
@@ -392,6 +394,7 @@ unsafe impl AnyCompatible for Unchanged {
 }
 
 crate::impl_try_from_any!(Unchanged);
+crate::impl_into_arg!(Unchanged);
 
 // SAFETY: the carrier contains either the resource-free marker or exactly
 // T's owning representation. Borrowing never acquires ownership; moving
