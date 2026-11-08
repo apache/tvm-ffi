@@ -68,8 +68,8 @@ class CodeBlock:
     def from_begin_line(lineo: int, line: str, syntax: C.MarkerSyntax) -> CodeBlock:
         """Parse a line to create a CodeBlock if it contains a stub begin marker."""
         if not line.startswith(syntax.begin):
-            # One-line directive `<comment> tvm-ffi-stubgen(<name>): <payload>`. The payload is
-            # kept verbatim for whoever consumes the name: the pipeline or the generator.
+            # One-line directive `<comment> tvm-ffi-stubgen(<subject>): <payload>`. The payload is
+            # kept verbatim for `directives.Directives` to parse.
             name, sep, payload = line[len(syntax.prefix) :].partition("):")
             if not sep or not name or not name.replace("-", "_").isidentifier():
                 raise ValueError(f"Unknown stub type at line {lineo}: {line}")
@@ -188,7 +188,7 @@ class FileInfo:
                 codes.append(code)
                 code = None
             elif clean_line.startswith(syntax.prefix):
-                # Process a one-line directive "<comment> tvm-ffi-stubgen(<name>): ..."
+                # Process a one-line directive "<comment> tvm-ffi-stubgen(<subject>): ..."
                 dir_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
                 dir_code.lineno_end = lineno
                 dir_code.lines.append(line)

@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from . import consts as C
-from .directives import Directives
+from .directives import RustDirectives
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -105,7 +105,7 @@ class RustImports:
     """The per-file collector: the ``use`` items and the Rust directives of one file."""
 
     items: list[RustUse] = dataclasses.field(default_factory=list)
-    directives: Directives = dataclasses.field(default_factory=Directives)
+    directives: RustDirectives = dataclasses.field(default_factory=RustDirectives)
     builtin_mirrors: dict[str, str] = dataclasses.field(default_factory=dict)
     """Builtin ancestors mirrored in this file, root first: type key -> the base each embeds."""
     reserved: set[str] = dataclasses.field(default_factory=set)

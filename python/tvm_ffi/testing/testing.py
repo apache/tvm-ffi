@@ -161,7 +161,7 @@ class TestNonCopyable(Object):
 
 @c_class("testing.SchemaAllTypes")
 class _SchemaAllTypes:
-    # tvm-ffi-stubgen(ty-map): testing.SchemaAllTypes -> testing._SchemaAllTypes
+    # tvm-ffi-stubgen(object): testing.SchemaAllTypes(ty_map = testing._SchemaAllTypes)
     # tvm-ffi-stubgen(begin): object/testing.SchemaAllTypes
     # fmt: off
     v_bool: bool
@@ -317,7 +317,7 @@ class TestEqWithoutHash(Object):
 
 @c_class("testing.TestCxxClassBase")
 class _TestCxxClassBase(Object):
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxClassBase -> testing._TestCxxClassBase
+    # tvm-ffi-stubgen(object): testing.TestCxxClassBase(ty_map = testing._TestCxxClassBase)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxClassBase
     # fmt: off
     v_i64: int
@@ -338,7 +338,7 @@ class _TestCxxClassBase(Object):
 
 @c_class("testing.TestCxxClassDerived", eq=True, order=True, unsafe_hash=True)
 class _TestCxxClassDerived(_TestCxxClassBase):
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxClassDerived -> testing._TestCxxClassDerived
+    # tvm-ffi-stubgen(object): testing.TestCxxClassDerived(ty_map = testing._TestCxxClassDerived)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxClassDerived
     # fmt: off
     v_f64: float
@@ -352,7 +352,7 @@ class _TestCxxClassDerived(_TestCxxClassBase):
 
 @c_class("testing.TestCxxClassDerivedDerived")
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxClassDerivedDerived -> testing._TestCxxClassDerivedDerived
+    # tvm-ffi-stubgen(object): testing.TestCxxClassDerivedDerived(ty_map = testing._TestCxxClassDerivedDerived)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxClassDerivedDerived
     # fmt: off
     v_str: str
@@ -396,7 +396,7 @@ class _TestCxxEnumHolder(Object):
 
 @c_class("testing.TestCxxInitSubset")
 class _TestCxxInitSubset(Object):
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxInitSubset -> testing._TestCxxInitSubset
+    # tvm-ffi-stubgen(object): testing.TestCxxInitSubset(ty_map = testing._TestCxxInitSubset)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxInitSubset
     # fmt: off
     required_field: int
@@ -411,7 +411,7 @@ class _TestCxxInitSubset(Object):
 
 @c_class("testing.TestCxxKwOnly")
 class _TestCxxKwOnly(Object):
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxKwOnly -> testing._TestCxxKwOnly
+    # tvm-ffi-stubgen(object): testing.TestCxxKwOnly(ty_map = testing._TestCxxKwOnly)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxKwOnly
     # fmt: off
     x: int
@@ -431,7 +431,7 @@ class _TestCxxAutoInit(Object):
 
     __test__ = False
 
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInit -> testing._TestCxxAutoInit
+    # tvm-ffi-stubgen(object): testing.TestCxxAutoInit(ty_map = testing._TestCxxAutoInit)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInit
     # fmt: off
     a: int
@@ -451,7 +451,7 @@ class _TestCxxAutoInitSimple(Object):
 
     __test__ = False
 
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitSimple -> testing._TestCxxAutoInitSimple
+    # tvm-ffi-stubgen(object): testing.TestCxxAutoInitSimple(ty_map = testing._TestCxxAutoInitSimple)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitSimple
     # fmt: off
     x: int
@@ -469,7 +469,7 @@ class _TestCxxAutoInitAllInitOff(Object):
 
     __test__ = False
 
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitAllInitOff -> testing._TestCxxAutoInitAllInitOff
+    # tvm-ffi-stubgen(object): testing.TestCxxAutoInitAllInitOff(ty_map = testing._TestCxxAutoInitAllInitOff)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitAllInitOff
     # fmt: off
     x: int
@@ -488,7 +488,7 @@ class _TestCxxAutoInitKwOnlyDefaults(Object):
 
     __test__ = False
 
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitKwOnlyDefaults -> testing._TestCxxAutoInitKwOnlyDefaults
+    # tvm-ffi-stubgen(object): testing.TestCxxAutoInitKwOnlyDefaults(ty_map = testing._TestCxxAutoInitKwOnlyDefaults)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitKwOnlyDefaults
     # fmt: off
     p_required: int
@@ -509,7 +509,7 @@ class _TestCxxNoAutoInit(Object):
 
     __test__ = False
 
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxNoAutoInit -> testing._TestCxxNoAutoInit
+    # tvm-ffi-stubgen(object): testing.TestCxxNoAutoInit(ty_map = testing._TestCxxNoAutoInit)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxNoAutoInit
     # fmt: off
     x: int
@@ -524,7 +524,7 @@ class _TestCxxAutoInitParent(Object):
 
     __test__ = False
 
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitParent -> testing._TestCxxAutoInitParent
+    # tvm-ffi-stubgen(object): testing.TestCxxAutoInitParent(ty_map = testing._TestCxxAutoInitParent)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitParent
     # fmt: off
     parent_required: int
@@ -542,7 +542,7 @@ class _TestCxxAutoInitChild(_TestCxxAutoInitParent):
 
     __test__ = False
 
-    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitChild -> testing._TestCxxAutoInitChild
+    # tvm-ffi-stubgen(object): testing.TestCxxAutoInitChild(ty_map = testing._TestCxxAutoInitChild)
     # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitChild
     # fmt: off
     child_required: int

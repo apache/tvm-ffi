@@ -29,6 +29,7 @@ import tvm_ffi.testing  # loads the `testing.*` fixture types
 from tvm_ffi.core import TypeSchema
 from tvm_ffi.stub import consts as C
 from tvm_ffi.stub.cli import _stage_1, _stage_3
+from tvm_ffi.stub.directives import Directives
 from tvm_ffi.stub.file_utils import CodeBlock, FileInfo
 from tvm_ffi.stub.generator import get_generator
 from tvm_ffi.stub.lib_state import object_info_from_type_key
@@ -40,7 +41,7 @@ from tvm_ffi.stub.rust_generator.codegen import (
     generate_rust_import_section,
     generate_rust_object,
 )
-from tvm_ffi.stub.rust_generator.directives import Directives, EnumSpec
+from tvm_ffi.stub.rust_generator.directives import RUST_DIRECTIVE_KEYS, EnumSpec
 from tvm_ffi.stub.rust_generator.utils import (
     RustImports,
     RustUse,
@@ -298,16 +299,28 @@ def test_check_tokens_ignores_spelling() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _imports(*lines: str) -> RustImports:
+    """Seed a collector from directive lines ``<subject>: <payload>``, numbered from 1."""
+    directives = Directives(RUST_DIRECTIVE_KEYS)
+    for lineno, line in enumerate(lines, 1):
+        subject, _, payload = line.partition(": ")
+        directives.add(subject, payload, lineno)
+    return RUST.new_imports(directives)
+
+
 def test_directives_parse() -> None:
-    directives = Directives()
-    directives.add("field", " tirx.Add.a ->  PrimExpr ", 1)
-    directives.add("nullable", "ir.Expr.span", 2)
-    directives.add("enum", "tirx.For.kind -> ForKind(i32) { Serial=0, Parallel = 1 }", 3)
-    directives.add("enum", "tirx.For.mode -> Mode(u8)", 4)
-    directives.add("opaque", " ir.SourceName ", 5)
-    directives.add("upcast", "tirx.Add -> PrimExpr", 6)
-    directives.add("upcast", "tirx.Add -> crate::typed::TypedExpr", 7)
-    directives.add("custom-new", " tirx.Add ", 8)
+    directives = _imports(
+        "field: tirx.Add.a( type =  PrimExpr )",
+        "field: ir.Expr.span(nullable)",
+        "enum: ForKind(repr = i32, Serial = 0, Parallel = 1)",
+        "field: tirx.For.kind(type = ForKind)",
+        "enum: Mode(repr = u8)",
+        "field: tirx.For.mode(type = Mode)",
+        "object:  ir.SourceName(opaque) ",
+        "object: tirx.Add(upcast = PrimExpr)",
+        "object: tirx.Add(upcast = crate::typed::TypedExpr, custom_new)",
+        "object: tirx.Add",
+    ).directives
     assert directives.field_types == {"tirx.Add.a": "PrimExpr"}
     assert directives.nullable == {"ir.Expr.span"}
     assert directives.enums == {
@@ -320,44 +333,35 @@ def test_directives_parse() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "payload", "expected"),
+    ("line", "expected"),
     [
-        ("field", "tirx.Add.a", "-> <RustType>"),
-        ("field", "tirx.Add.a ->", "-> <RustType>"),
-        ("field", "Add -> PrimExpr", "<type_key>.<field>"),
-        ("nullable", "ir.Expr.span extra", "<type_key>.<field>"),
-        ("enum", "tirx.For.kind -> ForKind", "Name(i32)"),
-        ("enum", "tirx.For.kind -> ForKind(i128)", "Name(i32)"),
-        ("enum", "tirx.For.kind -> ForKind(i32) { Serial }", "Name(i32)"),
-        ("opaque", "ir.SourceName ir.Source", "<type_key>"),
-        ("upcast", "tirx.Add", "-> <RustType>"),
-        ("upcast", "tirx.Add PrimExpr -> PrimExpr", "<type_key>"),
-        ("custom-new", "", "<type_key>"),
-        ("typed-view", "tirx.Add -> PrimExpr", "Unknown directive"),
+        ("field: tirx.Add.a(type)", "`type` takes a value"),
+        ("field: tirx.Add.a(type =)", "`type` takes a value"),
+        ("field: tirx.Add.a(type = PrimType)", "`type` conflicts with line 6"),
+        ("field: Add(type = PrimExpr)", "<type_key>.<field>"),
+        ("field: ir.Expr.span extra", "bad target"),
+        ("field: ir.Expr.span(nullable", "expected `<target>("),
+        ("enum: ForKind(repr = i128)", "`repr` is one of"),
+        ("enum: ForKind(repr = i32, Serial)", "`Serial` takes a value"),
+        ("object: ir.SourceName ir.Source", "bad target"),
+        ("object: tirx.Add(upcast)", "`upcast` takes a value"),
+        ("object: tirx.Add(custom_new = yes)", "`custom_new` is a flag"),
+        ("object: tirx.Add(typed_view = PrimExpr)", "unknown key `typed_view`"),
+        ("typed-view: tirx.Add", "Unknown directive"),
     ],
 )
-def test_directives_reject_malformed(name: str, payload: str, expected: str) -> None:
+def test_directives_reject_malformed(line: str, expected: str) -> None:
+    directives = Directives(RUST_DIRECTIVE_KEYS)
+    directives.add("field", "tirx.Add.a(type = PrimExpr)", 6)
+    subject, _, payload = line.partition(": ")
     with pytest.raises(ValueError, match=re.escape(expected)) as exc:
-        Directives().add(name, payload, 7)
+        directives.add(subject, payload, 7)
     assert "at line 7" in str(exc.value)
 
 
 def test_generator_declares_its_directives_and_records_imports() -> None:
-    assert RUST.directive_kinds == {
-        "import-object",
-        "field",
-        "nullable",
-        "visibility",
-        "enum",
-        "opaque",
-        "upcast",
-        "custom-new",
-        "no-new",
-        "missing-docs",
-    }
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "import-object", "tvm_ffi.libinfo.Foo;False;_Foo", 1)
-    RUST.add_directive(imports, "nullable", "demo.Node.span", 2)
+    assert set(RUST.directive_keys) == {"object", "field", "enum", "file", "import"}
+    imports = _imports("import: tvm_ffi::libinfo::Foo", "field: demo.Node.span(nullable)")
     assert imports.items == [RustUse("tvm_ffi::libinfo::Foo")]
     assert imports.directives.nullable == {"demo.Node.span"}
 
@@ -640,15 +644,12 @@ def test_render_iter_var_golden() -> None:
         parent="ir.PrimExprConvertible",
         is_final=True,
     )
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "nullable", "tirx.IterVar.dom", 1)
-    RUST.add_directive(imports, "field", "tirx.IterVar.var -> PrimVar", 2)
-    RUST.add_directive(imports, "nullable", "tirx.IterVar.span", 3)
-    RUST.add_directive(
-        imports,
-        "enum",
-        "tirx.IterVar.iter_type -> IterVarType(i32) { kDataPar=0, kThreadIndex=1 }",
-        4,
+    imports = _imports(
+        "field: tirx.IterVar.dom(nullable)",
+        "field: tirx.IterVar.var(type = PrimVar)",
+        "field: tirx.IterVar.span(nullable)",
+        "enum: IterVarType(repr = i32, kDataPar = 0, kThreadIndex = 1)",
+        "field: tirx.IterVar.iter_type(type = IterVarType)",
     )
     text, imports = _render(info, imports)
     assert text == ITER_VAR_EXPECTED
@@ -668,9 +669,10 @@ def test_field_directive_with_path_records_use_and_nullable_does_not_double_wrap
             _field("dom", TypeSchema("Optional", (TypeSchema("int"),))),
         ),
     )
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "field", "demo.Node.buffer -> crate::typed::BufferVar", 1)
-    RUST.add_directive(imports, "nullable", "demo.Node.dom", 2)
+    imports = _imports(
+        "field: demo.Node.buffer(type = crate::typed::BufferVar)",
+        "field: demo.Node.dom(nullable)",
+    )
     text, imports = _render(info, imports)
     assert "pub fn buffer(&self) -> Result<BufferVar> {" in text
     assert "pub fn dom(&self) -> Result<Option<i64>> {" in text
@@ -696,12 +698,10 @@ def _span() -> ObjectInfo:
     )
 
 
-def _span_imports() -> RustImports:
+def _span_imports(*extra: str) -> RustImports:
     """Type the narrow integer fields by directive: the schema erases signedness."""
-    imports = RUST.new_imports()
-    for lineno, name in enumerate(("line", "column", "end_line", "end_column"), 1):
-        RUST.add_directive(imports, "field", f"ir.Span.{name} -> i32", lineno)
-    return imports
+    names = ("line", "column", "end_line", "end_column")
+    return _imports(*(f"field: ir.Span.{name}(type = i32)" for name in names), *extra)
 
 
 def _expr() -> ObjectInfo:
@@ -816,8 +816,7 @@ tvm_ffi::impl_object_ref_upcast!(unsafe Add => PrimExpr);"""
 
 def test_render_complete_expr_golden() -> None:
     """`ir.Expr` as tvm-rust-ext hand-writes it: `span: Option<Span>`, `ty: Type`, no getters."""
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "nullable", "ir.Expr.span", 1)
+    imports = _imports("field: ir.Expr.span(nullable)")
     text, imports = _render(_expr(), imports)
     assert text == EXPR_EXPECTED
     assert _uses(imports) == {"tvm_ffi::Object", "tvm_ffi::IntoArg", "tvm_ffi::ObjectArc"}
@@ -831,12 +830,13 @@ def test_render_complete_add_golden() -> None:
     as it is); `upcast` adds the `PrimExpr` view.
     """
     _register(_expr())
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "nullable", "ir.Expr.span", 1)
-    RUST.add_directive(imports, "field", "tirx.Add.a -> PrimExpr", 2)
-    RUST.add_directive(imports, "field", "tirx.Add.b -> PrimExpr", 3)
-    RUST.add_directive(imports, "field", "tirx.Add.ty -> PrimType", 4)
-    RUST.add_directive(imports, "upcast", "tirx.Add -> PrimExpr", 5)
+    imports = _imports(
+        "field: ir.Expr.span(nullable)",
+        "field: tirx.Add.a(type = PrimExpr)",
+        "field: tirx.Add.b(type = PrimExpr)",
+        "field: tirx.Add.ty(type = PrimType)",
+        "object: tirx.Add(upcast = PrimExpr)",
+    )
     text, imports = _render(_add(), imports)
     assert text == ADD_EXPECTED
     assert _uses(imports) == {
@@ -895,23 +895,21 @@ def test_reflected_base_and_data_keep_their_names() -> None:
         total_size=48,
         is_final=True,
     )
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "visibility", "demo.Ramp.cache_ -> pub(crate)", 1)
+    imports = _imports("field: demo.Ramp.cache_(visibility = pub(crate))")
     text, _ = _render(info, imports)
     assert (
         "    base_: Object,\n    pub base: i64,\n    pub data: i64,\n    pub(crate) cache_: i64,\n"
     ) in text
     assert "    pub fn new(base: i64, data: i64, cache_: i64) -> Self {" in text
     assert "        Self { base_, base, data, cache_ }" in text
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "visibility", "demo.Node.cache_ -> pub(crate)", 1)
+    imports = _imports("field: demo.Node.cache_(visibility = pub(crate))")
     text, _ = _render(_info("demo.Node", (_field("base", "int"), _field("cache_", "int"))), imports)
     assert (
         'pub fn base(&self) -> Result<i64> {\n        cached_field_getter!(NodeObj, "base")' in text
     )
     assert "    pub(crate) fn cache_(&self) -> Result<i64> {" in text
-    with pytest.raises(ValueError, match=r"`visibility` directive at line 2"):
-        Directives().add("visibility", "demo.Node.cache_ -> pub(super)", 2)
+    with pytest.raises(ValueError, match=r"line 2: `visibility` is one of pub\(crate\)"):
+        Directives(RUST_DIRECTIVE_KEYS).add("field", "demo.Node.cache_(visibility = pub(super))", 2)
 
 
 def test_render_complete_enum_field() -> None:
@@ -922,8 +920,7 @@ def test_render_complete_enum_field() -> None:
         total_size=40,
         is_final=True,
     )
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "enum", "demo.Pair.kind -> Kind(i32) { A=0, B=1 }", 1)
+    imports = _imports("enum: Kind(repr = i32, A = 0, B = 1)", "field: demo.Pair.kind(type = Kind)")
     text, imports = _render(info, imports)
     assert "    pub kind: Kind,\n" in text
     assert "    pub fn new(a: i64, kind: impl Into<Kind>) -> Self {" in text
@@ -932,16 +929,18 @@ def test_render_complete_enum_field() -> None:
 
 
 def test_allow_missing_docs_and_closed_enum() -> None:
-    """`missing-docs: allow` marks every generated type and `impl`; `closed` emits a Rust enum."""
+    """`missing_docs = allow` marks every generated type and `impl`; `closed` emits a Rust enum."""
     info = _info(
         "demo.Pair",
         (_field("a", "int", 24, 8), _field("kind", "int", 32, 4)),
         total_size=40,
         is_final=True,
     )
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "missing-docs", " allow ", 1)
-    RUST.add_directive(imports, "enum", "demo.Pair.kind -> Kind(i32) closed { A=0, B=-1 }", 2)
+    imports = _imports(
+        "file: mod(missing_docs = allow)",
+        "enum: Kind(repr = i32, closed, A = 0, B = -1)",
+        "field: demo.Pair.kind(type = Kind)",
+    )
     text, _ = _render(info, imports)
     assert text.startswith(
         "#[allow(missing_docs)]\n"
@@ -962,15 +961,12 @@ def test_allow_missing_docs_and_closed_enum() -> None:
     ) in text
     # The enum, the object struct, the wrapper and both allocator `impl`s.
     assert text.count("#[allow(missing_docs)]\n") == 5
-    with pytest.raises(ValueError, match="closed"):
-        Directives().add("enum", "demo.Pair.kind -> Kind(i32) closed {}", 3)
-    with pytest.raises(ValueError, match="no member equal to 0"):
-        Directives().add("enum", "demo.Pair.kind -> Kind(i32) closed { A=1 }", 4)
-    for payload in ("", "warn"):
-        with pytest.raises(
-            ValueError, match=r"`missing-docs` directive at line 4\. Expected `allow`"
-        ):
-            Directives().add("missing-docs", payload, 4)
+    for members in ("", ", A = 1"):
+        with pytest.raises(ValueError, match="no member equal to 0"):
+            _imports(f"enum: Kind(repr = i32, closed{members})")
+    for payload, expected in (("", "takes a value"), (" = warn", "is one of allow")):
+        with pytest.raises(ValueError, match=f"line 4: `missing_docs` {expected}"):
+            Directives(RUST_DIRECTIVE_KEYS).add("file", f"mod(missing_docs{payload})", 4)
 
 
 def test_complete_optional_field_mirrors() -> None:
@@ -1046,7 +1042,7 @@ def test_complete_big_int_field_mirrors() -> None:
 
 
 def test_ty_map_origin_override_survives_lossless_fold() -> None:
-    """A `ty-map` for `str` still wins for a reflected `ffi.String`: the lossless fold keeps no key."""
+    """A `ty_map` for `str` still wins for a reflected `ffi.String`: the lossless fold keeps no key."""
     name = TypeSchema.from_json_str('{"type":"ffi.String"}')
     assert (name.origin, name.type_key) == ("str", None)
     info = _info("demo.Named", (_field("name", name, 24, 16),), total_size=40, is_final=True)
@@ -1149,10 +1145,9 @@ def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> Non
 
 
 def test_custom_new_renames_the_wrapper_allocator() -> None:
-    """`custom-new`: `Add::new` stays hand-written, the allocator is `from_fields`."""
+    """`custom_new`: `Add::new` stays hand-written, the allocator is `from_fields`."""
     _register(_expr())
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "custom-new", "tirx.Add", 1)
+    imports = _imports("object: tirx.Add(custom_new)")
     text, _ = _render(_add(), imports)
     assert (
         "impl AddObj {\n    pub(crate) fn new(span: Span, ty: Type, a: Expr, b: Expr) -> Self {"
@@ -1203,11 +1198,13 @@ def test_wrapper_allocator_takes_object_references_as_into_arg() -> None:
         total_size=160,
         is_final=True,
     )
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "field", "demo.Node.buffer -> crate::typed::BufferVar", 1)
-    RUST.add_directive(imports, "nullable", "demo.Node.span", 2)
-    RUST.add_directive(imports, "enum", "demo.Node.kind -> Kind(i64) { A=0 }", 3)
-    RUST.add_directive(imports, "field", "demo.Node.count -> i32", 4)
+    imports = _imports(
+        "field: demo.Node.buffer(type = crate::typed::BufferVar)",
+        "field: demo.Node.span(nullable)",
+        "enum: Kind(repr = i64, A = 0)",
+        "field: demo.Node.kind(type = Kind)",
+        "field: demo.Node.count(type = i32)",
+    )
     text, imports = _render(info, imports)
     assert (
         "    pub fn new(\n"
@@ -1284,9 +1281,10 @@ def test_allocator_body_wraps_like_rustfmt() -> None:
 def test_upcast_directive_adds_typed_views() -> None:
     """`upcast` targets follow the ancestor chain; a `::` path is imported. Opaque: no allocator."""
     info = _info("demo.Leaf", parent="demo.Base")
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "upcast", "demo.Leaf -> crate::typed::LeafView", 1)
-    RUST.add_directive(imports, "upcast", "demo.Leaf -> Other", 2)
+    imports = _imports(
+        "object: demo.Leaf(upcast = crate::typed::LeafView)",
+        "object: demo.Leaf(upcast = Other)",
+    )
     text, imports = _render(info, imports)
     assert text.endswith(
         "tvm_ffi::impl_object_ref_upcast!(Leaf => Base);\n"
@@ -1297,8 +1295,7 @@ def test_upcast_directive_adds_typed_views() -> None:
 
 
 def test_opaque_directive_vetoes_a_complete_type() -> None:
-    imports = _span_imports()
-    RUST.add_directive(imports, "opaque", "ir.Span", 5)
+    imports = _span_imports("object: ir.Span(opaque)")
     text, _ = _render(_span(), imports)
     assert "// Opaque: vetoed by directive although the layout is reproducible." in text
     assert "pub fn line(&self) -> Result<i32> {" in text
@@ -1335,19 +1332,19 @@ def test_opaque_parent_keeps_the_child_opaque() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "payload", "message"),
+    ("lines", "message"),
     [
-        ("field", "demo.Pair.count -> i64", "maps a 4-byte field to `i64` (8 bytes)"),
-        ("enum", "demo.Pair.count -> Kind(i64)", "maps a 4-byte field to `i64` (8 bytes)"),
-        ("nullable", "demo.Pair.count", "the field is 4 bytes, not a pointer-sized"),
+        (("field: demo.Pair.count(type = i64)",), "maps a 4-byte field to `i64` (8 bytes)"),
+        (
+            ("enum: Kind(repr = i64)", "field: demo.Pair.count(type = Kind)"),
+            "maps a 4-byte field to `i64` (8 bytes)",
+        ),
+        (("field: demo.Pair.count(nullable)",), "the field is 4 bytes, not a pointer-sized"),
     ],
 )
-def test_directive_disagreeing_with_bytes_is_an_error(
-    name: str, payload: str, message: str
-) -> None:
+def test_directive_disagreeing_with_bytes_is_an_error(lines: tuple[str, ...], message: str) -> None:
     info = _info("demo.Pair", (_field("count", "int", 24, 4),), total_size=32)
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, name, payload, 1)
+    imports = _imports(*lines)
     with pytest.raises(ValueError, match=re.escape(message)):
         _render(info, imports)
 
@@ -1407,8 +1404,7 @@ def test_finalize_module_tree(tmp_path: Path) -> None:
 
 def _cxx_class_imports() -> RustImports:
     """Type the narrow integer ``v_i32`` by directive."""
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "field", "testing.TestCxxClassBase.v_i32 -> i32", 1)
+    imports = _imports("field: testing.TestCxxClassBase.v_i32(type = i32)")
     return imports
 
 
@@ -1483,7 +1479,8 @@ def test_stage_3_applies_directives_to_a_registered_type(tmp_path: Path) -> None
             [
                 f"{C.RUST_SYNTAX.begin} import-section",
                 C.RUST_SYNTAX.end,
-                f"{C.RUST_SYNTAX.directive('enum')} testing.TestCxxClassBase.v_i32 -> Kind(i32) {{ A=0 }}",
+                f"{C.RUST_SYNTAX.directive('enum')} Kind(repr = i32, A = 0)",
+                f"{C.RUST_SYNTAX.directive('field')} testing.TestCxxClassBase.v_i32(type = Kind)",
                 f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase",
                 C.RUST_SYNTAX.end,
                 "",
@@ -1799,9 +1796,7 @@ def test_allocator_hands_a_ty_map_parent_its_own_types() -> None:
         is_final=True,
     )
     ty_map = {**RUST.default_ty_map(), "demo.Base": "crate::hand::Base"}
-    imports = RUST.new_imports()
-    RUST.add_directive(imports, "field", "demo.Base.kind -> i32", 1)
-    RUST.add_directive(imports, "field", "demo.Child.kind -> Kind", 2)
+    imports = _imports("field: demo.Base.kind(type = i32)", "field: demo.Child.kind(type = Kind)")
     block = _object_block("demo.Child")
     generate_rust_object(block, ty_map, imports, Options(), info, _declared("demo.Child"))
     text = "\n".join(block.lines[1:-1])
@@ -1833,14 +1828,17 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
     assert info is not None
     with pytest.raises(ValueError, match=r"depends on `testing\.TestCxxClassBase`"):
         _stage_3(info, Options(dry_run=True), RUST.default_ty_map(), {}, RUST, declared)
-    # A `ty-map` names a hand-written parent; its `<Name>Obj` becomes the base slot.
-    mapped = f"{C.RUST_SYNTAX.ty_map} testing.TestCxxClassBase -> crate::hand::TestCxxClassBase"
-    narrow = f"{C.RUST_SYNTAX.directive('field')} testing.TestCxxClassBase.v_i32 -> i32"
+    # A `ty_map` names a hand-written parent; its `<Name>Obj` becomes the base slot.
+    mapped = (
+        f"{C.RUST_SYNTAX.directive('object')} "
+        "testing.TestCxxClassBase(ty_map = crate::hand::TestCxxClassBase)"
+    )
+    narrow = f"{C.RUST_SYNTAX.directive('field')} testing.TestCxxClassBase.v_i32(type = i32)"
     src.write_text("\n".join([mapped, narrow, *blocks]), encoding="utf-8")
     info = FileInfo.from_file(src)
     assert info is not None
     ty_map = RUST.default_ty_map()
-    _stage_1(info, ty_map)
+    _stage_1(info, ty_map, RUST)
     _stage_3(info, Options(dry_run=True), ty_map, {}, RUST, declared)
     text = "\n".join(line for block in info.code_blocks for line in block.lines)
     assert "    base_: TestCxxClassBaseObj," in text
@@ -1856,7 +1854,7 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
 
 
 def test_ffi_field_type_off_the_default_ty_map_reads_as_any() -> None:
-    """Of the `ffi.*` keys, only those on the default `ty-map` name a type the crate binds."""
+    """Of the `ffi.*` keys, only those on the default `ty_map` name a type the crate binds."""
     text, imports = _render(_info("demo.Doc", (_field("path", "ffi.reflection.AccessPath"),)))
     assert "    pub fn path(&self) -> Result<AccessPath> {" in text
     assert "tvm_ffi::reflection::AccessPath" in _uses(imports)
@@ -1935,8 +1933,8 @@ def test_prefix_directive_rolls_out_a_namespace(
         "\n".join(
             [
                 "//! Hand-written skeleton.",
-                f"{C.RUST_SYNTAX.directive('prefix')} testing",
-                f"{C.RUST_SYNTAX.directive('skip')} testing.TestCxxClassDerivedDerived",
+                f"{C.RUST_SYNTAX.directive('file')} mod(prefix = testing)",
+                f"{C.RUST_SYNTAX.directive('object')} testing.TestCxxClassDerivedDerived(skip)",
                 "",
                 f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase",
                 C.RUST_SYNTAX.end,
@@ -1973,7 +1971,9 @@ def test_prefix_declared_twice_is_a_failure(
 ) -> None:
     root = _crate(tmp_path)
     for name in ("a.rs", "b.rs"):
-        (root / name).write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n", encoding="utf-8")
+        (root / name).write_text(
+            f"{C.RUST_SYNTAX.directive('file')} mod(prefix = testing)\n", encoding="utf-8"
+        )
     monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
     assert stub_cli.__main__() == 2
 
@@ -1997,7 +1997,7 @@ def test_roll_out_matches_the_prefix_exactly(
     src.write_text(
         "\n".join(
             [
-                f"{C.RUST_SYNTAX.directive('prefix')} a.",
+                f"{C.RUST_SYNTAX.directive('file')} mod(prefix = a.)",
                 f"{begin} import-section",
                 end,
                 "mod tail {}",
@@ -2010,7 +2010,7 @@ def test_roll_out_matches_the_prefix_exactly(
     assert info is not None
     assert stub_cli._roll_out_prefixes([info], RUST) == 0
     assert [line for block in info.code_blocks for line in block.lines] == [
-        f"{C.RUST_SYNTAX.directive('prefix')} a.",
+        f"{C.RUST_SYNTAX.directive('file')} mod(prefix = a.)",
         f"{begin} import-section",
         end,
         "",
@@ -2023,7 +2023,7 @@ def test_roll_out_matches_the_prefix_exactly(
     ]
     # Every `ffi.*` key lives in the crate and is never rolled out, `ffi.Array` included: a
     # generated non-generic `Array` would shadow the crate's `Array<T>`.
-    src.write_text(f"{C.RUST_SYNTAX.directive('prefix')} ffi\n", encoding="utf-8")
+    src.write_text(f"{C.RUST_SYNTAX.directive('file')} mod(prefix = ffi)\n", encoding="utf-8")
     info = FileInfo.from_file(src)
     assert info is not None
     assert stub_cli._roll_out_prefixes([info], RUST) == 0
@@ -2035,13 +2035,15 @@ def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     root = _crate(tmp_path)
     (root / "testing").mkdir()
     mod_rs = root / "testing" / "mod.rs"
-    skip = f"{C.RUST_SYNTAX.directive('skip')} testing.TestCxxClassDerivedDerived"
-    mod_rs.write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n{skip}\n", encoding="utf-8")
+    skip = f"{C.RUST_SYNTAX.directive('object')} testing.TestCxxClassDerivedDerived(skip)"
+    mod_rs.write_text(
+        f"{C.RUST_SYNTAX.directive('file')} mod(prefix = testing)\n{skip}\n", encoding="utf-8"
+    )
     init = ["--init-pypkg", "demo", "--init-lib", "demo_shared", "--init-prefix", "testing."]
     monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *init, str(root)])
     assert stub_cli.__main__() == 0
     text = mod_rs.read_text(encoding="utf-8")
-    assert text.startswith(f"{C.RUST_SYNTAX.directive('prefix')} testing\n")
+    assert text.startswith(f"{C.RUST_SYNTAX.directive('file')} mod(prefix = testing)\n")
     assert "pub struct TestCxxClassDerivedObj {" in text
     assert "object/testing.TestCxxClassDerivedDerived" not in text  # `--init` honours `skip`
     monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
@@ -2061,7 +2063,13 @@ def test_prefix_removes_blocks_of_unregistered_types(
     gone = f"{C.RUST_SYNTAX.begin} object/testing.NoLongerRegistered"
     src.write_text(
         "\n".join(
-            [f"{C.RUST_SYNTAX.directive('prefix')} testing", "", gone, C.RUST_SYNTAX.end, ""]
+            [
+                f"{C.RUST_SYNTAX.directive('file')} mod(prefix = testing)",
+                "",
+                gone,
+                C.RUST_SYNTAX.end,
+                "",
+            ]
         ),
         encoding="utf-8",
     )

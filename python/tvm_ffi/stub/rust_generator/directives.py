@@ -14,46 +14,63 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""The Rust backend's one-line directives: payload grammar and per-file storage.
+"""The Rust backend's directive keys, and the settings they give one file.
 
-Four address one reflected field as ``<type_key>.<field>``, three address a type,
-and one applies to the whole file::
+Each subject's keys (see :mod:`tvm_ffi.stub.directives` for the grammar)::
 
-    // tvm-ffi-stubgen(field): tirx.Add.a -> PrimExpr
-    // tvm-ffi-stubgen(nullable): ir.Expr.span
-    // tvm-ffi-stubgen(visibility): ir.IRModule.global_var_map_ -> pub(crate)
-    // tvm-ffi-stubgen(enum): tirx.For.kind -> ForKind(i32) { Serial=0, Parallel=1 }
-    // tvm-ffi-stubgen(opaque): ir.SourceName
-    // tvm-ffi-stubgen(upcast): tirx.Add -> PrimExpr
-    // tvm-ffi-stubgen(custom-new): tirx.Add
-    // tvm-ffi-stubgen(no-new): ir.Expr
-    // tvm-ffi-stubgen(missing-docs): allow
+    // tvm-ffi-stubgen(object): tirx.Add(custom_new, upcast = PrimExpr)
+    // tvm-ffi-stubgen(object): ir.SourceName(opaque)
+    // tvm-ffi-stubgen(object): ir.Expr(no_new)
+    // tvm-ffi-stubgen(field): tirx.Add.a(type = PrimExpr)
+    // tvm-ffi-stubgen(field): ir.Expr.span(nullable)
+    // tvm-ffi-stubgen(field): ir.IRModule.global_var_map_(visibility = pub(crate))
+    // tvm-ffi-stubgen(enum): ForKind(repr = i32, Serial = 0, Parallel = 1)
+    // tvm-ffi-stubgen(field): tirx.For.kind(type = ForKind)
+    // tvm-ffi-stubgen(file): mod(missing_docs = allow)
+    // tvm-ffi-stubgen(import): tvm_ffi::AnyView
 
-``field`` sets the field's Rust type (a name in scope, or a ``::`` path to
-``use``); on a field inherited from an ancestor it narrows the allocator
-parameter instead. ``nullable`` wraps it in ``Option``; ``visibility`` makes the
-field and its accessor ``pub(crate)`` instead of ``pub``; ``enum`` declares an open
-integer newtype for it, or with ``closed`` before the member list a
-``#[repr(<int>)]`` enum of exactly those members; ``opaque`` keeps a type opaque
-even when its layout is reproducible. ``upcast`` adds an upcast to a reference
-outside the ancestor chain; ``custom-new`` says the wrapper's ``new`` is
-hand-written; the generated one is named ``from_fields`` instead. ``no-new``
-skips the wrapper's generated allocator, and for a final type ``<Leaf>Obj::new``
-too, which only that allocator uses.
-``missing-docs: allow`` puts ``#[allow(missing_docs)]`` on the file's generated
-types and ``impl`` blocks.
+``object`` keys: ``opaque`` keeps a type opaque even when its layout is
+reproducible; ``upcast`` (repeatable) adds an upcast to a reference outside the
+ancestor chain; ``custom_new`` says the wrapper's ``new`` is hand-written, so the
+generated one is named ``from_fields``; ``no_new`` skips the wrapper's generated
+allocator, and for a final type ``<Leaf>Obj::new`` too, which only that allocator
+uses. ``field`` keys: ``type`` sets the field's Rust type (a name in scope, a
+``::`` path to ``use``, or an ``enum`` of the file); on a field inherited from an
+ancestor it narrows the allocator parameter instead. ``nullable`` wraps it in
+``Option``; ``visibility = pub(crate)`` makes the field and its accessor
+``pub(crate)`` instead of ``pub``. ``enum`` declares an open integer newtype of
+``repr`` with the members ``Name = <int>``, or with ``closed`` a ``#[repr(<int>)]``
+enum of exactly those members. ``file: mod(missing_docs = allow)`` puts
+``#[allow(missing_docs)]`` on the file's generated types and ``impl`` blocks.
+``import`` keeps a path ``use``d in the import section.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import re
+from typing import TYPE_CHECKING
 
-_ENUM_RE = re.compile(
-    r"^(?P<target>\S+)\s*->\s*(?P<name>[A-Za-z_]\w*)\((?P<repr>[iu](?:8|16|32|64))\)"
-    r"\s*(?:(?P<closed>closed\s*)?\{(?P<body>[^{}]*)\})?$"
-)
-_MEMBER_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<value>-?\d+)$")
+from ..directives import Key, KeyTable
+
+if TYPE_CHECKING:
+    from ..directives import Directives
+
+_FLAG, _VALUE = Key(), Key(takes_value=True)
+_INT_TYPES = ("i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64")
+
+#: The keys the Rust backend reads; an ``enum``'s other keys are its members.
+RUST_DIRECTIVE_KEYS: KeyTable = {
+    "object": {
+        "custom_new": _FLAG,
+        "no_new": _FLAG,
+        "opaque": _FLAG,
+        "upcast": Key(takes_value=True, repeatable=True),
+    },
+    "field": {"type": _VALUE, "nullable": _FLAG, "visibility": Key(True, values=("pub(crate)",))},
+    "enum": {"repr": Key(True, values=_INT_TYPES), "closed": _FLAG, "*": _VALUE},
+    "file": {"missing_docs": Key(True, values=("allow",))},
+    "import": {},
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -72,8 +89,8 @@ class EnumSpec:
 
 
 @dataclasses.dataclass
-class Directives:
-    """The Rust directives of one file, keyed by ``<type_key>.<field>`` or ``<type_key>``."""
+class RustDirectives:
+    """The Rust settings of one file, keyed by ``<type_key>.<field>`` or ``<type_key>``."""
 
     field_types: dict[str, str] = dataclasses.field(default_factory=dict)
     nullable: set[str] = dataclasses.field(default_factory=set)
@@ -85,91 +102,49 @@ class Directives:
     no_new: set[str] = dataclasses.field(default_factory=set)
     allow_missing_docs: bool = False
 
-    def add(self, name: str, payload: str, lineno: int) -> None:
-        """Parse and store one directive; raise ``ValueError`` on a malformed payload."""
-        if name == "field":
-            lhs, rust_type = _split_arrow(name, payload, lineno, "<type_key>.<field> -> <RustType>")
-            self.field_types[_field_target(name, lhs, lineno)] = rust_type
-        elif name == "nullable":
-            self.nullable.add(_field_target(name, payload, lineno))
-        elif name == "visibility":
-            lhs, vis = _split_arrow(name, payload, lineno, "<type_key>.<field> -> pub(crate)")
-            if vis != "pub(crate)":  # the one non-default level so far
-                raise _invalid(name, lineno, "<type_key>.<field> -> pub(crate)")
-            self.visibility[_field_target(name, lhs, lineno)] = vis
-        elif name == "enum":
-            target, spec = _parse_enum(payload, lineno)
-            self.enums[target] = spec
-        elif name == "opaque":
-            self.opaque.add(_type_target(name, payload, lineno))
-        elif name == "upcast":
-            lhs, rust_type = _split_arrow(name, payload, lineno, "<type_key> -> <RustType>")
-            self.upcasts.setdefault(_type_target(name, lhs, lineno), []).append(rust_type)
-        elif name == "custom-new":
-            self.custom_new.add(_type_target(name, payload, lineno))
-        elif name == "no-new":
-            self.no_new.add(_type_target(name, payload, lineno))
-        elif name == "missing-docs":
-            if payload.strip() != "allow":  # the one level so far
-                raise _invalid(name, lineno, "allow")
-            self.allow_missing_docs = True
-        else:
-            raise ValueError(f"Unknown directive `{name}` at line {lineno}")
+    @staticmethod
+    def from_directives(directives: Directives) -> RustDirectives:
+        """Collect the settings of ``directives``; raise ``ValueError`` on a malformed ``enum``."""
+        settings, out = directives.settings, RustDirectives()
+        specs = {name: _enum_spec(name, keys) for name, keys in settings["enum"].items()}
+        for target, keys in settings["field"].items():
+            rust_type = str(keys.get("type", ""))
+            if rust_type in specs:
+                out.enums[target] = specs[rust_type]
+            elif rust_type:
+                out.field_types[target] = rust_type
+            if "nullable" in keys:
+                out.nullable.add(target)
+            if "visibility" in keys:
+                out.visibility[target] = str(keys["visibility"])
+        for target, keys in settings["object"].items():
+            for name, chosen in (
+                ("opaque", out.opaque),
+                ("custom_new", out.custom_new),
+                ("no_new", out.no_new),
+            ):
+                if name in keys:
+                    chosen.add(target)
+            upcasts = keys.get("upcast", [])
+            if isinstance(upcasts, list) and upcasts:
+                out.upcasts[target] = upcasts
+        out.allow_missing_docs = "missing_docs" in settings["file"].get("mod", {})
+        return out
 
 
-def _invalid(name: str, lineno: int, expected: str) -> ValueError:
-    return ValueError(f"Invalid `{name}` directive at line {lineno}. Expected `{expected}`")
-
-
-def _type_target(name: str, text: str, lineno: int) -> str:
-    """Validate a ``<type_key>`` reference."""
-    target = text.strip()
-    if not target or " " in target:
-        raise _invalid(name, lineno, "<type_key>")
-    return target
-
-
-def _field_target(name: str, text: str, lineno: int) -> str:
-    """Validate a ``<type_key>.<field>`` reference."""
-    target = text.strip()
-    if not target or " " in target or "." not in target.strip("."):
-        raise _invalid(name, lineno, "<type_key>.<field>")
-    return target
-
-
-def _split_arrow(name: str, payload: str, lineno: int, expected: str) -> tuple[str, str]:
-    """Split ``<target> -> <rust type>``; the caller validates the target."""
-    lhs, arrow, rhs = payload.partition("->")
-    if not arrow or not rhs.strip():
-        raise _invalid(name, lineno, expected)
-    return lhs, rhs.strip()
-
-
-def _parse_enum(payload: str, lineno: int) -> tuple[str, EnumSpec]:
-    """Parse ``<type_key>.<field> -> Name(i32) [closed] { A=0, B=1 }``.
-
-    The member list is optional unless ``closed``, which needs a member equal to 0.
-    """
-    expected = "<type_key>.<field> -> Name(i32) [closed] { A=0, B=1 }"
-    match = _ENUM_RE.match(payload.strip())
-    if match is None:
-        raise _invalid("enum", lineno, expected)
-    members: list[tuple[str, int]] = []
-    for item in (match.group("body") or "").split(","):
-        if not item.strip():
-            continue
-        member = _MEMBER_RE.match(item.strip())
-        if member is None:
-            raise _invalid("enum", lineno, expected)
-        members.append((member.group("name"), int(member.group("value"))))
-    closed = match.group("closed") is not None
-    if closed and not members:
-        raise _invalid("enum", lineno, expected)
-    if closed and all(value != 0 for _, value in members):
+def _enum_spec(name: str, keys: dict[str, bool | str | list[str]]) -> EnumSpec:
+    """Build the ``enum`` ``name``: a ``repr``, members ``Name = <int>``, and ``closed``."""
+    members = tuple((k, v) for k, v in keys.items() if k not in ("repr", "closed"))
+    if "repr" not in keys:
+        raise ValueError(f"`enum` directive `{name}` needs `repr = <{'|'.join(_INT_TYPES)}>`")
+    try:
+        values = tuple((member, int(str(value))) for member, value in members)
+    except ValueError:
+        raise ValueError(f"`enum` directive `{name}`: a member value is not an integer") from None
+    closed = "closed" in keys
+    if closed and all(value != 0 for _, value in values):
         raise ValueError(
-            f"Closed `enum` directive at line {lineno} has no member equal to 0, the value of "
+            f"Closed `enum` directive `{name}` has no member equal to 0, the value of "
             "a field an object zero-filled at creation never set"
         )
-    target = _field_target("enum", match.group("target"), lineno)
-    spec = EnumSpec(match.group("name"), match.group("repr"), tuple(members), closed)
-    return target, spec
+    return EnumSpec(name, str(keys["repr"]), values, closed)

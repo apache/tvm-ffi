@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from tvm_ffi.core import _object_type_key_to_index
 
 from . import consts as C
+from .directives import Directives, Value
 from .file_utils import CodeBlock, FileInfo, collect_files, syntax_for
 from .generator import generator_names, get_generator
 from .layout import classify, write_coverage_report
@@ -70,20 +71,14 @@ def __main__() -> int:
             init_path = init_path.parent
 
     # Stage 1: Collect information
-    # - type maps: `tvm-ffi-stubgen(ty-map)`
+    # - type maps: `tvm-ffi-stubgen(object): <type_key>(ty_map = <name>)`
     # - defined global functions: `tvm-ffi-stubgen(begin): global/...`
     # - defined object types: `tvm-ffi-stubgen(begin): object/...`
     ty_map: dict[str, str] = generator.default_ty_map()
     failed = 0
     stale = 0
     for file in files:
-        try:
-            _stage_1(file, ty_map)
-        except Exception:
-            failed += 1
-            print(
-                f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
-            )
+        _stage_1(file, ty_map, generator)
 
     # Stage 2. Generate stubs if they are not defined on the file.
     generated_prefixes: set[str] = set()
@@ -101,8 +96,8 @@ def __main__() -> int:
     # `--check` compares the generator's view of each file before the run edits any block.
     before = {file.path: generator.check_view(file.code_blocks) for file in files if opt.check}
 
-    # Stage 2b. Add the object blocks a `tvm-ffi-stubgen(prefix)` file asks for. This runs
-    # after `--init`, which rewrites files on disk and reloads them.
+    # Stage 2b. Add the object blocks a `tvm-ffi-stubgen(file): mod(prefix = ...)` file asks
+    # for. This runs after `--init`, which rewrites files on disk and reloads them.
     failed += _roll_out_prefixes(files, generator)
 
     # Stage 3: Process
@@ -150,20 +145,31 @@ def __main__() -> int:
     return 2 if failed else 1 if stale else 0
 
 
-def _stage_1(
-    file: FileInfo,
-    ty_map: dict[str, str],
-) -> None:
+def _directives(file: FileInfo, generator: Generator) -> Directives:
+    """Parse the one-line directives of ``file`` against the pipeline's and the generator's keys."""
+    pipeline, own = C.PIPELINE_DIRECTIVE_KEYS, generator.directive_keys
+    directives = Directives(
+        {s: {**pipeline.get(s, {}), **own.get(s, {})} for s in {*pipeline, *own}}
+    )
     for code in file.code_blocks:
-        if code.kind != "directive" or code.param[0] != "ty-map":
-            continue
-        try:
-            lhs, rhs = code.param[1].split("->")
-        except ValueError as e:
-            raise ValueError(
-                f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
-            ) from e
-        ty_map[lhs.strip()] = rhs.strip()
+        if code.kind == "directive":
+            subject, payload = code.param
+            directives.add(subject, payload, code.lineno_start)
+    return directives
+
+
+def _settings(file: FileInfo, generator: Generator) -> dict[str, dict[str, dict[str, Value]]]:
+    """Return the settings the pipeline reads ahead of ``_stage_3``, which reports a bad file."""
+    try:
+        return _directives(file, generator).settings
+    except ValueError:
+        return {}
+
+
+def _stage_1(file: FileInfo, ty_map: dict[str, str], generator: Generator) -> None:
+    for type_key, keys in _settings(file, generator).get("object", {}).items():
+        if "ty_map" in keys:
+            ty_map[type_key] = str(keys["ty_map"])
 
 
 def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
@@ -179,20 +185,17 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
     owners: dict[str, Path] = {}
     failed = 0
     for file in files:
-        directives = [c for c in file.code_blocks if c.kind == "directive"]
-        heads = [c for c in directives if c.param[0] == "prefix"]
-        if not heads:
+        settings = _settings(file, generator)
+        if "prefix" not in settings.get("file", {}).get("mod", {}):
             continue
-        head = heads[0]
-        prefix = head.param[1].rstrip(".")
-        error = ""
-        if len(heads) > 1:
-            error = f"more than one `prefix` directive (line {heads[1].lineno_start})"
-        elif owners.setdefault(prefix, file.path) != file.path:
-            error = f"prefix `{prefix}` is already declared by {owners[prefix]}"
-        if error:
+        prefix = str(settings["file"]["mod"]["prefix"]).rstrip(".")
+        head = next(c for c in file.code_blocks if c.kind == "directive" and c.param[0] == "file")
+        if owners.setdefault(prefix, file.path) != file.path:
             failed += 1
-            print(f'{C.TERM_RED}[Failed] File "{file.path}": {error}{C.TERM_RESET}')
+            print(
+                f'{C.TERM_RED}[Failed] File "{file.path}": prefix `{prefix}` is already '
+                f"declared by {owners[prefix]}{C.TERM_RESET}"
+            )
             continue
         _remove_unregistered_blocks(file, prefix, registry.get(prefix, []))
         if prefix not in registry:
@@ -200,7 +203,7 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
                 f"{C.TERM_YELLOW}[Skipped] No registered object under prefix `{prefix}`{C.TERM_RESET}"
             )
             continue
-        skipped = {c.param[1].strip() for c in directives if c.param[0] == "skip"}
+        skipped = {key for key, keys in settings.get("object", {}).items() if "skip" in keys}
         keys = [
             key
             for key in registry[prefix]
@@ -279,10 +282,10 @@ def _stage_2(
         code.param for file in files for code in file.code_blocks if code.kind == "object"
     }
     skipped: set[str] = {
-        code.param[1].strip()
+        type_key
         for file in files
-        for code in file.code_blocks
-        if code.kind == "directive" and code.param[0] == "skip"
+        for type_key, keys in _settings(file, generator).get("object", {}).items()
+        if "skip" in keys
     }
 
     # Step 0. Generate missing `_ffi_api.py` and `__init__.py` under each prefix.
@@ -367,17 +370,8 @@ def _stage_3(  # noqa: PLR0912
     defined_funcs: set[str] = set()
     unregistered: list[str] = []
     defined_types: set[str] = set()
-    imports = generator.new_imports()
-    # Stage 1. Hand the one-line directives the pipeline does not consume itself to the generator.
-    for code in file.code_blocks:
-        if code.kind != "directive":
-            continue
-        name, payload = code.param
-        if name in C.PIPELINE_DIRECTIVE_KINDS:
-            continue  # consumed by `_stage_1`
-        if name not in generator.directive_kinds:
-            raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")
-        generator.add_directive(imports, name, payload, code.lineno_start)
+    # Stage 1. Parse the one-line directives and seed the generator's collector with them.
+    imports = generator.new_imports(_directives(file, generator))
     # Stage 2. Process `tvm-ffi-stubgen(begin): global/...`
     for code in file.code_blocks:
         if code.kind == "global":

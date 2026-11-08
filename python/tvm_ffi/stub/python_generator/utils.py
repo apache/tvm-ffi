@@ -89,7 +89,7 @@ class PythonImports:
     """Opaque import collector threaded through the Python generation pipeline.
 
     The language-agnostic ``cli`` treats this as an opaque token: it asks the
-    generator to create one, seed it from ``import-object`` directives, and later
+    generator to create one, seed it from ``import`` directives, and later
     render it. Only the Python generator reaches inside.
     """
 

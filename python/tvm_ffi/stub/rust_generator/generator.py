@@ -33,11 +33,13 @@ from .codegen import (
     generate_rust_import_section,
     generate_rust_object,
 )
+from .directives import RUST_DIRECTIVE_KEYS, RustDirectives
 from .utils import RustImports, RustUse, check_tokens, is_crate_type_key, rust_module_path
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..directives import Directives
     from ..file_utils import CodeBlock
     from ..utils import FuncInfo, InitConfig, ObjectInfo, Options
 
@@ -67,7 +69,7 @@ class RustGenerator:
     name = "rust"
     syntax = C.RUST_SYNTAX
     source_exts = frozenset({".rs"})
-    directive_kinds = C_RUST.RUST_DIRECTIVE_KINDS
+    directive_keys = RUST_DIRECTIVE_KEYS
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Rust-type name map."""
@@ -75,16 +77,12 @@ class RustGenerator:
 
     # --- per-file collection --------------------------------------------------
 
-    def new_imports(self) -> RustImports:
-        """Create an empty per-file collector (``use`` items and directives)."""
-        return RustImports()
-
-    def add_directive(self, imports: RustImports, name: str, payload: str, lineno: int) -> None:
-        """Record ``import-object`` as a ``use`` (its path is the first ``;`` field); parse the rest."""
-        if name == "import-object":
-            imports.record(payload.split(";", 1)[0].strip())
-        else:
-            imports.directives.add(name, payload, lineno)
+    def new_imports(self, directives: Directives) -> RustImports:
+        """Create the per-file collector: the ``import`` paths as ``use`` items, and the settings."""
+        imports = RustImports(directives=RustDirectives.from_directives(directives))
+        for path in directives.settings["import"]:
+            imports.record(path)
+        return imports
 
     def canonical_type_name(self, type_key: str) -> str:
         """Return the Rust path for a defined type key (matches :attr:`RustUse.path`)."""

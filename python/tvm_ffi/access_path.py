@@ -50,7 +50,7 @@ class AccessKind(IntEnum):
 class AccessStep(Object):
     """Access step container."""
 
-    # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessStep -> ffi.access_path.AccessStep
+    # tvm-ffi-stubgen(object): ffi.reflection.AccessStep(ty_map = ffi.access_path.AccessStep)
     # tvm-ffi-stubgen(begin): object/ffi.reflection.AccessStep
     # fmt: off
     kind: int
@@ -81,7 +81,7 @@ class AccessPath(Object):
 
     """
 
-    # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessPath -> ffi.access_path.AccessPath
+    # tvm-ffi-stubgen(object): ffi.reflection.AccessPath(ty_map = ffi.access_path.AccessPath)
     # tvm-ffi-stubgen(begin): object/ffi.reflection.AccessPath
     # fmt: off
     parent: Object | None

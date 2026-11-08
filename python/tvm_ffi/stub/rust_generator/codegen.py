@@ -25,22 +25,22 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   width, pinned by a ``const`` size/alignment assertion. ``<Leaf>Obj::new``
   and the wrapper's ``new`` take every field root to leaf: the former each as
   its own type, the latter a scalar as its own type, an object reference as
-  ``impl IntoArg`` and anything else as ``impl Into``. ``custom-new``
+  ``impl IntoArg`` and anything else as ``impl Into``. ``custom_new``
   leaves the wrapper's ``new`` to hand-written code and names the generated
   one ``from_fields``. A type that is not final
   can be the parent of a type defined in Rust (``tvm_ffi::rs_object``): its
   ``<Leaf>Obj::new`` is public, and its object derives ``ShallowCopy`` and
   ``UnsafeInit`` (``rs_parent``) when every ancestor's is generated
-  too (a ``ty-map``'d one is hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
+  too (a ``ty_map``'d one is hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
 A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, an
-``ffi.*`` type the default ``ty-map`` does not list, a C++ standard-library type
+``ffi.*`` type the default ``ty_map`` does not list, a C++ standard-library type
 such as ``std::optional``, an integer narrower than 8 bytes, whose signedness the
 schema does not record, or any field whose reflected size or alignment is not its
-mirror's) makes the type opaque and is read through its getter; a ``field`` or
-``enum`` directive types a narrow integer; an ``opaque`` directive vetoes a
+mirror's) makes the type opaque and is read through its getter; a field's ``type``
+(a scalar or an ``enum``) types a narrow integer; an object's ``opaque`` vetoes a
 reproducible layout; a scalar width named by a directive is checked against the
 reflected field size.
 A builtin parent the crate defines (``ffi.Enum``: ``tvm_ffi::enum_ref::EnumObj``) is
@@ -52,7 +52,7 @@ An enum type (under ``ffi.Enum``) has no allocator, since its registry
 allocates the values, and its reference implements ``tvm_ffi::EnumRef``.
 
 Every type key an object refers to (parent, ancestors, field types) must be
-provided in the same run: ``ffi.*`` by the crate, a ``ty-map`` by a hand-written
+provided in the same run: ``ffi.*`` by the crate, a ``ty_map`` by a hand-written
 binding whose object struct is ``<Name>Obj``, anything else by an ``object/``
 block in one of the processed files. Otherwise the block is an error naming the
 missing keys, so a partial binding never references a module that does not exist.
@@ -165,7 +165,7 @@ def _is_object_ref(schema: TypeSchema) -> bool:
     """Whether the Rust type of ``schema`` is an object reference.
 
     A builtin origin is one when listed in ``RUST_OBJECT_REF_ORIGINS``; a type key
-    outside ``ffi.*`` always is, as a generated or ``ty-map``'d binding.
+    outside ``ffi.*`` always is, as a generated or ``ty_map``'d binding.
     """
     origin = schema.origin
     if origin in C_RUST.RUST_OBJECT_REF_ORIGINS:
@@ -258,7 +258,7 @@ class _ObjectRenderer:
     ) -> str | None:
         """Resolve a leaf origin to its in-scope Rust name (recording its ``use``), or ``None``.
 
-        A ``ty-map`` entry for the type key the schema was parsed from wins over the origin.
+        A ``ty_map`` entry for the type key the schema was parsed from wins over the origin.
         """
         key = type_key if type_key in self.ty_map else origin
         mapped = self.ty_map.get(key)
@@ -266,12 +266,12 @@ class _ObjectRenderer:
             if "." not in origin or origin.startswith("ctypes."):
                 return None
             if self._provider(origin) == "crate":  # a key nobody provides is recorded
-                return None  # an `ffi.*` key off the default `ty-map`: no crate type, read as `Any`
+                return None  # an `ffi.*` key off the default `ty_map`: no crate type, read as `Any`
             return imports.record(self._generated_type_path(origin))
         return self._record_mapped(key, mapped, imports)
 
     def _record_mapped(self, type_key: str, path: str, imports: RustImports) -> str:
-        """Record the ``ty-map`` target of ``type_key``; one in this file's own module is in scope.
+        """Record the ``ty_map`` target of ``type_key``; one in this file's own module is in scope.
 
         A hand-written binding next to the generated ones (``ir.Op -> crate::ir::Op``
         in ``crate::ir``) must not import itself.
@@ -303,7 +303,7 @@ class _ObjectRenderer:
     def _provider(self, type_key: str) -> str | None:
         """Who provides the binding of ``type_key``; a key nobody does is recorded in :attr:`missing`.
 
-        ``"crate"`` for builtin ``ffi.*`` types, ``"mapped"`` for a ``ty-map`` to a
+        ``"crate"`` for builtin ``ffi.*`` types, ``"mapped"`` for a ``ty_map`` to a
         hand-written binding, ``"generated"`` for an ``object/`` block in this run.
         """
         if is_crate_type_key(type_key):
@@ -316,7 +316,7 @@ class _ObjectRenderer:
         return None
 
     def _base_type(self) -> tuple[str, bool]:
-        """Resolve the ``base_`` struct and whether it is a generated or ``ty-map``'d parent.
+        """Resolve the ``base_`` struct and whether it is a generated or ``ty_map``'d parent.
 
         A builtin parent below ``ffi.Object`` is embedded as the crate's object
         struct, or as its header-only stand-in over the deepest builtin ancestor the
@@ -441,7 +441,7 @@ class _ObjectRenderer:
     # --- pieces ------------------------------------------------------------
 
     def _allow_missing_docs(self) -> list[str]:
-        """``#[allow(missing_docs)]`` under ``missing-docs: allow``, for a crate that warns on it."""
+        """``#[allow(missing_docs)]`` under ``missing_docs = allow``, for a crate that warns on it."""
         return ["#[allow(missing_docs)]"] if self.imports.directives.allow_missing_docs else []
 
     def _visibility(self, target: str) -> str:
@@ -566,7 +566,7 @@ class _ObjectRenderer:
         """``impl_object_ref_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives.
 
         A generated ancestor accepts every object of its type, so its upcast takes the
-        compile-time checked form; a ``ty-map``'d one or an ``upcast`` view may promise
+        compile-time checked form; a ``ty_map``'d one or an ``upcast`` view may promise
         more, so it takes the ``unsafe`` form.
         """
         checked: list[str] = []
@@ -727,7 +727,7 @@ class _ObjectRenderer:
         field as its own type, as ``#[rs_object]``'s ``new`` does, an object reference as
         ``impl IntoArg`` and any other as ``impl Into`` (:func:`_param_type`), and
         converts it on the way to ``<Leaf>Obj::new``.
-        ``custom-new`` names the wrapper's allocator ``from_fields`` instead; ``no-new``
+        ``custom_new`` names the wrapper's allocator ``from_fields`` instead; ``no_new``
         skips it, and ``<Leaf>Obj::new`` of a final type with it.
         ``<Leaf>Obj::new`` of a type that is not final is public: a subtype defined in Rust
         builds its parent's object with it.
@@ -814,7 +814,7 @@ class _ObjectRenderer:
         A subtype defined in Rust needs both of its parent's object. They are derived
         for a complete type that is not final and whose ancestors below ``ffi.Object``
         are all generated: each of those derives them by this rule, while a
-        ``ty-map``'d one is hand-written and may not.
+        ``ty_map``'d one is hand-written and may not.
         """
         if self.info.is_final or not verdict.is_complete:
             return False
@@ -920,7 +920,7 @@ def generate_rust_object(
         keys = ", ".join(f"`{key}`" for key in sorted(renderer.missing))
         raise ValueError(
             f"`{obj_info.type_key}` (line {code.lineno_start}) depends on {keys}, which this run "
-            "does not ask for: add an `object/<key>` block or a `ty-map` directive for each"
+            "does not ask for: add an `object/<key>` block or a `ty_map` directive key for each"
         )
     indent = " " * code.indent
     code.lines = [
