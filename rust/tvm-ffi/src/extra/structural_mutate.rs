@@ -533,7 +533,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// ```
     /// # use tvm_ffi::*;
     /// # use tvm_ffi::StructuralMutatorView;
-    /// # #[rs_object("my_ext.MyPair", final)]
+    /// # #[rs_object(type_key = "my_ext.MyPair", final)]
     /// # pub struct MyPairObj { base_: Object, pub first: Array<i64>, pub second: Array<i64> }
     /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
     /// # pub struct MyPair { data: ObjectArc<MyPairObj> }

@@ -34,7 +34,7 @@ pub(crate) fn rs_object(args: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// `#[rs_object("type.key", final, ...)]`.
+/// `#[rs_object(type_key = "type.key", final, ...)]`.
 struct RsObjectArgs {
     type_key: LitStr,
     type_final: bool,
@@ -48,14 +48,15 @@ struct RsObjectArgs {
 
 impl Parse for RsObjectArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let type_key = input.parse::<LitStr>().map_err(|error| {
-            syn::Error::new(
-                error.span(),
-                "expected the type key first, as in `#[rs_object(\"my.Point\")]`",
-            )
-        })?;
+        if input.peek(LitStr) {
+            return Err(syn::Error::new(
+                input.span(),
+                "name the type key, as in `#[rs_object(type_key = \"my.Point\")]`",
+            ));
+        }
+        let mut type_key = None;
         let mut args = RsObjectArgs {
-            type_key,
+            type_key: LitStr::new("", input.span()),
             type_final: false,
             immutable: false,
             s_eq_hash_kind: None,
@@ -66,9 +67,11 @@ impl Parse for RsObjectArgs {
         };
         let mut seen = Vec::new();
         while !input.is_empty() {
-            input.parse::<Token![,]>()?;
-            if input.is_empty() {
-                break;
+            if !seen.is_empty() {
+                input.parse::<Token![,]>()?;
+                if input.is_empty() {
+                    break;
+                }
             }
             // `final` and `crate` are keywords.
             let name = input.call(syn::Ident::parse_any)?;
@@ -80,6 +83,7 @@ impl Parse for RsObjectArgs {
                 input.parse::<Token![=]>()?;
             }
             match key.as_str() {
+                "type_key" => type_key = Some(input.parse()?),
                 "final" => args.type_final = true,
                 "immutable" => args.immutable = true,
                 "s_eq_hash_kind" => args.s_eq_hash_kind = Some(input.parse()?),
@@ -90,7 +94,7 @@ impl Parse for RsObjectArgs {
                 _ => {
                     return Err(syn::Error::new(
                         name.span(),
-                        "expected `final`, `immutable`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
+                        "expected `type_key = \"<key>\"`, `final`, `immutable`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
                          `child_slots_can_overflow = <bool>`, `reflection = <path>` or \
                          `crate = <path>`",
                     ));
@@ -98,6 +102,12 @@ impl Parse for RsObjectArgs {
             }
             seen.push(key);
         }
+        args.type_key = type_key.ok_or_else(|| {
+            syn::Error::new(
+                input.span(),
+                "missing the type key, as in `#[rs_object(type_key = \"my.Point\")]`",
+            )
+        })?;
         if args.type_final
             && (args.child_slots.is_some() || args.child_slots_can_overflow.is_some())
         {

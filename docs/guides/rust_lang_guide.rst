@@ -319,7 +319,7 @@ loads, as a C++ type does:
    use tvm_ffi::reflection::ObjectDef;
    use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 
-   #[rs_object("my.Point", s_eq_hash_kind = "TreeNode", reflection = PointObj::reflect_methods)]
+   #[rs_object(type_key = "my.Point", s_eq_hash_kind = "TreeNode", reflection = PointObj::reflect_methods)]
    pub struct PointObj {
        base_: Object,
        /// The x coordinate.
@@ -378,7 +378,7 @@ names the reference to the parent's object:
    use tvm_ffi::derive::ObjectRef;
    use tvm_ffi::{rs_object, Object, ObjectArc};
 
-   #[rs_object("my.Point", s_eq_hash_kind = "TreeNode")]
+   #[rs_object(type_key = "my.Point", s_eq_hash_kind = "TreeNode")]
    pub struct PointObj {
        base_: Object,
        pub x: i64,
@@ -391,7 +391,7 @@ names the reference to the parent's object:
        data: ObjectArc<PointObj>,
    }
 
-   #[rs_object("my.Point3", final)]
+   #[rs_object(type_key = "my.Point3", final)]
    pub struct Point3Obj {
        base_: PointObj,
        pub z: i64,

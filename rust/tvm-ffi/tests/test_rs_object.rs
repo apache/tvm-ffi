@@ -30,7 +30,7 @@ use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFIT
 
 /// A root type, under `ffi.Object`.
 #[rs_object(
-    "testing.rust.RsPoint",
+    type_key = "testing.rust.RsPoint",
     s_eq_hash_kind = "TreeNode",
     reflection = RsPointObj::reflect_methods
 )]
@@ -60,7 +60,7 @@ impl RsPointObj {
 }
 
 /// A subtype of a Rust-defined type, with a private field.
-#[rs_object("testing.rust.RsPoint3", final)]
+#[rs_object(type_key = "testing.rust.RsPoint3", final)]
 pub struct RsPoint3Obj {
     base_: RsPointObj,
     pub z: i64,
@@ -76,7 +76,7 @@ pub struct RsPoint3 {
 }
 
 /// A subtype without fields, which still registers its reflection.
-#[rs_object("testing.rust.RsMarker", final)]
+#[rs_object(type_key = "testing.rust.RsMarker", final)]
 pub struct RsMarkerObj {
     base_: RsPointObj,
 }
@@ -88,7 +88,7 @@ pub struct RsMarker {
 }
 
 /// Scalar fields, whose literal arguments to `new` infer as the field types.
-#[rs_object("testing.rust.RsScalars", final)]
+#[rs_object(type_key = "testing.rust.RsScalars", final)]
 pub struct RsScalarsObj {
     base_: Object,
     pub big: i64,
@@ -133,7 +133,11 @@ pub struct TestCxxClassBase {
 }
 
 /// A subtype of a C++ type.
-#[rs_object("testing.rust.RsCxxChild", final, s_eq_hash_kind = "TreeNode")]
+#[rs_object(
+    type_key = "testing.rust.RsCxxChild",
+    final,
+    s_eq_hash_kind = "TreeNode"
+)]
 pub struct RsCxxChildObj {
     base_: TestCxxClassBaseObj,
     pub name: tvm_ffi::String,
@@ -146,7 +150,7 @@ pub struct RsCxxChild {
 }
 
 /// A type that defines its own `__ffi_init__`, over which C++ generates none.
-#[rs_object("testing.rust.RsOwnInit", final, reflection = RsOwnInitObj::reflect_methods)]
+#[rs_object(type_key = "testing.rust.RsOwnInit", final, reflection = RsOwnInitObj::reflect_methods)]
 pub struct RsOwnInitObj {
     base_: Object,
     pub v: i64,
@@ -173,7 +177,7 @@ impl RsOwnInitObj {
 }
 
 /// `init_off` fields, which `__ffi_init__` leaves all-zero: a value of these types.
-#[rs_object("testing.rust.RsInitOff", final)]
+#[rs_object(type_key = "testing.rust.RsInitOff", final)]
 pub struct RsInitOffObj {
     base_: Object,
     pub v: i64,
@@ -189,7 +193,7 @@ pub struct RsInitOff {
 }
 
 /// An `init_off` reference, which all-zero bytes leave undefined: its registration fails.
-#[rs_object("testing.rust.RsInitOffReference", final)]
+#[rs_object(type_key = "testing.rust.RsInitOffReference", final)]
 pub struct RsInitOffReferenceObj {
     base_: Object,
     #[reflect(init_off)]
@@ -202,7 +206,7 @@ mod reexported {
     #[allow(dead_code)]
     mod tvm_ffi {}
 
-    #[::tvm_ffi::rs_object("testing.rust.RsReexported", crate = ::tvm_ffi)]
+    #[::tvm_ffi::rs_object(type_key = "testing.rust.RsReexported", crate = ::tvm_ffi)]
     pub struct ReexportedObj {
         base_: ::tvm_ffi::Object,
         pub v: i64,

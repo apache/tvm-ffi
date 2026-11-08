@@ -661,7 +661,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 /// use tvm_ffi::{rs_object, Any, AnyView, Object, ObjectArc};
 /// use tvm_ffi::object::ObjectRefAnyCompatible;
 ///
-/// #[rs_object("my_ext.MyPair", final)]
+/// #[rs_object(type_key = "my_ext.MyPair", final)]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,

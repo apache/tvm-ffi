@@ -112,7 +112,7 @@ pub use tvm_ffi_macros::Object;
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///
-/// #[rs_object("my_ext.MyPair")]
+/// #[rs_object(type_key = "my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,
@@ -124,7 +124,7 @@ pub use tvm_ffi_macros::Object;
 ///     data: ObjectArc<MyPairObj>,
 /// }
 ///
-/// #[rs_object("my_ext.MyTriple", final)]
+/// #[rs_object(type_key = "my_ext.MyTriple", final)]
 /// pub struct MyTripleObj {
 ///     base_: MyPairObj,
 ///     pub third: i64,
@@ -155,7 +155,7 @@ pub use tvm_ffi_macros::Object;
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Array, Object, ObjectArc};
 ///
-/// #[rs_object("my_ext.MyPair")]
+/// #[rs_object(type_key = "my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,

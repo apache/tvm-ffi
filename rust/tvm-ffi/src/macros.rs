@@ -90,7 +90,7 @@ macro_rules! cached_global_func {
 /// ```
 /// use tvm_ffi::{cached_field_getter, rs_object, Object, ObjectArc};
 ///
-/// #[rs_object("my_ext.Point")]
+/// #[rs_object(type_key = "my_ext.Point")]
 /// pub struct PointObj {
 ///     base_: Object,
 ///     x: i64,
@@ -462,7 +462,7 @@ macro_rules! impl_object_ref_upcast {
 /// use tvm_ffi::{Object, ObjectArc, ObjectRefCore};
 /// use tvm_ffi::object::ObjectRefAnyCompatible;
 ///
-/// #[rs_object("my_ext.MyPair", final)]
+/// #[rs_object(type_key = "my_ext.MyPair", final)]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,

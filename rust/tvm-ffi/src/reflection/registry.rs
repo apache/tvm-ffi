@@ -174,7 +174,7 @@ impl BitOr for FieldFlags {
 /// use tvm_ffi::reflection::{self, ObjectDef};
 /// use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 ///
-/// #[rs_object("my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
+/// #[rs_object(type_key = "my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,
@@ -500,7 +500,7 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 /// use tvm_ffi::reflection::TypeAttrColumn;
 /// use tvm_ffi::{rs_object, Object, ObjectCore};
 ///
-/// #[rs_object("my_ext.MyPair")]
+/// #[rs_object(type_key = "my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 /// }

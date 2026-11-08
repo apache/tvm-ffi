@@ -60,7 +60,7 @@ pub struct StructuralOptions {
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, structural_equal, Array, Object, ObjectArc};
 ///
-/// #[rs_object("my_ext.MyPair", final, s_eq_hash_kind = "TreeNode")]
+/// #[rs_object(type_key = "my_ext.MyPair", final, s_eq_hash_kind = "TreeNode")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,

@@ -54,7 +54,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn, TypeAttrDef};
 /// use tvm_ffi::{rs_object, Object, ObjectArc, ObjectCore, Result};
 ///
-/// #[rs_object("my_ext.MyPair")]
+/// #[rs_object(type_key = "my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     first: i64,
