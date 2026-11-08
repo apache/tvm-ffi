@@ -419,7 +419,7 @@ fn test_containers_upcast_without_a_copy() {
     let map3: Map<tvm_ffi::String, RsPoint3> = [("p".into(), point3(1, 3))].into();
     let upcast: Map<tvm_ffi::String, RsPoint> = map3.clone().upcast();
     assert!(upcast.same_as(&map3));
-    assert_eq!(upcast.get(&"p".into()).unwrap().unwrap().x, 1);
+    assert_eq!(upcast.get("p").unwrap().unwrap().x, 1);
     let roots: &Map<tvm_ffi::String, ObjectRef> = map3.upcast_ref();
     assert!(roots.same_as(&map3));
 }

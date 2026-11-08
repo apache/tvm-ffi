@@ -45,13 +45,13 @@ fn test_map_basic_lookup() {
     assert_eq!(map.len(), 3);
     assert!(!map.is_empty());
 
-    assert_eq!(map.get(&1).unwrap(), Some(10));
-    assert_eq!(map.get(&2).unwrap(), Some(20));
-    assert_eq!(map.get(&3).unwrap(), Some(30));
-    assert_eq!(map.get(&99).unwrap(), None);
+    assert_eq!(map.get(1).unwrap(), Some(10));
+    assert_eq!(map.get(2).unwrap(), Some(20));
+    assert_eq!(map.get(3).unwrap(), Some(30));
+    assert_eq!(map.get(99).unwrap(), None);
 
-    assert!(map.contains_key(&1).unwrap());
-    assert!(!map.contains_key(&99).unwrap());
+    assert!(map.contains_key(1).unwrap());
+    assert!(!map.contains_key(99).unwrap());
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn test_map_empty() {
     let map: Map<i64, i64> = Map::new();
     assert_eq!(map.len(), 0);
     assert!(map.is_empty());
-    assert_eq!(map.get(&1).unwrap(), None);
+    assert_eq!(map.get(1).unwrap(), None);
     // All three iterators must handle the empty (remaining == 0) case.
     assert_eq!(map.iter().count(), 0);
     assert_eq!(map.keys().count(), 0);
@@ -72,8 +72,8 @@ fn test_map_empty() {
 fn test_map_from_iter_duplicate_keys_last_wins() {
     let map: Map<i64, i64> = [(1i64, 10i64), (1, 20), (2, 30)].into_iter().collect();
     assert_eq!(map.len(), 2);
-    assert_eq!(map.get(&1).unwrap(), Some(20));
-    assert_eq!(map.get(&2).unwrap(), Some(30));
+    assert_eq!(map.get(1).unwrap(), Some(20));
+    assert_eq!(map.get(2).unwrap(), Some(30));
 }
 
 #[test]
@@ -109,10 +109,10 @@ fn test_map_string_keys() {
     .collect();
 
     assert_eq!(map.len(), 3);
-    assert_eq!(map.get(&String::from("a")).unwrap(), Some(1));
-    assert_eq!(map.get(&String::from("c")).unwrap(), Some(3));
-    assert_eq!(map.get(&String::from("z")).unwrap(), None);
-    assert!(map.contains_key(&String::from("b")).unwrap());
+    assert_eq!(map.get("a").unwrap(), Some(1));
+    assert_eq!(map.get("c").unwrap(), Some(3));
+    assert_eq!(map.get("z").unwrap(), None);
+    assert!(map.contains_key("b").unwrap());
 }
 
 #[test]
@@ -124,8 +124,8 @@ fn test_map_any_roundtrip() {
 
     let back: Map<i64, i64> = Map::try_from(any).expect("Any -> Map failed");
     assert_eq!(back.len(), 2);
-    assert_eq!(back.get(&1).unwrap(), Some(10));
-    assert_eq!(back.get(&2).unwrap(), Some(20));
+    assert_eq!(back.get(1).unwrap(), Some(10));
+    assert_eq!(back.get(2).unwrap(), Some(20));
 }
 
 #[test]
@@ -144,23 +144,22 @@ fn test_map_with_any_values() {
     .collect();
 
     assert_eq!(map.len(), 3);
-    assert!(map.contains_key(&String::from("number")).unwrap());
-    assert!(!map.contains_key(&String::from("missing")).unwrap());
+    assert!(map.contains_key("number").unwrap());
+    assert!(!map.contains_key("missing").unwrap());
     assert_eq!(format!("{map:?}"), "Map<String, Any>[3]");
     assert_eq!(AnyView::from(&array).debug_strong_count().unwrap(), 2);
     assert_eq!(
-        i64::try_from(map.get(&String::from("number")).unwrap().unwrap()).unwrap(),
+        i64::try_from(map.get("number").unwrap().unwrap()).unwrap(),
         7
     );
     assert_eq!(
-        String::try_from(map.get(&String::from("text")).unwrap().unwrap())
+        String::try_from(map.get("text").unwrap().unwrap())
             .unwrap()
             .as_str(),
         "value"
     );
 
-    let fetched_array =
-        Array::<i64>::try_from(map.get(&String::from("array")).unwrap().unwrap()).unwrap();
+    let fetched_array = Array::<i64>::try_from(map.get("array").unwrap().unwrap()).unwrap();
     assert_eq!(
         fetched_array.iter().copied().collect::<Vec<_>>(),
         vec![1, 2, 3]
@@ -229,7 +228,7 @@ fn test_map_shares_underlying_object() {
     // Cloning shares the same underlying MapObj rather than copying entries.
     let clone = map.clone();
     assert_eq!(clone.len(), 1);
-    assert_eq!(clone.get(&1).unwrap(), Some(10));
+    assert_eq!(clone.get(1).unwrap(), Some(10));
 }
 
 #[test]
@@ -245,10 +244,7 @@ fn test_map_object_values_and_refcount() {
     assert_eq!(AnyView::from(&t).debug_strong_count().unwrap(), base + 1);
 
     // The value round-trips correctly and `get` hands back a fresh handle.
-    let got = map
-        .get(&String::from("x"))
-        .unwrap()
-        .expect("key should be present");
+    let got = map.get("x").unwrap().expect("key should be present");
     assert_eq!(get_val(&got), 7.0);
     assert_eq!(got.ndim(), 2);
     assert_eq!(AnyView::from(&t).debug_strong_count().unwrap(), base + 2);
@@ -303,12 +299,12 @@ fn test_map_get_missing_with_object_values() {
         .into_iter()
         .collect();
 
-    let present = map.get(&String::from("x")).unwrap();
+    let present = map.get("x").unwrap();
     assert!(present.is_some());
     assert_eq!(get_val(&present.unwrap()), 7.0);
 
     // Absent key returns `None`, never an object miscast as a tensor.
-    assert!(map.get(&String::from("missing")).unwrap().is_none());
+    assert!(map.get("missing").unwrap().is_none());
 }
 
 /// Views a map behind an `Any` as `Map<K, V>` while bypassing the strict
@@ -334,7 +330,7 @@ fn mistyped_value_map() -> Map<i64, String> {
 #[test]
 fn test_map_get_type_mismatch_is_err() {
     let map = mistyped_value_map();
-    assert!(map.get(&1).is_err());
+    assert!(map.get(1).is_err());
 }
 
 /// Iterators panic on a value type mismatch rather than silently truncating
@@ -357,7 +353,7 @@ fn test_map_get_mistyped_key_debug_asserts() {
     // keys do not match `K = String`.
     let real: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
     let map: Map<String, i64> = view_map_unchecked(Any::from(real));
-    let _ = map.get(&String::from("anything"));
+    let _ = map.get("anything");
 }
 
 /// `try_from` rejects a map whose values can neither strictly match nor cast
@@ -377,8 +373,8 @@ fn test_map_any_cast_slow_path_converts() {
     let converted: Map<f64, f64> =
         Map::try_from(Any::from(real.clone())).expect("i64 entries cast to f64");
     assert_eq!(converted.len(), 2);
-    assert_eq!(converted.get(&1.0).unwrap(), Some(10.0));
-    assert_eq!(converted.get(&2.0).unwrap(), Some(20.0));
+    assert_eq!(converted.get(1.0).unwrap(), Some(10.0));
+    assert_eq!(converted.get(2.0).unwrap(), Some(20.0));
     // Each map owns its own object: nothing is shared between them.
     assert_eq!(AnyView::from(&real).debug_strong_count(), Some(1));
     assert_eq!(AnyView::from(&converted).debug_strong_count(), Some(1));
@@ -392,6 +388,6 @@ fn test_map_from_dict_copies() {
         .unwrap();
     let map = Map::<String, i64>::try_from(dict.clone()).unwrap();
     assert_eq!(map.len(), 2);
-    assert_eq!(map.get(&String::from("b")).unwrap(), Some(2));
+    assert_eq!(map.get("b").unwrap(), Some(2));
     assert_eq!(dict.debug_strong_count(), Some(1));
 }

@@ -29,6 +29,7 @@
 // hashing (`AnyHash`/`AnyEqual`) and dense/small probing, just as the Python
 // bindings also delegate.
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -121,8 +122,8 @@ pub struct MapObj {
 ///     .into_iter()
 ///     .collect();
 /// assert_eq!(map.len(), 2);
-/// assert_eq!(map.get(&String::from("b"))?, Some(2));
-/// assert_eq!(map.get(&String::from("c"))?, None);
+/// assert_eq!(map.get("b")?, Some(2));
+/// assert_eq!(map.get("c")?, None);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[repr(C)]
@@ -285,9 +286,10 @@ where
     /// is not hashable.
     ///
     /// The result for a `key` of another type than the map's keys is
-    /// unspecified, as for [`Map::get`].
-    pub fn contains_key(&self, key: &K) -> Result<bool> {
-        let present = self.try_contains_key(key)?;
+    /// unspecified, as for [`Map::get`]. Code generic over `K` that passes a
+    /// `&K` adds the bound `for<'a> &'a K: IntoArg<K>`.
+    pub fn contains_key(&self, key: impl IntoArg<K>) -> Result<bool> {
+        let present = self.try_contains_key(key.into_arg().borrow())?;
         if !present {
             self.debug_assert_key_type();
         }
@@ -304,9 +306,14 @@ where
     /// The result for a `key` of another type than the map's keys is
     /// unspecified: it currently reads as absent, since a lookup hashes the key
     /// instead of reading a stored one. Debug builds assert against it.
-    pub fn get(&self, key: &K) -> Result<Option<V>> {
+    ///
+    /// A `&str` key builds a temporary `String` for the runtime lookup. Code
+    /// generic over `K` that passes a `&K` adds the bound
+    /// `for<'a> &'a K: IntoArg<K>`.
+    pub fn get(&self, key: impl IntoArg<K>) -> Result<Option<V>> {
+        let key = key.into_arg();
         let result = crate::cached_global_func!("ffi.MapGetItemOrMissing")
-            .call_packed(&[AnyView::from(self), element_view(key)])?;
+            .call_packed(&[AnyView::from(self), element_view(key.borrow())])?;
         let raw = result.as_raw_ffi_any();
         if raw.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32
             && unsafe { raw.data_union.v_obj } as usize == *MISSING_OBJECT
