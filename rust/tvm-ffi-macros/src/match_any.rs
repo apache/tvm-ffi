@@ -259,13 +259,19 @@ fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ide
         let #probe = #pattern_probe;
         match (&#probe).leaf_pattern_list_id() {
             ::core::option::Option::Some(#pattern_list_id) => {
-                static #static_table: ::std::sync::OnceLock<#tvm_ffi::match_any_internal::LeafLookupTable> = ::std::sync::OnceLock::new();
+                // Type indices are process-stable, so the key is checked once.
+                static #static_table: ::std::sync::OnceLock<::core::option::Option<#tvm_ffi::match_any_internal::LeafLookupTable>> = ::std::sync::OnceLock::new();
                 let #table = #static_table.get_or_init(|| {
-                    let mut #type_indices = [0_i32; #arm_count];
-                    (&#probe).fill_leaf_type_indices(&mut #type_indices);
-                    #tvm_ffi::match_any_internal::LeafLookupTable::build(#pattern_list_id, &#type_indices)
+                    (&#probe).matches_key().then(|| {
+                        let mut #type_indices = [0_i32; #arm_count];
+                        (&#probe).fill_leaf_type_indices(&mut #type_indices);
+                        #tvm_ffi::match_any_internal::LeafLookupTable::build(#pattern_list_id, &#type_indices)
+                    })
                 });
-                #table.lookup(#pattern_list_id, #view.type_index())
+                match #table {
+                    ::core::option::Option::Some(#table) => #table.lookup(#pattern_list_id, #view.type_index()),
+                    ::core::option::Option::None => ::core::result::Result::Err(()),
+                }
             }
             ::core::option::Option::None => ::core::result::Result::Err(()),
         }

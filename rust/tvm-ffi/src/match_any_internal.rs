@@ -407,6 +407,11 @@ pub trait LeafPatternMetadata {
     }
 
     #[doc(hidden)]
+    fn matches_key(&self) -> bool {
+        false
+    }
+
+    #[doc(hidden)]
     fn fill_leaf_type_indices(&self, _out: &mut [i32]) {}
 }
 
@@ -415,7 +420,12 @@ impl<T> LeafPatternMetadata for &LeafPatternProbe<T> {}
 impl<T: LeafPatternList> LeafPatternMetadata for LeafPatternProbe<T> {
     #[inline(always)]
     fn leaf_pattern_list_id(&self) -> Option<TypeId> {
-        (T::ALL_EXACT_LEAF && T::matches_key()).then(TypeId::of::<T::Key>)
+        T::ALL_EXACT_LEAF.then(TypeId::of::<T::Key>)
+    }
+
+    #[inline(always)]
+    fn matches_key(&self) -> bool {
+        T::matches_key()
     }
 
     #[inline(always)]
