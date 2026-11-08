@@ -24,7 +24,7 @@ use std::marker::PhantomData;
 use super::structural_common::{raw_ffi_any_same_as, structural_error_from_raw};
 
 use crate::any::{Any, AnyView, TryFromTemp};
-use crate::error::{Error, Result, TYPE_ERROR};
+use crate::error::{Error, Result};
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFITypeIndex};
 use crate::type_traits::{AnyCompatible, ContainerElement};
 
@@ -207,80 +207,6 @@ impl<T: ContainerElement> UnchangedOr<T> {
         match self.into_option() {
             Some(value) => UnchangedOr::changed(convert(value)),
             None => UnchangedOr::unchanged(),
-        }
-    }
-
-    /// Fallibly convert only the replacement, preserving an unchanged result.
-    ///
-    /// # Arguments
-    ///
-    /// * `convert` - Converts the replacement; called only when there is one.
-    ///
-    /// # Returns
-    ///
-    /// The converted result.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error of `convert` unchanged.
-    ///
-    /// ```
-    /// use tvm_ffi::UnchangedOr;
-    /// let result = UnchangedOr::changed(3_i64).try_map(u32::try_from).unwrap();
-    /// assert_eq!(result.into_option(), Some(3_u32));
-    /// ```
-    ///
-    /// See also [`UnchangedOr`].
-    #[inline]
-    pub fn try_map<U: ContainerElement, E>(
-        self,
-        convert: impl FnOnce(T) -> std::result::Result<U, E>,
-    ) -> std::result::Result<UnchangedOr<U>, E> {
-        match self.into_option() {
-            Some(value) => convert(value).map(UnchangedOr::changed),
-            None => Ok(UnchangedOr::unchanged()),
-        }
-    }
-
-    /// Check a replacement's FFI type without cloning it.
-    ///
-    /// An unchanged result is compatible with every replacement type. Erased and
-    /// narrowing conversions retain the strict type check of
-    /// [`Any::downcast_ref`]. For a
-    /// known typed conversion, use `map(Into::into)`.
-    ///
-    /// # Returns
-    ///
-    /// The result typed as `UnchangedOr<U>`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TypeError` if the replacement is not stored as `U`.
-    ///
-    /// ```
-    /// use tvm_ffi::{Any, UnchangedOr};
-    /// let erased: UnchangedOr<Any> = 7_i64.into();
-    /// assert_eq!(erased.try_cast::<i64>()?.into_option(), Some(7));
-    /// # Ok::<(), tvm_ffi::Error>(())
-    /// ```
-    ///
-    /// See also [`UnchangedOr`].
-    #[inline]
-    pub fn try_cast<U: ContainerElement>(self) -> Result<UnchangedOr<U>> {
-        if unsafe { UnchangedOr::<U>::check_any_strict(self.data.as_raw_ffi_any()) } {
-            Ok(UnchangedOr {
-                data: self.data,
-                _marker: PhantomData,
-            })
-        } else {
-            Err(Error::new(
-                TYPE_ERROR,
-                &format!(
-                    "structural mutation result does not match {}",
-                    U::container_type_str()
-                ),
-                "",
-            ))
         }
     }
 }
