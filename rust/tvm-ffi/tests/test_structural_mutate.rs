@@ -2637,8 +2637,8 @@ fn dispatch_handlers_may_return_typed_results() {
             &mut self,
             value: MutationView<'_, Array<i64>>,
             mutator: &mut StructuralMutatorView<'_, Self>,
-        ) -> Result<UnchangedOr<Array<i64>>> {
-            mutator.default_mutate(self, value)?.try_cast()
+        ) -> Result<UnchangedOr<Any>> {
+            mutator.default_mutate(self, value)
         }
     }
     let mutated = structural_mutate(Array::from_vec(vec![1i64, 2]), Typed)

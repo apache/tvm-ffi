@@ -194,11 +194,8 @@ fn expand(item: &ItemImpl, args: &DispatchArgs) -> syn::Result<TokenStream2> {
             && has_pattern_lifetime(&ty)
         {
             lifetimes.normalize(&mut ty, None);
-            // Fix recovery independently of the arm-local mutable source borrow.
-            let recovery =
-                quote!(<#ty as #tvm_ffi::extra::dispatch::DispatchRecovery<#source>>::Recovery);
             generics.make_where_clause().predicates.push(syn::parse_quote!(
-                for<#borrow> #ty: #tvm_ffi::match_any_internal::MatchPattern<&#borrow mut #source, Recovery = #recovery>
+                for<#borrow> #ty: #tvm_ffi::match_any_internal::MatchPattern<&#borrow mut #source>
             ));
         }
         patterns.push(ty);

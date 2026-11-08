@@ -358,6 +358,13 @@ impl<'a, T> MutationView<'a, T> {
         }
     }
 
+    /// # Safety
+    /// The original must not be used while the alias lives.
+    #[inline(always)]
+    pub(crate) unsafe fn alias(&self) -> MutationView<'a, T> {
+        MutationView::from_raw(self.value, self.mode)
+    }
+
     // A chain may lend its view to one link at a time. The shorter lifetime
     // prevents a matched link from retaining a borrow across the next link.
     #[inline(always)]
@@ -564,13 +571,6 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
         let mode = self.mode.for_value(self.value);
         MutationView::from_raw(value, mode)
     }
-}
-
-impl<'source, 'value, T: crate::type_traits::ContainerElement>
-    super::dispatch::DispatchRecovery<crate::match_any_internal::MutationSource<'source>>
-    for crate::MutationView<'value, T>
-{
-    type Recovery = crate::MutationView<'source>;
 }
 
 /// The running structural mutation, passed to each handler.

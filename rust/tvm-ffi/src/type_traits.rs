@@ -56,14 +56,6 @@ pub unsafe trait AnyCompatible: Sized {
     #[doc(hidden)]
     const MATCH_ANY_EXACT: bool = false;
 
-    /// Whether strict matching accepts exactly `match_any_exact_type_index()`.
-    /// Unlike `MATCH_ANY_EXACT`, this covers every tag, including scalars:
-    /// `check_any_strict` and `match_constraints` together must succeed if and
-    /// only if the index matches.
-    /// Container-element checks must have the same acceptance set.
-    #[doc(hidden)]
-    const MATCH_ANY_STRICT_EXACT: bool = false;
-
     /// Return the sole runtime object type index accepted by this conversion.
     #[doc(hidden)]
     fn match_any_exact_type_index() -> i32 {
