@@ -436,10 +436,12 @@ pub unsafe trait ObjectCore: Sized + 'static {
 /// # Safety
 ///
 /// The blanket implementations are the only sound ones: do not implement it.
+#[doc(hidden)]
 #[diagnostic::on_unimplemented(message = "`{Self}` does not derive from `{A}`")]
 pub unsafe trait ObjectDerivesFrom<A, Depth> {}
 
 /// Inferred depths for [`ObjectDerivesFrom`].
+#[doc(hidden)]
 pub mod marker {
     /// `A` is the object type itself.
     pub enum Itself {}
@@ -1056,7 +1058,7 @@ pub mod unsafe_ {
 
     /// Increase the strong reference count of `handle`.
     #[inline]
-    pub unsafe fn inc_ref(handle: *mut TVMFFIObject) {
+    pub(crate) unsafe fn inc_ref(handle: *mut TVMFFIObject) {
         let obj = &*handle;
         obj.combined_ref_count.fetch_add(1, Ordering::Relaxed);
     }
