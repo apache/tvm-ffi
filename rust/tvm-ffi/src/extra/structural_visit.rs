@@ -1057,7 +1057,6 @@ fn invalid_visit_hook_result_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "structural visit hook must return None or ffi.VisitInterrupt",
-        "",
     )
 }
 

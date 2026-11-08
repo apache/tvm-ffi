@@ -29,7 +29,7 @@ use tvm_ffi::{
 };
 
 fn runtime_error(message: &str) -> Error {
-    Error::new(RUNTIME_ERROR, message, "")
+    Error::new(RUNTIME_ERROR, message)
 }
 
 // Nested recursion restores regions after normal, interrupt, error and panic exits.

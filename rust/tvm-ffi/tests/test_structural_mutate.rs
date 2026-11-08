@@ -965,7 +965,7 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
         ) -> Result<UnchangedOr<Any>> {
             if value.as_any_view().downcast_ref::<i64>().copied().is_some() {
                 return if self.0 {
-                    Err(Error::new(RUNTIME_ERROR, "child failed", ""))
+                    Err(Error::new(RUNTIME_ERROR, "child failed"))
                 } else {
                     Ok(UnchangedOr::<Any>::unchanged())
                 };
@@ -1131,14 +1131,11 @@ fn callback_errors_preserve_message_and_add_object_context() {
     unsafe impl Send for VisitErrorContext {}
     // SAFETY: as for `Send`.
     unsafe impl Sync for VisitErrorContext {}
-    let cause = Error::new(RUNTIME_ERROR, "cause", "");
-    let source = Error::new_with_cause_and_extra_context(
-        RUNTIME_ERROR,
-        "callback failed",
-        "origin",
-        Some(&cause),
-        Some(&VisitErrorContext::try_from(context.clone()).unwrap()),
-    );
+    let cause = Error::new(RUNTIME_ERROR, "cause");
+    let source = Error::new(RUNTIME_ERROR, "callback failed")
+        .with_backtrace("origin")
+        .with_cause(&cause)
+        .with_extra_context(&VisitErrorContext::try_from(context.clone()).unwrap());
     let mut errors = Vec::new();
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let leaf_error = structural_map(
@@ -1258,12 +1255,12 @@ fn map_errors_name_the_replaced_or_rebuilt_node() {
                     if order == WalkOrder::PreOrder {
                         Ok(value.into())
                     } else {
-                        Err(Error::new(RUNTIME_ERROR, "failed", ""))
+                        Err(Error::new(RUNTIME_ERROR, "failed"))
                     }
                 },
                 |value: i64| -> Result<i64> {
                     if order == WalkOrder::PreOrder {
-                        Err(Error::new(RUNTIME_ERROR, "failed", ""))
+                        Err(Error::new(RUNTIME_ERROR, "failed"))
                     } else {
                         Ok(value + 1)
                     }
@@ -1345,7 +1342,7 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
     let error = match structural_map(
         source.clone(),
         |_integer: i64| -> Result<i64> {
-            Err(Error::new(RUNTIME_ERROR, "map mapper failed", "origin"))
+            Err(Error::new(RUNTIME_ERROR, "map mapper failed").with_backtrace("origin"))
         },
         WalkOrder::PostOrder,
     ) {
@@ -2450,7 +2447,7 @@ fn mutation_regions_retargeting_and_error_restore() {
                 assert_eq!(mutator.def_region_kind(), Use);
                 let error: Result<()> = mutator.with_def_region_kind(Pattern, |mutator| {
                     assert_eq!(mutator.def_region_kind(), Pattern);
-                    Err(Error::new(RUNTIME_ERROR, "handler region error", ""))
+                    Err(Error::new(RUNTIME_ERROR, "handler region error"))
                 });
                 assert!(error
                     .unwrap_err()
@@ -2497,7 +2494,7 @@ fn mutation_regions_retargeting_and_error_restore() {
                     })?;
                     let error: Result<()> = mutator.with_def_region_kind(Use, |mutator| {
                         assert_eq!(mutator.def_region_kind(), Pattern);
-                        Err(Error::new(RUNTIME_ERROR, "scoped error", ""))
+                        Err(Error::new(RUNTIME_ERROR, "scoped error"))
                     });
                     assert!(error.is_err());
                     assert_eq!(mutator.def_region_kind(), Pattern);

@@ -502,11 +502,7 @@ TVM FFI uses standard Rust ``Result`` types:
 
        // Custom errors
        if value < 0 {
-           return Err(Error::new(
-               VALUE_ERROR,
-               "Value must be non-negative",
-               ""
-           ));
+           return Err(Error::new(VALUE_ERROR, "Value must be non-negative"));
        }
 
        Ok(())

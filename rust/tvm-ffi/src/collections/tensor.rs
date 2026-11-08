@@ -646,7 +646,7 @@ impl<'a> TensorView<'a> {
             "{context}Cannot convert from type `{}` to `DLTensor*`",
             crate::object::type_key_of_index(value.type_index)
         );
-        crate::error::Error::new(crate::error::TYPE_ERROR, &message, "")
+        crate::error::Error::new(crate::error::TYPE_ERROR, &message)
     }
 }
 

@@ -61,7 +61,7 @@ impl Drop for CountingBase {
 unsafe impl StructuralVisitorBase for CountingBase {
     fn new() -> Result<Self> {
         if FAIL_INIT.get() {
-            return Err(Error::new(RUNTIME_ERROR, "base initialization failed", ""));
+            return Err(Error::new(RUNTIME_ERROR, "base initialization failed"));
         }
         Ok(Self {
             prefix: StructuralVisitorObj::default(),
@@ -318,7 +318,7 @@ fn base_failure_and_owned_results_release_exactly_once() {
     drop(result);
     assert_eq!(payload.debug_strong_count(), Some(1));
 
-    let error = Error::new(RUNTIME_ERROR, "base descent failed", "");
+    let error = Error::new(RUNTIME_ERROR, "base descent failed");
     let owner = Any::from(error.clone());
     BASE_RESULT.with_borrow_mut(|slot| *slot = Some(Err(error)));
     let result = visit(&Array::from_vec(vec![-1_i64, 99]), Unmatched)
@@ -366,7 +366,7 @@ fn callback_outcomes_preserve_reborrows_and_owners_through_specialized_defaults(
     for fail in [false, true] {
         DROPPED.with_borrow_mut(Vec::clear);
         let payload = Any::from(Array::from_vec(vec![42_i64]));
-        let error = Error::new(RUNTIME_ERROR, "callback failed", "");
+        let error = Error::new(RUNTIME_ERROR, "callback failed");
         let error_owner = Any::from(error.clone());
         let mut visitor = Halt {
             result: Some(if fail {

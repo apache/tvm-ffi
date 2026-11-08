@@ -114,7 +114,8 @@ macro_rules! format_err {
             ::core::line!(),
             $crate::function_name!()
         );
-        $crate::error::Error::new($error_kind, &::std::format!($fmt $(, $args)*), &context)
+        $crate::error::Error::new($error_kind, &::std::format!($fmt $(, $args)*))
+            .with_backtrace(&context)
     }};
 }
 
@@ -734,7 +735,7 @@ macro_rules! tvm_ffi_dll_export_typed_func {
                     $crate::function_internal::call_packed_callable($func, packed_args)
                 })) {
                     ::core::result::Result::Ok(ret_value) => ret_value,
-                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::function_internal::panic_to_error(payload)),
+                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::error::Error::from_panic(payload)),
                 };
                 match ret_value {
                     ::core::result::Result::Ok(value) => {
@@ -805,7 +806,7 @@ macro_rules! __tvm_ffi_dll_export_metadata {
                     $crate::function_internal::exported_metadata(&$func)
                 })) {
                     ::core::result::Result::Ok(metadata) => metadata,
-                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::function_internal::panic_to_error(payload)),
+                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::error::Error::from_panic(payload)),
                 };
                 $crate::function_internal::write_exported_str(metadata, result)
             }

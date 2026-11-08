@@ -28,7 +28,6 @@ use std::ffi::c_void;
 use std::panic::catch_unwind;
 use std::sync::{Once, OnceLock};
 
-use crate::function_internal::panic_to_error;
 use crate::{Any, Error, Function, Result, INTERNAL_ERROR};
 
 #[doc(hidden)]
@@ -234,7 +233,7 @@ impl StaticInitBlock {
             (None, Ok(())) => Ok(()),
             (None, Err(text)) => {
                 let message = format!("The static init block at {} failed: {text}", self.place());
-                Err(Error::new(INTERNAL_ERROR, &message, ""))
+                Err(Error::new(INTERNAL_ERROR, &message))
             }
         }
     }
@@ -246,7 +245,7 @@ impl StaticInitBlock {
     fn run_once(&self) -> Result<()> {
         let marker = self.marker();
         if Function::get_global(&marker).is_err() {
-            catch_unwind(self.body).unwrap_or_else(|payload| Err(panic_to_error(payload)))?;
+            catch_unwind(self.body).unwrap_or_else(|payload| Err(Error::from_panic(payload)))?;
             Function::register_global(&marker, Function::from_packed(|_| Ok(Any::default())))?;
         }
         Ok(())
@@ -310,7 +309,7 @@ pub fn run_static_init_blocks() -> Result<()> {
             error.message()
         ));
     }
-    Err(Error::new(failures[0].1.kind(), &message, ""))
+    Err(Error::new(failures[0].1.kind(), &message))
 }
 
 /// The constructor of every [`static_init_block!`](crate::static_init_block), which the loader

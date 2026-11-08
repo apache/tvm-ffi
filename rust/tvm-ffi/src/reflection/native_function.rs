@@ -119,8 +119,7 @@ impl<Args: NativeArgs, R: TryFrom<Any>> NativeFunction<Args, R> {
         if result.type_index() == TVMFFITypeIndex::kTVMFFIError as i32 {
             return Err(result.try_into()?);
         }
-        R::try_from(result)
-            .map_err(|_| Error::new(TYPE_ERROR, "Packed hook result type mismatch", ""))
+        R::try_from(result).map_err(|_| Error::new(TYPE_ERROR, "Packed hook result type mismatch"))
     }
 }
 
@@ -169,7 +168,7 @@ impl<Args, R> NativeFunction<Args, R> {
                 "Cannot convert from type `{}` to `NativeFunction`",
                 type_key_of_index(raw.type_index)
             );
-            return Err(Error::new(TYPE_ERROR, &message, ""));
+            return Err(Error::new(TYPE_ERROR, &message));
         }
         Ok(Self {
             data: value,
@@ -332,7 +331,7 @@ mod sealed {
                         // argument for the duration of the call, or null.
                         $(let Some($raw) = (unsafe { $raw.as_ref() }) else {
                             let message = "A native hook argument is null";
-                            return into_raw::<R>(Err(Error::new(TYPE_ERROR, message, "")));
+                            return into_raw::<R>(Err(Error::new(TYPE_ERROR, message)));
                         };)*
                         // A panic aborts here rather than unwind into the caller.
                         into_raw(function($($raw),*))

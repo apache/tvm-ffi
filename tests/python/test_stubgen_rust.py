@@ -591,7 +591,7 @@ impl TryFrom<i64> for IterVarType {{
     type Error = Error;
     fn try_from(value: i64) -> Result<Self> {{
         i32::try_from(value).map(Self).map_err(|_| {{
-            Error::new(VALUE_ERROR, &format!("IterVarType value {{value}} does not fit i32"), "")
+            Error::new(VALUE_ERROR, &format!("IterVarType value {{value}} does not fit i32"))
         }})
     }}
 }}
@@ -983,7 +983,7 @@ def test_allow_missing_docs_and_closed_enum() -> None:
         "        match value {\n"
         "            0 => Ok(Self::A),\n"
         "            -1 => Ok(Self::B),\n"
-        '            _ => Err(Error::new(VALUE_ERROR, &format!("Kind has no value {value}"), "")),\n'
+        '            _ => Err(Error::new(VALUE_ERROR, &format!("Kind has no value {value}"))),\n'
         "        }\n"
     ) in text
     # The enum, the object struct, the wrapper and both allocator `impl`s.

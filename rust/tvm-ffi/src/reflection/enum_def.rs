@@ -117,14 +117,12 @@ impl<E: EnumRef> EnumDef<E> {
             return Err(Error::new(
                 VALUE_ERROR,
                 &format!("a value name of `{type_key}` must be non-empty"),
-                "",
             ));
         }
         if !is_instance_of::<EnumObj>(type_index) || is_int_enum(type_index) {
             return Err(Error::new(
                 TYPE_ERROR,
                 &format!("`{type_key}` is not an enum type whose values Rust can register"),
-                "",
             ));
         }
         // The assert above sees only the Rust mirror, which may be opaque: a
@@ -142,7 +140,6 @@ impl<E: EnumRef> EnumDef<E> {
                     "`{type_key}` objects have fields beyond `ffi.Enum`, so Rust cannot \
                      register its values"
                 ),
-                "",
             ));
         }
         let _registering = lock_type_registration();
@@ -156,7 +153,6 @@ impl<E: EnumRef> EnumDef<E> {
             return Err(Error::new(
                 VALUE_ERROR,
                 &format!("Enum `{type_key}` already has a value named `{name}`"),
-                "",
             ));
         }
         let object = ObjectArc::into_raw(ObjectArc::new(EnumObj::new(index, name)));

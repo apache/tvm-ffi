@@ -75,7 +75,6 @@ impl TypeAttrColumn {
             Error::new(
                 crate::INTERNAL_ERROR,
                 &format!("type attribute column `{name}` was not created"),
-                "",
             )
         })
     }
@@ -307,7 +306,6 @@ impl FieldGetter {
             return Err(Error::new(
                 TYPE_ERROR,
                 &format!("Cannot find type info for type_index={type_index}"),
-                "",
             ));
         }
         let type_info = unsafe { TVMFFIGetTypeInfo(type_index) };
@@ -317,7 +315,6 @@ impl FieldGetter {
             Error::new(
                 TYPE_ERROR,
                 &format!("Cannot find reflected field `{field_name}` in type `{type_key}`"),
-                "",
             )
         })?;
         let field = unsafe { field.as_ref() };
@@ -327,7 +324,6 @@ impl FieldGetter {
             Error::new(
                 TYPE_ERROR,
                 &format!("Reflected field `{name}` has no getter"),
-                "",
             )
         })?;
         Ok(Self {
@@ -352,14 +348,10 @@ impl FieldGetter {
                 self.owner_type_depth,
             )
         } {
-            return Err(Error::new(
-                TYPE_ERROR,
-                &format!(
+            return Err(Error::new(TYPE_ERROR, &format!(
                     "Cannot read a field of type_index={} from object type_index={dynamic_type_index}",
                     self.owner_type_index
-                ),
-                "",
-            ));
+                )));
         }
 
         let field_address = unsafe {

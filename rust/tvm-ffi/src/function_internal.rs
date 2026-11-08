@@ -28,13 +28,6 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFIStringFromByteArray};
 //------------------------------------------------------------------------
 // PackedCallable
 //------------------------------------------------------------------------
-/// The error to raise for a panic caught at an FFI boundary, where unwinding
-/// into the caller would abort the process.
-#[doc(hidden)]
-pub fn panic_to_error(payload: Box<dyn std::any::Any + Send>) -> Error {
-    Error::from_panic(payload)
-}
-
 /// The arguments of a packed call from C.
 ///
 /// # Safety

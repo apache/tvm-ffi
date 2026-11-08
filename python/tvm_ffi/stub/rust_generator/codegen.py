@@ -494,7 +494,7 @@ class _ObjectRenderer:
         if spec.closed:
             message = f'&format!("{spec.name} has no value {{value}}")'
             rejected = _call_lines(
-                f"            _ => Err({error}::new(", [value_error, message, '""'], ")),"
+                f"            _ => Err({error}::new(", [value_error, message], ")),"
             )
             return [
                 *allow,
@@ -537,7 +537,7 @@ class _ObjectRenderer:
             f"    fn try_from(value: i64) -> {result}<Self> {{",
             f"        {spec.repr}::try_from(value).map(Self).map_err(|_| {{",
             f'            {error}::new({value_error}, &format!("{spec.name} value {{value}} does not fit '
-            f'{spec.repr}"), "")',
+            f'{spec.repr}"))',
             "        })",
             "    }",
             "}",

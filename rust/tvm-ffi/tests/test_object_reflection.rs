@@ -600,7 +600,7 @@ fn test_native_function() -> Result<()> {
     // A Rust closure as a native hook, whose error is the hook's.
     let x_of = |p: &PointObj| -> Result<i64> {
         match p.x {
-            0 => Err(Error::new(VALUE_ERROR, "zero", "")),
+            0 => Err(Error::new(VALUE_ERROR, "zero")),
             x => Ok(x),
         }
     };

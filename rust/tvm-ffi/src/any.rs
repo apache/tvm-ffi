@@ -587,7 +587,7 @@ impl<'a, T: AnyCompatible> TryFrom<AnyView<'a>> for TryFromTemp<T> {
                             T::get_mismatch_type_info(&value.data),
                             T::type_str()
                         );
-                        crate::error::Error::new(crate::error::TYPE_ERROR, &msg, "")
+                        crate::error::Error::new(crate::error::TYPE_ERROR, &msg)
                     })
                     .map(TryFromTemp::new)
             }
@@ -621,7 +621,7 @@ impl<T: AnyCompatible> TryFrom<Any> for TryFromTemp<T> {
                             T::get_mismatch_type_info(&value.data),
                             T::type_str()
                         );
-                        crate::error::Error::new(crate::error::TYPE_ERROR, &msg, "")
+                        crate::error::Error::new(crate::error::TYPE_ERROR, &msg)
                     })
                     .map(TryFromTemp::new)
             }
@@ -676,7 +676,7 @@ impl<T: AnyCompatible> ArgTryFromAnyView for T {
                         T::get_mismatch_type_info(&value.data),
                         T::type_str()
                     );
-                    crate::error::Error::new(crate::error::TYPE_ERROR, &msg, "")
+                    crate::error::Error::new(crate::error::TYPE_ERROR, &msg)
                 })
             }
         }

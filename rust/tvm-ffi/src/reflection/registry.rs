@@ -378,7 +378,6 @@ impl<N: ObjectCore> ObjectDef<N> {
             self.error = Some(Error::new(
                 VALUE_ERROR,
                 &format!("duplicate method `{name}` of `{}`", N::TYPE_KEY),
-                "",
             ));
             return self;
         }
@@ -417,7 +416,6 @@ impl<N: ObjectCore> ObjectDef<N> {
             self.error = Some(Error::new(
                 error.kind(),
                 &format!("registering method `{name}`: {}", error.message()),
-                "",
             ));
         }
         self
@@ -618,7 +616,6 @@ fn shallow_copy_any<N: ObjectCore + ShallowCopy>(object: &ObjectRef) -> Result<A
                 N::TYPE_KEY,
                 object_type_key(object)
             ),
-            "",
         ));
     };
     let copy = ObjectArc::new(node.shallow_copy());
@@ -666,7 +663,7 @@ unsafe extern "C" fn field_getter<F: AnyCompatible>(
         Ok(()) => 0,
         Err(_) => {
             let message = format!("panic while reading a field of type {}", F::type_str());
-            Error::set_raised(&Error::new(INTERNAL_ERROR, &message, ""));
+            Error::set_raised(&Error::new(INTERNAL_ERROR, &message));
             -1
         }
     }
@@ -697,7 +694,6 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
                     F::type_str(),
                     F::get_mismatch_type_info(&*value)
                 ),
-                "",
             )),
         }
     }));
@@ -707,7 +703,6 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
         Err(_) => Error::new(
             INTERNAL_ERROR,
             &format!("panic while writing a field of type {}", F::type_str()),
-            "",
         ),
     };
     Error::set_raised(&error);

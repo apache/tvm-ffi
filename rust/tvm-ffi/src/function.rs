@@ -122,7 +122,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> CallbackFunctionO
             (this.callback)(packed_args)
         })) {
             Ok(ret_value) => ret_value,
-            Err(payload) => Err(crate::function_internal::panic_to_error(payload)),
+            Err(payload) => Err(Error::from_panic(payload)),
         };
         match ret_value {
             Ok(value) => {

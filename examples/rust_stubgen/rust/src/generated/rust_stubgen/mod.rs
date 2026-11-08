@@ -64,7 +64,7 @@ impl TryFrom<i64> for PairKind {
     type Error = Error;
     fn try_from(value: i64) -> Result<Self> {
         i32::try_from(value).map(Self).map_err(|_| {
-            Error::new(VALUE_ERROR, &format!("PairKind value {value} does not fit i32"), "")
+            Error::new(VALUE_ERROR, &format!("PairKind value {value} does not fit i32"))
         })
     }
 }

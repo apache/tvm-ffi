@@ -1732,24 +1732,16 @@ static SHALLOW_COPY_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock:
 #[cold]
 #[inline(never)]
 fn missing_shallow_copy_error(type_index: i32, attribute: &str) -> Error {
-    Error::new(
-        TYPE_ERROR,
-        &format!(
+    Error::new(TYPE_ERROR, &format!(
             "type `{}` cannot use reflected structural mutation because it does not define `{attribute}`",
             crate::object::type_key_of_index(type_index)
-        ),
-        "",
-    )
+        ))
 }
 
 #[cold]
 #[inline(never)]
 fn invalid_shallow_copy_hook_error(attribute: &str) -> Error {
-    Error::new(
-        TYPE_ERROR,
-        &format!("{attribute} must be an ffi.Function"),
-        "",
-    )
+    Error::new(TYPE_ERROR, &format!("{attribute} must be an ffi.Function"))
 }
 
 #[cold]
@@ -1758,7 +1750,6 @@ fn invalid_shallow_copy_result_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "shallow copy callback must return a distinct object with the same type as its input",
-        "",
     )
 }
 
@@ -1768,7 +1759,6 @@ fn missing_field_setter_error(name: &str) -> Error {
     Error::new(
         TYPE_ERROR,
         &format!("cannot structurally mutate field `{name}` because it does not define a setter"),
-        "",
     )
 }
 
@@ -1786,7 +1776,6 @@ fn invalid_mutation_hook_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "__s_mutate__ must be an opaque function pointer or ffi.Function",
-        "",
     )
 }
 
@@ -1796,7 +1785,6 @@ fn var_remap_key_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "variable-remap keys must be object-backed values",
-        "",
     )
 }
 
