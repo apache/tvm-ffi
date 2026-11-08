@@ -21,7 +21,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, Data, DeriveInput, Fields, LitBool, LitInt, LitStr, Path, Token};
+use syn::{Data, DeriveInput, Fields, LitBool, LitInt, LitStr, Path, Token, parse_macro_input};
 
 use crate::object_macros::expand_object;
 use crate::utils::get_tvm_ffi_crate;

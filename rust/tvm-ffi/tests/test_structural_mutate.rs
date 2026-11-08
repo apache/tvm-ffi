@@ -18,6 +18,7 @@
  */
 
 use std::cell::{Cell, RefCell};
+use tvm_ffi::ObjectRefCore;
 use tvm_ffi::collections::map::MapObj;
 use tvm_ffi::extra::structural_mutate::IntoMutateResult;
 use tvm_ffi::extra::structural_mutate::{InplaceMode, StructuralMutatorView};
@@ -25,12 +26,11 @@ use tvm_ffi::extra::structural_visit::{DefRegionKind, StructuralVisitorView};
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::reflection::FieldGetter;
-use tvm_ffi::ObjectRefCore;
 use tvm_ffi::{
-    dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
-    Array, Dispatcher, Error, Function, IntoDispatcher, Map, MutationView, Object, ObjectArc,
-    Result, String as FfiString, TypeIndex, Unchanged, UnchangedOr, VisitInterrupt, WalkOrder,
-    WalkResult, RUNTIME_ERROR,
+    Any, AnyView, Array, Dispatcher, Error, Function, IntoDispatcher, Map, MutationView, Object,
+    ObjectArc, RUNTIME_ERROR, Result, String as FfiString, TypeIndex, Unchanged, UnchangedOr,
+    VisitInterrupt, WalkOrder, WalkResult, dispatch, structural_map, structural_mutate,
+    structural_visit, structural_walk,
 };
 
 /// The value when it is stored as a `bool`, not converted from an integer.
@@ -76,15 +76,21 @@ fn probe_remap(
     mutator: &mut StructuralMutatorView<'_, ManualIncrement>,
     key: Any,
 ) -> Result<UnchangedOr<Any>> {
-    assert!(mutator
-        .var_remap_get(dispatch, AnyView::from(&key))?
-        .is_none());
-    assert!(mutator
-        .var_remap_get(dispatch, AnyView::from(&1_i64))
-        .is_err());
-    assert!(mutator
-        .var_remap_set(dispatch, AnyView::from(&1_i64), &Any::new())
-        .is_err());
+    assert!(
+        mutator
+            .var_remap_get(dispatch, AnyView::from(&key))?
+            .is_none()
+    );
+    assert!(
+        mutator
+            .var_remap_get(dispatch, AnyView::from(&1_i64))
+            .is_err()
+    );
+    assert!(
+        mutator
+            .var_remap_set(dispatch, AnyView::from(&1_i64), &Any::new())
+            .is_err()
+    );
     let initial = mutator.def_region_kind();
     mutator.with_def_region_kind(DefRegionKind::Pattern, |mutator| {
         assert_eq!(mutator.def_region_kind(), DefRegionKind::Pattern);
@@ -1187,9 +1193,11 @@ fn callback_errors_preserve_message_and_add_object_context() {
     for error in errors {
         assert_eq!(error.message(), "callback failed");
         assert!(error.backtrace().contains("origin"));
-        assert!(error
-            .backtrace()
-            .contains("object `testing.TestObjectBase`"));
+        assert!(
+            error
+                .backtrace()
+                .contains("object `testing.TestObjectBase`")
+        );
         assert!(error.cause_chain().unwrap().same_as(&cause));
         let context = Any::from(error.extra_context().unwrap().clone());
         assert!(reflected_field::<ObjectRef>(&context, "prev_error_context").same_as(&payload));
@@ -1272,11 +1280,13 @@ fn map_errors_name_the_replaced_or_rebuilt_node() {
         .unwrap();
         let context = Any::from(error.extra_context().unwrap().clone());
         let records: Pattern = reflected_field(&context, "reverse_visit_pattern");
-        assert!(records
-            .get(0)
-            .unwrap()
-            .unwrap()
-            .same_as(&failed_node.unwrap()));
+        assert!(
+            records
+                .get(0)
+                .unwrap()
+                .unwrap()
+                .same_as(&failed_node.unwrap())
+        );
         assert_eq!(records.len(), 1);
         assert_eq!(root.get(0).unwrap(), 0);
     }
@@ -2449,10 +2459,12 @@ fn mutation_regions_retargeting_and_error_restore() {
                     assert_eq!(mutator.def_region_kind(), Pattern);
                     Err(Error::new(RUNTIME_ERROR, "handler region error"))
                 });
-                assert!(error
-                    .unwrap_err()
-                    .message()
-                    .contains("handler region error"));
+                assert!(
+                    error
+                        .unwrap_err()
+                        .message()
+                        .contains("handler region error")
+                );
                 assert_eq!(mutator.def_region_kind(), Use);
                 let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     mutator.with_def_region_kind(Pattern, |mutator| -> Result<()> {
@@ -2523,7 +2535,7 @@ fn mutation_regions_retargeting_and_error_restore() {
                 .unwrap();
             structural_map(graph, &mut mapper, order).unwrap();
             let expected = vec![(1, Simple), (2, Pattern), (3, Use)];
-            assert_eq!(mapper.0 .0, expected);
+            assert_eq!(mapper.0.0, expected);
         }
         let mut scoped = Regions(vec![], requested);
         let output = structural_mutate(true, &mut scoped).unwrap();

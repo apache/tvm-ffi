@@ -19,7 +19,7 @@
 
 use super::structural_visit::DefRegionKind;
 use crate::any::Any;
-use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
+use crate::error::{Error, RUNTIME_ERROR, Result, TYPE_ERROR};
 use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashDefPattern, kTVMFFIFieldFlagBitMaskSEqHashDefSimple,
     kTVMFFIFieldFlagBitMaskSEqHashIgnore, kTVMFFIFieldFlagBitSetterIsFunctionObj,
@@ -76,7 +76,7 @@ pub(super) fn with_structural_field_error_context(
 #[cold]
 #[inline(never)]
 pub(super) unsafe fn structural_error_from_raw(raw: TVMFFIAny) -> Error {
-    let value = Any::from_raw_ffi_any(raw);
+    let value = unsafe { Any::from_raw_ffi_any(raw) };
     match Error::try_from(value) {
         Ok(error) | Err(error) => error,
     }
@@ -145,10 +145,10 @@ pub(crate) fn reject_error_value(value: Any) -> Result<Any> {
 #[inline(always)]
 pub(crate) unsafe fn raw_ffi_any_into_result(raw: TVMFFIAny) -> Result<Any> {
     if raw.type_index != TVMFFITypeIndex::kTVMFFIError as i32 {
-        return Ok(Any::from_raw_ffi_any(raw));
+        return Ok(unsafe { Any::from_raw_ffi_any(raw) });
     }
     core::hint::cold_path();
-    Err(structural_error_from_raw(raw))
+    Err(unsafe { structural_error_from_raw(raw) })
 }
 
 pub(super) const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
@@ -174,11 +174,11 @@ pub(super) fn registered_type_index(key: &str) -> i32 {
 /// `info` is a registered type-info record.
 #[inline(always)]
 pub(super) unsafe fn seq_hash_kind(info: *const TVMFFITypeInfo) -> i32 {
-    let metadata = (*info).metadata;
+    let metadata = unsafe { (*info).metadata };
     if metadata.is_null() {
         TVMFFISEqHashKind::kTVMFFISEqHashKindUnsupported as i32
     } else {
-        (*metadata).structural_eq_hash_kind
+        unsafe { (*metadata).structural_eq_hash_kind }
     }
 }
 
@@ -226,13 +226,13 @@ pub(super) unsafe fn for_each_field_info<B>(
 ) -> Option<B> {
     // Ancestor slot 0 is the root Object. C++ starts at slot 1, walks toward
     // the immediate parent, then visits the concrete type's own fields.
-    for depth in 1..(*info).type_depth {
-        let ancestor = *(*info).type_acenstors.offset(depth as isize);
-        if let Some(value) = visit_field_level(ancestor, callback) {
+    for depth in unsafe { 1..(*info).type_depth } {
+        let ancestor = unsafe { *(*info).type_acenstors.offset(depth as isize) };
+        if let Some(value) = unsafe { visit_field_level(ancestor, callback) } {
             return Some(value);
         }
     }
-    visit_field_level(info, callback)
+    unsafe { visit_field_level(info, callback) }
 }
 
 unsafe fn visit_field_level<B>(
@@ -242,11 +242,12 @@ unsafe fn visit_field_level<B>(
     if info.is_null() {
         return None;
     }
-    let fields =
-        crate::util::slice_from_nullable_raw_parts((*info).fields, (*info).num_fields as usize);
+    let fields = unsafe {
+        crate::util::slice_from_nullable_raw_parts((*info).fields, (*info).num_fields as usize)
+    };
     for field in fields {
         // C reflection tables are immortal once registered.
-        let field: &'static TVMFFIFieldInfo = &*(field as *const TVMFFIFieldInfo);
+        let field: &'static TVMFFIFieldInfo = unsafe { &*(field as *const TVMFFIFieldInfo) };
         if let ControlFlow::Break(value) = callback(field) {
             return Some(value);
         }

@@ -20,8 +20,8 @@
 
 use crate::error::Result;
 use crate::type_traits::AnyCompatible;
-use tvm_ffi_sys::dlpack::{DLDataType, DLDataTypeCode};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+use tvm_ffi_sys::dlpack::{DLDataType, DLDataTypeCode};
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFIDataTypeFromString, TVMFFIDataTypeToString};
 
 /// Name conversions of a `DLDataType`.
@@ -108,17 +108,17 @@ unsafe impl AnyCompatible for DLDataType {
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        data.data_union.v_dtype
+        unsafe { data.data_union.v_dtype }
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        data.data_union.v_dtype
+        unsafe { data.data_union.v_dtype }
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFIDataType as i32 {
-            Ok(data.data_union.v_dtype)
-        } else if let Ok(string) = crate::string::String::try_cast_from_any_view(data) {
+            Ok(unsafe { data.data_union.v_dtype })
+        } else if let Ok(string) = unsafe { crate::string::String::try_cast_from_any_view(data) } {
             // A data type also converts from its name, such as "float32".
             DLDataType::try_from_str(string.as_str()).map_err(|_| ())
         } else {

@@ -19,9 +19,9 @@
 
 //! Access paths, which locate a value nested in another.
 
+use crate::Any;
 use crate::derive::{Object, ObjectRef};
 use crate::object::{Object, ObjectArc, ObjectRef};
-use crate::Any;
 
 /// What an [`AccessStep`] accesses: an attribute, an array item or a map
 /// item, or one of those that is missing.

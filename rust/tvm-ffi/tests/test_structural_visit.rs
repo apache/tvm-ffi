@@ -18,14 +18,14 @@
  */
 
 use std::cell::{Cell, RefCell};
+use tvm_ffi::ObjectRefCore;
 use tvm_ffi::extra::structural_visit::{DefRegionKind, StructuralVisitorView};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::reflection::{FieldGetter, TypeAttrColumn};
-use tvm_ffi::ObjectRefCore;
 use tvm_ffi::{
-    dispatch, structural_visit, structural_walk, Any, AnyView, Array, DLDataType, DLDataTypeCode,
-    Dispatcher, Error, Function, Map, Object, Result, String as FfiString, TypeIndex,
-    VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
+    Any, AnyView, Array, DLDataType, DLDataTypeCode, Dispatcher, Error, Function, Map, Object,
+    RUNTIME_ERROR, Result, String as FfiString, TypeIndex, VisitInterrupt, WalkOrder, WalkResult,
+    dispatch, structural_visit, structural_walk,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -178,10 +178,12 @@ fn default_descent_retargets_without_dispatching_the_container() {
         ) -> Result<Option<VisitInterrupt>> {
             let kind = visitor.def_region_kind();
             if value.downcast_ref::<i64>().copied() == Some(-1) {
-                assert!(visitor
-                    .with_def_region_kind(DefRegionKind::Pattern, |visitor| visitor
-                        .default_visit(self, &Any::new()))?
-                    .is_none());
+                assert!(
+                    visitor
+                        .with_def_region_kind(DefRegionKind::Pattern, |visitor| visitor
+                            .default_visit(self, &Any::new()))?
+                        .is_none()
+                );
                 let target = self.1.as_ref().unwrap().clone();
                 let result = visitor.with_def_region_kind(DefRegionKind::Pattern, |visitor| {
                     visitor.default_visit(self, &target)
@@ -280,12 +282,14 @@ fn regions_compose_with_field_flags_and_function_hooks() {
     for with_hook in [false, true] {
         let root = visit_region_graph(with_hook);
         if with_hook {
-            assert!(Function::try_from(
-                TypeAttrColumn::lookup("__s_visit__")
-                    .and_then(|column| column.get(root.type_index()))
-                    .unwrap()
-            )
-            .is_ok());
+            assert!(
+                Function::try_from(
+                    TypeAttrColumn::lookup("__s_visit__")
+                        .and_then(|column| column.get(root.type_index()))
+                        .unwrap()
+                )
+                .is_ok()
+            );
         }
         for region in [Use, Simple, Pattern] {
             let ordinary = if with_hook && region == Use {
@@ -311,16 +315,18 @@ fn regions_compose_with_field_flags_and_function_hooks() {
             if region == Use {
                 for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
                     let mut seen = vec![];
-                    assert!(structural_walk(
-                        &root,
-                        |value: i64, kind: DefRegionKind| {
-                            seen.push((value, kind));
-                            WalkResult::Advance
-                        },
-                        order
-                    )
-                    .unwrap()
-                    .is_none());
+                    assert!(
+                        structural_walk(
+                            &root,
+                            |value: i64, kind: DefRegionKind| {
+                                seen.push((value, kind));
+                                WalkResult::Advance
+                            },
+                            order
+                        )
+                        .unwrap()
+                        .is_none()
+                    );
                     assert_eq!(seen, expected);
                 }
             }
@@ -381,16 +387,18 @@ fn reflected_pattern_precedes_default_descent() {
     }
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let mut seen = vec![];
-        assert!(structural_walk(
-            &root,
-            |value: i64, kind: DefRegionKind| {
-                seen.push((value, kind));
-                WalkResult::Advance
-            },
-            order
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            structural_walk(
+                &root,
+                |value: i64, kind: DefRegionKind| {
+                    seen.push((value, kind));
+                    WalkResult::Advance
+                },
+                order
+            )
+            .unwrap()
+            .is_none()
+        );
         assert_eq!(seen, vec![(1, Simple), (2, Pattern), (3, Use)]);
     }
 }
@@ -426,33 +434,39 @@ fn public_reflection_access_uses_registered_field_and_type_attr() {
     assert!(FieldGetter::new(type_index, "missing").is_err());
 
     // ObjectDef registers this Function-valued attribute for copyable C++ types.
-    assert!(Function::try_from(
-        TypeAttrColumn::lookup("__ffi_shallow_copy__")
+    assert!(
+        Function::try_from(
+            TypeAttrColumn::lookup("__ffi_shallow_copy__")
+                .and_then(|column| column.get(type_index))
+                .unwrap()
+        )
+        .is_ok()
+    );
+    assert!(
+        TypeAttrColumn::lookup("missing")
             .and_then(|column| column.get(type_index))
-            .unwrap()
-    )
-    .is_ok());
-    assert!(TypeAttrColumn::lookup("missing")
-        .and_then(|column| column.get(type_index))
-        .is_none());
+            .is_none()
+    );
 }
 
 #[test]
 fn plain_walk_uses_registered_array_hook() {
     let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut integers = 0;
-    assert!(structural_walk(
-        &root,
-        |value: AnyView<'_>| {
-            if value.downcast_ref::<i64>().copied().is_some() {
-                integers += 1;
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |value: AnyView<'_>| {
+                if value.downcast_ref::<i64>().copied().is_some() {
+                    integers += 1;
+                }
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(integers, 3);
 }
 
@@ -463,97 +477,109 @@ fn plain_walk_visits_map_values_without_visiting_keys() {
         .collect();
     let mut integers = 0;
     let mut strings = 0;
-    assert!(structural_walk(
-        &root,
-        |value: AnyView<'_>| {
-            if value.downcast_ref::<i64>().copied().is_some() {
-                integers += 1;
-            } else if value.downcast_ref::<FfiString>().cloned().is_some() {
-                strings += 1;
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |value: AnyView<'_>| {
+                if value.downcast_ref::<i64>().copied().is_some() {
+                    integers += 1;
+                } else if value.downcast_ref::<FfiString>().cloned().is_some() {
+                    strings += 1;
+                }
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(integers, 2);
     assert_eq!(strings, 0);
 }
 
 #[test]
 fn primitive_values_are_leaves_in_pre_and_post_order() {
-    assert!(TypeAttrColumn::lookup("__s_visit__")
-        .and_then(|column| column.get(TypeIndex::kTVMFFIDataType as i32))
-        .is_none());
+    assert!(
+        TypeAttrColumn::lookup("__s_visit__")
+            .and_then(|column| column.get(TypeIndex::kTVMFFIDataType as i32))
+            .is_none()
+    );
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
 
     let mut pre = Vec::new();
-    assert!(structural_walk(
-        &dtype,
-        |value: AnyView<'_>| {
-            if value.downcast_ref::<DLDataType>().copied().is_some() {
-                pre.push("dtype");
-            } else if value.downcast_ref::<i64>().copied().is_some() {
-                pre.push("child");
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &dtype,
+            |value: AnyView<'_>| {
+                if value.downcast_ref::<DLDataType>().copied().is_some() {
+                    pre.push("dtype");
+                } else if value.downcast_ref::<i64>().copied().is_some() {
+                    pre.push("child");
+                }
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(pre, ["dtype"]);
 
     let mut skipped = Vec::new();
-    assert!(structural_walk(
-        &dtype,
-        |value: AnyView<'_>| {
-            if value.downcast_ref::<DLDataType>().copied().is_some() {
-                skipped.push("dtype");
-                WalkResult::Skip
-            } else {
-                skipped.push("child");
-                WalkResult::Advance
-            }
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &dtype,
+            |value: AnyView<'_>| {
+                if value.downcast_ref::<DLDataType>().copied().is_some() {
+                    skipped.push("dtype");
+                    WalkResult::Skip
+                } else {
+                    skipped.push("child");
+                    WalkResult::Advance
+                }
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(skipped, ["dtype"]);
 
     let mut post = Vec::new();
-    assert!(structural_walk(
-        &dtype,
-        |value: AnyView<'_>| {
-            if value.downcast_ref::<DLDataType>().copied().is_some() {
-                post.push("dtype");
-            } else if value.downcast_ref::<i64>().copied().is_some() {
-                post.push("child");
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PostOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &dtype,
+            |value: AnyView<'_>| {
+                if value.downcast_ref::<DLDataType>().copied().is_some() {
+                    post.push("dtype");
+                } else if value.downcast_ref::<i64>().copied().is_some() {
+                    post.push("child");
+                }
+                WalkResult::Advance
+            },
+            WalkOrder::PostOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(post, ["dtype"]);
 }
 
 #[test]
 fn primitive_fast_path_preserves_none_interrupt_and_error() {
     let mut none_calls = 0;
-    assert!(structural_walk(
-        &Any::new(),
-        |_value: AnyView<'_>| {
-            none_calls += 1;
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &Any::new(),
+            |_value: AnyView<'_>| {
+                none_calls += 1;
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(none_calls, 0);
 
     let interrupt = structural_walk(
@@ -584,20 +610,22 @@ fn registered_map_hook_visits_all_values_without_visiting_keys() {
         .collect();
     let mut sum = 0;
     let mut strings = 0;
-    assert!(structural_walk(
-        &root,
-        |value: AnyView<'_>| {
-            if let Some(integer) = value.downcast_ref::<i64>().copied() {
-                sum += integer;
-            } else if value.downcast_ref::<FfiString>().cloned().is_some() {
-                strings += 1;
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |value: AnyView<'_>| {
+                if let Some(integer) = value.downcast_ref::<i64>().copied() {
+                    sum += integer;
+                } else if value.downcast_ref::<FfiString>().cloned().is_some() {
+                    strings += 1;
+                }
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(sum, (0..9).sum::<i64>());
     assert_eq!(strings, 0);
 }
@@ -878,16 +906,20 @@ impl MissingWholeImpl {
 fn generated_dispatch_supports_pod_and_ordered_catch_all() {
     let root = Array::from_vec(vec![1i64, 2]);
     let mut probe = GenericDispatchProbe::default();
-    assert!(structural_walk(&root, &mut probe, WalkOrder::PreOrder)
-        .unwrap()
-        .is_none());
+    assert!(
+        structural_walk(&root, &mut probe, WalkOrder::PreOrder)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(probe.integers, vec![1, 2]);
     assert_eq!(probe.objects, 1);
 
     let floats = Array::from_vec(vec![1.0f64, 2.0]);
-    assert!(structural_walk(&floats, &mut probe, WalkOrder::PreOrder)
-        .unwrap()
-        .is_none());
+    assert!(
+        structural_walk(&floats, &mut probe, WalkOrder::PreOrder)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(probe.objects, 2);
     assert_eq!(probe.catch_all, 2);
 
@@ -996,9 +1028,11 @@ impl OrderProbe {
 fn stateful_structural_walk_supports_post_order() {
     let root = Array::from_vec(vec![1i64, 2]);
     let mut probe = OrderProbe::default();
-    assert!(structural_walk(&root, &mut probe, WalkOrder::PostOrder)
-        .unwrap()
-        .is_none());
+    assert!(
+        structural_walk(&root, &mut probe, WalkOrder::PostOrder)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(probe.events, vec!["int:1", "int:2", "array"]);
 }
 
@@ -1010,31 +1044,33 @@ fn nested_walk_restores_the_outer_active_visitor() {
     let mut outer_values = Vec::new();
     let mut inner_values = Vec::new();
 
-    assert!(structural_walk(
-        &outer,
-        |value: AnyView<'_>| -> Result<WalkResult> {
-            if let Some(value) = value.downcast_ref::<i64>().copied() {
-                outer_values.push(value);
-            }
-            if !entered_inner {
-                entered_inner = true;
-                structural_walk(
-                    &inner,
-                    |value: AnyView<'_>| {
-                        if let Some(value) = value.downcast_ref::<i64>().copied() {
-                            inner_values.push(value);
-                        }
-                        WalkResult::Advance
-                    },
-                    WalkOrder::PreOrder,
-                )?;
-            }
-            Ok(WalkResult::Advance)
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &outer,
+            |value: AnyView<'_>| -> Result<WalkResult> {
+                if let Some(value) = value.downcast_ref::<i64>().copied() {
+                    outer_values.push(value);
+                }
+                if !entered_inner {
+                    entered_inner = true;
+                    structural_walk(
+                        &inner,
+                        |value: AnyView<'_>| {
+                            if let Some(value) = value.downcast_ref::<i64>().copied() {
+                                inner_values.push(value);
+                            }
+                            WalkResult::Advance
+                        },
+                        WalkOrder::PreOrder,
+                    )?;
+                }
+                Ok(WalkResult::Advance)
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(outer_values, vec![10, 20]);
     assert_eq!(inner_values, vec![1, 2]);
 }
@@ -1176,18 +1212,20 @@ fn closure_walk_receives_def_region_kind() {
     //          [&](const TVarObj* var, TVMFFIDefRegionKind kind) { ... })
     let root = Array::from_vec(vec![1i64, 2]);
     let mut kinds = Vec::new();
-    assert!(structural_walk(
-        &root,
-        |value: AnyView<'_>, kind: DefRegionKind| {
-            if value.downcast_ref::<i64>().copied().is_some() {
-                kinds.push(kind);
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |value: AnyView<'_>, kind: DefRegionKind| {
+                if value.downcast_ref::<i64>().copied().is_some() {
+                    kinds.push(kind);
+                }
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(kinds, vec![DefRegionKind::None; 2]);
 }
 
@@ -1195,33 +1233,37 @@ fn closure_walk_receives_def_region_kind() {
 fn closure_walk_supports_post_order_and_skip() {
     let root = Array::from_vec(vec![1i64, 2]);
     let mut order_probe = Vec::new();
-    assert!(structural_walk(
-        &root,
-        |value: AnyView<'_>| {
-            order_probe.push(value.downcast_ref::<i64>().copied());
-            WalkResult::Advance
-        },
-        WalkOrder::PostOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |value: AnyView<'_>| {
+                order_probe.push(value.downcast_ref::<i64>().copied());
+                WalkResult::Advance
+            },
+            WalkOrder::PostOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(order_probe, vec![Some(1), Some(2), None]);
 
     let mut visited = 0;
-    assert!(structural_walk(
-        &root,
-        |value: AnyView<'_>| {
-            visited += 1;
-            if value.downcast_ref::<i64>().copied().is_none() {
-                WalkResult::Skip
-            } else {
-                WalkResult::Advance
-            }
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |value: AnyView<'_>| {
+                visited += 1;
+                if value.downcast_ref::<i64>().copied().is_none() {
+                    WalkResult::Skip
+                } else {
+                    WalkResult::Advance
+                }
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(visited, 1);
 }
 
@@ -1237,19 +1279,21 @@ fn chain_accepts_owned_object_ref_links() {
         Array::from_vec(vec![2i64, 3]),
     ]);
     let mut lengths = Vec::new();
-    assert!(structural_walk(
-        &root,
-        (
-            |array: Array<i64>| {
-                lengths.push(array.len());
-                WalkResult::Advance
-            },
-            |_value: i64| WalkResult::Advance,
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (
+                |array: Array<i64>| {
+                    lengths.push(array.len());
+                    WalkResult::Advance
+                },
+                |_value: i64| WalkResult::Advance,
+            ),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     // The outer Array<Array<i64>> fails the strict element check and falls
     // through the chain; only the inner arrays match the typed link.
     assert_eq!(lengths, vec![1, 2]);
@@ -1260,23 +1304,25 @@ fn chain_links_may_mix_def_region_arity() {
     let root = Array::from_vec(vec![1i64, 2]);
     let mut kinds = Vec::new();
     let mut objects = 0;
-    assert!(structural_walk(
-        &root,
-        (
-            |_value: i64, kind: DefRegionKind| {
-                kinds.push(kind);
-                WalkResult::Advance
-            },
-            |_value: AnyView<'_>, kind: DefRegionKind| {
-                assert_eq!(kind, DefRegionKind::None);
-                objects += 1;
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (
+                |_value: i64, kind: DefRegionKind| {
+                    kinds.push(kind);
+                    WalkResult::Advance
+                },
+                |_value: AnyView<'_>, kind: DefRegionKind| {
+                    assert_eq!(kind, DefRegionKind::None);
+                    objects += 1;
+                    WalkResult::Advance
+                },
+            ),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(kinds, vec![DefRegionKind::None; 2]);
     assert_eq!(objects, 1);
 }
@@ -1289,22 +1335,24 @@ fn chain_links_can_skip_children() {
     ]);
     let mut arrays = 0;
     let mut integers = 0;
-    assert!(structural_walk(
-        &root,
-        (
-            |_array: Array<i64>| {
-                arrays += 1;
-                WalkResult::Skip
-            },
-            |_value: i64| {
-                integers += 1;
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (
+                |_array: Array<i64>| {
+                    arrays += 1;
+                    WalkResult::Skip
+                },
+                |_value: i64| {
+                    integers += 1;
+                    WalkResult::Advance
+                },
+            ),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(arrays, 2);
     assert_eq!(integers, 0); // both inner arrays were skipped
 }
@@ -1331,22 +1379,24 @@ fn chain_link_errors_include_native_visit_path() {
 fn chain_supports_post_order() {
     let root = Array::from_vec(vec![1i64, 2]);
     let events = std::cell::RefCell::new(Vec::new());
-    assert!(structural_walk(
-        &root,
-        (
-            |value: i64| {
-                events.borrow_mut().push(format!("int:{value}"));
-                WalkResult::Advance
-            },
-            |_object: &Object| {
-                events.borrow_mut().push("array".to_string());
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PostOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (
+                |value: i64| {
+                    events.borrow_mut().push(format!("int:{value}"));
+                    WalkResult::Advance
+                },
+                |_object: &Object| {
+                    events.borrow_mut().push("array".to_string());
+                    WalkResult::Advance
+                },
+            ),
+            WalkOrder::PostOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(events.into_inner(), vec!["int:1", "int:2", "array"]);
 }
 
@@ -1368,16 +1418,18 @@ fn chain_splices_dispatch_walkers_between_closures() {
     let root = Array::from_vec(vec![1i64, 2]);
     let mut counter = ObjectCounter::default();
     let mut integers = 0;
-    assert!(structural_walk(
-        &root,
-        (&mut counter, |_value: i64| {
-            integers += 1;
-            WalkResult::Advance
-        },),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (&mut counter, |_value: i64| {
+                integers += 1;
+                WalkResult::Advance
+            },),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(counter.objects, 1);
     assert_eq!(integers, 2);
 }
@@ -1388,35 +1440,37 @@ fn chain_supports_full_arity() {
     let mut integers = Vec::new();
     let mut objects = 0;
     let mut others = 0;
-    assert!(structural_walk(
-        &root,
-        (
-            |_value: f64| WalkResult::Advance,
-            |_value: bool| WalkResult::Advance,
-            |_value: tvm_ffi::String| WalkResult::Advance,
-            |_value: Array<f64>| WalkResult::Advance,
-            |_value: f32| WalkResult::Advance,
-            |_value: tvm_ffi::DLDevice| WalkResult::Advance,
-            |_value: Array<bool>| WalkResult::Advance,
-            |_value: Array<tvm_ffi::String>| WalkResult::Advance,
-            |_value: Map<FfiString, i64>, _kind: DefRegionKind| WalkResult::Advance,
-            |value: i64| {
-                integers.push(value);
-                WalkResult::Advance
-            },
-            |_object: &Object, _kind: DefRegionKind| {
-                objects += 1;
-                WalkResult::Advance
-            },
-            |_value: AnyView<'_>, _kind: DefRegionKind| {
-                others += 1;
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (
+                |_value: f64| WalkResult::Advance,
+                |_value: bool| WalkResult::Advance,
+                |_value: tvm_ffi::String| WalkResult::Advance,
+                |_value: Array<f64>| WalkResult::Advance,
+                |_value: f32| WalkResult::Advance,
+                |_value: tvm_ffi::DLDevice| WalkResult::Advance,
+                |_value: Array<bool>| WalkResult::Advance,
+                |_value: Array<tvm_ffi::String>| WalkResult::Advance,
+                |_value: Map<FfiString, i64>, _kind: DefRegionKind| WalkResult::Advance,
+                |value: i64| {
+                    integers.push(value);
+                    WalkResult::Advance
+                },
+                |_object: &Object, _kind: DefRegionKind| {
+                    objects += 1;
+                    WalkResult::Advance
+                },
+                |_value: AnyView<'_>, _kind: DefRegionKind| {
+                    others += 1;
+                    WalkResult::Advance
+                },
+            ),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(integers, vec![1, 2, 3]);
     assert_eq!(objects, 1); // the array itself; integers matched earlier
     assert_eq!(others, 0); // every value matched an earlier link
@@ -1429,27 +1483,31 @@ fn typed_lambda_walks_bare_and_as_single_link_tuple() {
     // chain impls instead and must agree.
     let root = Array::from_vec(vec![1i64, 2, 3]);
     let mut bare = 0;
-    assert!(structural_walk(
-        &root,
-        |value: i64| {
-            bare += value;
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |value: i64| {
+                bare += value;
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     let mut tupled = 0;
-    assert!(structural_walk(
-        &root,
-        (|value: i64| {
-            tupled += value;
-            WalkResult::Advance
-        },),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (|value: i64| {
+                tupled += value;
+                WalkResult::Advance
+            },),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!((bare, tupled), (6, 6));
 }
 
@@ -1457,17 +1515,19 @@ fn typed_lambda_walks_bare_and_as_single_link_tuple() {
 fn bare_node_lambda_takes_def_region_kind() {
     let root = Array::from_vec(vec![1i64, 2]);
     let mut objects = 0;
-    assert!(structural_walk(
-        &root,
-        |_object: &Object, kind: DefRegionKind| {
-            assert_eq!(kind, DefRegionKind::None);
-            objects += 1;
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            |_object: &Object, kind: DefRegionKind| {
+                assert_eq!(kind, DefRegionKind::None);
+                objects += 1;
+                WalkResult::Advance
+            },
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(objects, 1);
 }
 
@@ -1536,26 +1596,28 @@ fn reflected_fields_reach_typed_handlers() {
     let mut integers = Vec::new();
     let mut floats = Vec::new();
     let mut strings = Vec::new();
-    assert!(structural_walk(
-        &root,
-        (
-            |value: i64, kind: DefRegionKind| {
-                integers.push((value, kind));
-                WalkResult::Advance
-            },
-            |value: f64| {
-                floats.push(value);
-                WalkResult::Advance
-            },
-            |value: FfiString| {
-                strings.push(value);
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (
+                |value: i64, kind: DefRegionKind| {
+                    integers.push((value, kind));
+                    WalkResult::Advance
+                },
+                |value: f64| {
+                    floats.push(value);
+                    WalkResult::Advance
+                },
+                |value: FfiString| {
+                    strings.push(value);
+                    WalkResult::Advance
+                },
+            ),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(integers, vec![(1, DefRegionKind::None)]);
     assert_eq!(floats, vec![2.5]);
     assert_eq!(strings.len(), 1);
@@ -1568,45 +1630,47 @@ fn nested_tuple_chain_exceeds_flat_arity() {
     let mut integers = Vec::new();
     let mut objects = 0;
     let mut others = 0;
-    assert!(structural_walk(
-        &root,
-        (
+    assert!(
+        structural_walk(
+            &root,
             (
-                |_value: f64| WalkResult::Advance,
-                |_value: bool| WalkResult::Advance,
-                |_value: tvm_ffi::String| WalkResult::Advance,
-                |_value: Array<f64>| WalkResult::Advance,
-                |_value: f32| WalkResult::Advance,
-                |_value: tvm_ffi::DLDevice| WalkResult::Advance,
-                |_value: Array<bool>| WalkResult::Advance,
-                |_value: Array<tvm_ffi::String>| WalkResult::Advance,
-                |_value: Map<FfiString, i64>| WalkResult::Advance,
-                |_value: Map<i64, i64>, _kind: DefRegionKind| WalkResult::Advance,
-                |_value: Array<Array<i64>>| WalkResult::Advance,
-                |_value: tvm_ffi::Function| WalkResult::Advance,
-            ),
-            (
-                |value: i64| {
-                    integers.push(value);
-                    WalkResult::Advance
-                },
                 (
-                    |_object: &Object, _kind: DefRegionKind| {
-                        objects += 1;
+                    |_value: f64| WalkResult::Advance,
+                    |_value: bool| WalkResult::Advance,
+                    |_value: tvm_ffi::String| WalkResult::Advance,
+                    |_value: Array<f64>| WalkResult::Advance,
+                    |_value: f32| WalkResult::Advance,
+                    |_value: tvm_ffi::DLDevice| WalkResult::Advance,
+                    |_value: Array<bool>| WalkResult::Advance,
+                    |_value: Array<tvm_ffi::String>| WalkResult::Advance,
+                    |_value: Map<FfiString, i64>| WalkResult::Advance,
+                    |_value: Map<i64, i64>, _kind: DefRegionKind| WalkResult::Advance,
+                    |_value: Array<Array<i64>>| WalkResult::Advance,
+                    |_value: tvm_ffi::Function| WalkResult::Advance,
+                ),
+                (
+                    |value: i64| {
+                        integers.push(value);
                         WalkResult::Advance
                     },
-                    (|_value: AnyView<'_>, _kind: DefRegionKind| {
-                        others += 1;
-                        WalkResult::Advance
-                    },),
+                    (
+                        |_object: &Object, _kind: DefRegionKind| {
+                            objects += 1;
+                            WalkResult::Advance
+                        },
+                        (|_value: AnyView<'_>, _kind: DefRegionKind| {
+                            others += 1;
+                            WalkResult::Advance
+                        },),
+                    ),
+                    |_value: AnyView<'_>| WalkResult::Advance,
                 ),
-                |_value: AnyView<'_>| WalkResult::Advance,
             ),
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(integers, vec![1, 2, 3]);
     assert_eq!(objects, 1);
     assert_eq!(others, 0);
@@ -1617,22 +1681,24 @@ fn nested_tuple_first_match_order_is_flattened() {
     let root = Array::from_vec(vec![1i64, 2]);
     let mut first = 0;
     let mut second = 0;
-    assert!(structural_walk(
-        &root,
-        (
-            (|_value: AnyView<'_>| {
-                first += 1;
-                WalkResult::Advance
-            },),
-            |_value: i64| {
-                second += 1;
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_walk(
+            &root,
+            (
+                (|_value: AnyView<'_>| {
+                    first += 1;
+                    WalkResult::Advance
+                },),
+                |_value: i64| {
+                    second += 1;
+                    WalkResult::Advance
+                },
+            ),
+            WalkOrder::PreOrder,
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(first, 3);
     assert_eq!(second, 0);
 }
@@ -1676,15 +1742,19 @@ fn callback_visit_defaults_only_when_no_link_matches() {
     }
     let root = Array::from_vec(vec![1i64, 2]);
     let integers = Cell::new(0);
-    assert!(structural_visit(&root, Integers(&integers),)
-        .unwrap()
-        .is_none());
+    assert!(
+        structural_visit(&root, Integers(&integers),)
+            .unwrap()
+            .is_none()
+    );
 
     assert_eq!(integers.get(), 3);
     let integers = Cell::new(0);
-    assert!(structural_visit(&root, SkipArray(&integers),)
-        .unwrap()
-        .is_none());
+    assert!(
+        structural_visit(&root, SkipArray(&integers),)
+            .unwrap()
+            .is_none()
+    );
 
     assert_eq!(integers.get(), 0);
 }
@@ -1707,10 +1777,12 @@ impl StatefulVisitStats {
         visitor: &mut StructuralVisitorView<'_, Self>,
     ) -> Result<Option<VisitInterrupt>> {
         self.arrays += 1;
-        assert!(AnyView::from(&array)
-            .downcast_ref::<Array<i64>>()
-            .cloned()
-            .is_some());
+        assert!(
+            AnyView::from(&array)
+                .downcast_ref::<Array<i64>>()
+                .cloned()
+                .is_some()
+        );
         visitor.default_visit(self, &array)
     }
     fn visit_integer(&mut self, value: i64) -> Result<Option<VisitInterrupt>> {
@@ -2039,17 +2111,19 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
     let entered_inner = Cell::new(false);
     let outer_values = RefCell::new(Vec::new());
     let inner_values = RefCell::new(Vec::new());
-    assert!(structural_visit(
-        &outer,
-        Outer {
-            inner: &inner,
-            entered: &entered_inner,
-            outer_values: &outer_values,
-            inner_values: &inner_values,
-        }
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        structural_visit(
+            &outer,
+            Outer {
+                inner: &inner,
+                entered: &entered_inner,
+                outer_values: &outer_values,
+                inner_values: &inner_values,
+            }
+        )
+        .unwrap()
+        .is_none()
+    );
     assert_eq!(*outer_values.borrow(), vec![10, 20]);
     assert_eq!(*inner_values.borrow(), vec![1, 2]);
 }

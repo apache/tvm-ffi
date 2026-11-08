@@ -56,7 +56,7 @@ pub struct StructuralOptions {
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, structural_equal, Array, Object, ObjectArc};
 ///

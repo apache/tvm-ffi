@@ -18,8 +18,8 @@
  */
 use tvm_ffi::reflection::AccessKind;
 use tvm_ffi::{
-    get_first_structural_mismatch, structural_equal, structural_equal_with, structural_hash, Array,
-    StructuralOptions,
+    Array, StructuralOptions, get_first_structural_mismatch, structural_equal,
+    structural_equal_with, structural_hash,
 };
 
 #[test]

@@ -115,8 +115,8 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> CallbackFunctionO
         num_args: i32,
         result: *mut TVMFFIAny,
     ) -> i32 {
-        let this = &*(handle as *mut Self);
-        let packed_args = crate::function_internal::packed_args(args, num_args);
+        let this = unsafe { &*(handle as *mut Self) };
+        let packed_args = unsafe { crate::function_internal::packed_args(args, num_args) };
         let ret_value = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             (this.callback)(packed_args)
         })) {
@@ -125,7 +125,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> CallbackFunctionO
         };
         match ret_value {
             Ok(value) => {
-                *result = Any::into_raw_ffi_any(value);
+                unsafe { *result = Any::into_raw_ffi_any(value) };
                 0
             }
             Err(error) => {
@@ -146,7 +146,7 @@ unsafe impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> ObjectCore
         FunctionObj::type_index()
     }
     unsafe fn object_header_mut(this: &mut Self) -> &mut tvm_ffi_sys::TVMFFIObject {
-        FunctionObj::object_header_mut(&mut this.function)
+        unsafe { FunctionObj::object_header_mut(&mut this.function) }
     }
 }
 
@@ -230,7 +230,7 @@ impl Function {
     /// `Function::GetGlobalRequired`. Probe with `.ok()` where a missing
     /// function is expected.
     ///
-    /// ```
+    /// ```standalone_crate
     /// use tvm_ffi::Function;
     /// let double = Function::from_typed(|x: i64| -> tvm_ffi::Result<i64> { Ok(x * 2) });
     /// Function::register_global("my_ext.double", double)?;
@@ -300,7 +300,7 @@ impl Function {
     ///
     /// Returns an error if the registration fails.
     ///
-    /// ```
+    /// ```standalone_crate
     /// use tvm_ffi::{Function, Result};
     /// let add = |x: i64, y: i64| -> Result<i64> { Ok(x + y) };
     /// Function::register_global_typed("my_ext.add", add, "Add two integers.")?;

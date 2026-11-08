@@ -22,8 +22,8 @@
 use tvm_ffi::derive::ObjectRef;
 use tvm_ffi::object::ObjectArc;
 use tvm_ffi::tvm_ffi_sys::TVMFFIAny;
-use tvm_ffi::{impl_any_compatible_conversions, match_any, rs_object};
 use tvm_ffi::{Any, AnyCompatible, AnyView, Object, ObjectRefCore};
+use tvm_ffi::{impl_any_compatible_conversions, match_any, rs_object};
 
 // A derived reference.
 #[rs_object(type_key = "testing.object_ref_any.Pair", final)]
@@ -85,7 +85,7 @@ unsafe impl ObjectRefCore for RawPair {
         Pair::into_data(this.0)
     }
     unsafe fn from_data(data: ObjectArc<PairObj>) -> Self {
-        Self(Pair::from_data(data))
+        Self(unsafe { Pair::from_data(data) })
     }
 }
 
@@ -94,22 +94,22 @@ unsafe impl AnyCompatible for RawPair {
         "RawPair".into()
     }
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-        Pair::copy_to_any_view(&src.0, data)
+        unsafe { Pair::copy_to_any_view(&src.0, data) }
     }
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-        Pair::move_to_any(src.0, data)
+        unsafe { Pair::move_to_any(src.0, data) }
     }
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        Pair::check_any_strict(data)
+        unsafe { Pair::check_any_strict(data) }
     }
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        Self(Pair::copy_from_any_view_after_check(data))
+        Self(unsafe { Pair::copy_from_any_view_after_check(data) })
     }
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        Self(Pair::move_from_any_after_check(data))
+        Self(unsafe { Pair::move_from_any_after_check(data) })
     }
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-        Pair::try_cast_from_any_view(data).map(Self)
+        unsafe { Pair::try_cast_from_any_view(data).map(Self) }
     }
 }
 

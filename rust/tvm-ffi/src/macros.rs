@@ -87,7 +87,7 @@ macro_rules! cached_global_func {
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::{cached_field_getter, rs_object, Object, ObjectArc};
 ///
 /// #[rs_object(type_key = "my_ext.Point")]
@@ -456,7 +456,7 @@ macro_rules! impl_object_ref_upcast {
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, impl_object_ref_downcast_ref, Any};
 /// use tvm_ffi::{Object, ObjectArc, ObjectRefCore};
@@ -750,7 +750,7 @@ macro_rules! impl_into_packed_arg {
 /// * `$func` - The function to export
 ///
 /// # Example
-/// ```rust
+/// ```rust,standalone_crate
 /// use tvm_ffi::*;
 ///
 /// fn add_one(x: i32) -> Result<i32> { Ok(x + 1) }
@@ -814,7 +814,7 @@ macro_rules! tvm_ffi_dll_export_typed_func {
 /// * `$doc` - The doc string, a string literal
 ///
 /// # Example
-/// ```rust
+/// ```rust,standalone_crate
 /// use tvm_ffi::*;
 ///
 /// fn add(a: i64, b: i64) -> Result<i64> { Ok(a + b) }

@@ -68,16 +68,15 @@ pub(crate) fn update_visit_error_context(mut error: Error, raw: TVMFFIAny) -> Er
         }
     };
     // Callback, policy and default descent can report the same frame.
-    if let Some(context) = error.extra_context().and_then(as_context) {
-        if context
+    if let Some(context) = error.extra_context().and_then(as_context)
+        && context
             .reverse_visit_pattern
             .iter()
             .next_back()
             .and_then(Option::as_ref)
             .is_some_and(|last| last.same_as(&node))
-        {
-            return error;
-        }
+    {
+        return error;
     }
     let slot = error.extra_context_mut();
     let previous = slot.take();

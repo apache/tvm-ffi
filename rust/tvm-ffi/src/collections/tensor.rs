@@ -25,9 +25,9 @@ use crate::dtype::AsDLDataType;
 use crate::dtype::DLDataTypeExt;
 use crate::error::Result;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems};
-use tvm_ffi_sys::dlpack::{DLDataType, DLDevice, DLDeviceType, DLTensor};
 use tvm_ffi_sys::TVMFFIAny;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+use tvm_ffi_sys::dlpack::{DLDataType, DLDevice, DLDeviceType, DLTensor};
 use tvm_ffi_sys::{TVMFFIEnvTensorAlloc, TVMFFIObjectHandle};
 
 //-----------------------------------------------------
@@ -296,7 +296,7 @@ unsafe impl<TNDAlloc: NDAllocator> ObjectCore for TensorObjFromNDAlloc<TNDAlloc>
         TensorObj::type_index()
     }
     unsafe fn object_header_mut(this: &mut Self) -> &mut tvm_ffi_sys::TVMFFIObject {
-        TensorObj::object_header_mut(&mut this.base_)
+        unsafe { TensorObj::object_header_mut(&mut this.base_) }
     }
 }
 
@@ -455,14 +455,14 @@ unsafe impl NDAllocator for CPUNDAlloc {
     const MIN_ALIGN: usize = 64;
 
     unsafe fn alloc_data(&mut self, prototype: &DLTensor) -> *mut core::ffi::c_void {
-        let size = data_size(prototype);
+        let size = unsafe { data_size(prototype) };
         // A zero-size allocation is undefined behavior; an empty tensor gets an
         // aligned dangling pointer, which `free_data` does not release.
         if size == 0 {
             return Self::MIN_ALIGN as *mut core::ffi::c_void;
         }
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
-        let ptr = std::alloc::alloc(layout);
+        let ptr = unsafe { std::alloc::alloc(layout) };
         if ptr.is_null() {
             std::alloc::handle_alloc_error(layout);
         }
@@ -470,12 +470,12 @@ unsafe impl NDAllocator for CPUNDAlloc {
     }
 
     unsafe fn free_data(&mut self, tensor: &DLTensor) {
-        let size = data_size(tensor);
+        let size = unsafe { data_size(tensor) };
         if size == 0 {
             return;
         }
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
-        std::alloc::dealloc(tensor.data as *mut u8, layout);
+        unsafe { std::alloc::dealloc(tensor.data as *mut u8, layout) };
     }
 }
 

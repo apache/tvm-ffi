@@ -19,9 +19,9 @@
 
 use std::any::TypeId;
 
-use tvm_ffi::match_any_internal::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
+use tvm_ffi::match_any_internal::{ArmId, JumpTable, JumpTableMetadata, JumpTableProbe};
 use tvm_ffi::{
-    match_any, Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex, VisitInterrupt,
+    Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex, VisitInterrupt, match_any,
 };
 
 type CustomModuleMatcher = Module;
@@ -105,7 +105,7 @@ fn matches_concrete_object_containers_in_source_order() {
     };
     assert_eq!(size, 3);
     assert_eq!(count(), 1);
-    let mut saved = None;
+    let saved;
     assert_eq!(
         match_any! {
             &source {
@@ -228,8 +228,8 @@ fn matches_concrete_object_containers_in_source_order() {
         Some(1)
     );
 
-    use tvm_ffi::extra::structural_mutate::InplaceMode;
     use tvm_ffi::MutationView;
+    use tvm_ffi::extra::structural_mutate::InplaceMode;
     let mut capability_evaluations = 0;
     let capability = match_any!({
         capability_evaluations += 1;
@@ -390,24 +390,24 @@ fn parameterized_containers_use_complete_conversion_semantics() {
 fn direct_lookup_table_maps_runtime_indices_to_local_arm_ids() {
     const ARM_0: ArmId = 0;
     const ARM_2: ArmId = 2;
-    let pattern_list_id = TypeId::of::<(i32, i64, f32)>();
+    let type_list_id = TypeId::of::<(i32, i64, f32)>();
     let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
-    let table = LeafLookupTable::build(
-        pattern_list_id,
+    let table = JumpTable::build(
+        type_list_id,
         &[object_begin + 4, object_begin + 4, object_begin + 7],
     );
 
-    assert_eq!(table.lookup(pattern_list_id, object_begin + 3), Ok(None));
+    assert_eq!(table.lookup(type_list_id, object_begin + 3), Ok(None));
     assert_eq!(
-        table.lookup(pattern_list_id, object_begin + 4),
+        table.lookup(type_list_id, object_begin + 4),
         Ok(Some(ARM_0))
     );
-    assert_eq!(table.lookup(pattern_list_id, object_begin + 5), Ok(None));
+    assert_eq!(table.lookup(type_list_id, object_begin + 5), Ok(None));
     assert_eq!(
-        table.lookup(pattern_list_id, object_begin + 7),
+        table.lookup(type_list_id, object_begin + 7),
         Ok(Some(ARM_2))
     );
-    assert_eq!(table.lookup(pattern_list_id, object_begin + 8), Ok(None));
+    assert_eq!(table.lookup(type_list_id, object_begin + 8), Ok(None));
     assert_eq!(
         table.lookup(TypeId::of::<(u8, u16)>(), object_begin + 4),
         Err(())
@@ -419,24 +419,24 @@ fn direct_lookup_table_maps_runtime_indices_to_local_arm_ids() {
 #[allow(clippy::needless_borrow)]
 fn metadata_only_accepts_exact_leaf_patterns() {
     type Leaf = (VisitInterrupt, ());
-    let leaf = LeafPatternProbe::<Leaf>::new();
+    let leaf = JumpTableProbe::<Leaf>::new();
     let mut type_indices = [0; 1];
-    assert!((&leaf).leaf_pattern_list_id().is_some());
-    (&leaf).fill_leaf_type_indices(&mut type_indices);
+    assert!((&leaf).type_list_id().is_some());
+    (&leaf).fill_type_indices(&mut type_indices);
     assert!(type_indices[0] >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
 
     type Parameterized = (Array<i64>, ());
-    let parameterized = LeafPatternProbe::<Parameterized>::new();
-    assert!((&parameterized).leaf_pattern_list_id().is_none());
+    let parameterized = JumpTableProbe::<Parameterized>::new();
+    assert!((&parameterized).type_list_id().is_none());
 
     type NonFinal = (Tensor, ());
-    let non_final = LeafPatternProbe::<NonFinal>::new();
-    assert!((&non_final).leaf_pattern_list_id().is_none());
+    let non_final = JumpTableProbe::<NonFinal>::new();
+    assert!((&non_final).type_list_id().is_none());
 
     struct NoAnyCompatibleMetadata;
     type Custom = (NoAnyCompatibleMetadata, ());
-    let custom = LeafPatternProbe::<Custom>::new();
-    assert!((&custom).leaf_pattern_list_id().is_none());
+    let custom = JumpTableProbe::<Custom>::new();
+    assert!((&custom).type_list_id().is_none());
 
     // Large generic and lifetime-bearing matches must compile without a static
     // bound; their metadata does not justify a final-object table.

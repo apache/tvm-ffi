@@ -20,7 +20,7 @@
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{Object as ObjectBase, ObjectArc, ObjectCore};
 use tvm_ffi::{
-    dispatch, match_any, Any, AnyView, Array, Dispatcher, MutationView, Shape, TypeIndex,
+    Any, AnyView, Array, Dispatcher, MutationView, Shape, TypeIndex, dispatch, match_any,
 };
 
 #[repr(C)]
@@ -270,13 +270,13 @@ fn dispatches_representative_ast_leaf_nodes() {
 
     // The ref adapter must expose final-node metadata, including in mixed lists.
     use tvm_ffi::match_any_internal::{
-        LeafPatternMetadata, LeafPatternProbe, PatternConversionProbe, RefPatternMetadata,
+        JumpTableMetadata, JumpTableProbe, RefJumpTableEntry, RefPatternProbe,
     };
-    let node_probe = PatternConversionProbe::<AddExprObj>::new();
-    let mixed = LeafPatternProbe::<(SubExpr, ())>::new().prepend((&&&node_probe).leaf_pattern());
-    assert!((&mixed).leaf_pattern_list_id().is_some());
+    let node_probe = RefPatternProbe::<AddExprObj>::new();
+    let mixed = JumpTableProbe::<(SubExpr, ())>::new().prepend((&&&node_probe).table_entry());
+    assert!((&mixed).type_list_id().is_some());
     let mut indices = [0; 2];
-    (&mixed).fill_leaf_type_indices(&mut indices);
+    (&mixed).fill_type_indices(&mut indices);
     assert_eq!(
         indices,
         [AddExprObj::type_index(), SubExprObj::type_index()]

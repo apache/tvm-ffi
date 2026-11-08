@@ -29,8 +29,8 @@ use tvm_ffi::tvm_ffi_sys::{
     TVMFFITypeMetadata, TVMFFITypeRegisterMetadata,
 };
 use tvm_ffi::{
-    dispatch, structural_visit, Any, AnyView, Array, Dispatcher, Error, Function, IntoDispatcher,
-    Result, VisitInterrupt, RUNTIME_ERROR,
+    Any, AnyView, Array, Dispatcher, Error, Function, IntoDispatcher, RUNTIME_ERROR, Result,
+    VisitInterrupt, dispatch, structural_visit,
 };
 
 thread_local! {
@@ -101,15 +101,19 @@ unsafe impl StructuralVisitorBase for CountingBase {
     }
 
     unsafe fn default_visit_raw(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny {
-        assert_eq!(
-            (*runtime.cast::<TVMFFIObject>()).type_index,
-            Self::type_index()
-        );
-        (*runtime).defaults.set((*runtime).defaults.get() + 1);
+        unsafe {
+            assert_eq!(
+                (*runtime.cast::<TVMFFIObject>()).type_index,
+                Self::type_index()
+            )
+        };
+        unsafe { (*runtime).defaults.set((*runtime).defaults.get() + 1) };
         // A default with observable behavior: redirect 10 to children 11 and 12.
         if value.downcast_ref::<i64>().copied() == Some(10) {
             let children = Array::from_vec(vec![11_i64, 12]);
-            return StructuralVisitorObj::default_visit_raw(runtime.cast(), (&children).into());
+            return unsafe {
+                StructuralVisitorObj::default_visit_raw(runtime.cast(), (&children).into())
+            };
         }
         if value.downcast_ref::<i64>().copied() == Some(-1) {
             let result = BASE_RESULT.with_borrow_mut(Option::take).unwrap();
@@ -124,13 +128,15 @@ unsafe impl StructuralVisitorBase for CountingBase {
             let hook = TypeAttrColumn::lookup("__s_visit__")
                 .and_then(|column| column.get(value.type_index()))
                 .unwrap();
-            return StructuralVisitorObj::call_structural_visit_hook_raw(
-                runtime.cast(),
-                *value.as_raw_ffi_any(),
-                *AnyView::from(&hook).as_raw_ffi_any(),
-            );
+            unsafe {
+                return StructuralVisitorObj::call_structural_visit_hook_raw(
+                    runtime.cast(),
+                    *value.as_raw_ffi_any(),
+                    *AnyView::from(&hook).as_raw_ffi_any(),
+                );
+            };
         }
-        StructuralVisitorObj::default_visit_raw(runtime.cast(), value)
+        unsafe { StructuralVisitorObj::default_visit_raw(runtime.cast(), value) }
     }
 }
 
@@ -140,22 +146,22 @@ fn visit<'a, H, M, D, O>(root: impl Into<AnyView<'a>>, visitor: H) -> Result<Opt
 where
     O: std::borrow::BorrowMut<D>,
     for<'v, 'c, 'r> H: IntoDispatcher<
-        (
-            AnyView<'v>,
-            &'c mut StructuralVisitorView<'r, D, CountingBase>,
-        ),
-        Option<Result<Option<VisitInterrupt>>>,
-        M,
-        Target = D,
-        Output = O,
-    >,
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, CountingBase>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
     for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-        (
-            AnyView<'v>,
-            &'c mut StructuralVisitorView<'r, D, CountingBase>,
-        ),
-        Option<Result<Option<VisitInterrupt>>>,
-    >,
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, CountingBase>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
 {
     StructuralVisitEngine::<CountingBase>::visit_root(root, visitor)
 }
@@ -240,12 +246,16 @@ fn unmatched_scalar_uses_selected_default_and_owned_dispatcher() {
     DROPPED.with_borrow_mut(Vec::clear);
     assert!(visit(&10_i64, Empty).unwrap().is_none());
     DROPPED.with_borrow(|drops| assert_eq!(*drops, [3]));
-    assert!(structural_visit(&Array::from_vec(vec![1_i64]), Empty)
-        .unwrap()
-        .is_none());
-    assert!(structural_visit(&Array::from_vec(vec![1_i64]), &mut Empty)
-        .unwrap()
-        .is_none());
+    assert!(
+        structural_visit(&Array::from_vec(vec![1_i64]), Empty)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        structural_visit(&Array::from_vec(vec![1_i64]), &mut Empty)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -299,11 +309,13 @@ fn base_failure_and_owned_results_release_exactly_once() {
     }
     DROPPED.with_borrow_mut(Vec::clear);
     FAIL_INIT.set(true);
-    assert!(visit(&1_i64, Unmatched)
-        .err()
-        .unwrap()
-        .to_string()
-        .contains("initialization failed"));
+    assert!(
+        visit(&1_i64, Unmatched)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("initialization failed")
+    );
     FAIL_INIT.set(false);
     DROPPED.with_borrow(|drops| assert!(drops.is_empty()));
 
@@ -381,12 +393,14 @@ fn callback_outcomes_preserve_reborrows_and_owners_through_specialized_defaults(
         assert_eq!(visitor.seen, [10, 11, 99]);
         DROPPED.with_borrow(|drops| assert_eq!(*drops, [2]));
         if fail {
-            assert!(result
-                .as_ref()
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("callback failed"));
+            assert!(
+                result
+                    .as_ref()
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("callback failed")
+            );
         } else {
             assert_eq!(payload.debug_strong_count(), Some(2));
         }

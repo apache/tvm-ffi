@@ -131,11 +131,9 @@ where
         visitor: &mut StructuralVisitorView<'_, Self>,
     ) -> Result<Option<VisitInterrupt>> {
         let kind = visitor.def_region_kind();
-        if !PRE_ORDER {
-            if let Some(interrupt) = visitor.default_visit(self, value)? {
-                core::hint::cold_path();
-                return Ok(Some(interrupt));
-            }
+        if !PRE_ORDER && let Some(interrupt) = visitor.default_visit(self, value)? {
+            core::hint::cold_path();
+            return Ok(Some(interrupt));
         }
         match (&mut *self.observer)
             .dispatch_tuple((value, kind))
@@ -245,12 +243,12 @@ pub fn structural_walk<'input, R, M, H, D, O>(
 ) -> Result<Option<VisitInterrupt>>
 where
     for<'v> H: IntoDispatcher<
-        (AnyView<'v>, DefRegionKind),
-        Option<Result<WalkResult>>,
-        M,
-        Target = D,
-        Output = O,
-    >,
+            (AnyView<'v>, DefRegionKind),
+            Option<Result<WalkResult>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
     for<'s, 'v> &'s mut D: Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<WalkResult>>>,
     R: Into<AnyView<'input>>,
     O: BorrowMut<D>,

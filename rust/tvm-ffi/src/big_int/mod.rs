@@ -20,8 +20,8 @@
 mod int_ops;
 
 use crate::derive::Object;
-use crate::error::{Error, Result, OVERFLOW_ERROR, VALUE_ERROR};
-use crate::object::{unsafe_, Object, ObjectArc, ObjectCoreWithExtraItems};
+use crate::error::{Error, OVERFLOW_ERROR, Result, VALUE_ERROR};
+use crate::object::{Object, ObjectArc, ObjectCoreWithExtraItems, unsafe_};
 use crate::type_traits::AnyCompatible;
 use std::alloc::Layout;
 use std::cmp::Ordering;
@@ -36,7 +36,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
+use tvm_ffi_sys::{COMBINED_REF_COUNT_BOTH_ONE, TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject};
 
 /// An arbitrary-precision signed integer.
 ///
@@ -83,7 +83,7 @@ unsafe impl ObjectCoreWithExtraItems for BigIntObj {
 // `BigInt::try_build` allocates from the C allocator like C++
 // `make_inplace_array_object`, so it can prune the logical size in place (C++
 // `ShrinkSize`): `free` needs no layout, unlike Rust's global allocator.
-extern "C" {
+unsafe extern "C" {
     fn malloc(size: usize) -> *mut c_void;
     fn free(ptr: *mut c_void);
 }
@@ -92,7 +92,7 @@ extern "C" {
 /// need no destructor.
 unsafe extern "C" fn delete_obj(ptr: *mut c_void, flags: i32) {
     if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-        free(ptr);
+        unsafe { free(ptr) };
     }
 }
 
@@ -284,10 +284,10 @@ impl BigInt {
 
     /// Truncating quotient and remainder in one pass; raises `ZeroDivisionError`.
     pub fn div_rem(&self, rhs: &BigInt) -> Result<(BigInt, BigInt)> {
-        if let (Some(x), Some(y)) = (self.to_i64(), rhs.to_i64()) {
-            if let Some(q) = int_ops::trunc_div_i64(x, y)? {
-                return Ok((Self::from_i64(q), Self::from_i64(x.wrapping_rem(y))));
-            }
+        if let (Some(x), Some(y)) = (self.to_i64(), rhs.to_i64())
+            && let Some(q) = int_ops::trunc_div_i64(x, y)?
+        {
+            return Ok((Self::from_i64(q), Self::from_i64(x.wrapping_rem(y))));
         }
         int_ops::div_rem(self.words(), rhs.words())
     }
@@ -569,80 +569,80 @@ impl Debug for BigInt {
 // ---- Arithmetic: an inline fast path, then the word fallbacks.
 #[inline]
 fn add_impl(a: &BigInt, b: &BigInt) -> BigInt {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = x.checked_add(y) {
-            return BigInt::from_i64(result);
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = x.checked_add(y)
+    {
+        return BigInt::from_i64(result);
     }
     int_ops::add(a.words(), b.words())
 }
 
 #[inline]
 fn sub_impl(a: &BigInt, b: &BigInt) -> BigInt {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = x.checked_sub(y) {
-            return BigInt::from_i64(result);
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = x.checked_sub(y)
+    {
+        return BigInt::from_i64(result);
     }
     int_ops::sub(a.words(), b.words())
 }
 
 #[inline]
 fn mul_impl(a: &BigInt, b: &BigInt) -> BigInt {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = x.checked_mul(y) {
-            return BigInt::from_i64(result);
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = x.checked_mul(y)
+    {
+        return BigInt::from_i64(result);
     }
     int_ops::mul(a.words(), b.words())
 }
 
 #[inline]
 fn div_impl(a: &BigInt, b: &BigInt) -> Result<BigInt> {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = int_ops::trunc_div_i64(x, y)? {
-            return Ok(BigInt::from_i64(result));
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = int_ops::trunc_div_i64(x, y)?
+    {
+        return Ok(BigInt::from_i64(result));
     }
     int_ops::trunc_div(a.words(), b.words())
 }
 
 #[inline]
 fn rem_impl(a: &BigInt, b: &BigInt) -> Result<BigInt> {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = int_ops::trunc_mod_i64(x, y)? {
-            return Ok(BigInt::from_i64(result));
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = int_ops::trunc_mod_i64(x, y)?
+    {
+        return Ok(BigInt::from_i64(result));
     }
     int_ops::trunc_mod(a.words(), b.words())
 }
 
 #[inline]
 fn floor_div_impl(a: &BigInt, b: &BigInt) -> Result<BigInt> {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = int_ops::floor_div_i64(x, y)? {
-            return Ok(BigInt::from_i64(result));
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = int_ops::floor_div_i64(x, y)?
+    {
+        return Ok(BigInt::from_i64(result));
     }
     int_ops::floor_div(a.words(), b.words())
 }
 
 #[inline]
 fn floor_mod_impl(a: &BigInt, b: &BigInt) -> Result<BigInt> {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = int_ops::floor_mod_i64(x, y)? {
-            return Ok(BigInt::from_i64(result));
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = int_ops::floor_mod_i64(x, y)?
+    {
+        return Ok(BigInt::from_i64(result));
     }
     int_ops::floor_mod(a.words(), b.words())
 }
 
 #[inline]
 fn shl_impl(a: &BigInt, b: &BigInt) -> Result<BigInt> {
-    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
-        if let Some(result) = int_ops::shl_i64(x, y)? {
-            return Ok(BigInt::from_i64(result));
-        }
+    if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64())
+        && let Some(result) = int_ops::shl_i64(x, y)?
+    {
+        return Ok(BigInt::from_i64(result));
     }
     int_ops::shl(a.words(), b.words())
 }
@@ -847,7 +847,7 @@ unsafe impl AnyCompatible for BigInt {
     // A big integer is an inline integer or a big integer object, never None.
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
-        (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32
+        unsafe { (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32 }
     }
 
     fn type_schema() -> std::string::String {
@@ -880,10 +880,10 @@ unsafe impl AnyCompatible for BigInt {
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
-        if Self::check_any_strict(data) {
-            Ok(Self::copy_from_any_view_after_check(data))
+        if unsafe { Self::check_any_strict(data) } {
+            Ok(unsafe { Self::copy_from_any_view_after_check(data) })
         } else if data.type_index == TypeIndex::kTVMFFIBool as i32 {
-            Ok(Self::from_i64(data.data_union.v_int64))
+            Ok(unsafe { Self::from_i64(data.data_union.v_int64) })
         } else {
             Err(())
         }

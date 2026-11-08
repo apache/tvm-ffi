@@ -72,9 +72,9 @@ use crate::tvm_ffi_sys::{
 };
 
 use super::structural_common::{
-    field_def_region, for_each_field_info, free_var_child_region, missing_field_getter_error,
-    registered_type_index, runtime_error, seq_hash_kind, with_structural_error_context,
-    with_structural_field_error_context, wrong_dispatcher, FLAG_SEQ_HASH_IGNORE,
+    FLAG_SEQ_HASH_IGNORE, field_def_region, for_each_field_info, free_var_child_region,
+    missing_field_getter_error, registered_type_index, runtime_error, seq_hash_kind,
+    with_structural_error_context, with_structural_field_error_context, wrong_dispatcher,
 };
 use super::visit_error_context::update_visit_error_context;
 
@@ -259,7 +259,7 @@ unsafe impl StructuralVisitorBase for StructuralVisitorObj {
 
     #[inline(always)]
     unsafe fn default_visit_raw(runtime: *mut Self, value: AnyView<'_>) -> TVMFFIAny {
-        Self::visit_children_raw(runtime, *value.as_raw_ffi_any())
+        unsafe { Self::visit_children_raw(runtime, *value.as_raw_ffi_any()) }
     }
 }
 
@@ -479,22 +479,22 @@ where
     R: Into<AnyView<'input>>,
     O: BorrowMut<D>,
     for<'v, 'c, 'r> H: IntoDispatcher<
-        (
-            AnyView<'v>,
-            &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
-        ),
-        Option<Result<Option<VisitInterrupt>>>,
-        M,
-        Target = D,
-        Output = O,
-    >,
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
     for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-        (
-            AnyView<'v>,
-            &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
-        ),
-        Option<Result<Option<VisitInterrupt>>>,
-    >,
+            (
+                AnyView<'v>,
+                &'c mut StructuralVisitorView<'r, D, StructuralVisitorObj>,
+            ),
+            Option<Result<Option<VisitInterrupt>>>,
+        >,
 {
     StructuralVisitEngine::visit_root(root, dispatcher)
 }
@@ -524,16 +524,16 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
         R: Into<AnyView<'input>>,
         O: BorrowMut<D>,
         for<'v, 'c, 'r> H: IntoDispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-            M,
-            Target = D,
-            Output = O,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+                M,
+                Target = D,
+                Output = O,
+            >,
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
     {
         // Normalize the input once. Named dispatchers keep their own recursive view
         // type; callback and tuple targets are their aggregate adapters.
@@ -564,8 +564,8 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
         dispatch: &mut D,
         raw: TVMFFIAny,
     ) -> TVMFFIAny {
-        let context = Self::checked_dispatcher(runtime, dispatch);
-        (*Self::from_handle(runtime)).dispatcher = context;
+        let context = unsafe { Self::checked_dispatcher(runtime, dispatch) };
+        unsafe { (*Self::from_handle(runtime)).dispatcher = context };
         StructuralVisitorObj::call_visitor_raw(runtime, raw)
     }
 
@@ -582,7 +582,7 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
         dispatch: &mut D,
     ) -> *mut c_void {
         let current = dispatcher_ptr(dispatch);
-        if current != (*Self::from_handle(runtime)).dispatcher {
+        if current != unsafe { (*Self::from_handle(runtime)).dispatcher } {
             core::hint::cold_path();
             wrong_dispatcher();
         }
@@ -595,9 +595,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     fn vtable<D>() -> &'static StructuralVisitorVTable
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
     {
         &StructuralVisitorVTable {
             visit: Self::rust_vtable_visit_raw::<D>,
@@ -617,33 +617,35 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     ) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
     {
-        let context = (*Self::from_handle(runtime)).dispatcher;
+        let context = unsafe { (*Self::from_handle(runtime)).dispatcher };
         let raw = *value.as_raw_ffi_any();
         let result = if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
             core::hint::cold_path();
             TVMFFIAny::new()
         } else {
-            let dispatch = &mut *context.cast::<D>();
-            let mut visitor = Self::visitor_context::<D>(runtime);
+            let dispatch = unsafe { &mut *context.cast::<D>() };
+            let mut visitor = unsafe { Self::visitor_context::<D>(runtime) };
             // SAFETY: the native caller keeps the input alive for this synchronous
             // dispatch, and the handler does not modify a list or dict cell
             // holding it (the callback contract); the higher-ranked callback
             // cannot retain its borrowed view.
-            match crate::Dispatcher::dispatch_tuple(
-                &mut *dispatch,
-                (AnyView::from_raw_ffi_any(raw), &mut visitor),
-            ) {
+            match unsafe {
+                crate::Dispatcher::dispatch_tuple(
+                    &mut *dispatch,
+                    (AnyView::from_raw_ffi_any(raw), &mut visitor),
+                )
+            } {
                 Some(result) => visit_result_raw(result, raw),
-                None => Self::default_visit_raw(runtime, dispatcher_ptr(dispatch), raw),
+                None => unsafe { Self::default_visit_raw(runtime, dispatcher_ptr(dispatch), raw) },
             }
         };
         // The enclosing callback may resume using its ancestor mutable borrow.
         // Native hooks cannot restore Rust-only borrow provenance for us.
-        (*Self::from_handle(runtime)).dispatcher = context;
+        unsafe { (*Self::from_handle(runtime)).dispatcher = context };
         result
     }
 
@@ -676,11 +678,13 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     ) -> TVMFFIAny {
         // Context is the supplied exclusive reborrow. Publish it before descent;
         // the handle-only scanner never creates or uses a competing D reference.
-        (*Self::from_handle(runtime)).dispatcher = context;
-        StructuralVisitorObj::with_visit_context_raw(
-            Base::default_visit_raw(runtime.cast(), AnyView::from_raw_ffi_any(raw)),
-            raw,
-        )
+        unsafe { (*Self::from_handle(runtime)).dispatcher = context };
+        unsafe {
+            StructuralVisitorObj::with_visit_context_raw(
+                Base::default_visit_raw(runtime.cast(), AnyView::from_raw_ffi_any(raw)),
+                raw,
+            )
+        }
     }
 
     /// Visit borrowed `root` with `dispatch` on a fresh engine; the root's owner outlives it.
@@ -690,9 +694,9 @@ impl<Base: StructuralVisitorBase> StructuralVisitEngine<Base> {
     ) -> Result<Option<VisitInterrupt>>
     where
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
-            Option<Result<Option<VisitInterrupt>>>,
-        >,
+                (AnyView<'v>, &'c mut StructuralVisitorView<'r, D, Base>),
+                Option<Result<Option<VisitInterrupt>>>,
+            >,
     {
         let base = Base::new()?;
         let type_index = Base::type_index();
@@ -767,16 +771,16 @@ impl StructuralVisitorObj {
     /// `runtime` is live with its dispatcher published, and `value` outlives descent.
     #[inline(always)]
     unsafe fn visit_children_raw(runtime: StructuralVisitorHandle, value: TVMFFIAny) -> TVMFFIAny {
-        if let Some(attr) = structural_visit_column().get_raw_ffi_any(value.type_index) {
-            if attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32 {
-                return Self::call_structural_visit_hook_raw(runtime, value, attr);
-            }
+        if let Some(attr) = structural_visit_column().get_raw_ffi_any(value.type_index)
+            && attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32
+        {
+            return unsafe { Self::call_structural_visit_hook_raw(runtime, value, attr) };
         }
 
         if value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
             TVMFFIAny::new()
         } else {
-            Self::visit_reflected_fields_raw(runtime, value)
+            unsafe { Self::visit_reflected_fields_raw(runtime, value) }
         }
     }
 
@@ -795,10 +799,12 @@ impl StructuralVisitorObj {
         if type_info.is_null() {
             return Any::into_raw_ffi_any(unregistered_visit_type_error(value.type_index).into());
         }
-        let def_region_kind = free_var_child_region(
-            std::mem::transmute::<i32, DefRegionKind>(*(*runtime).def_region_mode.get()),
-            seq_hash_kind(type_info),
-        );
+        let def_region_kind = unsafe {
+            free_var_child_region(
+                std::mem::transmute::<i32, DefRegionKind>(*(*runtime).def_region_mode.get()),
+                seq_hash_kind(type_info),
+            )
+        };
         let object = unsafe { value.data_union.v_obj } as *mut u8;
         let halted = unsafe {
             for_each_field_info(type_info, &mut |field| {
@@ -829,23 +835,32 @@ impl StructuralVisitorObj {
         }
 
         let Some(getter) = field.getter else {
-            return Any::from(missing_field_getter_error("visitor", field.name.as_str()));
+            return Any::from(unsafe {
+                missing_field_getter_error("visitor", field.name.as_str())
+            });
         };
-        let address = object.offset(field.offset as isize) as *mut c_void;
+        let address = unsafe { object.offset(field.offset as isize) as *mut c_void };
         // Own the getter result so partial writes and recursive borrows drop safely.
         let mut child = Any::new();
-        if getter(address, Any::as_raw_ffi_any_mut(&mut child)) != 0 {
-            return with_field_error_context(Any::from(Error::from_raised()), field.name.as_str());
+        if unsafe { getter(address, Any::as_raw_ffi_any_mut(&mut child)) } != 0 {
+            return unsafe {
+                with_field_error_context(Any::from(Error::from_raised()), field.name.as_str())
+            };
         }
 
         let borrowed = AnyView::from(&child);
         let child_region = field_def_region(field, inherited_region);
-        with_field_error_context(
-            Self::with_def_region_kind(runtime, child_region, || {
-                Any::from_raw_ffi_any(Self::call_visitor_raw(runtime, *borrowed.as_raw_ffi_any()))
-            }),
-            field.name.as_str(),
-        )
+        unsafe {
+            with_field_error_context(
+                Self::with_def_region_kind(runtime, child_region, || {
+                    Any::from_raw_ffi_any(Self::call_visitor_raw(
+                        runtime,
+                        *borrowed.as_raw_ffi_any(),
+                    ))
+                }),
+                field.name.as_str(),
+            )
+        }
     }
 
     /// Dispatch borrowed `value` through the runtime's vtable.
@@ -1013,7 +1028,7 @@ fn checked_hook_result(value: Any) -> Any {
 unsafe fn take_error(value: Any) -> Error {
     use crate::type_traits::AnyCompatible;
     let mut raw = Any::into_raw_ffi_any(value);
-    Error::move_from_any_after_check(&mut raw)
+    unsafe { Error::move_from_any_after_check(&mut raw) }
 }
 
 #[inline(always)]

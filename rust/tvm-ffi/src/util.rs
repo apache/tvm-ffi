@@ -28,7 +28,7 @@ pub(crate) unsafe fn slice_from_nullable_raw_parts<'a, T>(data: *const T, len: u
     if len == 0 {
         return &[];
     }
-    std::slice::from_raw_parts(data, len)
+    unsafe { std::slice::from_raw_parts(data, len) }
 }
 
 /// [`std::slice::from_raw_parts_mut`] that allows a null `data` when `len` is 0.
@@ -43,5 +43,5 @@ pub(crate) unsafe fn slice_from_nullable_raw_parts_mut<'a, T>(
     if len == 0 {
         return &mut [];
     }
-    std::slice::from_raw_parts_mut(data, len)
+    unsafe { std::slice::from_raw_parts_mut(data, len) }
 }

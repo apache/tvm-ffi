@@ -30,7 +30,7 @@ use tvm_ffi::*;
 // Exported by libtvm_ffi_testing with `TVM_FFI_DLL_EXPORT_TYPED_FUNC` and
 // `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, for `int64_t(int64_t)`.
 #[cfg(feature = "export-metadata")]
-extern "C" {
+unsafe extern "C" {
     fn __tvm_ffi__metadata_testing_dll_schema_id_int(
         handle: *mut std::ffi::c_void,
         args: *const TVMFFIAny,

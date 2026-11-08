@@ -348,7 +348,8 @@ impl FieldGetter {
                 &format!(
                     "Cannot read a field of type_index={} from object type_index={dynamic_type_index}",
                     self.owner_type_index
-                )));
+                ),
+            ));
         }
         // SAFETY: `object` has the resolved type or a subtype, which embeds it.
         unsafe { self.read(object) }
@@ -443,12 +444,12 @@ unsafe fn find_field(
     field_name: &str,
 ) -> Option<NonNull<TVMFFIFieldInfo>> {
     // Prefer the most-derived declaration, then search nearest ancestors.
-    if let Some(field) = find_field_at_level(type_info, field_name) {
+    if let Some(field) = unsafe { find_field_at_level(type_info, field_name) } {
         return Some(field);
     }
-    for depth in (0..(*type_info).type_depth).rev() {
-        let ancestor = *(*type_info).type_acenstors.add(depth as usize);
-        if let Some(field) = find_field_at_level(ancestor, field_name) {
+    for depth in unsafe { (0..(*type_info).type_depth).rev() } {
+        let ancestor = unsafe { *(*type_info).type_acenstors.add(depth as usize) };
+        if let Some(field) = unsafe { find_field_at_level(ancestor, field_name) } {
             return Some(field);
         }
     }
@@ -459,12 +460,12 @@ unsafe fn find_field_at_level(
     type_info: *const crate::tvm_ffi_sys::TVMFFITypeInfo,
     field_name: &str,
 ) -> Option<NonNull<TVMFFIFieldInfo>> {
-    if type_info.is_null() || (*type_info).fields.is_null() {
+    if type_info.is_null() || unsafe { (*type_info).fields.is_null() } {
         return None;
     }
-    for index in 0..(*type_info).num_fields as usize {
-        let field = (*type_info).fields.add(index);
-        if (*field).name.as_str() == field_name {
+    for index in unsafe { 0..(*type_info).num_fields as usize } {
+        let field = unsafe { (*type_info).fields.add(index) };
+        if unsafe { (*field).name.as_str() } == field_name {
             return NonNull::new(field.cast_mut());
         }
     }
@@ -479,15 +480,16 @@ unsafe fn is_type_or_subtype(
     if dynamic_type_index == target_type_index {
         return true;
     }
-    let dynamic_info = TVMFFIGetTypeInfo(dynamic_type_index);
-    if dynamic_info.is_null()
-        || (*dynamic_info).type_depth <= target_type_depth
-        || (*dynamic_info).type_acenstors.is_null()
+    let dynamic_info = unsafe { TVMFFIGetTypeInfo(dynamic_type_index) };
+    if unsafe { dynamic_info.is_null() || (*dynamic_info).type_depth <= target_type_depth }
+        || unsafe { (*dynamic_info).type_acenstors.is_null() }
     {
         return false;
     }
-    let ancestor = *(*dynamic_info)
-        .type_acenstors
-        .add(target_type_depth as usize);
-    !ancestor.is_null() && (*ancestor).type_index == target_type_index
+    let ancestor = unsafe {
+        *(*dynamic_info)
+            .type_acenstors
+            .add(target_type_depth as usize)
+    };
+    unsafe { !ancestor.is_null() && (*ancestor).type_index == target_type_index }
 }

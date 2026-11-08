@@ -76,22 +76,32 @@ impl Module {
     ///
     /// # Errors
     ///
-    /// Returns an error if the module has no function `name`, as Python's
-    /// `Module.get_function` raises.
+    /// Returns a `ValueError` naming the function if the module has no function
+    /// `name`, as [`Function::get_global`] does for a missing global function.
     pub fn get_function<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
-        let name = crate::string::String::from(name.as_ref());
-        crate::cached_global_func!("ffi.ModuleGetFunction")
-            .call_tuple((self, name, false))?
-            .try_into()
+        self.lookup_function(name.as_ref(), false)
     }
 
     /// As [`get_function`](Self::get_function), but also searching the modules
     /// this one imports, depth first in import order.
     pub fn get_function_with_imports<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
-        let name = crate::string::String::from(name.as_ref());
-        crate::cached_global_func!("ffi.ModuleGetFunction")
-            .call_tuple((self, name, true))?
-            .try_into()
+        self.lookup_function(name.as_ref(), true)
+    }
+
+    fn lookup_function(&self, name: &str, query_imports: bool) -> Result<Function> {
+        let function = crate::cached_global_func!("ffi.ModuleGetFunction").call_tuple((
+            self,
+            name,
+            query_imports,
+        ))?;
+        if function.is_none() {
+            crate::bail!(
+                crate::error::VALUE_ERROR,
+                "Module has no function '{}'",
+                name
+            );
+        }
+        function.try_into()
     }
 
     /// Whether the module implements the function `name`.

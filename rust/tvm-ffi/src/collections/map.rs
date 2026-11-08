@@ -34,13 +34,13 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
 
+use crate::IntoArg;
 use crate::any::TryFromTemp;
 use crate::derive::Object;
 use crate::extra::cold_init_lazy_lock::ColdInitLazyLock;
 use crate::function::Function;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::{ContainerElement, TypeSubsumes};
-use crate::IntoArg;
 use crate::{Any, AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -652,7 +652,7 @@ where
 {
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
-        ObjectArc::is_null(std::ptr::addr_of!((*field).data))
+        unsafe { ObjectArc::is_null(std::ptr::addr_of!((*field).data)) }
     }
 
     fn type_str() -> String {
@@ -677,7 +677,7 @@ where
         if data.type_index != TypeIndex::kTVMFFIMap as i32 {
             return false;
         }
-        let map = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
+        let map = unsafe { <Self as AnyCompatible>::copy_from_any_view_after_check(data) };
         match map.try_raw_entries() {
             Ok(entries) => entries.iter().all(|(k, v)| unsafe {
                 K::container_check_any_strict(k.as_raw_ffi_any())
@@ -688,7 +688,7 @@ where
     }
 
     unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-        let map = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
+        let map = unsafe { <Self as AnyCompatible>::copy_from_any_view_after_check(data) };
         match map.try_raw_entries() {
             Ok(entries) => entries.iter().all(|(k, v)| unsafe {
                 K::container_match_constraints(k.as_raw_ffi_any())
@@ -711,14 +711,14 @@ where
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *const MapObj;
-        crate::object::unsafe_::inc_ref(ptr as *mut TVMFFIObject);
-        Self::from_data(ObjectArc::from_raw(ptr))
+        let ptr = unsafe { data.data_union.v_obj as *const MapObj };
+        unsafe { crate::object::unsafe_::inc_ref(ptr as *mut TVMFFIObject) };
+        unsafe { Self::from_data(ObjectArc::from_raw(ptr)) }
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *const MapObj;
-        let obj = Self::from_data(ObjectArc::from_raw(ptr));
+        let ptr = unsafe { data.data_union.v_obj as *const MapObj };
+        let obj = unsafe { Self::from_data(ObjectArc::from_raw(ptr)) };
         data.type_index = TypeIndex::kTVMFFINone as i32;
         data.data_union.v_int64 = 0;
         obj
@@ -728,13 +728,15 @@ where
         if data.type_index == TypeIndex::kTVMFFIDict as i32 {
             // A dict is mutable, so it converts by copy, as C++ `Map` accepts it.
             // `ffi.Dict` shares the `MapBaseObj` header.
-            let len = (*(data.data_union.v_obj as *const MapObj)).size as usize;
-            let entries = forward_entries(
-                crate::cached_global_func!("ffi.DictForwardIterFunctor"),
-                AnyView::from_raw_ffi_any(*data),
-                len,
-            )
-            .map_err(|_| ())?;
+            let len = unsafe { (*(data.data_union.v_obj as *const MapObj)).size as usize };
+            let entries = unsafe {
+                forward_entries(
+                    crate::cached_global_func!("ffi.DictForwardIterFunctor"),
+                    AnyView::from_raw_ffi_any(*data),
+                    len,
+                )
+                .map_err(|_| ())?
+            };
             return Self::from_raw_entries(entries).map_err(|_| ());
         }
         if data.type_index != TypeIndex::kTVMFFIMap as i32 {
@@ -742,15 +744,13 @@ where
         }
 
         // Fast path: if all entries match strictly, we can just copy the reference.
-        if <Self as AnyCompatible>::check_any_strict(data) {
-            return Ok(<Self as AnyCompatible>::copy_from_any_view_after_check(
-                data,
-            ));
+        if unsafe { <Self as AnyCompatible>::check_any_strict(data) } {
+            return Ok(unsafe { <Self as AnyCompatible>::copy_from_any_view_after_check(data) });
         }
 
         // Slow path: try to convert entry by entry into a new map, as C++
         // `TryCastFromAnyView` does.
-        let src = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
+        let src = unsafe { <Self as AnyCompatible>::copy_from_any_view_after_check(data) };
         let entries = src.try_raw_entries().map_err(|_| ())?;
         Self::from_raw_entries(entries).map_err(|_| ())
     }
@@ -764,7 +764,7 @@ where
 {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &*(core::ptr::addr_of!(cell.data_union) as *const Self)
+        unsafe { &*(core::ptr::addr_of!(cell.data_union) as *const Self) }
     }
 }
 
@@ -775,7 +775,7 @@ where
 {
     #[inline(always)]
     unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-        crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
+        unsafe { crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell) }
     }
 }
 
@@ -786,7 +786,7 @@ where
 {
     #[inline(always)]
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
-        crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
+        unsafe { crate::type_traits::downcast_ref_from_object_in_place::<Self>(place) }
     }
 }
 

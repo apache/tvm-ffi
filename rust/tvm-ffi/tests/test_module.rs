@@ -26,7 +26,7 @@ use tvm_ffi::tvm_ffi_sys::{TVMFFIAny, TVMFFISafeCallType};
 use tvm_ffi::*;
 
 // The metadata and doc getters libtvm_ffi_testing exports, read directly.
-extern "C" {
+unsafe extern "C" {
     fn __tvm_ffi__metadata_testing_dll_schema_id_int(
         handle: *mut std::ffi::c_void,
         args: *const TVMFFIAny,
@@ -111,26 +111,36 @@ fn test_module_accessors_and_imports() {
     // search, as C++ `GetFunction(name)` and Python's default do not.
     let module = importing_module();
     assert!(!module.implements_function(SCHEMA_ID_INT).unwrap());
-    assert!(module
-        .get_function_metadata(SCHEMA_ID_INT)
-        .unwrap()
-        .is_none());
-    assert!(module
-        .get_function_doc(ADD_WITH_DOCSTRING)
-        .unwrap()
-        .is_none());
+    assert!(
+        module
+            .get_function_metadata(SCHEMA_ID_INT)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        module
+            .get_function_doc(ADD_WITH_DOCSTRING)
+            .unwrap()
+            .is_none()
+    );
     // The `_with_imports` lookups find it there.
     assert!(module.get_function(SCHEMA_ID_INT).is_err());
     assert!(module.get_function_with_imports(SCHEMA_ID_INT).is_ok());
-    assert!(module
-        .implements_function_with_imports(SCHEMA_ID_INT)
-        .unwrap());
-    assert!(module
-        .get_function_metadata_with_imports(SCHEMA_ID_INT)
-        .unwrap()
-        .is_some());
-    assert!(module
-        .get_function_doc_with_imports(ADD_WITH_DOCSTRING)
-        .unwrap()
-        .is_some());
+    assert!(
+        module
+            .implements_function_with_imports(SCHEMA_ID_INT)
+            .unwrap()
+    );
+    assert!(
+        module
+            .get_function_metadata_with_imports(SCHEMA_ID_INT)
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        module
+            .get_function_doc_with_imports(ADD_WITH_DOCSTRING)
+            .unwrap()
+            .is_some()
+    );
 }
