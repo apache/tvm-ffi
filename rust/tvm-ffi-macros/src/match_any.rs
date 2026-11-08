@@ -20,7 +20,7 @@
 use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{braced, Expr, Pat, Result, Token, Type};
+use syn::{Expr, Pat, Result, Token, Type, braced};
 
 use crate::utils::get_tvm_ffi_crate;
 

@@ -21,13 +21,13 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
+use crate::IntoArg;
 use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
 use crate::object::ObjectCoreWithExtraItems;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::{ContainerElement, RefFromAnyUnchecked, TypeSubsumes};
-use crate::IntoArg;
 use crate::{Any, AnyCompatible, AnyView, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -677,7 +677,7 @@ where
 {
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
-        ObjectArc::is_null(std::ptr::addr_of!((*field).data))
+        unsafe { ObjectArc::is_null(std::ptr::addr_of!((*field).data)) }
     }
 
     fn type_str() -> String {
@@ -696,11 +696,11 @@ where
             return false;
         }
 
-        let container = &*(data.data_union.v_obj as *const ArrayObj);
+        let container = unsafe { &*(data.data_union.v_obj as *const ArrayObj) };
         let base_ptr = container.data as *const TVMFFIAny;
         for i in 0..container.size {
-            let elem_any = &*base_ptr.add(i as usize);
-            if !T::container_check_any_strict(elem_any) {
+            let elem_any = unsafe { &*base_ptr.add(i as usize) };
+            if unsafe { !T::container_check_any_strict(elem_any) } {
                 return false;
             }
         }
@@ -708,11 +708,11 @@ where
     }
 
     unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-        let container = &*(data.data_union.v_obj as *const ArrayObj);
+        let container = unsafe { &*(data.data_union.v_obj as *const ArrayObj) };
         let base_ptr = container.data as *const TVMFFIAny;
         for i in 0..container.size {
-            let elem_any = &*base_ptr.add(i as usize);
-            if !T::container_match_constraints(elem_any) {
+            let elem_any = unsafe { &*base_ptr.add(i as usize) };
+            if unsafe { !T::container_match_constraints(elem_any) } {
                 return false;
             }
         }
@@ -732,14 +732,14 @@ where
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *const ArrayObj;
-        crate::object::unsafe_::inc_ref(ptr as *mut TVMFFIObject);
-        Self::from_data(ObjectArc::from_raw(ptr))
+        let ptr = unsafe { data.data_union.v_obj as *const ArrayObj };
+        unsafe { crate::object::unsafe_::inc_ref(ptr as *mut TVMFFIObject) };
+        unsafe { Self::from_data(ObjectArc::from_raw(ptr)) }
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *const ArrayObj;
-        let obj = Self::from_data(ObjectArc::from_raw(ptr));
+        let ptr = unsafe { data.data_union.v_obj as *const ArrayObj };
+        let obj = unsafe { Self::from_data(ObjectArc::from_raw(ptr)) };
 
         data.type_index = TypeIndex::kTVMFFINone as i32;
         data.data_union.v_int64 = 0;
@@ -757,17 +757,15 @@ where
         }
 
         // Fast path: an array whose elements all match shares the reference.
-        if <Self as AnyCompatible>::check_any_strict(data) {
-            return Ok(<Self as AnyCompatible>::copy_from_any_view_after_check(
-                data,
-            ));
+        if unsafe { <Self as AnyCompatible>::check_any_strict(data) } {
+            return Ok(unsafe { <Self as AnyCompatible>::copy_from_any_view_after_check(data) });
         }
 
         // Slow path: convert element by element into a new array.
-        let cells = seq_cells(data);
+        let cells = unsafe { seq_cells(data) };
         let mut items = Vec::with_capacity(cells.len());
         for cell in cells {
-            items.push(T::container_try_cast_from_any_view(cell)?);
+            unsafe { items.push(T::container_try_cast_from_any_view(cell)?) };
         }
         Ok(Array::from_vec(items))
     }
@@ -780,7 +778,7 @@ where
 {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &*(core::ptr::addr_of!(cell.data_union) as *const Self)
+        unsafe { &*(core::ptr::addr_of!(cell.data_union) as *const Self) }
     }
 }
 
@@ -790,7 +788,7 @@ where
 {
     #[inline(always)]
     unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-        crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
+        unsafe { crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell) }
     }
 }
 
@@ -800,7 +798,7 @@ where
 {
     #[inline(always)]
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
-        crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
+        unsafe { crate::type_traits::downcast_ref_from_object_in_place::<Self>(place) }
     }
 }
 
@@ -847,6 +845,6 @@ where
 /// Move `value` into the uninitialized `cell`.
 unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
     let mut raw = TVMFFIAny::new();
-    T::container_move_to_any(value, &mut raw);
-    std::ptr::write(cell, raw);
+    unsafe { T::container_move_to_any(value, &mut raw) };
+    unsafe { std::ptr::write(cell, raw) };
 }

@@ -16,8 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{collections::HashMap, hash::Hash};
 use tvm_ffi::object::{ObjectCoreWithExtraItems, ObjectIdentity};
 use tvm_ffi::tvm_ffi_sys::TVMFFIObject;
@@ -46,10 +46,12 @@ impl TestIntObj {
 
 impl Drop for TestIntObj {
     fn drop(&mut self) {
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _: AnyView<'_> = (&self.object).into();
-        }))
-        .is_err());
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _: AnyView<'_> = (&self.object).into();
+            }))
+            .is_err()
+        );
         self.delete_counter.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -64,7 +66,7 @@ unsafe impl ObjectCore for TestIntObj {
     }
     #[inline]
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
-        Object::object_header_mut(&mut this.object)
+        unsafe { Object::object_header_mut(&mut this.object) }
     }
 }
 
@@ -78,10 +80,12 @@ unsafe impl ObjectCoreWithExtraItems for TestIntObj {
 
 #[test]
 fn test_object_arc() {
-    assert!(std::panic::catch_unwind(|| {
-        let _: AnyView<'_> = (&Object::new()).into();
-    })
-    .is_err());
+    assert!(
+        std::panic::catch_unwind(|| {
+            let _: AnyView<'_> = (&Object::new()).into();
+        })
+        .is_err()
+    );
     let delete_counter = Arc::new(AtomicU32::new(0));
     let obj_arc = ObjectArc::new(TestIntObj::new(11, delete_counter.clone(), 0));
     let view: AnyView<'_> = (&obj_arc.object).into();
@@ -146,12 +150,12 @@ thread_local! {
 
 unsafe impl std::alloc::GlobalAlloc for RecordingAllocator {
     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
-        std::alloc::System.alloc(layout)
+        unsafe { std::alloc::System.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
         let _ = LAST_DEALLOC_SIZE.try_with(|size| size.set(layout.size()));
-        std::alloc::System.dealloc(ptr, layout)
+        unsafe { std::alloc::System.dealloc(ptr, layout) }
     }
 }
 
@@ -221,7 +225,7 @@ unsafe impl<const N: usize> ObjectCore for HeaderOnlyObj<N> {
     }
     #[inline]
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
-        Object::object_header_mut(&mut this.object)
+        unsafe { Object::object_header_mut(&mut this.object) }
     }
 }
 

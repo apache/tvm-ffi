@@ -50,7 +50,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn, TypeAttrDef};
 /// use tvm_ffi::{rs_object, Object, ObjectArc, ObjectCore, Result};
 ///

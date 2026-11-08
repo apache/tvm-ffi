@@ -42,7 +42,7 @@ pub unsafe fn packed_args<'a>(args: *const TVMFFIAny, num_args: i32) -> &'a [Any
         core::hint::cold_path();
         return &[];
     }
-    std::slice::from_raw_parts(args as *const AnyView, num_args as usize)
+    unsafe { std::slice::from_raw_parts(args as *const AnyView, num_args as usize) }
 }
 
 /// A closure `Fn(T0, ..., Tn) -> Result<O>` with 0 to 8 parameters, which
@@ -90,8 +90,8 @@ where
 pub unsafe fn write_exported_str(text: Result<std::string::String>, result: *mut TVMFFIAny) -> i32 {
     match text {
         Ok(text) => {
-            let text = TVMFFIByteArray::from_str(&text);
-            TVMFFIStringFromByteArray(&text, result)
+            let text = unsafe { TVMFFIByteArray::from_str(&text) };
+            unsafe { TVMFFIStringFromByteArray(&text, result) }
         }
         Err(error) => {
             Error::set_raised(&error);

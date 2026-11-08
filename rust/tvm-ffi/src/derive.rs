@@ -108,7 +108,7 @@ pub use tvm_ffi_macros::Object;
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///

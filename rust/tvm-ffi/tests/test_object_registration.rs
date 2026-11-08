@@ -17,7 +17,7 @@
  * under the License.
  */
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::object::{is_instance_of, ObjectRef};
+use tvm_ffi::object::{ObjectRef, is_instance_of};
 use tvm_ffi::*;
 use tvm_ffi_sys::{TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeKeyToIndex};
 

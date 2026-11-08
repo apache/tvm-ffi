@@ -100,7 +100,7 @@ unsafe impl AnyCompatible for DLDevice {
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
         // No device type is zero.
-        *std::ptr::addr_of!((*field).device_type) == 0
+        unsafe { *std::ptr::addr_of!((*field).device_type) == 0 }
     }
 
     fn type_str() -> String {
@@ -127,18 +127,18 @@ unsafe impl AnyCompatible for DLDevice {
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        data.data_union.v_device
+        unsafe { data.data_union.v_device }
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        data.data_union.v_device
+        unsafe { data.data_union.v_device }
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFIDevice as i32 {
-            return Ok(data.data_union.v_device);
+            return Ok(unsafe { data.data_union.v_device });
         }
-        let text = <crate::String as AnyCompatible>::try_cast_from_any_view(data)?;
+        let text = unsafe { <crate::String as AnyCompatible>::try_cast_from_any_view(data)? };
         parse_device(text.as_str()).ok_or(())
     }
 }

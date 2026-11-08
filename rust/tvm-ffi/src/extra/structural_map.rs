@@ -21,12 +21,12 @@
 
 use super::structural_common::raw_ffi_any_same_as;
 use super::structural_mutate::{
-    with_mutation_error_context, IntoMutateResult, MutationView, StructuralMutateEngine,
-    StructuralMutatorView,
+    IntoMutateResult, MutationView, StructuralMutateEngine, StructuralMutatorView,
+    with_mutation_error_context,
 };
 use super::structural_visit::DefRegionKind;
 use super::structural_walk::WalkOrder;
-use super::unchanged::{is_unchanged, UnchangedOr};
+use super::unchanged::{UnchangedOr, is_unchanged};
 use crate::{Any, AnyView, Dispatcher, IntoDispatcher, Result};
 use std::borrow::BorrowMut;
 
@@ -216,12 +216,12 @@ where
     R: Into<Any>,
     O: BorrowMut<D>,
     for<'v> H: IntoDispatcher<
-        (AnyView<'v>, DefRegionKind),
-        Option<Result<UnchangedOr<Any>>>,
-        M,
-        Target = D,
-        Output = O,
-    >,
+            (AnyView<'v>, DefRegionKind),
+            Option<Result<UnchangedOr<Any>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
     for<'s, 'v> &'s mut D:
         Dispatcher<(AnyView<'v>, DefRegionKind), Option<Result<UnchangedOr<Any>>>>,
 {

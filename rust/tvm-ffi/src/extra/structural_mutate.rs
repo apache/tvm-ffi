@@ -26,7 +26,7 @@
 // anything can unwind. Private `extern "C-unwind"` helpers return it in registers on AArch64.
 
 use std::cell::{RefCell, UnsafeCell};
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
@@ -38,7 +38,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 
 use super::dispatch::Dispatcher;
-use crate::any::{is_plain_inline, Any, AnyView};
+use crate::any::{Any, AnyView, is_plain_inline};
 use crate::error::{Error, Result, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc};
@@ -50,11 +50,11 @@ use crate::tvm_ffi_sys::{
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
-    field_def_region, for_each_field_info, free_var_child_region, missing_field_getter_error,
-    raw_ffi_any_into_result, raw_ffi_any_same_as, registered_type_index, reject_error_value,
-    result_into_raw_ffi_any, runtime_error, seq_hash_kind, with_structural_error_context,
-    with_structural_field_error_context, wrong_dispatcher, FLAG_SEQ_HASH_IGNORE,
-    FLAG_SETTER_IS_FUNCTION,
+    FLAG_SEQ_HASH_IGNORE, FLAG_SETTER_IS_FUNCTION, field_def_region, for_each_field_info,
+    free_var_child_region, missing_field_getter_error, raw_ffi_any_into_result,
+    raw_ffi_any_same_as, registered_type_index, reject_error_value, result_into_raw_ffi_any,
+    runtime_error, seq_hash_kind, with_structural_error_context,
+    with_structural_field_error_context, wrong_dispatcher,
 };
 use super::structural_visit::DefRegionKind;
 use super::unchanged::is_unchanged;
@@ -180,9 +180,9 @@ unsafe impl StructuralMutatorBase for StructuralMutatorObj {
         // A hook that rewrites fields keeps the rebuilt object valid for the
         // refined references that point at it.
         if let Some(attr) = Self::structural_mutate_hook(raw, value.mode) {
-            return Self::call_structural_mutate_hook_raw(runtime, raw, attr);
+            return unsafe { Self::call_structural_mutate_hook_raw(runtime, raw, attr) };
         }
-        Self::mutate_without_hook_raw(runtime, raw)
+        unsafe { Self::mutate_without_hook_raw(runtime, raw) }
     }
 }
 
@@ -530,7 +530,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     ///
     /// Panics if `selector` returns a reference outside the node.
     ///
-    /// ```
+    /// ```standalone_crate
     /// # use tvm_ffi::*;
     /// # use tvm_ffi::StructuralMutatorView;
     /// # #[rs_object(type_key = "my_ext.MyPair", final)]
@@ -849,22 +849,22 @@ where
     R: Into<Any>,
     O: BorrowMut<D>,
     for<'v, 'c, 'r> H: IntoDispatcher<
-        (
-            MutationView<'v>,
-            &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
-        ),
-        Option<Result<UnchangedOr<Any>>>,
-        M,
-        Target = D,
-        Output = O,
-    >,
+            (
+                MutationView<'v>,
+                &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
+            ),
+            Option<Result<UnchangedOr<Any>>>,
+            M,
+            Target = D,
+            Output = O,
+        >,
     for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-        (
-            MutationView<'v>,
-            &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
-        ),
-        Option<Result<UnchangedOr<Any>>>,
-    >,
+            (
+                MutationView<'v>,
+                &'c mut StructuralMutatorView<'r, D, StructuralMutatorObj>,
+            ),
+            Option<Result<UnchangedOr<Any>>>,
+        >,
 {
     StructuralMutateEngine::mutate_root(root, dispatcher)
 }
@@ -922,16 +922,16 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         R: Into<Any>,
         O: BorrowMut<D>,
         for<'v, 'c, 'r> H: IntoDispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<UnchangedOr<Any>>>,
-            M,
-            Target = D,
-            Output = O,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<UnchangedOr<Any>>>,
+                M,
+                Target = D,
+                Output = O,
+            >,
         for<'s, 'v, 'c, 'r> &'s mut D: crate::Dispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<UnchangedOr<Any>>>,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<UnchangedOr<Any>>>,
+            >,
     {
         // Normalize the input once. Named dispatchers keep their own recursive view
         // type; callback and tuple targets are their aggregate adapters.
@@ -961,7 +961,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         dispatch: &mut D,
     ) -> *mut c_void {
         let context = std::ptr::from_mut(dispatch).cast();
-        if context != (*Self::from_handle(runtime)).dispatcher {
+        if context != unsafe { (*Self::from_handle(runtime)).dispatcher } {
             core::hint::cold_path();
             wrong_dispatcher();
         }
@@ -974,9 +974,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     fn vtable<D, const CALLBACK_CONTEXT: bool>() -> &'static StructuralMutatorVTable
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<UnchangedOr<Any>>>,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<UnchangedOr<Any>>>,
+            >,
     {
         &StructuralMutatorVTable {
             mutate: Self::rust_vtable_mutate::<D, false, CALLBACK_CONTEXT>,
@@ -999,11 +999,11 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     ) -> TVMFFIAny
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<UnchangedOr<Any>>>,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<UnchangedOr<Any>>>,
+            >,
     {
-        let context = (*Self::from_handle(runtime)).dispatcher;
+        let context = unsafe { (*Self::from_handle(runtime)).dispatcher };
         let raw = *value.as_raw_ffi_any();
         let mode = if INPLACE {
             InplaceMode::Allow
@@ -1011,7 +1011,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
             InplaceMode::Disallow
         };
         let mode = mode.for_value(raw);
-        let dispatch = &mut *context.cast::<D>();
+        let dispatch = unsafe { &mut *context.cast::<D>() };
         let mut mutator = StructuralMutatorView {
             runtime,
             _marker: PhantomData,
@@ -1030,15 +1030,17 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
                     result
                 })
             }
-            None => Self::publish_and_descend_raw(
-                runtime,
-                std::ptr::from_mut(dispatch).cast(),
-                raw,
-                mode,
-            ),
+            None => unsafe {
+                Self::publish_and_descend_raw(
+                    runtime,
+                    std::ptr::from_mut(dispatch).cast(),
+                    raw,
+                    mode,
+                )
+            },
         };
         // All callback reborrows have ended before restoring the caller's provenance.
-        (*Self::from_handle(runtime)).dispatcher = context;
+        unsafe { (*Self::from_handle(runtime)).dispatcher = context };
         result
     }
 
@@ -1055,11 +1057,13 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         raw: TVMFFIAny,
         mode: InplaceMode,
     ) -> TVMFFIAny {
-        (*Self::from_handle(runtime)).dispatcher = context;
-        <Base as StructuralMutatorBase>::default_mutate_raw(
-            runtime.cast(),
-            MutationView::new(AnyView::from_raw_ffi_any(raw), mode),
-        )
+        unsafe { (*Self::from_handle(runtime)).dispatcher = context };
+        unsafe {
+            <Base as StructuralMutatorBase>::default_mutate_raw(
+                runtime.cast(),
+                MutationView::new(AnyView::from_raw_ffi_any(raw), mode),
+            )
+        }
     }
 
     /// Look up borrowed identity `raw` in the invocation remap, cloning its value.
@@ -1072,10 +1076,12 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         runtime: StructuralMutatorHandle,
         raw: TVMFFIAny,
     ) -> Result<Option<Any>> {
-        (*Self::from_handle(runtime))
-            .remap
-            .borrow()
-            .get(AnyView::from_raw_ffi_any(raw))
+        unsafe {
+            (*Self::from_handle(runtime))
+                .remap
+                .borrow()
+                .get(AnyView::from_raw_ffi_any(raw))
+        }
     }
 
     /// Record borrowed identity `raw` and clone `value` into the invocation remap.
@@ -1089,10 +1095,12 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         raw: TVMFFIAny,
         value: &Any,
     ) -> Result<()> {
-        (*Self::from_handle(runtime))
-            .remap
-            .borrow_mut()
-            .set(AnyView::from_raw_ffi_any(raw), value)
+        unsafe {
+            (*Self::from_handle(runtime))
+                .remap
+                .borrow_mut()
+                .set(AnyView::from_raw_ffi_any(raw), value)
+        }
     }
 
     /// Native remap lookup: borrow `var`, return an owning value, None, or Error.
@@ -1104,7 +1112,7 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         runtime: StructuralMutatorHandle,
         var: AnyView<'static>,
     ) -> TVMFFIAny {
-        match Self::runtime_var_remap_get(runtime, *var.as_raw_ffi_any()) {
+        match unsafe { Self::runtime_var_remap_get(runtime, *var.as_raw_ffi_any()) } {
             Ok(Some(value)) => Any::into_raw_ffi_any(value),
             Ok(None) => TVMFFIAny::new(),
             Err(error) => result_into_raw_ffi_any(Err(error)),
@@ -1122,8 +1130,10 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
         replacement: AnyView<'static>,
     ) -> TVMFFIAny {
         // Finish replacement cleanup before constructing the ABI result.
-        let result = raw_ffi_any_to_owned_any(*replacement.as_raw_ffi_any())
-            .and_then(|value| Self::runtime_var_remap_set(runtime, *var.as_raw_ffi_any(), &value));
+        let result =
+            raw_ffi_any_to_owned_any(*replacement.as_raw_ffi_any()).and_then(|value| unsafe {
+                Self::runtime_var_remap_set(runtime, *var.as_raw_ffi_any(), &value)
+            });
         result_into_raw_ffi_any(result.map(|()| Any::new()))
     }
 
@@ -1138,9 +1148,9 @@ impl<Base: StructuralMutatorBase> StructuralMutateEngine<Base> {
     ) -> Result<Any>
     where
         for<'s, 'v, 'c, 'r> &'s mut D: Dispatcher<
-            (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
-            Option<Result<UnchangedOr<Any>>>,
-        >,
+                (MutationView<'v>, &'c mut StructuralMutatorView<'r, D, Base>),
+                Option<Result<UnchangedOr<Any>>>,
+            >,
     {
         let mut base = Base::new()?;
         let type_index = Base::type_index();
@@ -1187,7 +1197,7 @@ impl StructuralMutatorObj {
             result
         } else {
             core::hint::cold_path();
-            Self::with_mutation_context_raw(result, raw)
+            unsafe { Self::with_mutation_context_raw(result, raw) }
         }
     }
 
@@ -1202,10 +1212,12 @@ impl StructuralMutatorObj {
         result: TVMFFIAny,
         raw: TVMFFIAny,
     ) -> TVMFFIAny {
-        result_into_raw_ffi_any(
-            raw_ffi_any_into_result(result)
-                .map_err(|error| with_mutation_error_context(error, raw, "mutate")),
-        )
+        unsafe {
+            result_into_raw_ffi_any(
+                raw_ffi_any_into_result(result)
+                    .map_err(|error| with_mutation_error_context(error, raw, "mutate")),
+            )
+        }
     }
 
     /// Mutate the reflected fields of a shallow copy of borrowed `raw`; `Unchanged` when no
@@ -1277,28 +1289,29 @@ impl StructuralMutatorObj {
         field_changed: &mut bool,
     ) -> Result<()> {
         let Some(getter) = field.getter else {
-            return Err(missing_field_getter_error(
-                "structural mutate",
-                field.name.as_str(),
-            ));
+            return Err(unsafe {
+                missing_field_getter_error("structural mutate", field.name.as_str())
+            });
         };
         // Read every field from the copy so earlier setters' side effects are
         // visible to later field mappings, exactly as in the C++ fallback.
         let field_offset = usize::try_from(field.offset)
-            .map_err(|_| invalid_field_offset_error(field.name.as_str()))?;
+            .map_err(|_| unsafe { invalid_field_offset_error(field.name.as_str()) })?;
         // SAFETY: registered reflection metadata guarantees that the field
         // offset lies within this object's allocation. The checked conversion
         // above also prevents truncation on 32-bit targets.
-        let source_address = output_object.add(field_offset).cast::<c_void>();
+        let source_address = unsafe { output_object.add(field_offset).cast::<c_void>() };
         // Own the output slot before entering foreign code. A getter may
         // populate an owning result and still report an error.
         let mut child = Any::new();
-        if getter(source_address, Any::as_raw_ffi_any_mut(&mut child)) != 0 {
-            return Err(with_structural_field_error_context(
-                Error::from_raised(),
-                "mutate",
-                field.name.as_str(),
-            ));
+        if unsafe { getter(source_address, Any::as_raw_ffi_any_mut(&mut child)) } != 0 {
+            return Err(unsafe {
+                with_structural_field_error_context(
+                    Error::from_raised(),
+                    "mutate",
+                    field.name.as_str(),
+                )
+            });
         }
         // Reflection getters return owning values. Keep the child alive for
         // the complete recursive call, then let normal Drop release it.
@@ -1307,16 +1320,18 @@ impl StructuralMutatorObj {
         let mapped = Self::with_def_region_kind(runtime, child_region, |_| {
             Self::call_mutator(runtime, child_raw, InplaceMode::Disallow)
         })
-        .map_err(|error| {
+        .map_err(|error| unsafe {
             with_structural_field_error_context(error, "mutate", field.name.as_str())
         })?;
         if is_unchanged(&mapped) || raw_ffi_any_same_as(child_raw, *mapped.as_raw_ffi_any()) {
             return Ok(());
         }
 
-        call_field_setter(field, source_address, mapped.as_raw_ffi_any()).map_err(|error| {
-            with_structural_field_error_context(error, "mutate", field.name.as_str())
-        })?;
+        call_field_setter(field, source_address, mapped.as_raw_ffi_any()).map_err(
+            |error| unsafe {
+                with_structural_field_error_context(error, "mutate", field.name.as_str())
+            },
+        )?;
         *field_changed = true;
         Ok(())
     }
@@ -1346,14 +1361,12 @@ impl StructuralMutatorObj {
     /// `raw` is unique, otherwise the copying one.
     #[inline(always)]
     fn structural_mutate_hook(raw: TVMFFIAny, mode: InplaceMode) -> Option<TVMFFIAny> {
-        if mode.for_value(raw) == InplaceMode::Allow {
-            if let Some(attr) = structural_mutate_column::<true>().get_raw_ffi_any(raw.type_index) {
-                if attr.type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32
-                    || attr.type_index == TVMFFITypeIndex::kTVMFFIFunction as i32
-                {
-                    return Some(attr);
-                }
-            }
+        if mode.for_value(raw) == InplaceMode::Allow
+            && let Some(attr) = structural_mutate_column::<true>().get_raw_ffi_any(raw.type_index)
+            && (attr.type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32
+                || attr.type_index == TVMFFITypeIndex::kTVMFFIFunction as i32)
+        {
+            return Some(attr);
         }
         let attr = structural_mutate_column::<false>().get_raw_ffi_any(raw.type_index)?;
         (attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32).then_some(attr)
@@ -1399,12 +1412,14 @@ impl StructuralMutatorObj {
         attr: TVMFFIAny,
     ) -> TVMFFIAny {
         let result = if attr.type_index == TVMFFITypeIndex::kTVMFFIFunction as i32 {
-            Function::try_from(AnyView::from_raw_ffi_any(attr)).and_then(|function| {
-                function.call_packed(&[
-                    Self::borrowed_mutator_view(runtime),
-                    AnyView::from_raw_ffi_any(raw),
-                ])
-            })
+            unsafe {
+                Function::try_from(AnyView::from_raw_ffi_any(attr)).and_then(|function| {
+                    function.call_packed(&[
+                        Self::borrowed_mutator_view(runtime),
+                        AnyView::from_raw_ffi_any(raw),
+                    ])
+                })
+            }
         } else {
             Err(invalid_mutation_hook_error())
         };
@@ -1423,10 +1438,10 @@ impl StructuralMutatorObj {
     unsafe fn borrowed_mutator_view<'a>(runtime: StructuralMutatorHandle) -> AnyView<'a> {
         let object = runtime.cast::<TVMFFIObject>();
         let mut raw = TVMFFIAny::new();
-        raw.type_index = (*object).type_index;
+        raw.type_index = unsafe { (*object).type_index };
         raw.small_str_len = 0;
         raw.data_union.v_obj = object;
-        AnyView::from_raw_ffi_any(raw)
+        unsafe { AnyView::from_raw_ffi_any(raw) }
     }
 
     /// Run `callback` under requested `kind` on live borrowed `mutator`.
@@ -1476,7 +1491,7 @@ impl StructuralMutatorObj {
     ) -> TVMFFIAny {
         // Read the region here rather than on the native-hook path, which does not use it.
         let def_region_kind =
-            std::mem::transmute::<i32, DefRegionKind>(*(*runtime).def_region_mode.get());
+            unsafe { std::mem::transmute::<i32, DefRegionKind>(*(*runtime).def_region_mode.get()) };
         result_into_raw_ffi_any(
             Self::mutate_without_hook(runtime, raw, def_region_kind)
                 .map_err(|error| with_mutation_error_context(error, raw, "mutate")),
@@ -1490,8 +1505,9 @@ impl StructuralMutatorObj {
         runtime: StructuralMutatorHandle,
         raw: TVMFFIAny,
     ) -> Result<Option<Any>> {
-        let callback = (*(*runtime).vtable).var_remap_get;
-        let value = raw_ffi_any_into_result(callback(runtime, AnyView::from_raw_ffi_any(raw)))?;
+        let callback = unsafe { (*(*runtime).vtable).var_remap_get };
+        let value =
+            unsafe { raw_ffi_any_into_result(callback(runtime, AnyView::from_raw_ffi_any(raw)))? };
         Ok((value.type_index() != TVMFFITypeIndex::kTVMFFINone as i32).then_some(value))
     }
 
@@ -1503,13 +1519,15 @@ impl StructuralMutatorObj {
         raw: TVMFFIAny,
         value: &Any,
     ) -> Result<()> {
-        let callback = (*(*runtime).vtable).var_remap_set;
-        raw_ffi_any_into_result(callback(
-            runtime,
-            AnyView::from_raw_ffi_any(raw),
-            AnyView::from_raw_ffi_any(*value.as_raw_ffi_any()),
-        ))
-        .map(|_| ())
+        let callback = unsafe { (*(*runtime).vtable).var_remap_set };
+        unsafe {
+            raw_ffi_any_into_result(callback(
+                runtime,
+                AnyView::from_raw_ffi_any(raw),
+                AnyView::from_raw_ffi_any(*value.as_raw_ffi_any()),
+            ))
+            .map(|_| ())
+        }
     }
 
     /// The reflective mutation of [`Self::mutate_without_hook_raw`], on owned results.
@@ -1732,10 +1750,13 @@ static SHALLOW_COPY_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock:
 #[cold]
 #[inline(never)]
 fn missing_shallow_copy_error(type_index: i32, attribute: &str) -> Error {
-    Error::new(TYPE_ERROR, &format!(
+    Error::new(
+        TYPE_ERROR,
+        &format!(
             "type `{}` cannot use reflected structural mutation because it does not define `{attribute}`",
             crate::object::type_key_of_index(type_index)
-        ))
+        ),
+    )
 }
 
 #[cold]

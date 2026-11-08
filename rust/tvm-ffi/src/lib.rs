@@ -27,7 +27,7 @@
 //!
 //! # Examples
 //!
-//! ```
+//! ```standalone_crate
 //! use tvm_ffi::{Array, Function, Result};
 //!
 //! let sum = |xs: Array<i64>| -> Result<i64> { Ok(xs.iter().sum()) };
@@ -96,25 +96,25 @@ pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{Tensor, TensorView};
 pub use crate::dtype::DLDataTypeExt;
 pub use crate::enum_ref::EnumRef;
-pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
     TYPE_ERROR, VALUE_ERROR, ZERO_DIVISION_ERROR,
 };
+pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::extra::dispatch::{Dispatcher, IntoDispatcher};
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_eq_hash::{
-    get_first_structural_mismatch, get_first_structural_mismatch_with, structural_equal,
-    structural_equal_with, structural_hash, structural_hash_with, StructuralOptions,
+    StructuralOptions, get_first_structural_mismatch, get_first_structural_mismatch_with,
+    structural_equal, structural_equal_with, structural_hash, structural_hash_with,
 };
 pub use crate::extra::structural_map::structural_map;
 pub use crate::extra::structural_mutate::{
-    structural_mutate, InplaceMode, MutationView, StructuralMutatorView,
+    InplaceMode, MutationView, StructuralMutatorView, structural_mutate,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, DefRegionKind, StructuralVisitorView, VisitInterrupt,
+    DefRegionKind, StructuralVisitorView, VisitInterrupt, structural_visit,
 };
-pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
+pub use crate::extra::structural_walk::{IntoWalkResult, WalkOrder, WalkResult, structural_walk};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
@@ -318,7 +318,7 @@ pub use tvm_ffi_macros::match_any;
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///

@@ -30,7 +30,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use super::BigInt;
-use crate::error::{Error, Result, OVERFLOW_ERROR, VALUE_ERROR, ZERO_DIVISION_ERROR};
+use crate::error::{Error, OVERFLOW_ERROR, Result, VALUE_ERROR, ZERO_DIVISION_ERROR};
 use std::mem::MaybeUninit;
 
 const BASE: u64 = 1 << 32;
@@ -97,11 +97,7 @@ pub(super) fn is_negative(x: &[i64]) -> bool {
 /// The word that sign-extends `x` beyond its length.
 #[inline]
 pub(super) fn extension(x: &[i64]) -> u64 {
-    if is_negative(x) {
-        u64::MAX
-    } else {
-        0
-    }
+    if is_negative(x) { u64::MAX } else { 0 }
 }
 
 /// Word `i` of `x`, sign-extended past its length.
@@ -195,11 +191,7 @@ pub(super) fn shr_i64(a: i64, b: i64) -> Result<i64> {
         return Err(negative_shift());
     }
     Ok(if b >= 64 {
-        if a < 0 {
-            -1
-        } else {
-            0
-        }
+        if a < 0 { -1 } else { 0 }
     } else {
         a >> b
     })

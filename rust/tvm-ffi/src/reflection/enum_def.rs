@@ -24,12 +24,12 @@ use std::marker::PhantomData;
 use std::mem::{align_of, size_of};
 
 use super::registry::{ensure_not_opaque_ptr, register_type_attr};
-use super::{get_method, NativeFunction, TypeAttrColumn};
+use super::{NativeFunction, TypeAttrColumn, get_method};
 use crate::any::TryFromTemp;
 use crate::derive::{Object, ObjectRef};
 use crate::enum_ref::EnumObj;
 use crate::object::{
-    is_instance_of, lock_type_registration, Object, ObjectArc, ObjectCore, ObjectRef,
+    Object, ObjectArc, ObjectCore, ObjectRef, is_instance_of, lock_type_registration,
 };
 use crate::tvm_ffi_sys::{TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeInfo};
 use crate::type_traits::AnyCompatible;
@@ -49,7 +49,7 @@ use crate::{Any, AnyView, EnumRef, Error, List, Result, String, TYPE_ERROR, VALU
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::{Object, ObjectRef};
 /// use tvm_ffi::reflection::EnumDef;
 /// use tvm_ffi::{EnumRef, ObjectArc};

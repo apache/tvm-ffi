@@ -235,23 +235,23 @@ unsafe impl<T: OptionalCompatible> AnyCompatible for Optional<T> {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        Option::<T>::check_any_strict(data)
+        unsafe { Option::<T>::check_any_strict(data) }
     }
 
     unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-        Option::<T>::match_constraints(data)
+        unsafe { Option::<T>::match_constraints(data) }
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        Option::<T>::copy_from_any_view_after_check(data).into()
+        unsafe { Option::<T>::copy_from_any_view_after_check(data).into() }
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        Option::<T>::move_from_any_after_check(data).into()
+        unsafe { Option::<T>::move_from_any_after_check(data).into() }
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-        Option::<T>::try_cast_from_any_view(data).map(Self::from)
+        unsafe { Option::<T>::try_cast_from_any_view(data).map(Self::from) }
     }
 }
 

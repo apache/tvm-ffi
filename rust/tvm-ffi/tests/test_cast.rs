@@ -16,10 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::object::{is_instance_of, ObjectRef};
+use tvm_ffi::object::{ObjectRef, is_instance_of};
 use tvm_ffi::*;
 
 // The hierarchy Object <- testing.rust.CastBase <- testing.rust.CastDerived;
@@ -203,9 +203,11 @@ fn test_borrowed_node_cast_preserves_reference_count() {
 
     let base_only = Any::from(base_only);
     assert!(base_only.downcast_ref::<TestDerivedObj>().is_none());
-    assert!(AnyView::from(&base_only)
-        .downcast_ref::<TestDerivedObj>()
-        .is_none());
+    assert!(
+        AnyView::from(&base_only)
+            .downcast_ref::<TestDerivedObj>()
+            .is_none()
+    );
 }
 
 #[test]
@@ -229,9 +231,11 @@ fn test_generated_borrow_and_upcast_conversions() {
 
 #[test]
 fn test_cast_checks_parameterized_container_type() {
-    assert!(Array::from_vec(vec![1_i64, 2_i64])
-        .downcast::<Array<f32>>()
-        .is_err());
+    assert!(
+        Array::from_vec(vec![1_i64, 2_i64])
+            .downcast::<Array<f32>>()
+            .is_err()
+    );
 }
 
 #[test]

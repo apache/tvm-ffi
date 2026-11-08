@@ -30,14 +30,14 @@
 
 use std::alloc::Layout;
 use std::ffi::c_void;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::AtomicU64;
 
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
 use crate::tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::{
     kTVMFFIObjectDeleterFlagBitMaskStrong, kTVMFFIObjectDeleterFlagBitMaskWeak,
 };
-use crate::tvm_ffi_sys::{TVMFFIObject, TVMFFIObjectHandle, COMBINED_REF_COUNT_BOTH_ONE};
+use crate::tvm_ffi_sys::{COMBINED_REF_COUNT_BOTH_ONE, TVMFFIObject, TVMFFIObjectHandle};
 use crate::type_traits::AnyCompatible;
 use crate::{Error, INTERNAL_ERROR};
 

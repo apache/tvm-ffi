@@ -1187,7 +1187,7 @@ fn test_big_int_native_objects_cross_runtime() {
 /// last strong reference to heap `value` goes, then release it (`Object::DecWeakRef`).
 /// Returns the (strong, weak) counts the weak reference saw and whether it freed.
 fn outlive_with_weak_ref(value: BigInt) -> (u64, u64, bool) {
-    use std::sync::atomic::{fence, Ordering};
+    use std::sync::atomic::{Ordering, fence};
     use tvm_ffi_sys::COMBINED_REF_COUNT_WEAK_ONE as WEAK_ONE;
     unsafe {
         let raw = Any::into_raw_ffi_any(Any::from(value));

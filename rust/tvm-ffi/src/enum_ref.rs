@@ -23,8 +23,8 @@
 
 use crate::derive::Object;
 use crate::object::{Object, ObjectCore, ObjectRefCore};
-use crate::reflection::enum_def::{any_into, dict_get, enum_state};
 use crate::reflection::EnumAttrMap;
+use crate::reflection::enum_def::{any_into, dict_get, enum_state};
 use crate::type_traits::AnyCompatible;
 use crate::{AnyView, Error, Result, String, VALUE_ERROR};
 
@@ -68,7 +68,7 @@ impl EnumObj {
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::{Object, ObjectRef};
 /// use tvm_ffi::reflection::EnumDef;
 /// use tvm_ffi::{EnumRef, ObjectArc, ObjectRefCore};

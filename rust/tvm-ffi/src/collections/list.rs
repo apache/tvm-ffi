@@ -104,14 +104,14 @@ impl ListObj {
     /// Cell `index` of the buffer; the caller keeps `index` below `capacity`.
     #[inline]
     unsafe fn cell(this: *mut ListObj, index: usize) -> *mut TVMFFIAny {
-        ((*(*this).data.get()) as *mut TVMFFIAny).add(index)
+        unsafe { ((*(*this).data.get()) as *mut TVMFFIAny).add(index) }
     }
 
     /// Drops the elements from the back down to `len`.
     unsafe fn truncate(this: *mut ListObj, len: usize) {
-        while (*(*this).size.get()) as usize > len {
-            (*(*this).size.get()) -= 1;
-            drop(take_cell(Self::cell(this, (*(*this).size.get()) as usize)));
+        while unsafe { (*(*this).size.get()) as usize } > len {
+            unsafe { (*(*this).size.get()) -= 1 };
+            unsafe { drop(take_cell(Self::cell(this, (*(*this).size.get()) as usize))) };
         }
     }
 }
@@ -120,14 +120,14 @@ impl ListObj {
 /// it from the list's accounting.
 #[inline]
 unsafe fn take_cell(cell: *mut TVMFFIAny) -> Any {
-    Any::from_raw_ffi_any(ptr::read(cell))
+    unsafe { Any::from_raw_ffi_any(ptr::read(cell)) }
 }
 
 #[inline]
 unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
     let mut raw = TVMFFIAny::new();
-    T::container_move_to_any(value, &mut raw);
-    ptr::write(cell, raw);
+    unsafe { T::container_move_to_any(value, &mut raw) };
+    unsafe { ptr::write(cell, raw) };
 }
 
 /// The most elements a list buffer can hold: its byte size must fit in `isize`.
@@ -239,11 +239,13 @@ unsafe impl<T: ContainerElement> ObjectRefCore for List<T> {
 /// `data` must hold one of those two objects, and the list must not be
 /// mutated while the slice is alive.
 pub(crate) unsafe fn seq_cells(data: &TVMFFIAny) -> &[TVMFFIAny] {
-    let seq = &*(data.data_union.v_obj as *const ListObj);
-    crate::util::slice_from_nullable_raw_parts(
-        *seq.data.get() as *const TVMFFIAny,
-        *seq.size.get() as usize,
-    )
+    let seq = unsafe { &*(data.data_union.v_obj as *const ListObj) };
+    unsafe {
+        crate::util::slice_from_nullable_raw_parts(
+            *seq.data.get() as *const TVMFFIAny,
+            *seq.size.get() as usize,
+        )
+    }
 }
 
 impl<T: ContainerElement> List<T> {
@@ -639,7 +641,9 @@ impl<T: ContainerElement> Iter<'_, T> {
     unsafe fn read(&self, index: usize) -> Result<T> {
         // SAFETY: the conversion leaves the list unchanged while it reads the
         // cell (see the module docs).
-        match T::container_try_cast_from_any_view(&*ListObj::cell(self.list.obj(), index)) {
+        match unsafe {
+            T::container_try_cast_from_any_view(&*ListObj::cell(self.list.obj(), index))
+        } {
             Ok(value) => Ok(value),
             Err(()) => type_error(index),
         }
@@ -691,7 +695,7 @@ impl<'a, T: ContainerElement> IntoIterator for &'a List<T> {
 unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
-        ObjectArc::is_null(std::ptr::addr_of!((*field).data))
+        unsafe { ObjectArc::is_null(std::ptr::addr_of!((*field).data)) }
     }
 
     fn type_str() -> String {
@@ -706,16 +710,20 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        data.type_index == TypeIndex::kTVMFFIList as i32
-            && seq_cells(data)
-                .iter()
-                .all(|cell| T::container_check_any_strict(cell))
+        unsafe {
+            data.type_index == TypeIndex::kTVMFFIList as i32
+                && seq_cells(data)
+                    .iter()
+                    .all(|cell| T::container_check_any_strict(cell))
+        }
     }
 
     unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-        seq_cells(data)
-            .iter()
-            .all(|cell| T::container_match_constraints(cell))
+        unsafe {
+            seq_cells(data)
+                .iter()
+                .all(|cell| T::container_match_constraints(cell))
+        }
     }
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
@@ -731,14 +739,14 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *const ListObj;
-        crate::object::unsafe_::inc_ref(ptr as *mut TVMFFIObject);
-        Self::from_data(ObjectArc::from_raw(ptr))
+        let ptr = unsafe { data.data_union.v_obj as *const ListObj };
+        unsafe { crate::object::unsafe_::inc_ref(ptr as *mut TVMFFIObject) };
+        unsafe { Self::from_data(ObjectArc::from_raw(ptr)) }
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *const ListObj;
-        let obj = Self::from_data(ObjectArc::from_raw(ptr));
+        let ptr = unsafe { data.data_union.v_obj as *const ListObj };
+        let obj = unsafe { Self::from_data(ObjectArc::from_raw(ptr)) };
         data.type_index = TypeIndex::kTVMFFINone as i32;
         data.data_union.v_int64 = 0;
         obj
@@ -754,18 +762,16 @@ unsafe impl<T: ContainerElement> AnyCompatible for List<T> {
         }
 
         // Fast path: a list whose elements all match shares the reference.
-        if <Self as AnyCompatible>::check_any_strict(data) {
-            return Ok(<Self as AnyCompatible>::copy_from_any_view_after_check(
-                data,
-            ));
+        if unsafe { <Self as AnyCompatible>::check_any_strict(data) } {
+            return Ok(unsafe { <Self as AnyCompatible>::copy_from_any_view_after_check(data) });
         }
 
         // Slow path: convert element by element into a new list. The
         // conversions leave the source sequence unchanged (see the module
         // docs), so the borrowed cells stay valid.
         let mut items = Vec::new();
-        for cell in seq_cells(data) {
-            items.push(T::container_try_cast_from_any_view(cell)?);
+        for cell in unsafe { seq_cells(data) } {
+            unsafe { items.push(T::container_try_cast_from_any_view(cell)?) };
         }
         Self::from_items(&items).map_err(|_| ())
     }
@@ -778,7 +784,7 @@ where
 {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &*(core::ptr::addr_of!(cell.data_union) as *const Self)
+        unsafe { &*(core::ptr::addr_of!(cell.data_union) as *const Self) }
     }
 }
 
@@ -788,7 +794,7 @@ where
 {
     #[inline(always)]
     unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-        crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell)
+        unsafe { crate::type_traits::downcast_ref_from_any_in_place::<Self>(cell) }
     }
 }
 
@@ -798,7 +804,7 @@ where
 {
     #[inline(always)]
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
-        crate::type_traits::downcast_ref_from_object_in_place::<Self>(place)
+        unsafe { crate::type_traits::downcast_ref_from_object_in_place::<Self>(place) }
     }
 }
 

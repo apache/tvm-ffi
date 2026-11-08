@@ -28,7 +28,7 @@
 
 use tvm_ffi::extra::structural_visit::{DefRegionKind, StructuralVisitorView};
 use tvm_ffi::{
-    dispatch, structural_visit, AnyView, Array, Result, String as FfiString, VisitInterrupt,
+    AnyView, Array, Result, String as FfiString, VisitInterrupt, dispatch, structural_visit,
 };
 
 /// C++: class TestVisitorObj : public StructuralVisitorObj

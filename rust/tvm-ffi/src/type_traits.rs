@@ -265,7 +265,7 @@ pub unsafe trait RefFromAnyUnchecked: ContainerElement {
 unsafe impl RefFromAnyUnchecked for Any {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &*(cell as *const TVMFFIAny as *const Any)
+        unsafe { &*(cell as *const TVMFFIAny as *const Any) }
     }
 }
 
@@ -281,21 +281,21 @@ unsafe impl RefFromAnyUnchecked for crate::big_int::BigInt {
                 std::mem::align_of::<crate::big_int::BigInt>() == std::mem::align_of::<TVMFFIAny>()
             );
         };
-        &*(cell as *const TVMFFIAny as *const crate::big_int::BigInt)
+        unsafe { &*(cell as *const TVMFFIAny as *const crate::big_int::BigInt) }
     }
 }
 
 unsafe impl RefFromAnyUnchecked for crate::String {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &*(cell as *const TVMFFIAny as *const crate::String)
+        unsafe { &*(cell as *const TVMFFIAny as *const crate::String) }
     }
 }
 
 unsafe impl RefFromAnyUnchecked for crate::string::Bytes {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &*(cell as *const TVMFFIAny as *const crate::string::Bytes)
+        unsafe { &*(cell as *const TVMFFIAny as *const crate::string::Bytes) }
     }
 }
 
@@ -303,28 +303,28 @@ unsafe impl RefFromAnyUnchecked for crate::string::Bytes {
 unsafe impl RefFromAnyUnchecked for i64 {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &cell.data_union.v_int64
+        unsafe { &cell.data_union.v_int64 }
     }
 }
 
 unsafe impl RefFromAnyUnchecked for f64 {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &cell.data_union.v_float64
+        unsafe { &cell.data_union.v_float64 }
     }
 }
 
 unsafe impl RefFromAnyUnchecked for tvm_ffi_sys::dlpack::DLDataType {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &cell.data_union.v_dtype
+        unsafe { &cell.data_union.v_dtype }
     }
 }
 
 unsafe impl RefFromAnyUnchecked for tvm_ffi_sys::dlpack::DLDevice {
     #[inline(always)]
     unsafe fn ref_from_any_unchecked(cell: &TVMFFIAny) -> &Self {
-        &cell.data_union.v_device
+        unsafe { &cell.data_union.v_device }
     }
 }
 
@@ -343,7 +343,7 @@ unsafe impl<T: crate::object::ObjectRefCore> RefFromAnyUnchecked for Option<T> {
             // do not rely on a producer for it.
             return &None;
         }
-        &*(&cell.data_union.v_obj as *const *mut TVMFFIObject as *const Option<T>)
+        unsafe { &*(&cell.data_union.v_obj as *const *mut TVMFFIObject as *const Option<T>) }
     }
 }
 
@@ -382,7 +382,7 @@ unsafe impl<T: crate::object::ObjectCore> DowncastRefFromAny for T {
         }
         // SAFETY: the type check establishes T's layout, and the cell keeps the
         // object alive while it is borrowed.
-        Some(&*cell.data_union.v_obj.cast::<T>())
+        Some(unsafe { &*cell.data_union.v_obj.cast::<T>() })
     }
 }
 
@@ -397,8 +397,8 @@ unsafe impl<T: crate::object::ObjectCore> DowncastRefFromAny for T {
 pub unsafe fn downcast_ref_from_any_in_place<T: RefFromAnyUnchecked>(
     cell: &TVMFFIAny,
 ) -> Option<&T> {
-    if T::container_check_any_strict(cell) {
-        Some(T::ref_from_any_unchecked(cell))
+    if unsafe { T::container_check_any_strict(cell) } {
+        Some(unsafe { T::ref_from_any_unchecked(cell) })
     } else {
         None
     }
@@ -407,7 +407,7 @@ pub unsafe fn downcast_ref_from_any_in_place<T: RefFromAnyUnchecked>(
 unsafe impl<T: crate::object::ObjectRefCore> DowncastRefFromAny for Option<T> {
     #[inline(always)]
     unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-        downcast_ref_from_any_in_place::<Self>(cell)
+        unsafe { downcast_ref_from_any_in_place::<Self>(cell) }
     }
 }
 
@@ -416,7 +416,7 @@ macro_rules! impl_downcast_ref_from_any {
         $(unsafe impl DowncastRefFromAny for $t {
             #[inline(always)]
             unsafe fn downcast_ref_from_any(cell: &TVMFFIAny) -> Option<&Self> {
-                downcast_ref_from_any_in_place::<Self>(cell)
+                unsafe { downcast_ref_from_any_in_place::<Self>(cell) }
             }
         })*
     };
@@ -437,7 +437,7 @@ unsafe impl DowncastRefFromAny for Any {
         if borrowed {
             None
         } else {
-            Some(Any::ref_from_any_unchecked(cell))
+            Some(unsafe { Any::ref_from_any_unchecked(cell) })
         }
     }
 }
@@ -494,11 +494,11 @@ unsafe impl<T: crate::object::ObjectCore> DowncastRefFromObject for T {
     #[inline(always)]
     unsafe fn downcast_ref_from_object(place: &*mut TVMFFIObject) -> Option<&Self> {
         let object = *place;
-        if !crate::object::is_instance_of::<T>((*object).type_index) {
+        if unsafe { !crate::object::is_instance_of::<T>((*object).type_index) } {
             return None;
         }
         // SAFETY: the type check establishes T's layout.
-        Some(&*object.cast::<T>())
+        Some(unsafe { &*object.cast::<T>() })
     }
 }
 
@@ -523,16 +523,18 @@ pub unsafe fn downcast_ref_from_object_in_place<T: RefFromAnyUnchecked>(
     };
     let object = *place;
     // An object header always carries an object-range type index.
-    core::hint::assert_unchecked(
-        (*object).type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
-    );
+    unsafe {
+        core::hint::assert_unchecked(
+            (*object).type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
+        )
+    };
     let mut cell = TVMFFIAny::new();
-    cell.type_index = (*object).type_index;
+    cell.type_index = unsafe { (*object).type_index };
     cell.data_union.v_obj = object;
-    if T::container_check_any_strict(&cell) {
+    if unsafe { T::container_check_any_strict(&cell) } {
         // SAFETY: `T` is exactly one object pointer, and the check shows the
         // object satisfies `T`.
-        Some(&*(place as *const *mut TVMFFIObject as *const T))
+        Some(unsafe { &*(place as *const *mut TVMFFIObject as *const T) })
     } else {
         None
     }
@@ -552,7 +554,7 @@ unsafe impl AnyCompatible for bool {
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        data.data_union.v_int64 != 0
+        unsafe { data.data_union.v_int64 != 0 }
     }
 
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
@@ -562,7 +564,7 @@ unsafe impl AnyCompatible for bool {
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        data.data_union.v_int64 != 0
+        unsafe { data.data_union.v_int64 != 0 }
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
@@ -599,11 +601,11 @@ macro_rules! impl_any_compatible_for_int {
                 }
 
                 unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-                    <$int_type>::try_from(data.data_union.v_int64).is_ok()
+                    <$int_type>::try_from(unsafe { data.data_union.v_int64 }).is_ok()
                 }
 
                 unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-                    data.data_union.v_int64 as $int_type
+                    unsafe { data.data_union.v_int64 as $int_type }
                 }
 
                 unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
@@ -613,13 +615,13 @@ macro_rules! impl_any_compatible_for_int {
                 }
 
                 unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-                    data.data_union.v_int64 as $int_type
+                    unsafe { data.data_union.v_int64 as $int_type }
                 }
 
                 unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
                     if data.type_index == TypeIndex::kTVMFFIInt as i32 ||
                        data.type_index == TypeIndex::kTVMFFIBool as i32 {
-                        Ok(data.data_union.v_int64 as $int_type)
+                        Ok(unsafe { data.data_union.v_int64 } as $int_type)
                     } else {
                         Err(())
                     }
@@ -651,12 +653,12 @@ macro_rules! impl_any_compatible_for_float {
                 }
 
                 unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-                    let value = data.data_union.v_float64;
+                    let value = unsafe { data.data_union.v_float64 };
                     ((value as $float_type) as f64).to_bits() == value.to_bits()
                 }
 
                 unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-                    data.data_union.v_float64 as $float_type
+                    unsafe { data.data_union.v_float64 as $float_type }
                 }
 
                 unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
@@ -666,15 +668,15 @@ macro_rules! impl_any_compatible_for_float {
                 }
 
                 unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-                    data.data_union.v_float64 as $float_type
+                    unsafe { data.data_union.v_float64 as $float_type }
                 }
 
                 unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
                     if data.type_index == TypeIndex::kTVMFFIFloat as i32 {
-                        Ok(data.data_union.v_float64 as $float_type)
+                        Ok(unsafe { data.data_union.v_float64 } as $float_type)
                     } else if data.type_index == TypeIndex::kTVMFFIInt as i32 ||
                        data.type_index == TypeIndex::kTVMFFIBool as i32 {
-                        Ok(data.data_union.v_int64 as $float_type)
+                        Ok(unsafe { data.data_union.v_int64 } as $float_type)
                     } else {
                         Err(())
                     }
@@ -713,12 +715,12 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
             return false;
         }
         let none = std::mem::MaybeUninit::new(None::<T>);
-        T::is_undefined(field.cast::<T>()) && !T::is_undefined(none.as_ptr().cast::<T>())
+        unsafe { T::is_undefined(field.cast::<T>()) && !T::is_undefined(none.as_ptr().cast::<T>()) }
     }
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-        if let Some(ref value) = src {
-            T::copy_to_any_view(value, data);
+        if let Some(value) = src {
+            unsafe { T::copy_to_any_view(value, data) };
         } else {
             data.type_index = TypeIndex::kTVMFFINone as i32;
             data.small_str_len = 0;
@@ -728,7 +730,7 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
 
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
         if let Some(value) = src {
-            T::move_to_any(value, data);
+            unsafe { T::move_to_any(value, data) };
         } else {
             data.type_index = TypeIndex::kTVMFFINone as i32;
             data.small_str_len = 0;
@@ -737,18 +739,18 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        T::check_any_strict(data) || data.type_index == TypeIndex::kTVMFFINone as i32
+        unsafe { T::check_any_strict(data) || data.type_index == TypeIndex::kTVMFFINone as i32 }
     }
 
     unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-        data.type_index == TypeIndex::kTVMFFINone as i32 || T::match_constraints(data)
+        unsafe { data.type_index == TypeIndex::kTVMFFINone as i32 || T::match_constraints(data) }
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
         if data.type_index == TypeIndex::kTVMFFINone as i32 {
             None
         } else {
-            Some(T::copy_from_any_view_after_check(data))
+            Some(unsafe { T::copy_from_any_view_after_check(data) })
         }
     }
 
@@ -756,7 +758,7 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
         if data.type_index == TypeIndex::kTVMFFINone as i32 {
             None
         } else {
-            Some(T::move_from_any_after_check(data))
+            Some(unsafe { T::move_from_any_after_check(data) })
         }
     }
 
@@ -764,7 +766,7 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
         if data.type_index == TypeIndex::kTVMFFINone as i32 {
             Ok(None)
         } else {
-            T::try_cast_from_any_view(data).map(Some)
+            unsafe { T::try_cast_from_any_view(data).map(Some) }
         }
     }
 }
@@ -819,7 +821,7 @@ unsafe impl AnyCompatible for *mut core::ffi::c_void {
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        data.data_union.v_ptr
+        unsafe { data.data_union.v_ptr }
     }
 
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
@@ -829,7 +831,7 @@ unsafe impl AnyCompatible for *mut core::ffi::c_void {
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        data.data_union.v_ptr
+        unsafe { data.data_union.v_ptr }
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
@@ -868,36 +870,36 @@ mod container_element_ops {
     impl<T: AnyCompatible> Ops for T {
         #[inline(always)]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-            <T as AnyCompatible>::copy_to_any_view(src, data)
+            unsafe { <T as AnyCompatible>::copy_to_any_view(src, data) }
         }
 
         #[inline(always)]
         unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny) {
-            <T as AnyCompatible>::move_to_any(src, data)
+            unsafe { <T as AnyCompatible>::move_to_any(src, data) }
         }
 
         #[inline(always)]
         unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool {
-            <T as AnyCompatible>::check_any_strict(data)
+            unsafe { <T as AnyCompatible>::check_any_strict(data) }
         }
         #[inline(always)]
         unsafe fn container_match_constraints(data: &TVMFFIAny) -> bool {
-            <T as AnyCompatible>::match_constraints(data)
+            unsafe { <T as AnyCompatible>::match_constraints(data) }
         }
 
         #[inline(always)]
         unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-            <T as AnyCompatible>::copy_from_any_view_after_check(data)
+            unsafe { <T as AnyCompatible>::copy_from_any_view_after_check(data) }
         }
 
         #[inline(always)]
         unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-            <T as AnyCompatible>::move_from_any_after_check(data)
+            unsafe { <T as AnyCompatible>::move_from_any_after_check(data) }
         }
 
         #[inline(always)]
         unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-            <T as AnyCompatible>::try_cast_from_any_view(data)
+            unsafe { <T as AnyCompatible>::try_cast_from_any_view(data) }
         }
 
         #[inline(always)]
@@ -940,17 +942,17 @@ mod container_element_ops {
 
         #[inline(always)]
         unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-            Any::from(AnyView::from_raw_ffi_any(*data))
+            unsafe { Any::from(AnyView::from_raw_ffi_any(*data)) }
         }
 
         #[inline(always)]
         unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-            Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new()))
+            unsafe { Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new())) }
         }
 
         #[inline(always)]
         unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-            Ok(Any::from(AnyView::from_raw_ffi_any(*data)))
+            Ok(unsafe { Any::from(AnyView::from_raw_ffi_any(*data)) })
         }
 
         #[inline(always)]

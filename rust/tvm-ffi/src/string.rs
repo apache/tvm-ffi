@@ -19,7 +19,7 @@
 //! [`String`] and [`Bytes`], immutable reference-counted strings.
 
 use crate::derive::Object;
-use crate::object::{unsafe_, Object, ObjectArc, ObjectCoreWithExtraItems};
+use crate::object::{Object, ObjectArc, ObjectCoreWithExtraItems, unsafe_};
 use crate::type_traits::AnyCompatible;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
@@ -568,7 +568,7 @@ unsafe impl AnyCompatible for Bytes {
     // Bytes are small bytes or a bytes object, never None.
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
-        (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32
+        unsafe { (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32 }
     }
 
     unsafe fn copy_to_any_view(this: &Self, data: &mut TVMFFIAny) {
@@ -599,10 +599,12 @@ unsafe impl AnyCompatible for Bytes {
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFIByteArrayPtr as i32 {
             // deep copy from bytearray ptr
-            let bytes = &*(data.data_union.v_ptr as *const TVMFFIByteArray);
-            Ok(Self::from(crate::util::slice_from_nullable_raw_parts(
-                bytes.data, bytes.size,
-            )))
+            let bytes = unsafe { &*(data.data_union.v_ptr as *const TVMFFIByteArray) };
+            Ok(unsafe {
+                Self::from(crate::util::slice_from_nullable_raw_parts(
+                    bytes.data, bytes.size,
+                ))
+            })
         } else if data.type_index == TypeIndex::kTVMFFISmallBytes as i32 {
             Ok(Self { data: *data })
         } else if data.type_index == TypeIndex::kTVMFFIBytes as i32 {
@@ -622,7 +624,7 @@ unsafe impl AnyCompatible for String {
     // A string is a small string or a string object, never None.
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
-        (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32
+        unsafe { (*std::ptr::addr_of!((*field).data.type_index)) == TypeIndex::kTVMFFINone as i32 }
     }
 
     unsafe fn copy_to_any_view(this: &Self, data: &mut TVMFFIAny) {
@@ -652,8 +654,9 @@ unsafe impl AnyCompatible for String {
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFIRawStr as i32 {
-            let c_str =
-                std::ffi::CStr::from_ptr(data.data_union.v_c_str as *const std::os::raw::c_char);
+            let c_str = unsafe {
+                std::ffi::CStr::from_ptr(data.data_union.v_c_str as *const std::os::raw::c_char)
+            };
             c_str.to_str().map(Self::from).map_err(|_| ())
         } else if data.type_index == TypeIndex::kTVMFFISmallStr as i32 {
             Ok(Self { data: *data })

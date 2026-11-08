@@ -120,7 +120,7 @@ fn test_any_tensor() {
 mod env_alloc {
     use std::ffi::{c_char, c_void};
     use tvm_ffi::tvm_ffi_sys::{
-        dlpack::DLTensor, DLPackManagedTensorAllocator, TVMFFIEnvSetDLPackManagedTensorAllocator,
+        DLPackManagedTensorAllocator, TVMFFIEnvSetDLPackManagedTensorAllocator, dlpack::DLTensor,
     };
     use tvm_ffi::*;
 
@@ -141,8 +141,8 @@ mod env_alloc {
     }
 
     unsafe extern "C" fn delete(tensor: *mut ManagedTensor) {
-        let tensor = Box::from_raw(tensor);
-        drop(Box::from_raw(tensor.manager_ctx as *mut Owned));
+        let tensor = unsafe { Box::from_raw(tensor) };
+        drop(unsafe { Box::from_raw(tensor.manager_ctx as *mut Owned) });
     }
 
     unsafe extern "C" fn cpu_allocator(
@@ -151,8 +151,9 @@ mod env_alloc {
         _error_ctx: *mut c_void,
         _set_error: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char),
     ) -> i32 {
-        let prototype = &*prototype;
-        let shape = std::slice::from_raw_parts(prototype.shape, prototype.ndim as usize).to_vec();
+        let prototype = unsafe { &*prototype };
+        let shape = unsafe { std::slice::from_raw_parts(prototype.shape, prototype.ndim as usize) }
+            .to_vec();
         let bytes = shape.iter().product::<i64>() as usize * (prototype.dtype.bits as usize / 8);
         let mut owned = Box::new(Owned {
             shape,
@@ -174,7 +175,7 @@ mod env_alloc {
             flags: 0,
             dl_tensor,
         });
-        *out = Box::into_raw(tensor) as *mut c_void;
+        unsafe { *out = Box::into_raw(tensor) as *mut c_void };
         0
     }
 
@@ -186,7 +187,7 @@ mod env_alloc {
     ) -> i32 {
         let kind = c"MemoryError";
         let message = c"out of test memory";
-        set_error(error_ctx, kind.as_ptr(), message.as_ptr());
+        unsafe { set_error(error_ctx, kind.as_ptr(), message.as_ptr()) };
         -1
     }
 

@@ -30,7 +30,7 @@ mod registry;
 mod unsafe_init;
 pub use access_path::{AccessKind, AccessPath, AccessPathObj, AccessStep, AccessStepObj};
 pub use accessor::{
-    field_default, get_method, get_method_by_index, type_key, FieldGetter, TypeAttrColumn,
+    FieldGetter, TypeAttrColumn, field_default, get_method, get_method_by_index, type_key,
 };
 pub use enum_def::{EnumAttrMap, EnumDef};
 pub use native_function::{NativeArgs, NativeFunction};
@@ -38,6 +38,6 @@ pub(crate) use registry::field_static_type_index;
 #[doc(hidden)]
 pub use registry::register_object;
 pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrDef};
+pub use unsafe_init::{UnsafeInit, unsafe_init};
 #[doc(hidden)]
 pub use unsafe_init::{field_drop, unsafe_init_creator};
-pub use unsafe_init::{unsafe_init, UnsafeInit};

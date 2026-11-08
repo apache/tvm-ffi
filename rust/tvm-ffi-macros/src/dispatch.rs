@@ -19,10 +19,10 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2, TokenTree};
-use quote::{format_ident, quote, quote_spanned, ToTokens};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
 use syn::{
-    parse_macro_input, FnArg, GenericParam, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta,
-    Token, Type,
+    FnArg, GenericParam, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta, Token, Type,
+    parse_macro_input,
 };
 
 use crate::utils::get_tvm_ffi_crate;
@@ -46,12 +46,11 @@ pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
 fn inline_handlers(item: &mut ItemImpl, args: &DispatchArgs) {
     let method_prefix = format!("{}_", args.prefix);
     for member in &mut item.items {
-        if let ImplItem::Method(method) = member {
-            if method.sig.ident.to_string().starts_with(&method_prefix)
-                && !method.attrs.iter().any(|attr| attr.path.is_ident("inline"))
-            {
-                method.attrs.push(syn::parse_quote!(#[inline(always)]));
-            }
+        if let ImplItem::Method(method) = member
+            && method.sig.ident.to_string().starts_with(&method_prefix)
+            && !method.attrs.iter().any(|attr| attr.path.is_ident("inline"))
+        {
+            method.attrs.push(syn::parse_quote!(#[inline(always)]));
         }
     }
 }
@@ -68,10 +67,12 @@ impl syn::parse::Parse for DispatchArgs {
         input.parse::<Token![,]>()?;
         let arguments = match input.parse::<Type>()? {
             Type::Tuple(tuple) if !tuple.elems.is_empty() => tuple,
-            ty => return Err(syn::Error::new_spanned(
-                ty,
-                "dispatch requires a nonempty argument tuple, starting with AnyView or MutationView",
-            )),
+            ty => {
+                return Err(syn::Error::new_spanned(
+                    ty,
+                    "dispatch requires a nonempty argument tuple, starting with AnyView or MutationView",
+                ));
+            }
         };
         input.parse::<Token![,]>()?;
         let output = input.parse::<Type>()?;
@@ -230,8 +231,10 @@ fn expand(item: &ItemImpl, args: &DispatchArgs) -> syn::Result<TokenStream2> {
             GenericParam::Lifetime(_) => continue,
         };
         if !contains_ident(constrained.iter().cloned().collect(), ident) {
-            return Err(syn::Error::new_spanned(param,
-                "dispatch generic parameters must occur in the receiver type, argument tuple or return type; move an unused parameter to an ordinary helper method"));
+            return Err(syn::Error::new_spanned(
+                param,
+                "dispatch generic parameters must occur in the receiver type, argument tuple or return type; move an unused parameter to an ordinary helper method",
+            ));
         }
     }
     let (impl_generics, _, where_clause) = generics.split_for_impl();
@@ -400,8 +403,10 @@ fn parse_handler<'a>(method: &'a ImplItemMethod, args: &DispatchArgs) -> syn::Re
         || signature.abi.is_some()
         || signature.variadic.is_some()
     {
-        return Err(syn::Error::new_spanned(signature,
-            "dispatch handlers must be safe synchronous methods taking &self or &mut self and a value"));
+        return Err(syn::Error::new_spanned(
+            signature,
+            "dispatch handlers must be safe synchronous methods taking &self or &mut self and a value",
+        ));
     }
     let FnArg::Typed(value) = &signature.inputs[1] else {
         unreachable!()
@@ -727,10 +732,10 @@ fn presence_meta(meta: Meta) -> Option<Meta> {
     let mut retained = syn::punctuated::Punctuated::new();
     retained.push(condition);
     for item in items {
-        if let NestedMeta::Meta(meta) = item {
-            if let Some(meta) = presence_meta(meta) {
-                retained.push(NestedMeta::Meta(meta));
-            }
+        if let NestedMeta::Meta(meta) = item
+            && let Some(meta) = presence_meta(meta)
+        {
+            retained.push(NestedMeta::Meta(meta));
         }
     }
     if retained.len() == 1 {

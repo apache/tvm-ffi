@@ -22,8 +22,8 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tvm_ffi::static_init::{StaticInitBlock, STATIC_INIT_BLOCKS};
-use tvm_ffi::{run_static_init_blocks, Error, Function, Result, VALUE_ERROR};
+use tvm_ffi::static_init::{STATIC_INIT_BLOCKS, StaticInitBlock};
+use tvm_ffi::{Error, Function, Result, VALUE_ERROR, run_static_init_blocks};
 
 fn add_one(x: i64) -> Result<i64> {
     Ok(x + 1)
@@ -159,9 +159,11 @@ fn a_block_another_library_ran_is_skipped() {
     let block = || StaticInitBlock::__new("ext::shared", 3, "0.1.0", text, body);
     let (first, second) = (block(), block());
     assert_eq!(first.marker(), second.marker());
-    assert!(first
-        .marker()
-        .starts_with("ffi.static_init_block.ext::shared:3@0.1.0#"));
+    assert!(
+        first
+            .marker()
+            .starts_with("ffi.static_init_block.ext::shared:3@0.1.0#")
+    );
 
     // The first library runs the block and marks it; the second skips it, where registering the
     // name again would fail.
@@ -175,9 +177,11 @@ fn a_block_another_library_ran_is_skipped() {
     // gets the error, and a later caller an error that names the block.
     let other = StaticInitBlock::__new("ext::shared", 3, "0.2.0", text, body);
     let error = other.run().unwrap_err();
-    assert!(error
-        .message()
-        .contains("`test_static_init.shared` is already registered"));
+    assert!(
+        error
+            .message()
+            .contains("`test_static_init.shared` is already registered")
+    );
     assert_eq!(RUNS.load(Ordering::SeqCst), 2);
     let again = other.run().unwrap_err();
     assert!(

@@ -17,11 +17,11 @@
  * under the License.
  */
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
 use proc_macro_error::abort;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::ext::IdentExt;
 use syn::DeriveInput;
+use syn::ext::IdentExt;
 
 use crate::utils::*;
 
@@ -541,10 +541,10 @@ impl Reflection {
             // The registration is a `static` initializer, where `Self` does
             // not resolve, so `Self::f` names the struct.
             let mut path = path.clone();
-            if let Some(first) = path.segments.first_mut() {
-                if first.ident == "Self" {
-                    first.ident = struct_name.clone();
-                }
+            if let Some(first) = path.segments.first_mut()
+                && first.ident == "Self"
+            {
+                first.ident = struct_name.clone();
             }
             quote!(#path)
         });
@@ -980,7 +980,7 @@ impl ObjectOptions {
                      `unsafe type_index = ...`, `final`, `immutable`, `register`, `rs_parent`, \
                      `child_slots = <n>`, `child_slots_can_overflow = <bool>`, \
                      `s_eq_hash_kind = \"<kind>\"` or `reflection = <path>`",
-                ))
+                ));
             }
         }
         Ok(())

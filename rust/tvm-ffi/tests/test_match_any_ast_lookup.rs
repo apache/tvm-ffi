@@ -20,7 +20,7 @@
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{Object as ObjectBase, ObjectArc, ObjectCore};
 use tvm_ffi::{
-    dispatch, match_any, Any, AnyView, Array, Dispatcher, MutationView, Shape, TypeIndex,
+    Any, AnyView, Array, Dispatcher, MutationView, Shape, TypeIndex, dispatch, match_any,
 };
 
 #[repr(C)]

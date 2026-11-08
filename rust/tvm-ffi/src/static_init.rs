@@ -28,7 +28,7 @@ use std::ffi::c_void;
 use std::panic::catch_unwind;
 use std::sync::{Once, OnceLock};
 
-use crate::{Any, Error, Function, Result, INTERNAL_ERROR};
+use crate::{Any, Error, Function, INTERNAL_ERROR, Result};
 
 #[doc(hidden)]
 pub use linkme;
@@ -39,7 +39,7 @@ pub use linkme;
 /// and stops at its first error, which `?` returns. A body whose statements all end in `;` returns
 /// `Ok(())`; one that ends in an expression returns it, a `Result<()>`.
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::{Function, Result};
 ///
 /// fn add_one(x: i64) -> Result<i64> {
@@ -102,9 +102,9 @@ macro_rules! static_init_block {
                 $crate::static_init::IntoStaticInitResult::into_static_init_result({ $($body)* })
             }
             #[used]
-            #[cfg_attr(target_os = "linux", link_section = ".init_array")]
-            #[cfg_attr(target_os = "macos", link_section = "__DATA,__mod_init_func")]
-            #[cfg_attr(windows, link_section = ".CRT$XCU")]
+            #[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+            #[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+            #[cfg_attr(windows, unsafe(link_section = ".CRT$XCU"))]
             static RUN_AT_LOAD: extern "C" fn() = $crate::static_init::__run_at_load;
         };
     };
@@ -342,7 +342,7 @@ pub extern "C" fn __run_at_load() {
 /// module, would leave the registrations dangling. Returns the path of the library.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn keep_loaded() -> Option<std::string::String> {
-    use std::ffi::{c_char, c_int, CStr};
+    use std::ffi::{CStr, c_char, c_int};
 
     #[repr(C)]
     struct DlInfo {
@@ -351,7 +351,7 @@ fn keep_loaded() -> Option<std::string::String> {
         sname: *const c_char,
         saddr: *mut c_void,
     }
-    extern "C" {
+    unsafe extern "C" {
         fn dladdr(addr: *const c_void, info: *mut DlInfo) -> c_int;
         fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
     }
@@ -388,7 +388,7 @@ fn keep_loaded() -> Option<std::string::String> {
 
     type Module = *mut c_void;
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn GetModuleHandleExW(flags: u32, module_name: *const u16, module: *mut Module) -> i32;
         fn GetModuleFileNameW(module: Module, filename: *mut u16, size: u32) -> u32;
     }

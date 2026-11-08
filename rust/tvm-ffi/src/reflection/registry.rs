@@ -37,12 +37,12 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::mem::{align_of, size_of};
 use std::ops::BitOr;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::NativeFunction;
 use crate::function_internal::AsPackedCallable;
 use crate::object::{
-    lock_type_registration, Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore,
+    Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore, lock_type_registration,
 };
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter,
@@ -50,8 +50,8 @@ use crate::tvm_ffi_sys::{
     TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
     TVMFFITypeRegisterField, TVMFFITypeRegisterMetadata, TVMFFITypeRegisterMethod,
 };
-use crate::type_traits::{type_schema_metadata, AnyCompatible};
-use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR, VALUE_ERROR};
+use crate::type_traits::{AnyCompatible, type_schema_metadata};
+use crate::{Any, Error, Function, INTERNAL_ERROR, Result, TYPE_ERROR, VALUE_ERROR};
 
 /// A copy of an object's own fields under a fresh object header, which
 /// `__ffi_shallow_copy__` returns; fields that are references share their
@@ -169,7 +169,7 @@ impl BitOr for FieldFlags {
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::reflection::{self, ObjectDef};
 /// use tvm_ffi::{rs_object, Object, ObjectArc, Result};
@@ -227,14 +227,14 @@ impl<N: ObjectCore> ObjectDef<N> {
         kind: Option<SEqHashKind>,
         creator: Option<TVMFFIObjectCreator>,
     ) -> Result<Self> {
-        let info = TVMFFIGetTypeInfo(type_index);
+        let info = unsafe { TVMFFIGetTypeInfo(type_index) };
         crate::ensure!(
             !info.is_null(),
             INTERNAL_ERROR,
             "no type info for `{}` (type index {type_index})",
             N::TYPE_KEY
         );
-        let fresh = (*info).metadata.is_null();
+        let fresh = unsafe { (*info).metadata.is_null() };
         // `finish` writes `__ffi_type_final__` last, as C++ `ObjectDef` and
         // Python `py_class` do: metadata without it is left by a registration
         // that failed partway, or by one that does not publish finality.
@@ -251,15 +251,17 @@ impl<N: ObjectCore> ObjectDef<N> {
         if fresh {
             let kind = match kind {
                 Some(kind) => kind.raw(),
-                None => inherited_kind(info),
+                None => unsafe { inherited_kind(info) },
             };
-            let metadata = TVMFFITypeMetadata {
-                doc: TVMFFIByteArray::from_str(""),
-                creator,
-                total_size: size_of::<N>() as i32,
-                structural_eq_hash_kind: kind,
+            let metadata = unsafe {
+                TVMFFITypeMetadata {
+                    doc: TVMFFIByteArray::from_str(""),
+                    creator,
+                    total_size: size_of::<N>() as i32,
+                    structural_eq_hash_kind: kind,
+                }
             };
-            crate::check_safe_call!(TVMFFITypeRegisterMetadata(type_index, &metadata))?;
+            unsafe { crate::check_safe_call!(TVMFFITypeRegisterMetadata(type_index, &metadata))? };
         }
         Ok(Self {
             type_index,
@@ -446,10 +448,10 @@ impl<N: ObjectCore> ObjectDef<N> {
             // C++ `ObjectDef` looks `ffi._RegisterFFIInit` up the same way, in case
             // it is not registered yet.
             let explicit_init = self.method_names.iter().any(|name| name == "__ffi_init__");
-            if !explicit_init {
-                if let Ok(register_init) = Function::get_global("ffi._RegisterFFIInit") {
-                    register_init.call_tuple((self.type_index,))?;
-                }
+            if !explicit_init
+                && let Ok(register_init) = Function::get_global("ffi._RegisterFFIInit")
+            {
+                register_init.call_tuple((self.type_index,))?;
             }
         }
         register_type_attr(
@@ -479,7 +481,8 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
     fields: impl FnOnce(ObjectDef<N>) -> Result<ObjectDef<N>>,
     methods: impl FnOnce(&mut ObjectDef<N>),
 ) -> Result<()> {
-    let mut def = fields(ObjectDef::registering(type_index, kind, creator)?)?.shallow_copy()?;
+    let mut def =
+        unsafe { fields(ObjectDef::registering(type_index, kind, creator)?)?.shallow_copy()? };
     methods(&mut def);
     def.finish()
 }
@@ -495,7 +498,7 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::reflection::TypeAttrDef;
 /// use tvm_ffi::reflection::TypeAttrColumn;
 /// use tvm_ffi::{rs_object, Object, ObjectCore};
@@ -597,10 +600,10 @@ pub(super) fn ensure_not_opaque_ptr(name: &str, value: &Any) -> Result<()> {
 
 /// The structural kind of the nearest ancestor of `info` with metadata.
 unsafe fn inherited_kind(info: *const crate::tvm_ffi_sys::TVMFFITypeInfo) -> i32 {
-    for depth in (0..(*info).type_depth).rev() {
-        let ancestor = *(*info).type_acenstors.add(depth as usize);
-        if !ancestor.is_null() && !(*ancestor).metadata.is_null() {
-            return (*(*ancestor).metadata).structural_eq_hash_kind;
+    for depth in unsafe { (0..(*info).type_depth).rev() } {
+        let ancestor = unsafe { *(*info).type_acenstors.add(depth as usize) };
+        if !ancestor.is_null() && unsafe { !(*ancestor).metadata.is_null() } {
+            return unsafe { (*(*ancestor).metadata).structural_eq_hash_kind };
         }
     }
     SEqHashKind::Unsupported.raw()
@@ -652,12 +655,12 @@ unsafe extern "C" fn field_getter<F: AnyCompatible>(
     let read = catch_unwind(AssertUnwindSafe(|| {
         let field = field.cast::<F>();
         // An undefined field reads as None, as a null `ObjectRef` does in C++.
-        let value = if F::is_undefined(field) {
+        let value = if unsafe { F::is_undefined(field) } {
             Any::new()
         } else {
-            (*field).to_any()
+            unsafe { (*field).to_any() }
         };
-        std::ptr::write(result, Any::into_raw_ffi_any(value));
+        unsafe { std::ptr::write(result, Any::into_raw_ffi_any(value)) };
     }));
     match read {
         Ok(()) => 0,
@@ -676,25 +679,27 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
     value: *const TVMFFIAny,
 ) -> i32 {
     let written = catch_unwind(AssertUnwindSafe(|| {
-        match F::try_cast_from_any_view(&*value) {
+        match unsafe { F::try_cast_from_any_view(&*value) } {
             Ok(converted) => {
                 let field = field.cast::<F>();
                 // An undefined field holds no value to drop.
-                if F::is_undefined(field) {
-                    field.write(converted);
+                if unsafe { F::is_undefined(field) } {
+                    unsafe { field.write(converted) };
                 } else {
-                    *field = converted;
+                    unsafe { *field = converted };
                 }
                 None
             }
-            Err(()) => Some(Error::new(
-                TYPE_ERROR,
-                &format!(
-                    "expected a field value of type {}, got {}",
-                    F::type_str(),
-                    F::get_mismatch_type_info(&*value)
-                ),
-            )),
+            Err(()) => Some(unsafe {
+                Error::new(
+                    TYPE_ERROR,
+                    &format!(
+                        "expected a field value of type {}, got {}",
+                        F::type_str(),
+                        F::get_mismatch_type_info(&*value)
+                    ),
+                )
+            }),
         }
     }));
     let error = match written {
@@ -741,7 +746,7 @@ pub(crate) fn field_static_type_index(type_str: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::field_static_type_index;
-    use crate::type_traits::{type_schema_metadata, AnyCompatible};
+    use crate::type_traits::{AnyCompatible, type_schema_metadata};
     use crate::{Array, List, Map};
 
     #[test]

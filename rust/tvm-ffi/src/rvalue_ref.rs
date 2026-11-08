@@ -75,29 +75,29 @@ where
     unsafe fn from_view(value: &AnyView<'_>, arg_index: Option<usize>) -> Result<Self> {
         let raw = value.as_raw_ffi_any();
         let converted = if raw.type_index == TypeIndex::kTVMFFIObjectRValueRef as i32 {
-            let slot = raw.data_union.v_ptr.cast::<*mut TVMFFIObject>();
-            if slot.is_null() || (*slot).is_null() {
-                return Err(conversion_error::<T>(raw, arg_index, true));
+            let slot = unsafe { raw.data_union.v_ptr.cast::<*mut TVMFFIObject>() };
+            if slot.is_null() || unsafe { (*slot).is_null() } {
+                return Err(unsafe { conversion_error::<T>(raw, arg_index, true) });
             }
-            let object = *slot;
-            let object_view = object_any(object);
-            if T::check_any_strict(&object_view) {
-                *slot = std::ptr::null_mut();
+            let object = unsafe { *slot };
+            let object_view = unsafe { object_any(object) };
+            if unsafe { T::check_any_strict(&object_view) } {
+                unsafe { *slot = std::ptr::null_mut() };
                 return Ok(Self {
                     slot: UnsafeCell::new(object),
                     _marker: PhantomData,
                 });
             }
-            T::try_cast_from_any_view(&object_view)
-        } else if T::check_any_strict(raw) {
-            Ok(T::copy_from_any_view_after_check(raw))
+            unsafe { T::try_cast_from_any_view(&object_view) }
+        } else if unsafe { T::check_any_strict(raw) } {
+            Ok(unsafe { T::copy_from_any_view_after_check(raw) })
         } else {
-            T::try_cast_from_any_view(raw)
+            unsafe { T::try_cast_from_any_view(raw) }
         };
 
         converted
             .map(Self::new)
-            .map_err(|()| conversion_error::<T>(raw, arg_index, false))
+            .map_err(|()| unsafe { conversion_error::<T>(raw, arg_index, false) })
     }
 }
 
@@ -170,10 +170,12 @@ where
 /// dynamic type index.
 unsafe fn object_any(object: *mut TVMFFIObject) -> TVMFFIAny {
     let mut raw = TVMFFIAny::new();
-    raw.type_index = (*object).type_index;
+    raw.type_index = unsafe { (*object).type_index };
     // SAFETY: The caller provides a live object from an owning reference or
     // a valid object-rvalue slot, so its dynamic type is in the object range.
-    core::hint::assert_unchecked(raw.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+    unsafe {
+        core::hint::assert_unchecked(raw.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32)
+    };
     raw.data_union.v_obj = object;
     raw
 }

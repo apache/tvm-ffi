@@ -291,7 +291,7 @@ unsafe impl AnyCompatible for Unchanged {
     }
 
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-        Self::copy_to_any_view(&src, data);
+        unsafe { Self::copy_to_any_view(&src, data) };
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
@@ -307,7 +307,7 @@ unsafe impl AnyCompatible for Unchanged {
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
-        Self::check_any_strict(data).then_some(Self).ok_or(())
+        unsafe { Self::check_any_strict(data).then_some(Self).ok_or(()) }
     }
 
     fn type_str() -> std::string::String {
@@ -339,26 +339,28 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
             // An erased successful result excludes the ABI's error channel.
             data.type_index != TVMFFITypeIndex::kTVMFFIError as i32
         } else {
-            Unchanged::check_any_strict(data) || T::container_check_any_strict(data)
+            unsafe { Unchanged::check_any_strict(data) || T::container_check_any_strict(data) }
         }
     }
 
     unsafe fn match_constraints(data: &TVMFFIAny) -> bool {
-        Unchanged::check_any_strict(data) || T::container_match_constraints(data)
+        unsafe { Unchanged::check_any_strict(data) || T::container_match_constraints(data) }
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        if Unchanged::check_any_strict(data) {
+        if unsafe { Unchanged::check_any_strict(data) } {
             return Self::unchanged();
         }
         // Materialize T, including numeric narrowing, before storing its value.
-        Self::changed(T::container_copy_from_any_view_after_check(data))
+        unsafe { Self::changed(T::container_copy_from_any_view_after_check(data)) }
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        Self {
-            data: Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new())),
-            _marker: PhantomData,
+        unsafe {
+            Self {
+                data: Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new())),
+                _marker: PhantomData,
+            }
         }
     }
 
@@ -366,10 +368,10 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
         if T::CONTAINER_IS_ANY && data.type_index == TVMFFITypeIndex::kTVMFFIError as i32 {
             return Err(());
         }
-        if Unchanged::check_any_strict(data) {
+        if unsafe { Unchanged::check_any_strict(data) } {
             return Ok(Self::unchanged());
         }
-        T::container_try_cast_from_any_view(data).map(Self::changed)
+        unsafe { T::container_try_cast_from_any_view(data).map(Self::changed) }
     }
 
     fn type_str() -> std::string::String {

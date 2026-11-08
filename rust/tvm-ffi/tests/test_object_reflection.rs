@@ -326,12 +326,14 @@ fn test_types_with_only_methods_register_their_reflection() {
     assert_eq!(info.num_fields, 0);
     assert!(!info.metadata.is_null());
     assert_eq!(methods(info).len(), 1);
-    assert!(bool::try_from(
-        TypeAttrColumn::lookup("__ffi_type_final__")
-            .and_then(|column| column.get(TallyObj::type_index()))
-            .unwrap()
-    )
-    .unwrap());
+    assert!(
+        bool::try_from(
+            TypeAttrColumn::lookup("__ffi_type_final__")
+                .and_then(|column| column.get(TallyObj::type_index()))
+                .unwrap()
+        )
+        .unwrap()
+    );
     let count = tvm_ffi::reflection::get_method_by_index(TallyObj::type_index(), "count").unwrap();
     let tally = Tally {
         data: ObjectArc::new(TallyObj {
@@ -498,9 +500,11 @@ fn test_types_without_reflect_register_no_reflection() {
     let info = type_info::<CounterObj>();
     assert_eq!(info.num_fields, 0);
     assert!(info.metadata.is_null());
-    assert!(TypeAttrColumn::lookup("__ffi_shallow_copy__")
-        .and_then(|column| column.get(CounterObj::type_index()))
-        .is_none());
+    assert!(
+        TypeAttrColumn::lookup("__ffi_shallow_copy__")
+            .and_then(|column| column.get(CounterObj::type_index()))
+            .is_none()
+    );
 }
 
 // The derives name every item by path, so they need nothing in scope.
@@ -564,9 +568,11 @@ impl DuplicateMethodObj {
 #[test]
 fn test_duplicate_method_names_fail_the_registration() {
     let error = tvm_ffi::run_static_init_blocks().unwrap_err();
-    assert!(error
-        .message()
-        .contains("duplicate method `same` of `testing.rust.DuplicateMethod`"));
+    assert!(
+        error
+            .message()
+            .contains("duplicate method `same` of `testing.rust.DuplicateMethod`")
+    );
 }
 
 #[test]

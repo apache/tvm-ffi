@@ -21,7 +21,7 @@ use std::any::TypeId;
 
 use tvm_ffi::match_any_internal::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
 use tvm_ffi::{
-    match_any, Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex, VisitInterrupt,
+    Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex, VisitInterrupt, match_any,
 };
 
 type CustomModuleMatcher = Module;
@@ -228,8 +228,8 @@ fn matches_concrete_object_containers_in_source_order() {
         Some(1)
     );
 
-    use tvm_ffi::extra::structural_mutate::InplaceMode;
     use tvm_ffi::MutationView;
+    use tvm_ffi::extra::structural_mutate::InplaceMode;
     let mut capability_evaluations = 0;
     let capability = match_any!({
         capability_evaluations += 1;

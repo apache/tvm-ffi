@@ -28,7 +28,7 @@ use crate::any::AnyView;
 use crate::derive::ObjectRef;
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
+use tvm_ffi_sys::{COMBINED_REF_COUNT_BOTH_ONE, TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject};
 
 // Type registration: writes to the runtime's type table from Rust, and the
 // check that a key registered elsewhere matches its Rust declaration.
@@ -63,14 +63,16 @@ pub unsafe fn assert_registered_type_matches<T: ObjectCore>(
     parent: i32,
     binding: bool,
 ) {
-    let info = &*TVMFFIGetTypeInfo(type_index);
+    let info = unsafe { &*TVMFFIGetTypeInfo(type_index) };
     let depth = T::TYPE_DEPTH;
-    let same_parent = info.type_depth == depth
-        && depth > 0
-        && (**info.type_acenstors.add(depth as usize - 1)).type_index == parent;
+    let same_parent = unsafe {
+        info.type_depth == depth
+            && depth > 0
+            && (**info.type_acenstors.add(depth as usize - 1)).type_index == parent
+    };
     let size = std::mem::size_of::<T>();
     let same_size = info.metadata.is_null() || {
-        let registered = (*info.metadata).total_size as usize;
+        let registered = unsafe { (*info.metadata).total_size as usize };
         size == registered || (binding && size < registered)
     };
     assert!(
@@ -134,9 +136,11 @@ impl ObjectArc<Object> {
     /// The erased owner and handles must remain on this thread unless the
     /// concrete payload permits sharing or transfer; erasure grants neither.
     pub(crate) unsafe fn new_opaque_unchecked<T>(data: T, type_index: i32) -> Self {
-        Self {
-            ptr: allocate_object(data, type_index).cast(),
-            _phantom: std::marker::PhantomData,
+        unsafe {
+            Self {
+                ptr: allocate_object(data, type_index).cast(),
+                _phantom: std::marker::PhantomData,
+            }
         }
     }
 }
@@ -208,7 +212,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// `this` points to an `ObjectArc<T>` or to all-zero bytes.
     #[inline]
     pub(crate) unsafe fn is_null(this: *const Self) -> bool {
-        (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null()
+        unsafe { (*std::ptr::addr_of!((*this).ptr).cast::<*const T>()).is_null() }
     }
 
     /// Take ownership of a raw object pointer, as `Arc::from_raw`.
@@ -225,9 +229,11 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// Ownership of that reference is transferred into the returned handle.
     #[inline(always)]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
-        Self {
-            ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
-            _phantom: std::marker::PhantomData,
+        unsafe {
+            Self {
+                ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
+                _phantom: std::marker::PhantomData,
+            }
         }
     }
 
@@ -656,7 +662,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 ///
 /// # Examples
 ///
-/// ```
+/// ```standalone_crate
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Any, AnyView, Object, ObjectArc};
 /// use tvm_ffi::object::ObjectRefAnyCompatible;
@@ -767,48 +773,50 @@ unsafe impl<T: ObjectRefAnyCompatible> AnyCompatible for T {
     #[inline]
     unsafe fn is_undefined(field: *const Self) -> bool {
         // `Self` is one `ObjectArc`, so its null form is the undefined field.
-        ObjectArc::is_null(field.cast::<ObjectArc<T::ContainerType>>())
+        unsafe { ObjectArc::is_null(field.cast::<ObjectArc<T::ContainerType>>()) }
     }
 
     #[inline(always)]
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-        write_object_cell(ObjectArc::as_ptr(T::data(src)), data);
+        unsafe { write_object_cell(ObjectArc::as_ptr(T::data(src)), data) };
     }
 
     #[inline(always)]
     unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-        write_object_cell(ObjectArc::into_raw(T::into_data(src)), data);
+        unsafe { write_object_cell(ObjectArc::into_raw(T::into_data(src)), data) };
     }
 
     #[inline(always)]
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
         // An instance of `ContainerType` points to one, so `extra_check` may read it.
-        is_instance_of::<T::ContainerType>(data.type_index)
-            && T::extra_check(&*data.data_union.v_obj.cast::<T::ContainerType>())
+        unsafe {
+            is_instance_of::<T::ContainerType>(data.type_index)
+                && T::extra_check(&*data.data_union.v_obj.cast::<T::ContainerType>())
+        }
     }
 
     #[inline]
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
         // The view does not own the object, so the new reference takes one.
-        unsafe_::inc_ref(data.data_union.v_obj);
-        T::from_data(ObjectArc::from_raw(data.data_union.v_obj.cast()))
+        unsafe { unsafe_::inc_ref(data.data_union.v_obj) };
+        unsafe { T::from_data(ObjectArc::from_raw(data.data_union.v_obj.cast())) }
     }
 
     #[inline(always)]
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        T::from_data(ObjectArc::from_raw(data.data_union.v_obj.cast()))
+        unsafe { T::from_data(ObjectArc::from_raw(data.data_union.v_obj.cast())) }
     }
 
     #[inline]
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-        if Self::check_any_strict(data) {
-            return Ok(Self::copy_from_any_view_after_check(data));
+        if unsafe { Self::check_any_strict(data) } {
+            return Ok(unsafe { Self::copy_from_any_view_after_check(data) });
         }
         // A moved-from rvalue slot is consumed only by an exact object match.
         if data.type_index == TypeIndex::kTVMFFIObjectRValueRef as i32 {
             return Err(());
         }
-        T::convert_fallback(AnyView::from_raw_ffi_any(*data)).ok_or(())
+        unsafe { T::convert_fallback(AnyView::from_raw_ffi_any(*data)).ok_or(()) }
     }
 
     fn get_mismatch_type_info(data: &TVMFFIAny) -> String {
@@ -1011,9 +1019,11 @@ pub(crate) fn type_key_of_index(type_index: i32) -> String {
 #[inline(always)]
 unsafe fn write_object_cell<T: ObjectCore>(ptr: *const T, data: &mut TVMFFIAny) {
     let object = ptr as *mut TVMFFIObject;
-    data.type_index = (*object).type_index;
+    data.type_index = unsafe { (*object).type_index };
     // SAFETY: a live object's header holds its registered object-range type index.
-    std::hint::assert_unchecked(data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+    unsafe {
+        std::hint::assert_unchecked(data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32)
+    };
     data.small_str_len = 0;
     data.data_union.v_obj = object;
 }
@@ -1022,22 +1032,24 @@ unsafe fn write_object_cell<T: ObjectCore>(ptr: *const T, data: &mut TVMFFIAny) 
 // payload's alignment and drop/layout deleter. The payload starts with an Object.
 unsafe fn allocate_object<T>(data: T, type_index: i32) -> NonNull<T> {
     let layout = std::alloc::Layout::new::<T>();
-    let allocation = std::alloc::alloc(layout);
+    let allocation = unsafe { std::alloc::alloc(layout) };
     if allocation.is_null() {
         std::alloc::handle_alloc_error(layout);
     }
     let ptr = allocation.cast::<T>();
-    std::ptr::write(ptr, data);
-    std::ptr::write(
-        ptr.cast::<TVMFFIObject>(),
-        TVMFFIObject {
-            combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
-            type_index,
-            __padding: 0,
-            deleter: Some(unsafe_::object_deleter_for_new::<T>),
-        },
-    );
-    NonNull::new_unchecked(ptr)
+    unsafe { std::ptr::write(ptr, data) };
+    unsafe {
+        std::ptr::write(
+            ptr.cast::<TVMFFIObject>(),
+            TVMFFIObject {
+                combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
+                type_index,
+                __padding: 0,
+                deleter: Some(unsafe_::object_deleter_for_new::<T>),
+            },
+        )
+    };
+    unsafe { NonNull::new_unchecked(ptr) }
 }
 
 /// Unsafe reference-count operations on raw object headers.
@@ -1049,7 +1061,7 @@ pub mod unsafe_ {
     };
 
     use std::ffi::c_void;
-    use std::sync::atomic::{fence, Ordering};
+    use std::sync::atomic::{Ordering, fence};
     use tvm_ffi_sys::TVMFFIObject;
     use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::{
         kTVMFFIObjectDeleterFlagBitMaskBoth, kTVMFFIObjectDeleterFlagBitMaskStrong,
@@ -1059,7 +1071,7 @@ pub mod unsafe_ {
     /// Increase the strong reference count of `handle`.
     #[inline]
     pub(crate) unsafe fn inc_ref(handle: *mut TVMFFIObject) {
-        let obj = &*handle;
+        let obj = unsafe { &*handle };
         obj.combined_ref_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -1067,16 +1079,20 @@ pub mod unsafe_ {
     #[inline]
     pub(crate) unsafe fn dec_ref(handle: *mut TVMFFIObject) {
         // Release publishes this owner's writes; the Acquire fence before the deleter pairs with it.
-        let old_combined_count = (*handle)
-            .combined_ref_count
-            .fetch_sub(COMBINED_REF_COUNT_STRONG_ONE, Ordering::Release);
+        let old_combined_count = unsafe {
+            (*handle)
+                .combined_ref_count
+                .fetch_sub(COMBINED_REF_COUNT_STRONG_ONE, Ordering::Release)
+        };
         if old_combined_count == COMBINED_REF_COUNT_BOTH_ONE {
             fence(Ordering::Acquire);
-            if let Some(deleter) = (*handle).deleter {
-                deleter(
-                    handle.cast::<c_void>(),
-                    kTVMFFIObjectDeleterFlagBitMaskBoth as i32,
-                );
+            if let Some(deleter) = unsafe { (*handle).deleter } {
+                unsafe {
+                    deleter(
+                        handle.cast::<c_void>(),
+                        kTVMFFIObjectDeleterFlagBitMaskBoth as i32,
+                    )
+                };
             }
         } else if (old_combined_count & COMBINED_REF_COUNT_MASK_U32)
             == COMBINED_REF_COUNT_STRONG_ONE
@@ -1084,22 +1100,28 @@ pub mod unsafe_ {
             // slow path, there is still a weak reference left
             // need to run two phase decrement
             fence(Ordering::Acquire);
-            if let Some(deleter) = (*handle).deleter {
-                deleter(
-                    handle.cast::<c_void>(),
-                    kTVMFFIObjectDeleterFlagBitMaskStrong as i32,
-                );
-            }
-            let old_weak_count = (*handle)
-                .combined_ref_count
-                .fetch_sub(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Release);
-            if old_weak_count == COMBINED_REF_COUNT_WEAK_ONE {
-                fence(Ordering::Acquire);
-                if let Some(deleter) = (*handle).deleter {
+            if let Some(deleter) = unsafe { (*handle).deleter } {
+                unsafe {
                     deleter(
                         handle.cast::<c_void>(),
-                        kTVMFFIObjectDeleterFlagBitMaskWeak as i32,
-                    );
+                        kTVMFFIObjectDeleterFlagBitMaskStrong as i32,
+                    )
+                };
+            }
+            let old_weak_count = unsafe {
+                (*handle)
+                    .combined_ref_count
+                    .fetch_sub(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Release)
+            };
+            if old_weak_count == COMBINED_REF_COUNT_WEAK_ONE {
+                fence(Ordering::Acquire);
+                if let Some(deleter) = unsafe { (*handle).deleter } {
+                    unsafe {
+                        deleter(
+                            handle.cast::<c_void>(),
+                            kTVMFFIObjectDeleterFlagBitMaskWeak as i32,
+                        )
+                    };
                 }
             }
         }
@@ -1107,7 +1129,7 @@ pub mod unsafe_ {
 
     #[inline]
     pub(crate) unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
-        let obj = &*handle;
+        let obj = unsafe { &*handle };
         (obj.combined_ref_count.load(Ordering::Relaxed) & COMBINED_REF_COUNT_MASK_U32) as usize
     }
 
@@ -1117,12 +1139,14 @@ pub mod unsafe_ {
     #[inline]
     pub(crate) unsafe fn is_unique(handle: *mut TVMFFIObject) -> bool {
         // Acquire pairs with the releasing decrement: other owners' accesses precede an in-place write.
-        (*handle).combined_ref_count.load(Ordering::Acquire) == COMBINED_REF_COUNT_BOTH_ONE
+        unsafe {
+            (*handle).combined_ref_count.load(Ordering::Acquire) == COMBINED_REF_COUNT_BOTH_ONE
+        }
     }
 
     #[inline]
     pub(crate) unsafe fn weak_count(handle: *mut TVMFFIObject) -> usize {
-        let obj = &*handle;
+        let obj = unsafe { &*handle };
         (obj.combined_ref_count.load(Ordering::Relaxed) >> 32) as usize
     }
 
@@ -1130,10 +1154,10 @@ pub mod unsafe_ {
     pub(crate) unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32) {
         let obj = ptr as *mut T;
         if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
-            std::ptr::drop_in_place(obj);
+            unsafe { std::ptr::drop_in_place(obj) };
         }
         if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-            std::alloc::dealloc(ptr as *mut u8, std::alloc::Layout::new::<T>());
+            unsafe { std::alloc::dealloc(ptr as *mut u8, std::alloc::Layout::new::<T>()) };
         }
     }
 
@@ -1159,27 +1183,32 @@ pub mod unsafe_ {
     {
         let obj = ptr as *mut T;
         if flags == kTVMFFIObjectDeleterFlagBitMaskBoth as i32 {
-            let extra_items_count = T::extra_items_count(&(*obj));
-            std::ptr::drop_in_place(obj);
-            std::alloc::dealloc(
-                ptr as *mut u8,
-                extra_items_layout::<T, U>(extra_items_count),
-            );
-        } else {
-            // Weak references keep using the header, so the weak phase finds the item
-            // count in the first word after it.
-            let count_slot = (ptr as *mut u8).add(std::mem::size_of::<TVMFFIObject>()) as *mut u64;
-            if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
-                let extra_items_count = T::extra_items_count(&(*obj));
-                std::ptr::drop_in_place(obj);
-                std::ptr::write(count_slot, extra_items_count as u64);
-            }
-            if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-                let extra_items_count = std::ptr::read(count_slot) as usize;
+            let extra_items_count = unsafe { T::extra_items_count(&(*obj)) };
+            unsafe { std::ptr::drop_in_place(obj) };
+            unsafe {
                 std::alloc::dealloc(
                     ptr as *mut u8,
                     extra_items_layout::<T, U>(extra_items_count),
-                );
+                )
+            };
+        } else {
+            // Weak references keep using the header, so the weak phase finds the item
+            // count in the first word after it.
+            let count_slot =
+                unsafe { (ptr as *mut u8).add(std::mem::size_of::<TVMFFIObject>()) as *mut u64 };
+            if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
+                let extra_items_count = unsafe { T::extra_items_count(&(*obj)) };
+                unsafe { std::ptr::drop_in_place(obj) };
+                unsafe { std::ptr::write(count_slot, extra_items_count as u64) };
+            }
+            if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
+                let extra_items_count = unsafe { std::ptr::read(count_slot) as usize };
+                unsafe {
+                    std::alloc::dealloc(
+                        ptr as *mut u8,
+                        extra_items_layout::<T, U>(extra_items_count),
+                    )
+                };
             }
         }
     }
