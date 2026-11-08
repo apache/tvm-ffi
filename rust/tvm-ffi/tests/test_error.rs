@@ -20,7 +20,7 @@ use tvm_ffi::*;
 
 #[test]
 fn test_error_new() {
-    let error = Error::new(RUNTIME_ERROR, "test error", "test traceback");
+    let error = Error::new(RUNTIME_ERROR, "test error").with_backtrace("test traceback");
     assert_eq!(error.kind(), RUNTIME_ERROR);
     assert_eq!(error.message(), "test error");
     assert_eq!(error.backtrace(), "test traceback");
@@ -28,7 +28,7 @@ fn test_error_new() {
 
 #[test]
 fn test_error_from_raised() {
-    let error0 = Error::new(RUNTIME_ERROR, "test error", "test traceback");
+    let error0 = Error::new(RUNTIME_ERROR, "test error").with_backtrace("test traceback");
     Error::set_raised(&error0);
     let error1 = Error::from_raised();
     assert_eq!(error1.kind(), RUNTIME_ERROR);
@@ -62,13 +62,10 @@ fn test_error_with_context() {
 
     let payload = Array::from_vec(vec![7i64]);
     for shared in [false, true] {
-        let error = Error::new_with_cause_and_extra_context(
-            RUNTIME_ERROR,
-            "outer",
-            "origin",
-            Some(&error0),
-            Some(&payload),
-        );
+        let error = Error::new(RUNTIME_ERROR, "outer")
+            .with_backtrace("origin")
+            .with_cause(&error0)
+            .with_extra_context(&payload);
         let retained = shared.then(|| error.clone());
         let output = Error::with_appended_backtrace(error, " frame");
         assert_eq!(output.backtrace(), "origin frame");
@@ -85,7 +82,7 @@ fn test_error_with_context() {
 
 #[test]
 fn test_error_any_convert() {
-    let error = Error::new(RUNTIME_ERROR, "test error", "test traceback");
+    let error = Error::new(RUNTIME_ERROR, "test error").with_backtrace("test traceback");
     let any = Any::from(error.clone());
     let error2 = any.clone().downcast_ref::<Error>().cloned().unwrap();
     assert_eq!(error2.kind(), RUNTIME_ERROR);

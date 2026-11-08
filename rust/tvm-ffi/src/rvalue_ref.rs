@@ -196,6 +196,5 @@ where
             "{prefix}Cannot convert from `{source}` to `RValueRef<{}>`",
             T::type_str()
         ),
-        "",
     )
 }

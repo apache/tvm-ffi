@@ -122,7 +122,6 @@ pub trait EnumRef: ObjectRefCore {
                     "Enum `{}` has no value named `{name}`",
                     Self::ContainerType::TYPE_KEY
                 ),
-                "",
             ));
         };
         any_into(value)

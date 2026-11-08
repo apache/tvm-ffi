@@ -114,14 +114,9 @@ unsafe impl ObjectCoreWithExtraItems for BytesObj {
     }
 }
 
-impl<T> From<T> for Bytes
-where
-    T: AsRef<[u8]>,
-{
-    #[inline]
-    /// Copy the bytes of `src`.
-    fn from(src: T) -> Self {
-        let value: &[u8] = src.as_ref();
+impl From<&[u8]> for Bytes {
+    /// Copy the bytes of `value`.
+    fn from(value: &[u8]) -> Self {
         // to be compatible with normal c++
         const MAX_SMALL_BYTES_LEN: usize = 7;
         unsafe {
@@ -224,17 +219,64 @@ impl Hash for Bytes {
     }
 }
 
-impl Display for Bytes {
+/// Formats as `[u8]` does, such as `[97, 98]`.
+impl Debug for Bytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.as_slice(), f)
+        Debug::fmt(self.as_slice(), f)
     }
 }
 
-impl Debug for Bytes {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ffi.Bytes")
-            .field("data", &self.as_slice())
-            .finish()
+macro_rules! impl_bytes_from {
+    ($([$($g:tt)*] $t:ty),* $(,)?) => {
+        $(impl<$($g)*> From<$t> for Bytes {
+            #[inline]
+            fn from(value: $t) -> Self {
+                Self::from(&value[..])
+            }
+        })*
+    };
+}
+
+impl_bytes_from!([] &mut [u8], [] Vec<u8>, [] &Vec<u8>, [] Box<[u8]>, [const N: usize] [u8; N], [const N: usize] &[u8; N]);
+
+macro_rules! impl_bytes_eq {
+    ($([$($g:tt)*] $t:ty),* $(,)?) => {
+        $(impl<$($g)*> PartialEq<$t> for Bytes {
+            #[inline]
+            fn eq(&self, other: &$t) -> bool {
+                self.as_slice() == &other[..]
+            }
+        }
+
+        impl<$($g)*> PartialEq<Bytes> for $t {
+            #[inline]
+            fn eq(&self, other: &Bytes) -> bool {
+                &self[..] == other.as_slice()
+            }
+        })*
+    };
+}
+
+impl_bytes_eq!([] [u8], ['a] &'a [u8], [] Vec<u8>, [const N: usize] [u8; N], ['a, const N: usize] &'a [u8; N]);
+
+impl AsRef<[u8]> for Bytes {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl std::borrow::Borrow<[u8]> for Bytes {
+    #[inline]
+    fn borrow(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl From<Bytes> for Vec<u8> {
+    #[inline]
+    fn from(value: Bytes) -> Self {
+        value.as_slice().to_vec()
     }
 }
 
@@ -331,15 +373,10 @@ impl String {
     }
 }
 
-impl<T> From<T> for String
-where
-    T: AsRef<str>,
-{
-    #[inline]
-    /// Copy the string `src`.
-    fn from(src: T) -> Self {
+impl From<&str> for String {
+    /// Copy the string `value`.
+    fn from(value: &str) -> Self {
         unsafe {
-            let value: &str = src.as_ref();
             let bytes = value.as_bytes();
             const MAX_SMALL_BYTES_LEN: usize = 7;
             if bytes.len() <= MAX_SMALL_BYTES_LEN {
@@ -423,28 +460,68 @@ impl PartialEq for String {
     }
 }
 
-// Allows `my_string == "hello"`
-impl<T> PartialEq<T> for String
-where
-    T: AsRef<str>,
-{
+macro_rules! impl_string_from {
+    ($([$($g:tt)*] $t:ty),* $(,)?) => {
+        $(impl<$($g)*> From<$t> for String {
+            #[inline]
+            fn from(value: $t) -> Self {
+                Self::from(&value[..])
+            }
+        })*
+    };
+}
+
+impl_string_from!([] &mut str, [] std::string::String, [] &std::string::String, [] Box<str>, ['a] std::borrow::Cow<'a, str>);
+
+macro_rules! impl_string_eq {
+    ($([$($g:tt)*] $t:ty),* $(,)?) => {
+        $(impl<$($g)*> PartialEq<$t> for String {
+            #[inline]
+            fn eq(&self, other: &$t) -> bool {
+                self.as_str() == &other[..]
+            }
+        }
+
+        impl<$($g)*> PartialEq<String> for $t {
+            #[inline]
+            fn eq(&self, other: &String) -> bool {
+                &self[..] == other.as_str()
+            }
+        })*
+    };
+}
+
+impl_string_eq!([] str, ['a] &'a str, [] std::string::String, ['a] std::borrow::Cow<'a, str>);
+
+impl AsRef<str> for String {
     #[inline]
-    fn eq(&self, other: &T) -> bool {
-        self.as_str() == other.as_ref()
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<[u8]> for String {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl std::borrow::Borrow<str> for String {
+    #[inline]
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl From<String> for std::string::String {
+    #[inline]
+    fn from(value: String) -> Self {
+        value.as_str().to_owned()
     }
 }
 
 impl Eq for String {}
-
-impl<T> PartialEq<T> for Bytes
-where
-    T: AsRef<[u8]>,
-{
-    #[inline]
-    fn eq(&self, other: &T) -> bool {
-        self.as_slice() == other.as_ref()
-    }
-}
 
 impl PartialOrd for String {
     #[inline]
@@ -473,11 +550,10 @@ impl Display for String {
     }
 }
 
+/// Formats as `str` does, such as `"hi"`.
 impl Debug for String {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ffi.String")
-            .field("data", &self.as_str())
-            .finish()
+        Debug::fmt(self.as_str(), f)
     }
 }
 

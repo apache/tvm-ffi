@@ -291,13 +291,16 @@ impl<T: ObjectCore> ObjectArc<T> {
         unsafe { unsafe_::is_unique(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
     }
 
-    /// The number of weak references, as `Arc::weak_count`.
+    /// The number of weak references, as `Arc::weak_count`: the weak
+    /// reference that the strong references hold together is not counted.
     ///
     /// # Arguments
     /// * `this` - The handle.
     #[inline]
     pub fn weak_count(this: &Self) -> usize {
-        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+        // While a strong reference lives, the raw count includes the one weak
+        // reference that all strong references share.
+        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) - 1 }
     }
 }
 
@@ -433,10 +436,12 @@ pub unsafe trait ObjectCore: Sized + 'static {
 /// # Safety
 ///
 /// The blanket implementations are the only sound ones: do not implement it.
+#[doc(hidden)]
 #[diagnostic::on_unimplemented(message = "`{Self}` does not derive from `{A}`")]
 pub unsafe trait ObjectDerivesFrom<A, Depth> {}
 
 /// Inferred depths for [`ObjectDerivesFrom`].
+#[doc(hidden)]
 pub mod marker {
     /// `A` is the object type itself.
     pub enum Itself {}
@@ -547,6 +552,31 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
             == ObjectArc::as_ptr(Other::data(other)).cast::<()>()
     }
 
+    /// The registered type key of the object's runtime type, such as
+    /// `"ffi.Array"`, as C++ `ObjectRef::GetTypeKey`.
+    #[inline]
+    fn type_key(&self) -> &'static str {
+        // SAFETY: ObjectRefCore guarantees a live object with a registered
+        // type index.
+        let type_index =
+            unsafe { (*ObjectArc::as_ptr(Self::data(self)).cast::<TVMFFIObject>()).type_index };
+        registered_type_key(type_index)
+    }
+
+    /// Whether the reference is a `T` as is, such as a subtype or a container
+    /// whose elements are checked too, by the strict check of
+    /// [`downcast`](Self::downcast), without a reference count change.
+    /// See also [`crate::Any::is`].
+    #[inline(always)]
+    fn is<T: AnyCompatible>(&self) -> bool {
+        let mut any_data = TVMFFIAny::new();
+        // SAFETY: the view of `self` is a valid cell while `self` is borrowed.
+        unsafe {
+            Self::copy_to_any_view(self, &mut any_data);
+            T::check_any_strict(&any_data)
+        }
+    }
+
     /// Borrow the underlying object as `T` when it is one.
     ///
     /// `T` is an object type such as `MyPairObj`, or a managed reference such
@@ -631,7 +661,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone + AnyCompatible {
 /// use tvm_ffi::{rs_object, Any, AnyView, Object, ObjectArc};
 /// use tvm_ffi::object::ObjectRefAnyCompatible;
 ///
-/// #[rs_object("my_ext.MyPair", final)]
+/// #[rs_object(type_key = "my_ext.MyPair", final)]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,
@@ -960,6 +990,15 @@ pub(crate) fn into_root_object_ref<S: ObjectRefCore>(value: S) -> ObjectRef {
     }
 }
 
+/// The type key of `type_index`, the type index of a value, which the runtime
+/// always registers.
+#[inline]
+pub(crate) fn registered_type_key(type_index: i32) -> &'static str {
+    // SAFETY: a value's type index is registered, and type information lives
+    // as long as the process; a type key is UTF-8 text.
+    unsafe { (*TVMFFIGetTypeInfo(type_index)).type_key.as_str() }
+}
+
 /// The registered type key of `type_index`, or `<type_index N>` when it has none.
 pub(crate) fn type_key_of_index(type_index: i32) -> String {
     match crate::reflection::type_key(type_index) {
@@ -1019,7 +1058,7 @@ pub mod unsafe_ {
 
     /// Increase the strong reference count of `handle`.
     #[inline]
-    pub unsafe fn inc_ref(handle: *mut TVMFFIObject) {
+    pub(crate) unsafe fn inc_ref(handle: *mut TVMFFIObject) {
         let obj = &*handle;
         obj.combined_ref_count.fetch_add(1, Ordering::Relaxed);
     }

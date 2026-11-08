@@ -551,9 +551,9 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         ) -> Result<UnchangedOr<Any>> {
             let mode = self.mode;
             if self.increment {
-                mutator.default_mutate(self, value.with_inplace_mode(mode))
+                mutator.default_mutate(self, value.narrow_inplace_mode(mode))
             } else {
-                let result = mutator.default_mutate(self, value.with_inplace_mode(mode))?;
+                let result = mutator.default_mutate(self, value.narrow_inplace_mode(mode))?;
                 assert!(result.is_unchanged());
                 Ok(result)
             }
@@ -597,7 +597,7 @@ fn borrowed_capabilities_cannot_enable_low_level_default_reuse() {
                 ObjectArc::strong_count(<Array<i64> as ObjectRefCore>::data(&source)),
                 1
             );
-            let value = value.with_inplace_mode(InplaceMode::Allow);
+            let value = value.narrow_inplace_mode(InplaceMode::Allow);
             assert_eq!(value.inplace_mode(), InplaceMode::Disallow);
             let result = mutator.default_mutate(self, value)?;
             let result = Array::<i64>::try_from(
@@ -685,7 +685,7 @@ fn owned_entry_mode_is_forwarded_by_generated_callbacks() {
                 let mut owner: Any = child.into();
                 let alias = self.shared.then(|| owner.clone());
                 let count = if self.shared { 2 } else { 1 };
-                let capability = MutationView::from(&mut owner).with_inplace_mode(self.mode);
+                let capability = MutationView::from(&mut owner).narrow_inplace_mode(self.mode);
                 assert_eq!(capability.inplace_mode(), self.mode);
                 assert_eq!(capability.as_any_view().debug_strong_count(), Some(count));
                 assert_eq!(
@@ -804,7 +804,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
             });
             self.observe(&value);
             mutator
-                .default_mutate(self, value.with_inplace_mode(self.requested))
+                .default_mutate(self, value.narrow_inplace_mode(self.requested))
                 .into_mutate_result()
         }
         fn mutate_integer(
@@ -871,7 +871,7 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     assert_eq!(a.size, 1);
     assert_eq!(a.inplace_mode(), Allow);
     assert_eq!(a.as_any_view().debug_strong_count(), Some(1));
-    let mut value = value.with_inplace_mode(Disallow);
+    let mut value = value.narrow_inplace_mode(Disallow);
     let b = value.field(|node| &node.b);
     assert_eq!(b.inplace_mode(), Disallow);
     assert_eq!(b.as_any_view().debug_strong_count(), Some(1));
@@ -965,7 +965,7 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
         ) -> Result<UnchangedOr<Any>> {
             if value.as_any_view().downcast_ref::<i64>().copied().is_some() {
                 return if self.0 {
-                    Err(Error::new(RUNTIME_ERROR, "child failed", ""))
+                    Err(Error::new(RUNTIME_ERROR, "child failed"))
                 } else {
                     Ok(UnchangedOr::<Any>::unchanged())
                 };
@@ -1131,14 +1131,11 @@ fn callback_errors_preserve_message_and_add_object_context() {
     unsafe impl Send for VisitErrorContext {}
     // SAFETY: as for `Send`.
     unsafe impl Sync for VisitErrorContext {}
-    let cause = Error::new(RUNTIME_ERROR, "cause", "");
-    let source = Error::new_with_cause_and_extra_context(
-        RUNTIME_ERROR,
-        "callback failed",
-        "origin",
-        Some(&cause),
-        Some(&VisitErrorContext::try_from(context.clone()).unwrap()),
-    );
+    let cause = Error::new(RUNTIME_ERROR, "cause");
+    let source = Error::new(RUNTIME_ERROR, "callback failed")
+        .with_backtrace("origin")
+        .with_cause(&cause)
+        .with_extra_context(&VisitErrorContext::try_from(context.clone()).unwrap());
     let mut errors = Vec::new();
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let leaf_error = structural_map(
@@ -1258,12 +1255,12 @@ fn map_errors_name_the_replaced_or_rebuilt_node() {
                     if order == WalkOrder::PreOrder {
                         Ok(value.into())
                     } else {
-                        Err(Error::new(RUNTIME_ERROR, "failed", ""))
+                        Err(Error::new(RUNTIME_ERROR, "failed"))
                     }
                 },
                 |value: i64| -> Result<i64> {
                     if order == WalkOrder::PreOrder {
-                        Err(Error::new(RUNTIME_ERROR, "failed", ""))
+                        Err(Error::new(RUNTIME_ERROR, "failed"))
                     } else {
                         Ok(value + 1)
                     }
@@ -1345,7 +1342,7 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
     let error = match structural_map(
         source.clone(),
         |_integer: i64| -> Result<i64> {
-            Err(Error::new(RUNTIME_ERROR, "map mapper failed", "origin"))
+            Err(Error::new(RUNTIME_ERROR, "map mapper failed").with_backtrace("origin"))
         },
         WalkOrder::PostOrder,
     ) {
@@ -2324,7 +2321,7 @@ fn mutation_descent_preserves_ownership_and_markers() {
             if self.retain {
                 self.retained = Some(Any::from(value.as_any_view()));
             }
-            let result = mutator.default_mutate(self, value.with_inplace_mode(self.mode))?;
+            let result = mutator.default_mutate(self, value.narrow_inplace_mode(self.mode))?;
             if !self.increment {
                 assert!(result.is_unchanged());
             }
@@ -2450,7 +2447,7 @@ fn mutation_regions_retargeting_and_error_restore() {
                 assert_eq!(mutator.def_region_kind(), Use);
                 let error: Result<()> = mutator.with_def_region_kind(Pattern, |mutator| {
                     assert_eq!(mutator.def_region_kind(), Pattern);
-                    Err(Error::new(RUNTIME_ERROR, "handler region error", ""))
+                    Err(Error::new(RUNTIME_ERROR, "handler region error"))
                 });
                 assert!(error
                     .unwrap_err()
@@ -2497,7 +2494,7 @@ fn mutation_regions_retargeting_and_error_restore() {
                     })?;
                     let error: Result<()> = mutator.with_def_region_kind(Use, |mutator| {
                         assert_eq!(mutator.def_region_kind(), Pattern);
-                        Err(Error::new(RUNTIME_ERROR, "scoped error", ""))
+                        Err(Error::new(RUNTIME_ERROR, "scoped error"))
                     });
                     assert!(error.is_err());
                     assert_eq!(mutator.def_region_kind(), Pattern);

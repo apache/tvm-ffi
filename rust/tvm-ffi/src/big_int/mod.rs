@@ -387,11 +387,7 @@ macro_rules! impl_try_from_big_int {
 
             fn try_from(value: &BigInt) -> Result<Self> {
                 value.$to().ok_or_else(|| {
-                    Error::new(
-                        OVERFLOW_ERROR,
-                        &format!("{} does not fit in {}", value, stringify!($t)),
-                        "",
-                    )
+                    Error::new(OVERFLOW_ERROR, &format!("{} does not fit in {}", value, stringify!($t)))
                 })
             }
         }
@@ -413,13 +409,12 @@ impl TryFrom<f64> for BigInt {
             return Ok(Self::from_i64(value as i64));
         }
         if value.is_nan() {
-            return Err(Error::new(VALUE_ERROR, "Cannot convert NaN to BigInt", ""));
+            return Err(Error::new(VALUE_ERROR, "Cannot convert NaN to BigInt"));
         }
         if value.is_infinite() {
             return Err(Error::new(
                 OVERFLOW_ERROR,
                 "Cannot convert infinity to BigInt",
-                "",
             ));
         }
         // |value| >= 2^63 is an integer: shift the 53-bit significand to its binary exponent.
@@ -445,11 +440,7 @@ impl FromStr for BigInt {
             _ => (false, text),
         };
         if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(Error::new(
-                VALUE_ERROR,
-                "Invalid decimal string for BigInt",
-                "",
-            ));
+            return Err(Error::new(VALUE_ERROR, "Invalid decimal string for BigInt"));
         }
         // Accumulate 19-digit chunks: magnitude = magnitude * 10^len + chunk.
         let mut magnitude = Vec::new();

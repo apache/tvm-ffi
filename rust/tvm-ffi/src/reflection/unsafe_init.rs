@@ -209,7 +209,7 @@ pub unsafe extern "C" fn unsafe_init_creator<T: UnsafeInit>(
         Ok(()) => 0,
         Err(_) => {
             let message = format!("panic while creating an object of `{}`", T::TYPE_KEY);
-            Error::set_raised(&Error::new(INTERNAL_ERROR, &message, ""));
+            Error::set_raised(&Error::new(INTERNAL_ERROR, &message));
             -1
         }
     }

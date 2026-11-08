@@ -22,7 +22,9 @@ use crate::derive::{Object, ObjectRef};
 use crate::object::{self, Object, ObjectArc, ObjectRefCore};
 use crate::type_traits::AnyCompatible;
 use std::ffi::c_void;
-use tvm_ffi_sys::TVMFFIBacktraceUpdateMode::kTVMFFIBacktraceUpdateModeAppend;
+use tvm_ffi_sys::TVMFFIBacktraceUpdateMode::{
+    kTVMFFIBacktraceUpdateModeAppend, kTVMFFIBacktraceUpdateModeReplace,
+};
 use tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIErrorCell, TVMFFIErrorCreateWithCauseAndExtraContext,
     TVMFFIErrorMoveFromRaised, TVMFFIErrorSetRaised, TVMFFIObjectHandle, TVMFFITypeIndex,
@@ -82,7 +84,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 ///
 /// Use the constants such as [`VALUE_ERROR`] and [`TYPE_ERROR`], or
 /// [`ErrorKind::new("MyError")`](ErrorKind::new) for a custom kind.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ErrorKind<'a>(&'a str);
 
 impl<'a> ErrorKind<'a> {
@@ -91,7 +93,7 @@ impl<'a> ErrorKind<'a> {
     /// ```
     /// use tvm_ffi::{Error, ErrorKind};
     /// const MY_ERROR: ErrorKind = ErrorKind::new("MyError");
-    /// let error = Error::new(MY_ERROR, "bad input", "");
+    /// let error = Error::new(MY_ERROR, "bad input");
     /// assert_eq!(error.kind().as_str(), "MyError");
     /// ```
     pub const fn new(name: &'a str) -> Self {
@@ -155,7 +157,7 @@ impl Error {
                     .map(|s| s.as_str())
             })
             .unwrap_or("unknown payload");
-        Self::new(INTERNAL_ERROR, &format!("panicked: {message}"), "")
+        Self::new(INTERNAL_ERROR, &format!("panicked: {message}"))
     }
 
     /// The `TypeError` for a reference that [`downcast`](crate::ObjectRefCore::downcast)
@@ -176,55 +178,57 @@ impl Error {
             B::get_mismatch_type_info(&cell),
             B::type_str()
         );
-        Self::new(TYPE_ERROR, &message, "")
+        Self::new(TYPE_ERROR, &message)
     }
 
-    /// Create an error.
+    /// Create an error with an empty backtrace.
     ///
-    /// Prefer [`bail!`](crate::bail), which also records the source location.
+    /// Prefer [`format_err!`](crate::format_err) or [`bail!`](crate::bail),
+    /// which also record the source location. Add the other parts with
+    /// [`with_backtrace`](Self::with_backtrace),
+    /// [`with_cause`](Self::with_cause) and
+    /// [`with_extra_context`](Self::with_extra_context).
     ///
     /// # Arguments
     ///
     /// * `kind` - The kind of the error, such as [`VALUE_ERROR`].
     /// * `message` - The message of the error.
-    /// * `backtrace` - The backtrace of the error, most recent call first; may be empty.
     ///
     /// # Returns
     ///
     /// The error.
-    pub fn new(kind: ErrorKind<'_>, message: &str, backtrace: &str) -> Self {
-        Self::create(kind, message, backtrace, None, std::ptr::null_mut())
+    pub fn new(kind: ErrorKind<'_>, message: &str) -> Self {
+        Self::create(kind, message, "", None, std::ptr::null_mut())
     }
 
-    /// Create an error retaining its cause and any application-specific context.
+    /// Set `cause` as the error that caused this one, the
+    /// [`cause_chain`](Self::cause_chain). The error is updated in place when
+    /// it is not shared, and copied otherwise.
     ///
-    /// # Arguments
-    ///
-    /// * `kind` - The kind of the error.
-    /// * `message` - The message of the error.
-    /// * `backtrace` - The backtrace of the error, most recent call first; may be empty.
-    /// * `cause_chain` - The error that caused this one, if any.
-    /// * `extra_context` - An object of application-specific context, if any;
-    ///   `Send + Sync`, since the error is.
-    ///
-    /// # Returns
-    ///
-    /// The error.
-    pub fn new_with_cause_and_extra_context<T: ObjectRefCore + Send + Sync>(
-        kind: ErrorKind<'_>,
-        message: &str,
-        backtrace: &str,
-        cause_chain: Option<&Error>,
-        extra_context: Option<&T>,
-    ) -> Self {
-        let extra_context = extra_context.map_or(std::ptr::null_mut(), |context| {
-            ObjectArc::as_ptr(T::data(context)) as TVMFFIObjectHandle
-        });
-        Self::create(kind, message, backtrace, cause_chain, extra_context)
+    /// ```
+    /// use tvm_ffi::{Error, RUNTIME_ERROR, VALUE_ERROR};
+    /// let cause = Error::new(VALUE_ERROR, "bad input");
+    /// let error = Error::new(RUNTIME_ERROR, "load failed").with_cause(&cause);
+    /// assert_eq!(error.cause_chain().unwrap().message(), "bad input");
+    /// ```
+    #[inline]
+    pub fn with_cause(mut self, cause: &Error) -> Self {
+        *self.cause_chain_mut() = Some(cause.clone());
+        self
     }
 
-    /// As [`Self::new_with_cause_and_extra_context`], with `extra_context` a
-    /// borrowed object handle or null.
+    /// Set `context` as the [`extra_context`](Self::extra_context), an object
+    /// of application-specific context; `Send + Sync`, since the error is.
+    /// The error is updated in place when it is not shared, and copied
+    /// otherwise.
+    #[inline]
+    pub fn with_extra_context<T: ObjectRefCore + Send + Sync>(mut self, context: &T) -> Self {
+        *self.extra_context_mut() = Some(object::into_root_object_ref(context.clone()));
+        self
+    }
+
+    /// Create an error from its parts, with `extra_context` a borrowed object
+    /// handle or null.
     fn create(
         kind: ErrorKind<'_>,
         message: &str,
@@ -352,6 +356,14 @@ impl Error {
         Some(unsafe { &*(handle as *const _ as *const object::ObjectRef) })
     }
 
+    /// The `cause_chain` slot, to update in place.
+    fn cause_chain_mut(&mut self) -> &mut Option<Error> {
+        let error = self.make_mut();
+        // SAFETY: this handle is the only reference, and the slot owns a nullable
+        // error handle, which is exactly an `Option<Error>`.
+        unsafe { &mut *std::ptr::addr_of_mut!((*error).cell.cause_chain).cast::<Option<Error>>() }
+    }
+
     /// The `extra_context` slot, to update in place.
     pub(crate) fn extra_context_mut(&mut self) -> &mut Option<object::ObjectRef> {
         let error = self.make_mut();
@@ -371,13 +383,29 @@ impl Error {
     /// The traceback of the error.
     pub fn traceback_most_recent_call_last(&self) -> String {
         let backtrace = self.backtrace();
-        let backtrace_lines = backtrace.split('\n');
         let mut traceback = String::new();
-        for line in backtrace_lines.rev() {
+        for line in backtrace.split('\n').rev().filter(|line| !line.is_empty()) {
             traceback.push_str(line);
             traceback.push('\n');
         }
         traceback
+    }
+
+    /// Replace the backtrace, most recent call first. The error is updated in
+    /// place when it is not shared, and copied otherwise.
+    #[inline]
+    pub fn with_backtrace(mut self, backtrace: &str) -> Self {
+        let error = self.make_mut();
+        // SAFETY: `make_mut` made this handle the only reference to `error`.
+        unsafe {
+            let backtrace_data = TVMFFIByteArray::from_str(backtrace);
+            ((*error).cell.update_backtrace)(
+                error.cast::<c_void>(),
+                &backtrace_data,
+                kTVMFFIBacktraceUpdateModeReplace as i32,
+            );
+        }
+        self
     }
 
     /// Append the backtrace to the error.
@@ -423,24 +451,26 @@ impl Error {
     }
 }
 
+/// Formats the kind and the message, such as `ValueError: bad x`, as C++
+/// `what()`; [`Debug`](std::fmt::Debug) adds the traceback.
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.backtrace().is_empty() {
-            return write!(f, "{}: {}", self.kind().as_str(), self.message());
-        }
-        write!(
-            f,
-            "Traceback (most recent call last):\n{}{}: {}",
-            self.traceback_most_recent_call_last(),
-            self.kind().as_str(),
-            self.message()
-        )
+        write!(f, "{}: {}", self.kind().as_str(), self.message())
     }
 }
 
+/// Formats the traceback, most recent call last, then the kind and the
+/// message, as Python prints an exception; `unwrap` and `expect` print it.
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self, f)
+        if self.backtrace().is_empty() {
+            return std::fmt::Display::fmt(self, f);
+        }
+        write!(
+            f,
+            "Traceback (most recent call last):\n{}{self}",
+            self.traceback_most_recent_call_last(),
+        )
     }
 }
 

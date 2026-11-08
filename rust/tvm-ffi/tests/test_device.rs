@@ -42,7 +42,7 @@ fn test_device_stream_restored_after_error() {
     // SAFETY: dummy_stream is a test value; CPU device accepts any stream handle.
     let result: Result<()> = unsafe {
         with_stream(&device, dummy_stream, || {
-            Err(Error::new(VALUE_ERROR, "closure failed", ""))
+            Err(Error::new(VALUE_ERROR, "closure failed"))
         })
     };
     assert_eq!(result.unwrap_err().message(), "closure failed");

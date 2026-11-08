@@ -93,6 +93,11 @@ pub struct Optional<T: OptionalCompatible> {
     _marker: PhantomData<T>,
 }
 
+// SAFETY: the cell holds only a `T` or `None`, so sending or sharing an
+// `Optional` is as safe as sending or sharing its value.
+unsafe impl<T: OptionalCompatible + Send + Sync> Send for Optional<T> {}
+unsafe impl<T: OptionalCompatible + Send + Sync> Sync for Optional<T> {}
+
 // Must stay 16 bytes / `TVMFFIAny`-aligned to overlay a C++ `ffi::Optional<T>`
 // field in place, independent of `T`.
 const _: () = assert!(

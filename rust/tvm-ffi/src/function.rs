@@ -19,12 +19,11 @@
 //! [`Function`], a callable shared with C++ and Python, and the global function
 //! registry.
 
-pub use crate::function_internal::{PackedCallArg, PackedCallArgs};
+pub use crate::function_internal::{AsPackedCallable, PackedCallArg, PackedCallArgs};
 
 use crate::any::{Any, AnyView};
 use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
-use crate::function_internal::AsPackedCallable;
 use crate::object::{Object, ObjectArc, ObjectCore};
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
@@ -122,7 +121,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static> CallbackFunctionO
             (this.callback)(packed_args)
         })) {
             Ok(ret_value) => ret_value,
-            Err(payload) => Err(crate::function_internal::panic_to_error(payload)),
+            Err(payload) => Err(Error::from_panic(payload)),
         };
         match ret_value {
             Ok(value) => {
@@ -227,8 +226,9 @@ impl Function {
     ///
     /// # Errors
     ///
-    /// Returns an error if no function is registered as `name`. Probe with
-    /// `.ok()` where a missing function is expected.
+    /// Returns a `ValueError` if no function is registered as `name`, as C++
+    /// `Function::GetGlobalRequired`. Probe with `.ok()` where a missing
+    /// function is expected.
     ///
     /// ```
     /// use tvm_ffi::Function;
@@ -246,7 +246,7 @@ impl Function {
             let mut result: TVMFFIObjectHandle = ::std::ptr::null_mut();
             crate::check_safe_call!(TVMFFIFunctionGetGlobal(&name_arg, &mut result))?;
             if result.is_null() {
-                crate::bail!(crate::error::RUNTIME_ERROR, "Function {} not found", name);
+                crate::bail!(crate::error::VALUE_ERROR, "Function {} not found", name);
             }
             Ok(Self {
                 data: ObjectArc::<FunctionObj>::from_raw(result as *mut FunctionObj),
@@ -385,7 +385,9 @@ impl Function {
     ///
     /// # Arguments
     ///
-    /// * `func` - The typed function, of signature `Fn(T0, T1, ...) -> Result<O>`.
+    /// * `func` - The typed function, an [`AsPackedCallable`] such as
+    ///   `Fn(T0, T1, ...) -> Result<O>`; each parameter is an `AnyCompatible`
+    ///   type, a `TensorView` or an `RValueRef<T>`.
     ///
     /// # Returns
     ///

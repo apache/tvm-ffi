@@ -76,6 +76,51 @@ macro_rules! cached_global_func {
     }};
 }
 
+/// Resolve a reflected field of the object type `N` once, and keep its getter
+/// for the process: a `&'static FieldGetter<N>`.
+///
+/// Each call site has its own cache, which later calls read without a lock.
+/// `N` must be a concrete type, not `Self` or a generic parameter. It panics,
+/// naming the field, if `N` has no such field. See also
+/// [`FieldGetter::of`](crate::reflection::FieldGetter::of), which returns an
+/// error instead.
+///
+/// # Examples
+///
+/// ```
+/// use tvm_ffi::{cached_field_getter, rs_object, Object, ObjectArc};
+///
+/// #[rs_object(type_key = "my_ext.Point")]
+/// pub struct PointObj {
+///     base_: Object,
+///     x: i64,
+/// }
+///
+/// let point = ObjectArc::new(PointObj { base_: Object::new(), x: 3 });
+/// let x: i64 = cached_field_getter!(PointObj, "x").get(&*point)?;
+/// assert_eq!(x, 3);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+#[macro_export]
+macro_rules! cached_field_getter {
+    ($owner:ty, $name:literal) => {{
+        static GETTER: $crate::extra::cold_init_lazy_lock::ColdInitLazyLock<
+            $crate::reflection::FieldGetter<$owner>,
+        > = $crate::extra::cold_init_lazy_lock::ColdInitLazyLock::new(|| {
+            $crate::reflection::FieldGetter::of::<$owner>($name).unwrap_or_else(|_| {
+                ::core::panic!(::core::concat!(
+                    "`",
+                    ::core::stringify!($owner),
+                    "` has no reflected field `",
+                    $name,
+                    "`"
+                ))
+            })
+        });
+        &*GETTER
+    }};
+}
+
 /// Turn the return code of a safe call into a `Result`, taking the raised
 /// error when it is nonzero: `check_safe_call!(function(args))?`.
 #[doc(hidden)]
@@ -89,6 +134,33 @@ macro_rules! check_safe_call {
             let error = $crate::error::Error::from_raised();
             ::core::result::Result::Err(error)
         }
+    }};
+}
+
+/// Make an [`Error`](crate::Error) of a kind with a formatted message,
+/// recording the source location in the backtrace, as [`bail!`](crate::bail)
+/// does without returning.
+///
+/// ```
+/// use tvm_ffi::{format_err, Result, KEY_ERROR};
+///
+/// fn lookup(names: &[&str], name: &str) -> Result<usize> {
+///     names.iter().position(|n| *n == name).ok_or_else(|| format_err!(KEY_ERROR, "no {name}"))
+/// }
+///
+/// assert_eq!(lookup(&["a"], "b").unwrap_err().to_string(), "KeyError: no b");
+/// ```
+#[macro_export]
+macro_rules! format_err {
+    ($error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
+        let context = ::std::format!(
+            "  File \"{}\", line {}, in {}\n",
+            ::core::file!(),
+            ::core::line!(),
+            $crate::function_name!()
+        );
+        $crate::error::Error::new($error_kind, &::std::format!($fmt $(, $args)*))
+            .with_backtrace(&context)
     }};
 }
 
@@ -127,13 +199,7 @@ macro_rules! check_safe_call {
 #[macro_export]
 macro_rules! bail {
     ($error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
-        let context = ::std::format!(
-            "  File \"{}\", line {}, in {}\n",
-            ::core::file!(),
-            ::core::line!(),
-            $crate::function_name!()
-        );
-        return ::core::result::Result::Err($crate::error::Error::new($error_kind, &::std::format!($fmt $(, $args)*), &context));
+        return ::core::result::Result::Err($crate::format_err!($error_kind, $fmt $(, $args)*));
     }};
 }
 
@@ -396,7 +462,7 @@ macro_rules! impl_object_ref_upcast {
 /// use tvm_ffi::{Object, ObjectArc, ObjectRefCore};
 /// use tvm_ffi::object::ObjectRefAnyCompatible;
 ///
-/// #[rs_object("my_ext.MyPair", final)]
+/// #[rs_object(type_key = "my_ext.MyPair", final)]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,
@@ -714,7 +780,7 @@ macro_rules! tvm_ffi_dll_export_typed_func {
                     $crate::function_internal::call_packed_callable($func, packed_args)
                 })) {
                     ::core::result::Result::Ok(ret_value) => ret_value,
-                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::function_internal::panic_to_error(payload)),
+                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::error::Error::from_panic(payload)),
                 };
                 match ret_value {
                     ::core::result::Result::Ok(value) => {
@@ -785,7 +851,7 @@ macro_rules! __tvm_ffi_dll_export_metadata {
                     $crate::function_internal::exported_metadata(&$func)
                 })) {
                     ::core::result::Result::Ok(metadata) => metadata,
-                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::function_internal::panic_to_error(payload)),
+                    ::core::result::Result::Err(payload) => ::core::result::Result::Err($crate::error::Error::from_panic(payload)),
                 };
                 $crate::function_internal::write_exported_str(metadata, result)
             }
@@ -850,7 +916,7 @@ macro_rules! __tvm_ffi_dll_export_doc {
 #[macro_export]
 macro_rules! into_typed_fn {
     // Case for 0 arguments
-    ($f:expr, $trait:ident() -> $ret_ty:ty) => {{
+    ($f:expr, Fn() -> $ret_ty:ty) => {{
         let _f = $f;
         move || -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple(())?)
@@ -858,7 +924,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 1 argument
-    ($f:expr, $trait:ident($t0:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0,))?)
@@ -866,7 +932,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 2 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1))?)
@@ -874,7 +940,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 3 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2))?)
@@ -882,7 +948,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 4 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3))?)
@@ -890,7 +956,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 5 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4))?)
@@ -898,7 +964,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 6 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4, a5))?)
@@ -906,7 +972,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 7 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty)
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6| -> $ret_ty {
@@ -915,7 +981,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 8 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty)
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6, a7: $t7| -> $ret_ty {
@@ -923,4 +989,10 @@ macro_rules! into_typed_fn {
                 .map_err(::core::convert::Into::into)
         }
     }};
+    ($f:expr, $($signature:tt)*) => {
+        ::core::compile_error!(::core::concat!(
+            "expected `Fn(A, ...) -> R` with 0 to 8 arguments, ",
+            "as in `into_typed_fn!(func, Fn(i32) -> Result<i32>)`"
+        ))
+    };
 }

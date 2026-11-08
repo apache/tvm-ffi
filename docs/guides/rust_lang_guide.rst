@@ -319,7 +319,7 @@ loads, as a C++ type does:
    use tvm_ffi::reflection::ObjectDef;
    use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 
-   #[rs_object("my.Point", s_eq_hash_kind = "TreeNode", reflection = PointObj::reflect_methods)]
+   #[rs_object(type_key = "my.Point", s_eq_hash_kind = "TreeNode", reflection = PointObj::reflect_methods)]
    pub struct PointObj {
        base_: Object,
        /// The x coordinate.
@@ -378,7 +378,7 @@ names the reference to the parent's object:
    use tvm_ffi::derive::ObjectRef;
    use tvm_ffi::{rs_object, Object, ObjectArc};
 
-   #[rs_object("my.Point", s_eq_hash_kind = "TreeNode")]
+   #[rs_object(type_key = "my.Point", s_eq_hash_kind = "TreeNode")]
    pub struct PointObj {
        base_: Object,
        pub x: i64,
@@ -391,7 +391,7 @@ names the reference to the parent's object:
        data: ObjectArc<PointObj>,
    }
 
-   #[rs_object("my.Point3", final)]
+   #[rs_object(type_key = "my.Point3", final)]
    pub struct Point3Obj {
        base_: PointObj,
        pub z: i64,
@@ -502,11 +502,7 @@ TVM FFI uses standard Rust ``Result`` types:
 
        // Custom errors
        if value < 0 {
-           return Err(Error::new(
-               VALUE_ERROR,
-               "Value must be non-negative",
-               ""
-           ));
+           return Err(Error::new(VALUE_ERROR, "Value must be non-negative"));
        }
 
        Ok(())
@@ -1024,7 +1020,7 @@ An enclosing Pattern region wins, and the prior region is restored even on error
 or panic. State remains available after the recursive call.
 
 Typed ``MutationView<'_, T>`` inputs work with the same recursive methods.
-Use ``value.with_inplace_mode(InplaceMode::Disallow)`` to restrict permission.
+Use ``value.narrow_inplace_mode(InplaceMode::Disallow)`` to restrict permission.
 Borrow the value in place through ``value.downcast_ref::<Node>()``, as with
 ``AnyView``, or other payloads through ``value.as_any_view()``; finish using those
 borrows before consuming the capability. A typed object capability also dereferences to its shared node.
@@ -1084,7 +1080,7 @@ while retaining typed scalar replacements:
            Ok((value + 1).into())
        }
        fn mutate_any(&mut self, value: MutationView<'_>, mutator: &mut StructuralMutatorView<'_, Self>) -> Result<UnchangedOr<Any>> {
-           mutator.default_mutate(self, value.with_inplace_mode(InplaceMode::Disallow))
+           mutator.default_mutate(self, value.narrow_inplace_mode(InplaceMode::Disallow))
        }
    }
 

@@ -395,7 +395,7 @@ impl<'a, T> MutationView<'a, T> {
     ///
     /// The view with the restricted mode.
     #[inline(always)]
-    pub fn with_inplace_mode(mut self, requested: InplaceMode) -> Self {
+    pub fn narrow_inplace_mode(mut self, requested: InplaceMode) -> Self {
         if requested == InplaceMode::Disallow {
             self.mode = InplaceMode::Disallow;
         }
@@ -434,6 +434,12 @@ impl<'a, T> MutationView<'a, T> {
         // SAFETY: the view holds a valid cell, borrowed for the returned lifetime,
         // and the input owner keeps its payload live.
         unsafe { U::downcast_ref_from_any(&self.value) }
+    }
+
+    /// Whether the value is a `U`, as [`Any::is`].
+    #[inline(always)]
+    pub fn is<U: crate::type_traits::AnyCompatible>(&self) -> bool {
+        self.as_any_view().is::<U>()
     }
 
     /// Narrow the matched type without acquiring an owning reference.
@@ -527,7 +533,7 @@ impl<T: object::ObjectRefCore> MutationView<'_, T> {
     /// ```
     /// # use tvm_ffi::*;
     /// # use tvm_ffi::StructuralMutatorView;
-    /// # #[rs_object("my_ext.MyPair", final)]
+    /// # #[rs_object(type_key = "my_ext.MyPair", final)]
     /// # pub struct MyPairObj { base_: Object, pub first: Array<i64>, pub second: Array<i64> }
     /// # #[derive(Clone, tvm_ffi::derive::ObjectRef)]
     /// # pub struct MyPair { data: ObjectArc<MyPairObj> }
@@ -1726,24 +1732,16 @@ static SHALLOW_COPY_COLUMN: ColdInitLazyLock<TypeAttrColumn> = ColdInitLazyLock:
 #[cold]
 #[inline(never)]
 fn missing_shallow_copy_error(type_index: i32, attribute: &str) -> Error {
-    Error::new(
-        TYPE_ERROR,
-        &format!(
+    Error::new(TYPE_ERROR, &format!(
             "type `{}` cannot use reflected structural mutation because it does not define `{attribute}`",
             crate::object::type_key_of_index(type_index)
-        ),
-        "",
-    )
+        ))
 }
 
 #[cold]
 #[inline(never)]
 fn invalid_shallow_copy_hook_error(attribute: &str) -> Error {
-    Error::new(
-        TYPE_ERROR,
-        &format!("{attribute} must be an ffi.Function"),
-        "",
-    )
+    Error::new(TYPE_ERROR, &format!("{attribute} must be an ffi.Function"))
 }
 
 #[cold]
@@ -1752,7 +1750,6 @@ fn invalid_shallow_copy_result_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "shallow copy callback must return a distinct object with the same type as its input",
-        "",
     )
 }
 
@@ -1762,7 +1759,6 @@ fn missing_field_setter_error(name: &str) -> Error {
     Error::new(
         TYPE_ERROR,
         &format!("cannot structurally mutate field `{name}` because it does not define a setter"),
-        "",
     )
 }
 
@@ -1780,7 +1776,6 @@ fn invalid_mutation_hook_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "__s_mutate__ must be an opaque function pointer or ffi.Function",
-        "",
     )
 }
 
@@ -1790,7 +1785,6 @@ fn var_remap_key_error() -> Error {
     Error::new(
         TYPE_ERROR,
         "variable-remap keys must be object-backed values",
-        "",
     )
 }
 

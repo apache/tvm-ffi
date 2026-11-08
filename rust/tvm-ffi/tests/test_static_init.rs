@@ -77,7 +77,7 @@ mod failing {
     }
 
     tvm_ffi::static_init_block! {
-        Err(Error::new(VALUE_ERROR, "the second block fails", ""))
+        Err(Error::new(VALUE_ERROR, "the second block fails"))
     }
 
     tvm_ffi::static_init_block! {

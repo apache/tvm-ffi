@@ -174,7 +174,7 @@ impl BitOr for FieldFlags {
 /// use tvm_ffi::reflection::{self, ObjectDef};
 /// use tvm_ffi::{rs_object, Object, ObjectArc, Result};
 ///
-/// #[rs_object("my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
+/// #[rs_object(type_key = "my_ext.MyPair", final, reflection = MyPairObj::reflect_methods)]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,
@@ -378,7 +378,6 @@ impl<N: ObjectCore> ObjectDef<N> {
             self.error = Some(Error::new(
                 VALUE_ERROR,
                 &format!("duplicate method `{name}` of `{}`", N::TYPE_KEY),
-                "",
             ));
             return self;
         }
@@ -417,7 +416,6 @@ impl<N: ObjectCore> ObjectDef<N> {
             self.error = Some(Error::new(
                 error.kind(),
                 &format!("registering method `{name}`: {}", error.message()),
-                "",
             ));
         }
         self
@@ -487,7 +485,7 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 }
 
 /// Registers type attributes of the object type `T`, each as soon as
-/// [`attr`](Self::attr) names it, for every language to read with
+/// [`set_attr`](Self::set_attr) names it, for every language to read with
 /// [`TypeAttrColumn`](crate::reflection::TypeAttrColumn).
 ///
 /// As in C++, attributes register during static initialization, such as in a
@@ -502,12 +500,12 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 /// use tvm_ffi::reflection::TypeAttrColumn;
 /// use tvm_ffi::{rs_object, Object, ObjectCore};
 ///
-/// #[rs_object("my_ext.MyPair")]
+/// #[rs_object(type_key = "my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 /// }
 ///
-/// TypeAttrDef::<MyPairObj>::new().attr("my_ext.arity", 2_i64)?;
+/// TypeAttrDef::<MyPairObj>::new().set_attr("my_ext.arity", 2_i64)?;
 ///
 /// let column = TypeAttrColumn::lookup("my_ext.arity").unwrap();
 /// let arity: i64 = column.get(MyPairObj::type_index()).unwrap().try_into()?;
@@ -541,8 +539,8 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     ///
     /// Returns an error if `T` already has the attribute `name`, or a
     /// `TypeError` if `value` is an opaque pointer: register a native hook
-    /// with [`native_fn_attr`](Self::native_fn_attr).
-    pub fn attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
+    /// with [`set_native_fn_attr`](Self::set_native_fn_attr).
+    pub fn set_attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
         let value = value.into();
         ensure_not_opaque_ptr(name, &value)?;
         self.register(name, value)
@@ -567,7 +565,7 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     ///
     /// Every caller of the column `name` calls its hooks with exactly `Args`
     /// and reads `R`: a native caller calls the function pointer unchecked.
-    pub unsafe fn native_fn_attr<Args, R>(
+    pub unsafe fn set_native_fn_attr<Args, R>(
         self,
         name: &str,
         f: NativeFunction<Args, R>,
@@ -618,7 +616,6 @@ fn shallow_copy_any<N: ObjectCore + ShallowCopy>(object: &ObjectRef) -> Result<A
                 N::TYPE_KEY,
                 object_type_key(object)
             ),
-            "",
         ));
     };
     let copy = ObjectArc::new(node.shallow_copy());
@@ -666,7 +663,7 @@ unsafe extern "C" fn field_getter<F: AnyCompatible>(
         Ok(()) => 0,
         Err(_) => {
             let message = format!("panic while reading a field of type {}", F::type_str());
-            Error::set_raised(&Error::new(INTERNAL_ERROR, &message, ""));
+            Error::set_raised(&Error::new(INTERNAL_ERROR, &message));
             -1
         }
     }
@@ -697,7 +694,6 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
                     F::type_str(),
                     F::get_mismatch_type_info(&*value)
                 ),
-                "",
             )),
         }
     }));
@@ -707,7 +703,6 @@ unsafe extern "C" fn field_setter<F: AnyCompatible>(
         Err(_) => Error::new(
             INTERNAL_ERROR,
             &format!("panic while writing a field of type {}", F::type_str()),
-            "",
         ),
     };
     Error::set_raised(&error);

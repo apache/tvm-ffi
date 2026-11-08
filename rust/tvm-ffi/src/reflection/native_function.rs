@@ -42,7 +42,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// it. Reading a hook with [`from_any`](Self::from_any) is `unsafe`, the
 /// caller vouching for the signature, and then calling it is safe. Building a
 /// hook from a Rust function with `into()` is safe; storing it, with
-/// [`TypeAttrDef::native_fn_attr`](super::TypeAttrDef::native_fn_attr) or
+/// [`TypeAttrDef::set_native_fn_attr`](super::TypeAttrDef::set_native_fn_attr) or
 /// [`EnumDef::set_native_fn_attr`](super::EnumDef::set_native_fn_attr), or
 /// converting it to [`Any`] for another registry with
 /// [`into_any`](Self::into_any), is `unsafe`, the caller vouching that the
@@ -54,7 +54,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// use tvm_ffi::reflection::{NativeFunction, TypeAttrColumn, TypeAttrDef};
 /// use tvm_ffi::{rs_object, Object, ObjectArc, ObjectCore, Result};
 ///
-/// #[rs_object("my_ext.MyPair")]
+/// #[rs_object(type_key = "my_ext.MyPair")]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     first: i64,
@@ -67,7 +67,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 ///
 /// let hook: NativeFunction<(&MyPairObj,), i64> = sum.into();
 /// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.
-/// unsafe { TypeAttrDef::<MyPairObj>::new().native_fn_attr("my_ext.sum", hook)? };
+/// unsafe { TypeAttrDef::<MyPairObj>::new().set_native_fn_attr("my_ext.sum", hook)? };
 ///
 /// let stored = TypeAttrColumn::lookup("my_ext.sum").unwrap().get(MyPairObj::type_index()).unwrap();
 /// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.
@@ -119,8 +119,7 @@ impl<Args: NativeArgs, R: TryFrom<Any>> NativeFunction<Args, R> {
         if result.type_index() == TVMFFITypeIndex::kTVMFFIError as i32 {
             return Err(result.try_into()?);
         }
-        R::try_from(result)
-            .map_err(|_| Error::new(TYPE_ERROR, "Packed hook result type mismatch", ""))
+        R::try_from(result).map_err(|_| Error::new(TYPE_ERROR, "Packed hook result type mismatch"))
     }
 }
 
@@ -169,7 +168,7 @@ impl<Args, R> NativeFunction<Args, R> {
                 "Cannot convert from type `{}` to `NativeFunction`",
                 type_key_of_index(raw.type_index)
             );
-            return Err(Error::new(TYPE_ERROR, &message, ""));
+            return Err(Error::new(TYPE_ERROR, &message));
         }
         Ok(Self {
             data: value,
@@ -332,7 +331,7 @@ mod sealed {
                         // argument for the duration of the call, or null.
                         $(let Some($raw) = (unsafe { $raw.as_ref() }) else {
                             let message = "A native hook argument is null";
-                            return into_raw::<R>(Err(Error::new(TYPE_ERROR, message, "")));
+                            return into_raw::<R>(Err(Error::new(TYPE_ERROR, message)));
                         };)*
                         // A panic aborts here rather than unwind into the caller.
                         into_raw(function($($raw),*))

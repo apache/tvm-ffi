@@ -20,6 +20,7 @@
 //! Reads of registered types: methods, fields and type attributes.
 
 use std::ffi::c_void;
+use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::{PoisonError, RwLock};
 
@@ -75,7 +76,6 @@ impl TypeAttrColumn {
             Error::new(
                 crate::INTERNAL_ERROR,
                 &format!("type attribute column `{name}` was not created"),
-                "",
             )
         })
     }
@@ -286,13 +286,28 @@ pub fn get_method_by_index(type_index: i32, method_name: &str) -> Result<Functio
     }
 }
 /// Resolves a reflected field once, then uses its registered C ABI getter.
-#[derive(Clone, Copy)]
-pub struct FieldGetter {
+///
+/// [`FieldGetter::new`] resolves a field by runtime type index into a
+/// `FieldGetter`, which checks the type of each object it reads. [`FieldGetter::of`] resolves a field of the
+/// object type `N` into a `FieldGetter<N>`, which reads only `&N`, so the
+/// type system replaces that check; [`cached_field_getter!`](crate::cached_field_getter)
+/// keeps one for the process.
+pub struct FieldGetter<N = ()> {
     owner_type_index: i32,
     owner_type_depth: i32,
     field_offset: i64,
     getter: TVMFFIFieldGetter,
+    owner: PhantomData<fn(&N)>,
 }
+
+impl<N> Clone for FieldGetter<N> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<N> Copy for FieldGetter<N> {}
 
 impl FieldGetter {
     /// Resolve a reflected field declared by `type_index` or one of its bases.
@@ -302,40 +317,16 @@ impl FieldGetter {
     /// Returns a `TypeError` if `type_index` is not registered or the type has
     /// no reflected field `field_name` with a getter.
     pub fn new(type_index: i32, field_name: &str) -> Result<Self> {
-        // The C API aborts the process on an unregistered index.
-        if !is_registered(type_index) {
-            return Err(Error::new(
-                TYPE_ERROR,
-                &format!("Cannot find type info for type_index={type_index}"),
-                "",
-            ));
-        }
-        let type_info = unsafe { TVMFFIGetTypeInfo(type_index) };
+        resolve(type_index, field_name)
+    }
 
-        let field = unsafe { find_field(type_info, field_name) }.ok_or_else(|| {
-            let type_key = unsafe { (*type_info).type_key.as_str() };
-            Error::new(
-                TYPE_ERROR,
-                &format!("Cannot find reflected field `{field_name}` in type `{type_key}`"),
-                "",
-            )
-        })?;
-        let field = unsafe { field.as_ref() };
-        let getter = field.getter.ok_or_else(|| {
-            // SAFETY: a field name is UTF-8 text.
-            let name = unsafe { field.name.as_str() };
-            Error::new(
-                TYPE_ERROR,
-                &format!("Reflected field `{name}` has no getter"),
-                "",
-            )
-        })?;
-        Ok(Self {
-            owner_type_index: type_index,
-            owner_type_depth: unsafe { (*type_info).type_depth },
-            field_offset: field.offset,
-            getter,
-        })
+    /// Resolve a reflected field declared by `N` or one of its bases.
+    ///
+    /// # Errors
+    ///
+    /// As [`FieldGetter::new`] for `N::type_index()`.
+    pub fn of<N: ObjectCore>(field_name: &str) -> Result<FieldGetter<N>> {
+        resolve(N::type_index(), field_name)
     }
 
     /// Read the field as an owning [`Any`].
@@ -357,13 +348,48 @@ impl FieldGetter {
                 &format!(
                     "Cannot read a field of type_index={} from object type_index={dynamic_type_index}",
                     self.owner_type_index
-                ),
-                "",
-            ));
+                )));
         }
+        // SAFETY: `object` has the resolved type or a subtype, which embeds it.
+        unsafe { self.read(object) }
+    }
 
+    /// Read and convert the field to `T`.
+    pub fn get<N, T>(&self, object: &N) -> Result<T>
+    where
+        N: ObjectCore,
+        T: TryFrom<Any, Error = Error>,
+    {
+        T::try_from(self.get_any(object)?)
+    }
+}
+
+impl<N: ObjectCore> FieldGetter<N> {
+    /// Read the field as an owning [`Any`].
+    #[inline(always)]
+    pub fn get_any(&self, object: &N) -> Result<Any> {
+        // SAFETY: the field was resolved for `N`, whose layout `object` has.
+        unsafe { self.read(object) }
+    }
+
+    /// Read and convert the field to `T`.
+    #[inline(always)]
+    pub fn get<T>(&self, object: &N) -> Result<T>
+    where
+        T: TryFrom<Any, Error = Error>,
+    {
+        T::try_from(self.get_any(object)?)
+    }
+}
+
+impl<N> FieldGetter<N> {
+    /// # Safety
+    ///
+    /// `object` has the layout of the type the field was resolved for.
+    #[inline(always)]
+    unsafe fn read<M>(&self, object: &M) -> Result<Any> {
         let field_address = unsafe {
-            object_pointer
+            std::ptr::from_ref(object)
                 .cast::<u8>()
                 .offset(self.field_offset as isize)
                 .cast_mut()
@@ -375,15 +401,41 @@ impl FieldGetter {
         }
         Ok(result)
     }
+}
 
-    /// Read and convert the field to `T`.
-    pub fn get<N, T>(&self, object: &N) -> Result<T>
-    where
-        N: ObjectCore,
-        T: TryFrom<Any, Error = Error>,
-    {
-        T::try_from(self.get_any(object)?)
+fn resolve<N>(type_index: i32, field_name: &str) -> Result<FieldGetter<N>> {
+    // The C API aborts the process on an unregistered index.
+    if !is_registered(type_index) {
+        return Err(Error::new(
+            TYPE_ERROR,
+            &format!("Cannot find type info for type_index={type_index}"),
+        ));
     }
+    let type_info = unsafe { TVMFFIGetTypeInfo(type_index) };
+
+    let field = unsafe { find_field(type_info, field_name) }.ok_or_else(|| {
+        let type_key = unsafe { (*type_info).type_key.as_str() };
+        Error::new(
+            TYPE_ERROR,
+            &format!("Cannot find reflected field `{field_name}` in type `{type_key}`"),
+        )
+    })?;
+    let field = unsafe { field.as_ref() };
+    let getter = field.getter.ok_or_else(|| {
+        // SAFETY: a field name is UTF-8 text.
+        let name = unsafe { field.name.as_str() };
+        Error::new(
+            TYPE_ERROR,
+            &format!("Reflected field `{name}` has no getter"),
+        )
+    })?;
+    Ok(FieldGetter {
+        owner_type_index: type_index,
+        owner_type_depth: unsafe { (*type_info).type_depth },
+        field_offset: field.offset,
+        getter,
+        owner: PhantomData,
+    })
 }
 
 unsafe fn find_field(

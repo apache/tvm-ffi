@@ -41,7 +41,10 @@ use tvm_ffi_sys::{TVMFFIEnvTensorAlloc, TVMFFIObjectHandle};
 /// (sub-byte types are packed), and `free_data` must release
 /// exactly what `alloc_data` returned. `free_data` may be called for a tensor
 /// whose `data` is null, when `alloc_data` panicked, and must then do nothing.
-pub unsafe trait NDAllocator: 'static {
+///
+/// `Send + Sync`: the tensor frees its data through the allocator when the
+/// last reference drops, which may be on any thread.
+pub unsafe trait NDAllocator: Send + Sync + 'static {
     /// The minimum alignment of the allocated data, in bytes.
     const MIN_ALIGN: usize;
     /// Allocate the data of a tensor.
@@ -646,7 +649,7 @@ impl<'a> TensorView<'a> {
             "{context}Cannot convert from type `{}` to `DLTensor*`",
             crate::object::type_key_of_index(value.type_index)
         );
-        crate::error::Error::new(crate::error::TYPE_ERROR, &message, "")
+        crate::error::Error::new(crate::error::TYPE_ERROR, &message)
     }
 }
 

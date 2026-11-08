@@ -348,10 +348,12 @@ fn test_types_with_only_methods_register_their_reflection() {
 #[test]
 fn test_reflected_fields_read_and_write_through_the_c_abi() {
     let p3 = point3(3, 4);
-    let x = FieldGetter::new(Point3Obj::type_index(), "x").unwrap();
-    let z = FieldGetter::new(Point3Obj::type_index(), "z").unwrap();
-    assert_eq!(x.get::<_, i64>(&*p3.data).unwrap(), 3);
-    assert_eq!(z.get::<_, i64>(&*p3.data).unwrap(), 4);
+    let x = FieldGetter::of::<Point3Obj>("x").unwrap();
+    assert_eq!(x.get::<i64>(&p3.data).unwrap(), 3);
+    let z: i64 = tvm_ffi::cached_field_getter!(Point3Obj, "z")
+        .get(&p3.data)
+        .unwrap();
+    assert_eq!(z, 4);
 
     let p = point(1, 2.0, "p");
     let y = &fields(type_info::<PointObj>())[1];
@@ -600,13 +602,13 @@ fn test_native_function() -> Result<()> {
     // A Rust closure as a native hook, whose error is the hook's.
     let x_of = |p: &PointObj| -> Result<i64> {
         match p.x {
-            0 => Err(Error::new(VALUE_ERROR, "zero", "")),
+            0 => Err(Error::new(VALUE_ERROR, "zero")),
             x => Ok(x),
         }
     };
     let hook = NativeFunction::<(&PointObj,), i64>::from(x_of);
     // SAFETY: `testing.x_of` holds `i64(const PointObj*)` hooks.
-    unsafe { TypeAttrDef::<PointObj>::new().native_fn_attr("testing.x_of", hook)? };
+    unsafe { TypeAttrDef::<PointObj>::new().set_native_fn_attr("testing.x_of", hook)? };
     let stored = TypeAttrColumn::lookup("testing.x_of")
         .unwrap()
         .get(PointObj::type_index());
@@ -627,7 +629,7 @@ fn test_native_function() -> Result<()> {
         }
     }
     let error = TypeAttrDef::<PointObj>::new()
-        .attr("testing.raw", RawPointer)
+        .set_attr("testing.raw", RawPointer)
         .err()
         .unwrap();
     assert_eq!(error.kind(), TYPE_ERROR);

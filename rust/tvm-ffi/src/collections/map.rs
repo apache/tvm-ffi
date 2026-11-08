@@ -78,7 +78,7 @@ fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
                 T::container_get_mismatch_type_info(value.as_raw_ffi_any()),
                 T::container_type_str()
             );
-            Error::new(crate::error::TYPE_ERROR, &message, "")
+            Error::new(crate::error::TYPE_ERROR, &message)
         })
     }
 }

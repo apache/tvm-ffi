@@ -22,7 +22,7 @@
 //! `export-metadata` feature, as C++ ones with
 //! `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`; global functions always do.
 
-use tvm_ffi::function_internal::AsPackedCallable;
+use tvm_ffi::function::AsPackedCallable;
 #[cfg(feature = "export-metadata")]
 use tvm_ffi::tvm_ffi_sys::TVMFFIAny;
 use tvm_ffi::*;

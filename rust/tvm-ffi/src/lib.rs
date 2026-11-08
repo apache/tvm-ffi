@@ -243,7 +243,7 @@ pub use tvm_ffi_macros::match_any;
 
 /// Define an object type in Rust that every language can use.
 ///
-/// `#[rs_object("type.Key", options...)]` registers the struct as an object
+/// `#[rs_object(type_key = "type.Key", options...)]` registers the struct as an object
 /// type with the reflection of every field, so that structural equality and
 /// hashing, `repr`, deep copy and Python see the fields. The first field,
 /// `base_`, is the parent type's object, embedded at the start of the struct:
@@ -265,7 +265,7 @@ pub use tvm_ffi_macros::match_any;
 ///
 /// # Arguments
 ///
-/// * `"type.Key"` - The type key.
+/// * `type_key = "type.Key"` - The type key, required.
 /// * `final` - The type has no subtypes.
 /// * `immutable` - Shared objects of the type are never mutated, so its
 ///   references cross threads when its fields can
@@ -322,7 +322,7 @@ pub use tvm_ffi_macros::match_any;
 /// use tvm_ffi::derive::ObjectRef;
 /// use tvm_ffi::{rs_object, Object, ObjectArc};
 ///
-/// #[rs_object("my_ext.MyPair", final)]
+/// #[rs_object(type_key = "my_ext.MyPair", final)]
 /// pub struct MyPairObj {
 ///     base_: Object,
 ///     pub first: i64,

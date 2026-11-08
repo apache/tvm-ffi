@@ -39,7 +39,7 @@ use std::ops::ControlFlow;
 #[cold]
 #[inline(never)]
 pub(super) fn runtime_error(message: &str) -> Error {
-    Error::new(RUNTIME_ERROR, message, "")
+    Error::new(RUNTIME_ERROR, message)
 }
 
 #[cold]
@@ -131,7 +131,6 @@ pub(crate) fn reject_error_value(value: Any) -> Result<Any> {
     Err(Error::new(
         TYPE_ERROR,
         "a structural handler returned an Error as a value; return it as Err to fail",
-        "",
     ))
 }
 

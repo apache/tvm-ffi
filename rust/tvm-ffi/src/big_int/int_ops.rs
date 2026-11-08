@@ -77,15 +77,15 @@ impl WordsBuf {
 }
 
 pub(super) fn zero_division() -> Error {
-    Error::new(ZERO_DIVISION_ERROR, "Division by zero", "")
+    Error::new(ZERO_DIVISION_ERROR, "Division by zero")
 }
 
 fn negative_shift() -> Error {
-    Error::new(VALUE_ERROR, "Negative BigInt shift count", "")
+    Error::new(VALUE_ERROR, "Negative BigInt shift count")
 }
 
 fn overflow(message: &str) -> Error {
-    Error::new(OVERFLOW_ERROR, message, "")
+    Error::new(OVERFLOW_ERROR, message)
 }
 
 /// Whether a nonempty signed-word view represents a negative integer.
