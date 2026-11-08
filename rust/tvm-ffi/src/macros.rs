@@ -916,7 +916,7 @@ macro_rules! __tvm_ffi_dll_export_doc {
 #[macro_export]
 macro_rules! into_typed_fn {
     // Case for 0 arguments
-    ($f:expr, $trait:ident() -> $ret_ty:ty) => {{
+    ($f:expr, Fn() -> $ret_ty:ty) => {{
         let _f = $f;
         move || -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple(())?)
@@ -924,7 +924,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 1 argument
-    ($f:expr, $trait:ident($t0:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0,))?)
@@ -932,7 +932,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 2 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1))?)
@@ -940,7 +940,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 3 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2))?)
@@ -948,7 +948,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 4 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3))?)
@@ -956,7 +956,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 5 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4))?)
@@ -964,7 +964,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 6 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty) -> $ret_ty:ty) => {{
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5| -> $ret_ty {
             ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4, a5))?)
@@ -972,7 +972,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 7 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty)
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6| -> $ret_ty {
@@ -981,7 +981,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 8 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty)
+    ($f:expr, Fn($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6, a7: $t7| -> $ret_ty {
@@ -989,4 +989,10 @@ macro_rules! into_typed_fn {
                 .map_err(::core::convert::Into::into)
         }
     }};
+    ($f:expr, $($signature:tt)*) => {
+        ::core::compile_error!(::core::concat!(
+            "expected `Fn(A, ...) -> R` with 0 to 8 arguments, ",
+            "as in `into_typed_fn!(func, Fn(i32) -> Result<i32>)`"
+        ))
+    };
 }
