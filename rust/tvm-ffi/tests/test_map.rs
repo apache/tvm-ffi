@@ -274,7 +274,7 @@ fn test_map_object_values_and_refcount() {
 fn test_map_as_function_argument() {
     let map: Map<i64, i64> = [(1i64, 10i64), (2, 20), (3, 30)].into_iter().collect();
 
-    // Exercises the `ArgIntoRef`/`call_tuple` path, by value and by reference.
+    // Exercises the `call_tuple` path, by value and by reference.
     let map_size = Function::get_global("ffi.MapSize").unwrap();
     let n_by_value: i64 = map_size
         .call_tuple((map.clone(),))

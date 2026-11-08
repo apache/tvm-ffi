@@ -85,7 +85,7 @@ fn test_function_call_tuple() {
     let result = sum1.call_tuple((1,)).unwrap();
     assert_eq!(i32::try_from(result).unwrap(), 1 + offset);
     // test pass by reference
-    let result = sum1.call_tuple_with_len::<1, _>((&1,)).unwrap();
+    let result = sum1.call_tuple((&1,)).unwrap();
     assert_eq!(i32::try_from(result).unwrap(), 1 + offset);
     let typed_fn = |x: &i32| -> Result<i32> { sum1.call_tuple((x,))?.try_into() };
     let result = typed_fn(&1);

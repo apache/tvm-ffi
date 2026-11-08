@@ -53,7 +53,7 @@ fn global_metadata(name: &str) -> String {
     assert_eq!(unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() }, 0);
     Function::get_global("ffi.GetGlobalFuncMetadata")
         .unwrap()
-        .call_tuple_with_len::<1, _>((String::from(name),))
+        .call_tuple((String::from(name),))
         .unwrap()
         .try_into()
         .unwrap()
@@ -137,7 +137,7 @@ fn test_exports_without_metadata() {
     // SAFETY: rust_add takes two arguments and does not use the handle.
     let add =
         unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_rust_add, None).unwrap() };
-    let sum = add.call_tuple_with_len::<2, _>((1i64, 2i64)).unwrap();
+    let sum = add.call_tuple((1i64, 2i64)).unwrap();
     assert_eq!(i64::try_from(sum).unwrap(), 3);
     without_export_metadata::__tvm_ffi__metadata_rust_schema_id_int();
     without_export_metadata::__tvm_ffi__metadata_rust_packed();
@@ -287,6 +287,6 @@ fn test_global_untyped_metadata_matches_cpp() {
 fn test_global_typed_registration_calls_the_function() {
     register_globals();
     let add = Function::get_global("testing.rust.add").unwrap();
-    let sum = add.call_tuple_with_len::<2, _>((1i64, 2i64)).unwrap();
+    let sum = add.call_tuple((1i64, 2i64)).unwrap();
     assert_eq!(i64::try_from(sum).unwrap(), 3);
 }

@@ -694,36 +694,26 @@ impl<'a> From<&TensorView<'a>> for AnyView<'a> {
 }
 
 // Passed to a function as a `DLTensor*`.
-impl<'a> crate::function_internal::IntoArgHolder for TensorView<'a> {
-    type Target = TensorView<'a>;
-    fn into_arg_holder(self) -> Self::Target {
+impl<'a> crate::function_internal::PackedCallArg for TensorView<'a> {
+    type Holder = Self;
+    #[inline(always)]
+    fn into_packed_arg(self) -> Self {
         self
+    }
+    #[inline(always)]
+    fn as_packed_arg(holder: &Self::Holder) -> AnyView<'_> {
+        AnyView::from(holder)
     }
 }
 
-impl<'a, 'b> crate::function_internal::IntoArgHolder for &'b TensorView<'a> {
-    type Target = &'b TensorView<'a>;
-    fn into_arg_holder(self) -> Self::Target {
+impl<'a, 'b> crate::function_internal::PackedCallArg for &'b TensorView<'a> {
+    type Holder = Self;
+    #[inline(always)]
+    fn into_packed_arg(self) -> Self {
         self
     }
-}
-
-impl<'a> crate::function_internal::ArgIntoRef for TensorView<'a> {
-    type Target = TensorView<'a>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-
-impl<'a> crate::function_internal::ArgIntoRef for &TensorView<'a> {
-    type Target = TensorView<'a>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-
-impl crate::function_internal::PackedArg for TensorView<'_> {
-    fn as_packed_arg(&self) -> AnyView<'_> {
-        AnyView::from(self)
+    #[inline(always)]
+    fn as_packed_arg(holder: &Self::Holder) -> AnyView<'_> {
+        AnyView::from(*holder)
     }
 }

@@ -19,10 +19,12 @@
 //! [`Function`], a callable shared with C++ and Python, and the global function
 //! registry.
 
+pub use crate::function_internal::{PackedCallArg, PackedCallArgs};
+
 use crate::any::{Any, AnyView};
 use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
-use crate::function_internal::{AsPackedCallable, TupleAsPackedArgs};
+use crate::function_internal::AsPackedCallable;
 use crate::object::{Object, ObjectArc, ObjectCore};
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
@@ -194,7 +196,8 @@ impl Function {
     /// Call the function with the arguments in the tuple `tuple_args`.
     ///
     /// An element may be a value or a reference to one; a reference passes an
-    /// object without retaining it.
+    /// object without retaining it, and a `&str` or `&[u8]` passes as a
+    /// `String` or `Bytes`.
     ///
     /// # Arguments
     ///
@@ -209,63 +212,8 @@ impl Function {
     /// Returns the error that the function raises.
     ///
     /// See also [`Function`].
-    pub fn call_tuple<TupleType>(&self, tuple_args: TupleType) -> Result<Any>
-    where
-        TupleType: TupleAsPackedArgs,
-    {
-        // This is a workaround for Rust's requirement that stack allocation size
-        // must be known at compile time for generic types.
-        // While we know args_len is a constant, Rust doesn't allow us to directly
-        // declare [AnyView::new(); args_len] in generic contexts.
-        //
-        // We use a small vector optimization pattern:
-        // 1. First allocate a small stack buffer (stack_args)
-        // 2. If args_len exceeds STACK_LEN, allocate a heap buffer (heap_args)
-        // 3. Use the appropriate buffer based on size
-        //
-        // Since args_len is a compile-time constant, the compiler should optimize
-        // away the unused branch, making this approach efficient.
-        const STACK_LEN: usize = 4;
-        let mut stack_args = [AnyView::new(); STACK_LEN];
-        let mut heap_args = Vec::<AnyView>::new();
-        let args_len = <TupleType as TupleAsPackedArgs>::LEN;
-        // get packed arguments
-        let packed_args: &mut [AnyView] = if args_len <= STACK_LEN {
-            &mut stack_args[..args_len]
-        } else {
-            heap_args.resize(args_len, AnyView::new());
-            &mut heap_args[..args_len]
-        };
-        tuple_args.fill_any_view(packed_args);
-        self.call_packed(packed_args)
-    }
-    /// Call the function with the `LEN` arguments in `tuple_args`.
-    ///
-    /// This is [`call_tuple`](Self::call_tuple) for an argument count known at
-    /// compile time, without its small-vector overhead.
-    ///
-    /// # Arguments
-    ///
-    /// * `tuple_args` - The `LEN` arguments, as a tuple.
-    ///
-    /// # Returns
-    ///
-    /// The function's result.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error that the function raises.
-    #[doc(hidden)]
-    pub fn call_tuple_with_len<const LEN: usize, TupleType>(
-        &self,
-        tuple_args: TupleType,
-    ) -> Result<Any>
-    where
-        TupleType: TupleAsPackedArgs,
-    {
-        let mut packed_args = [AnyView::new(); LEN];
-        tuple_args.fill_any_view(&mut packed_args);
-        self.call_packed(&packed_args)
+    pub fn call_tuple(&self, tuple_args: impl PackedCallArgs) -> Result<Any> {
+        tuple_args.with_packed_args(|packed_args| self.call_packed(packed_args))
     }
     /// Look up the global function registered as `name`.
     ///

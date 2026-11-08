@@ -499,8 +499,7 @@ macro_rules! impl_any_compatible_conversions {
     ($($t:ty),* $(,)?) => {
         $crate::impl_try_from_any!($($t),*);
         $crate::impl_into_arg!($($t),*);
-        $crate::impl_arg_into_ref!($($t),*);
-        $crate::impl_into_arg_holder_default!($($t),*);
+        $crate::impl_into_packed_arg!($($t),*);
     };
 }
 
@@ -625,48 +624,38 @@ macro_rules! impl_try_from_any_for_parametric {
     };
 }
 
-/// Typed-function arguments; part of [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions).
+/// Packed-call arguments; part of [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions).
 #[doc(hidden)]
 #[macro_export]
-macro_rules! impl_into_arg_holder_default {
-    ($($t:ty),*) => {
-        $(
-            impl $crate::function_internal::IntoArgHolder for $t {
-                type Target = $t;
-                fn into_arg_holder(self) -> Self::Target {
-                    self
-                }
-            }
-            impl<'a> $crate::function_internal::IntoArgHolder for &'a $t {
-                type Target = &'a $t;
-                fn into_arg_holder(self) -> Self::Target {
-                    self
-                }
-            }
-        )*
+macro_rules! impl_into_packed_arg {
+    ($($t:ty),* $(,)?) => {
+        $($crate::impl_into_packed_arg!(impl[] $t);)*
     };
-}
+    (impl[$($g:tt)*] $t:ty) => {
+        impl<$($g)*> $crate::function_internal::PackedCallArg for $t {
+            type Holder = $t;
+            #[inline(always)]
+            fn into_packed_arg(self) -> $t {
+                self
+            }
+            #[inline(always)]
+            fn as_packed_arg(holder: &Self::Holder) -> $crate::any::AnyView<'_> {
+                $crate::any::AnyView::from(holder)
+            }
+        }
 
-/// `call_tuple` arguments; part of [`impl_any_compatible_conversions!`](crate::impl_any_compatible_conversions).
-#[doc(hidden)]
-#[macro_export]
-macro_rules! impl_arg_into_ref {
-    ($($t:ty),*) => {
-        $(
-            impl $crate::function_internal::ArgIntoRef for $t {
-                type Target = $t;
-                fn to_ref(&self) -> &Self::Target {
-                    &self
-                }
+        impl<'a, $($g)*> $crate::function_internal::PackedCallArg for &'a $t {
+            type Holder = &'a $t;
+            #[inline(always)]
+            fn into_packed_arg(self) -> &'a $t {
+                self
             }
-            impl<'a> $crate::function_internal::ArgIntoRef for &'a $t {
-                type Target = $t;
-                fn to_ref(&self) -> &Self::Target {
-                    &self
-                }
+            #[inline(always)]
+            fn as_packed_arg(holder: &Self::Holder) -> $crate::any::AnyView<'_> {
+                $crate::any::AnyView::from(*holder)
             }
-        )*
-    }
+        }
+    };
 }
 
 // ----------------------------------------------------------------------------
@@ -864,7 +853,7 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident() -> $ret_ty:ty) => {{
         let _f = $f;
         move || -> $ret_ty {
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<0, _>(())?)
+            ::core::convert::TryInto::try_into(_f.call_tuple(())?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -872,9 +861,7 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident($t0:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0,).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<1, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0,))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -882,9 +869,7 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident($t0:ty, $t1:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0, a1).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<2, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -892,9 +877,7 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0, a1, a2).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<3, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -902,9 +885,7 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0, a1, a2, a3).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<4, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -912,9 +893,7 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0, a1, a2, a3, a4).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<5, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -922,9 +901,7 @@ macro_rules! into_typed_fn {
     ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0, a1, a2, a3, a4, a5).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<6, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4, a5))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -933,9 +910,7 @@ macro_rules! into_typed_fn {
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0, a1, a2, a3, a4, a5, a6).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<7, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4, a5, a6))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
@@ -944,9 +919,7 @@ macro_rules! into_typed_fn {
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6, a7: $t7| -> $ret_ty {
-            use $crate::function_internal::IntoArgHolderTuple;
-            let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7).into_arg_holder_tuple();
-            ::core::convert::TryInto::try_into(_f.call_tuple_with_len::<8, _>(tuple_args)?)
+            ::core::convert::TryInto::try_into(_f.call_tuple((a0, a1, a2, a3, a4, a5, a6, a7))?)
                 .map_err(::core::convert::Into::into)
         }
     }};
