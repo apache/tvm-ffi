@@ -307,7 +307,7 @@ fn type_alias_matcher_keeps_strict_compatibility() {
 
     let module: Module = Function::get_global("ffi.SystemLib")
         .unwrap()
-        .call_tuple_with_len::<0, _>(())
+        .call_tuple(())
         .unwrap()
         .try_into()
         .unwrap();

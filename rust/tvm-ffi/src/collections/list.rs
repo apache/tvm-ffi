@@ -802,6 +802,8 @@ where
     }
 }
 
+crate::impl_into_arg!(impl[T: ContainerElement] List<T>);
+
 impl<'b, T: ContainerElement> TryFrom<&'b Any> for List<T> {
     type Error = Error;
 

@@ -250,6 +250,8 @@ unsafe impl<T: OptionalCompatible> AnyCompatible for Optional<T> {
     }
 }
 
+crate::impl_into_arg!(impl[T: OptionalCompatible] Optional<T>);
+
 impl<T: OptionalCompatible> Default for Optional<T> {
     /// The empty optional, holding `None`.
     #[inline]

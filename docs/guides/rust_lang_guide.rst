@@ -417,7 +417,7 @@ names the reference to the parent's object:
 ``Point3Obj::new``, which takes the parent's object, then the fields: a scalar
 (``bool``, an integer or a float) as its own type, so that a literal infers as it,
 and any other field as ``impl Into<T>``. A constructor on the reference takes an
-object reference as ``impl IntoObjectRef<T>``, as the ones ``tvm-ffi-stubgen``
+object reference as ``impl IntoArg<T>``, as the ones ``tvm-ffi-stubgen``
 generates do. The reference dereferences to the object
 (``#[object_ref(skip_deref)]`` opts out), and its private ``from_object`` wraps a new
 object for the type's constructors. The reference also converts into ``parent``,

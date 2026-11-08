@@ -358,7 +358,7 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
         .and_then(Map::<i64, i64>::try_from)
         .unwrap();
     assert_eq!(map_pointer(&mutated_map), source_map_pointer);
-    assert_eq!(mutated_map.get(&1).unwrap(), Some(11));
+    assert_eq!(mutated_map.get(1).unwrap(), Some(11));
 
     let dict = call_global("ffi.Dict", &[Any::from(1i64), Any::from(10i64)]);
     let dict_pointer = any_object_pointer(&dict);
@@ -1295,7 +1295,7 @@ fn unique_map_reuses_nested_unique_value_storage() {
     let mapped = structural_map(source, &mut IncrementIntegers, WalkOrder::PostOrder)
         .and_then(Map::<i64, Array<i64>>::try_from)
         .unwrap();
-    let mapped_child = mapped.get(&1).unwrap().unwrap();
+    let mapped_child = mapped.get(1).unwrap().unwrap();
 
     assert_eq!(map_pointer(&mapped), source_pointer);
     assert_eq!(array_pointer(&mapped_child), child_pointer);
@@ -1319,8 +1319,8 @@ fn shared_map_and_dict_copy_only_when_a_value_changes() {
         .and_then(Map::<i64, i64>::try_from)
         .unwrap();
     assert_ne!(map_pointer(&mapped), source_pointer);
-    assert_eq!(source.get(&1).unwrap(), Some(10));
-    assert_eq!(mapped.get(&1).unwrap(), Some(11));
+    assert_eq!(source.get(1).unwrap(), Some(10));
+    assert_eq!(mapped.get(1).unwrap(), Some(11));
 
     let dict = call_global("ffi.Dict", &[Any::from(1i64), Any::from(10i64)]);
     let dict_pointer = any_object_pointer(&dict);
@@ -1353,8 +1353,8 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
         Err(error) => error,
     };
 
-    assert_eq!(source.get(&1).unwrap(), Some(10));
-    assert_eq!(source.get(&2).unwrap(), Some(20));
+    assert_eq!(source.get(1).unwrap(), Some(10));
+    assert_eq!(source.get(2).unwrap(), Some(20));
     assert_eq!(error.message(), "map mapper failed");
     assert!(error.backtrace().contains("origin"));
     assert!(error.backtrace().contains("object `ffi.Map`"));
@@ -1938,8 +1938,8 @@ fn map_keys_are_anchors_and_object_leaves_are_preserved() {
     .and_then(Map::<FfiString, i64>::try_from)
     .unwrap();
     assert_eq!(key_callbacks, 0);
-    assert_eq!(mapped.get(&FfiString::from("a")).unwrap(), Some(2));
-    assert_eq!(mapped.get(&FfiString::from("b")).unwrap(), Some(3));
+    assert_eq!(mapped.get(FfiString::from("a")).unwrap(), Some(2));
+    assert_eq!(mapped.get(FfiString::from("b")).unwrap(), Some(3));
 
     let string = FfiString::from("leaf");
     let heterogeneous = Function::get_global("ffi.Array")

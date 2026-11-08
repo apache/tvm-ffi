@@ -60,7 +60,7 @@ impl Module {
     pub fn load_from_file<Str: AsRef<str>>(file_name: Str) -> Result<Module> {
         let file_name = crate::string::String::from(file_name);
         crate::cached_global_func!("ffi.ModuleLoadFromFile")
-            .call_tuple_with_len::<1, _>((file_name,))?
+            .call_tuple((file_name,))?
             .try_into()
     }
 
@@ -81,7 +81,7 @@ impl Module {
     pub fn get_function<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
         let name = crate::string::String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunction")
-            .call_tuple_with_len::<3, _>((self, name, false))?
+            .call_tuple((self, name, false))?
             .try_into()
     }
 
@@ -90,7 +90,7 @@ impl Module {
     pub fn get_function_with_imports<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
         let name = crate::string::String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunction")
-            .call_tuple_with_len::<3, _>((self, name, true))?
+            .call_tuple((self, name, true))?
             .try_into()
     }
 
@@ -106,7 +106,7 @@ impl Module {
     pub fn implements_function<Str: AsRef<str>>(&self, name: Str) -> Result<bool> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleImplementsFunction")
-            .call_tuple_with_len::<3, _>((self, name, false))?
+            .call_tuple((self, name, false))?
             .try_into()
     }
 
@@ -115,7 +115,7 @@ impl Module {
     pub fn implements_function_with_imports<Str: AsRef<str>>(&self, name: Str) -> Result<bool> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleImplementsFunction")
-            .call_tuple_with_len::<3, _>((self, name, true))?
+            .call_tuple((self, name, true))?
             .try_into()
     }
 
@@ -135,7 +135,7 @@ impl Module {
     pub fn get_function_metadata<Str: AsRef<str>>(&self, name: Str) -> Result<Option<String>> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunctionMetadata")
-            .call_tuple_with_len::<3, _>((self, name, false))?
+            .call_tuple((self, name, false))?
             .try_into()
     }
 
@@ -147,7 +147,7 @@ impl Module {
     ) -> Result<Option<String>> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunctionMetadata")
-            .call_tuple_with_len::<3, _>((self, name, true))?
+            .call_tuple((self, name, true))?
             .try_into()
     }
 
@@ -166,7 +166,7 @@ impl Module {
     pub fn get_function_doc<Str: AsRef<str>>(&self, name: Str) -> Result<Option<String>> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunctionDoc")
-            .call_tuple_with_len::<3, _>((self, name, false))?
+            .call_tuple((self, name, false))?
             .try_into()
     }
 
@@ -178,7 +178,7 @@ impl Module {
     ) -> Result<Option<String>> {
         let name = String::from(name);
         crate::cached_global_func!("ffi.ModuleGetFunctionDoc")
-            .call_tuple_with_len::<3, _>((self, name, true))?
+            .call_tuple((self, name, true))?
             .try_into()
     }
 }

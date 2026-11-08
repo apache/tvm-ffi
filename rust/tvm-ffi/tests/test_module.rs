@@ -55,13 +55,13 @@ fn testing_module() -> Module {
 fn importing_module() -> Module {
     let module: Module = Function::get_global("ffi.SystemLib")
         .unwrap()
-        .call_tuple_with_len::<1, _>((String::from("testing.rust.test_module."),))
+        .call_tuple((String::from("testing.rust.test_module."),))
         .unwrap()
         .try_into()
         .unwrap();
     Function::get_global("ffi.ModuleImportModule")
         .unwrap()
-        .call_tuple_with_len::<2, _>((&module, &testing_module()))
+        .call_tuple((&module, &testing_module()))
         .unwrap();
     module
 }

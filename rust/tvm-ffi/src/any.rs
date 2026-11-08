@@ -605,8 +605,10 @@ crate::impl_any_compatible_conversions!(
 );
 // Only out of `Any`: a raw pointer and the root reference are not call arguments.
 crate::impl_try_from_any!(*mut core::ffi::c_void, crate::object::ObjectRef);
+crate::impl_into_arg!(Any, *mut core::ffi::c_void, crate::object::ObjectRef);
 
 crate::impl_try_from_any_for_parametric!(Option<T>);
+crate::impl_into_arg!(impl[T: AnyCompatible + Clone] Option<T>);
 
 /// The conversion of a typed function argument, whose error names the
 /// argument's index.

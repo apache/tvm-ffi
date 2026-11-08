@@ -484,7 +484,7 @@ fn test_big_int_containers() {
         assert!(map.contains_key(value).unwrap());
         assert_eq!(map.get(value).unwrap(), Some(i as i64));
     }
-    assert_eq!(map.get(&BigInt::from(1u128 << 64)).unwrap(), None);
+    assert_eq!(map.get(BigInt::from(1u128 << 64)).unwrap(), None);
 }
 
 #[test]

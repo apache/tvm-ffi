@@ -29,6 +29,7 @@
 // hashing (`AnyHash`/`AnyEqual`) and dense/small probing, just as the Python
 // bindings also delegate.
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -37,9 +38,9 @@ use crate::any::TryFromTemp;
 use crate::derive::Object;
 use crate::extra::cold_init_lazy_lock::ColdInitLazyLock;
 use crate::function::Function;
-use crate::object::IntoObjectRef;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::{ContainerElement, TypeSubsumes};
+use crate::IntoArg;
 use crate::{Any, AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -121,8 +122,8 @@ pub struct MapObj {
 ///     .into_iter()
 ///     .collect();
 /// assert_eq!(map.len(), 2);
-/// assert_eq!(map.get(&String::from("b"))?, Some(2));
-/// assert_eq!(map.get(&String::from("c"))?, None);
+/// assert_eq!(map.get("b")?, Some(2));
+/// assert_eq!(map.get("c")?, None);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[repr(C)]
@@ -285,9 +286,10 @@ where
     /// is not hashable.
     ///
     /// The result for a `key` of another type than the map's keys is
-    /// unspecified, as for [`Map::get`].
-    pub fn contains_key(&self, key: &K) -> Result<bool> {
-        let present = self.try_contains_key(key)?;
+    /// unspecified, as for [`Map::get`]. Code generic over `K` that passes a
+    /// `&K` adds the bound `for<'a> &'a K: IntoArg<K>`.
+    pub fn contains_key(&self, key: impl IntoArg<K>) -> Result<bool> {
+        let present = self.try_contains_key(key.into_arg().borrow())?;
         if !present {
             self.debug_assert_key_type();
         }
@@ -304,9 +306,14 @@ where
     /// The result for a `key` of another type than the map's keys is
     /// unspecified: it currently reads as absent, since a lookup hashes the key
     /// instead of reading a stored one. Debug builds assert against it.
-    pub fn get(&self, key: &K) -> Result<Option<V>> {
+    ///
+    /// A `&str` key builds a temporary `String` for the runtime lookup. Code
+    /// generic over `K` that passes a `&K` adds the bound
+    /// `for<'a> &'a K: IntoArg<K>`.
+    pub fn get(&self, key: impl IntoArg<K>) -> Result<Option<V>> {
+        let key = key.into_arg();
         let result = crate::cached_global_func!("ffi.MapGetItemOrMissing")
-            .call_packed(&[AnyView::from(self), element_view(key)])?;
+            .call_packed(&[AnyView::from(self), element_view(key.borrow())])?;
         let raw = result.as_raw_ffi_any();
         if raw.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32
             && unsafe { raw.data_union.v_obj } as usize == *MISSING_OBJECT
@@ -472,7 +479,7 @@ impl<K, V> Map<K, V> {
     /// `Map<KU, VU>(const Map<K, V>&)` does for bases `KU` and `VU`.
     ///
     /// It is a method, not `From`, for the reasons on [`Array::upcast`](crate::Array::upcast).
-    #[inline]
+    #[inline(always)]
     pub fn upcast<KU: TypeSubsumes<K>, VU: TypeSubsumes<V>>(self) -> Map<KU, VU> {
         Map {
             data: self.data,
@@ -481,7 +488,7 @@ impl<K, V> Map<K, V> {
     }
 
     /// Borrow this map as a `Map<KU, VU>`, as [`upcast`](Self::upcast) does.
-    #[inline]
+    #[inline(always)]
     pub fn upcast_ref<KU: TypeSubsumes<K>, VU: TypeSubsumes<V>>(&self) -> &Map<KU, VU> {
         // SAFETY: both are `repr(C)` over one `ObjectArc<MapObj>`, and every
         // entry of `Map<K, V>` is a valid entry of `Map<KU, VU>`.
@@ -489,21 +496,29 @@ impl<K, V> Map<K, V> {
     }
 }
 
-impl<K, V, KU: TypeSubsumes<K>, VU: TypeSubsumes<V>> IntoObjectRef<Map<KU, VU>> for Map<K, V> {
+impl<K, V, KU: TypeSubsumes<K>, VU: TypeSubsumes<V>> IntoArg<Map<KU, VU>> for Map<K, V> {
     type Output = Map<KU, VU>;
     #[inline(always)]
-    fn into_object_ref(self) -> Map<KU, VU> {
+    fn into_arg(self) -> Map<KU, VU> {
+        self.upcast()
+    }
+    #[inline(always)]
+    fn into_owned(self) -> Map<KU, VU> {
         self.upcast()
     }
 }
 
-impl<'a, K, V, KU: TypeSubsumes<K> + 'a, VU: TypeSubsumes<V> + 'a> IntoObjectRef<Map<KU, VU>>
+impl<'a, K, V, KU: TypeSubsumes<K> + 'a, VU: TypeSubsumes<V> + 'a> IntoArg<Map<KU, VU>>
     for &'a Map<K, V>
 {
     type Output = &'a Map<KU, VU>;
     #[inline(always)]
-    fn into_object_ref(self) -> &'a Map<KU, VU> {
+    fn into_arg(self) -> &'a Map<KU, VU> {
         self.upcast_ref()
+    }
+    #[inline(always)]
+    fn into_owned(self) -> Map<KU, VU> {
+        self.upcast_ref().clone()
     }
 }
 

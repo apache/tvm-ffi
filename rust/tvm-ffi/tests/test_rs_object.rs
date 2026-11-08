@@ -372,6 +372,22 @@ fn test_constructors_deref_and_upcast() {
 }
 
 #[test]
+fn test_into_arg_into_owned_moves_or_clones() {
+    fn keep(value: impl IntoArg<ObjectRef>) -> ObjectRef {
+        value.into_owned()
+    }
+    let pair = point(1, "a");
+    let count = || AnyView::from(&pair).debug_strong_count().unwrap();
+    let base = count();
+    let cloned = keep(&pair);
+    assert!(cloned.same_as(&pair));
+    assert_eq!(count(), base + 1);
+    let moved = keep(pair.clone());
+    assert!(moved.same_as(&pair));
+    assert_eq!(count(), base + 2);
+}
+
+#[test]
 fn test_containers_upcast_without_a_copy() {
     fn keep_array(value: impl Into<Array<RsPoint>>) -> Array<RsPoint> {
         value.into()
@@ -379,8 +395,8 @@ fn test_containers_upcast_without_a_copy() {
     fn keep_map(value: impl Into<Map<tvm_ffi::String, RsPoint>>) -> Map<tvm_ffi::String, RsPoint> {
         value.into()
     }
-    fn len(value: impl IntoObjectRef<Array<RsPoint>>) -> usize {
-        value.into_object_ref().borrow().len()
+    fn len(value: impl IntoArg<Array<RsPoint>>) -> usize {
+        value.into_arg().borrow().len()
     }
 
     let (a, b) = (point(1, "a"), point(2, "b"));
@@ -403,7 +419,7 @@ fn test_containers_upcast_without_a_copy() {
     let map3: Map<tvm_ffi::String, RsPoint3> = [("p".into(), point3(1, 3))].into();
     let upcast: Map<tvm_ffi::String, RsPoint> = map3.clone().upcast();
     assert!(upcast.same_as(&map3));
-    assert_eq!(upcast.get(&"p".into()).unwrap().unwrap().x, 1);
+    assert_eq!(upcast.get("p").unwrap().unwrap().x, 1);
     let roots: &Map<tvm_ffi::String, ObjectRef> = map3.upcast_ref();
     assert!(roots.same_as(&map3));
 }

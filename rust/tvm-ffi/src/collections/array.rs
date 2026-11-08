@@ -25,8 +25,9 @@ use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
 use crate::object::ObjectCoreWithExtraItems;
-use crate::object::{IntoObjectRef, Object, ObjectArc};
+use crate::object::{Object, ObjectArc};
 use crate::type_traits::{ContainerElement, RefFromAnyUnchecked, TypeSubsumes};
+use crate::IntoArg;
 use crate::{Any, AnyCompatible, AnyView, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -161,21 +162,27 @@ impl<T: ContainerElement + Clone> From<&Array<T>> for Array<T> {
     }
 }
 
-impl<T, U: TypeSubsumes<T>> IntoObjectRef<Array<U>> for Array<T> {
+impl<T, U: TypeSubsumes<T>> IntoArg<Array<U>> for Array<T> {
     type Output = Array<U>;
     #[inline(always)]
-    fn into_object_ref(self) -> Array<U> {
+    fn into_arg(self) -> Array<U> {
+        self.upcast()
+    }
+    #[inline(always)]
+    fn into_owned(self) -> Array<U> {
         self.upcast()
     }
 }
 
-impl<'a, T, U: TypeSubsumes<T> + ContainerElement + Clone + 'a> IntoObjectRef<Array<U>>
-    for &'a Array<T>
-{
+impl<'a, T, U: TypeSubsumes<T> + ContainerElement + Clone + 'a> IntoArg<Array<U>> for &'a Array<T> {
     type Output = &'a Array<U>;
     #[inline(always)]
-    fn into_object_ref(self) -> &'a Array<U> {
+    fn into_arg(self) -> &'a Array<U> {
         self.upcast_ref()
+    }
+    #[inline(always)]
+    fn into_owned(self) -> Array<U> {
+        self.upcast_ref().clone()
     }
 }
 
@@ -220,7 +227,7 @@ impl<T> Array<T> {
     /// let objects: Array<ObjectRef> = shapes.clone().upcast();
     /// assert!(objects[0].same_as(&shapes[0]));
     /// ```
-    #[inline]
+    #[inline(always)]
     pub fn upcast<U: TypeSubsumes<T>>(self) -> Array<U> {
         Array {
             data: self.data,
@@ -229,7 +236,7 @@ impl<T> Array<T> {
     }
 
     /// Borrow this array as an `Array<U>`, as [`upcast`](Self::upcast) does.
-    #[inline]
+    #[inline(always)]
     pub fn upcast_ref<U: TypeSubsumes<T>>(&self) -> &Array<U> {
         // SAFETY: `Array<T>` and `Array<U>` are both `repr(C)` over one
         // `ObjectArc<ArrayObj>`, and every `T` cell is a valid `U` cell.

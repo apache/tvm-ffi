@@ -169,273 +169,88 @@ impl_as_packed_callable!(6; T0, T1, T2, T3, T4, T5);
 impl_as_packed_callable!(7; T0, T1, T2, T3, T4, T5, T6);
 impl_as_packed_callable!(8; T0, T1, T2, T3, T4, T5, T6, T7);
 
-//--------------------------------------------------------------
-// IntoArgHolder, helper to convert to canonical holding type
-//
-// This is needed sometimes for reference types that may need to
-// be converted to value types.
-//--------------------------------------------------------------
-pub trait IntoArgHolder {
-    type Target;
-    fn into_arg_holder(self) -> Self::Target;
+/// One argument of a packed call: held for the call, then viewed as an FFI
+/// value. `&str` and `&[u8]` are held as `String` and `Bytes`. Implemented by
+/// `#[derive(ObjectRef)]` and `impl_any_compatible_conversions!`.
+pub trait PackedCallArg {
+    /// What keeps the argument alive during the call.
+    type Holder;
+    fn into_packed_arg(self) -> Self::Holder;
+    fn as_packed_arg(holder: &Self::Holder) -> AnyView<'_>;
 }
 
 // `Any` itself is an argument; every other value type is listed in `any.rs`.
-crate::impl_into_arg_holder_default!(Any);
+crate::impl_into_packed_arg!(Any);
 
-// string will be converted to String for argument passing
-impl IntoArgHolder for &str {
-    type Target = String;
-    fn into_arg_holder(self) -> Self::Target {
+impl PackedCallArg for &str {
+    type Holder = String;
+    #[inline]
+    fn into_packed_arg(self) -> String {
         String::from(self)
     }
+    #[inline(always)]
+    fn as_packed_arg(holder: &String) -> AnyView<'_> {
+        AnyView::from(holder)
+    }
 }
 
-// string will be converted to String for argument passing
-impl IntoArgHolder for &[u8] {
-    type Target = Bytes;
-    fn into_arg_holder(self) -> Self::Target {
+impl PackedCallArg for &[u8] {
+    type Holder = Bytes;
+    #[inline]
+    fn into_packed_arg(self) -> Bytes {
         Bytes::from(self)
     }
-}
-
-// helper trait to implement IntoArgHolderTuple to apply into_arg_holder to each element
-pub trait IntoArgHolderTuple {
-    type Target;
-    fn into_arg_holder_tuple(self) -> Self::Target;
-}
-
-macro_rules! impl_into_arg_holder_tuple {
-    ( $($T:ident),* ; $($idx:tt),* ) => {
-        impl<$($T),*> $crate::function_internal::IntoArgHolderTuple for ($($T,)*)
-        where
-            $($T: IntoArgHolder),* {
-            type Target = ($($T::Target,)*);
-
-            fn into_arg_holder_tuple(self) -> Self::Target {
-                ($(self.$idx.into_arg_holder(),)*)
-            }
-        }
-    };
-}
-
-impl IntoArgHolderTuple for () {
-    type Target = ();
-    fn into_arg_holder_tuple(self) -> Self::Target {}
-}
-impl_into_arg_holder_tuple!(T0; 0);
-impl_into_arg_holder_tuple!(T0, T1; 0, 1);
-impl_into_arg_holder_tuple!(T0, T1, T2; 0, 1, 2);
-impl_into_arg_holder_tuple!(T0, T1, T2, T3; 0, 1, 2, 3);
-impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4; 0, 1, 2, 3, 4);
-impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5; 0, 1, 2, 3, 4, 5);
-impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5, 6);
-impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6, 7);
-
-//------------------------------------------------------------
-// ArgIntoRef
-//
-// Helper to turn argument type to reference type
-// This is effectively AsRef<T> but removes the need of T
-//-----------------------------------------------------------
-pub trait ArgIntoRef {
-    type Target;
-    fn to_ref(&self) -> &Self::Target;
-}
-
-/// Convert a canonical argument holder into its packed ABI view.
-#[doc(hidden)]
-pub trait PackedArg {
-    fn as_packed_arg(&self) -> AnyView<'_>;
-}
-
-impl<T: AnyCompatible> PackedArg for T {
-    #[inline]
-    fn as_packed_arg(&self) -> AnyView<'_> {
-        AnyView::from(self)
+    #[inline(always)]
+    fn as_packed_arg(holder: &Bytes) -> AnyView<'_> {
+        AnyView::from(holder)
     }
 }
 
-impl PackedArg for Any {
-    #[inline]
-    fn as_packed_arg(&self) -> AnyView<'_> {
-        AnyView::from(self)
-    }
-}
-
-impl<T> PackedArg for RValueRef<T>
-where
-    T: ObjectRefCore,
-{
-    #[inline]
-    fn as_packed_arg(&self) -> AnyView<'_> {
-        AnyView::from(self)
-    }
-}
-
-// `Any` itself is an argument; every other value type is listed in `any.rs`.
-crate::impl_arg_into_ref!(Any);
-
-// Generic holders require explicit implementations rather than scalar macro entries.
-impl<T: AnyCompatible> IntoArgHolder for Option<T> {
-    type Target = Self;
-    fn into_arg_holder(self) -> Self::Target {
+impl<T: ObjectRefCore> PackedCallArg for RValueRef<T> {
+    type Holder = Self;
+    #[inline(always)]
+    fn into_packed_arg(self) -> Self {
         self
     }
-}
-
-impl<'a, T: AnyCompatible> IntoArgHolder for &'a Option<T> {
-    type Target = &'a Option<T>;
-    fn into_arg_holder(self) -> Self::Target {
-        self
+    #[inline(always)]
+    fn as_packed_arg(holder: &Self::Holder) -> AnyView<'_> {
+        AnyView::from(holder)
     }
 }
 
-impl<T: AnyCompatible> ArgIntoRef for Option<T> {
-    type Target = Self;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
+// Generic types, which the per-type lists cannot name.
+crate::impl_into_packed_arg!(impl[T: AnyCompatible] Option<T>);
+crate::impl_into_packed_arg!(impl[T: ContainerElement + Clone] crate::Array<T>);
+crate::impl_into_packed_arg!(impl[K: ContainerElement, V: ContainerElement] crate::Map<K, V>);
+crate::impl_into_packed_arg!(impl[T: ContainerElement] crate::List<T>);
 
-impl<T: AnyCompatible> ArgIntoRef for &Option<T> {
-    type Target = Option<T>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-
-impl<T: ContainerElement + Clone> IntoArgHolder for crate::Array<T> {
-    type Target = crate::Array<T>;
-    fn into_arg_holder(self) -> Self::Target {
-        self
-    }
-}
-impl<'a, T: ContainerElement + Clone> IntoArgHolder for &'a crate::Array<T> {
-    type Target = &'a crate::Array<T>;
-    fn into_arg_holder(self) -> Self::Target {
-        self
-    }
-}
-impl<T: ContainerElement + Clone> ArgIntoRef for crate::Array<T> {
-    type Target = crate::Array<T>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-impl<T: ContainerElement + Clone> ArgIntoRef for &crate::Array<T> {
-    type Target = crate::Array<T>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-
-impl<T> IntoArgHolder for RValueRef<T>
-where
-    T: ObjectRefCore,
-{
-    type Target = Self;
-    fn into_arg_holder(self) -> Self::Target {
-        self
-    }
-}
-
-impl<T> ArgIntoRef for RValueRef<T>
-where
-    T: ObjectRefCore,
-{
-    type Target = Self;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-
-impl<K: ContainerElement, V: ContainerElement> IntoArgHolder for crate::Map<K, V> {
-    type Target = crate::Map<K, V>;
-    fn into_arg_holder(self) -> Self::Target {
-        self
-    }
-}
-impl<'a, K: ContainerElement, V: ContainerElement> IntoArgHolder for &'a crate::Map<K, V> {
-    type Target = &'a crate::Map<K, V>;
-    fn into_arg_holder(self) -> Self::Target {
-        self
-    }
-}
-impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for crate::Map<K, V> {
-    type Target = crate::Map<K, V>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for &crate::Map<K, V> {
-    type Target = crate::Map<K, V>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-
-impl<T: ContainerElement> IntoArgHolder for crate::List<T> {
-    type Target = crate::List<T>;
-    fn into_arg_holder(self) -> Self::Target {
-        self
-    }
-}
-impl<'a, T: ContainerElement> IntoArgHolder for &'a crate::List<T> {
-    type Target = &'a crate::List<T>;
-    fn into_arg_holder(self) -> Self::Target {
-        self
-    }
-}
-impl<T: ContainerElement> ArgIntoRef for crate::List<T> {
-    type Target = crate::List<T>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-impl<T: ContainerElement> ArgIntoRef for &crate::List<T> {
-    type Target = crate::List<T>;
-    fn to_ref(&self) -> &Self::Target {
-        self
-    }
-}
-
-//-----------------------------------------------------------
-// TupleAsPackedArgs
-//
-// Helper to turn tuple type to packed arguments
-//-----------------------------------------------------------
-pub trait TupleAsPackedArgs {
+/// The arguments of a packed call: a tuple of 0 to 8 [`PackedCallArg`] values.
+pub trait PackedCallArgs {
     const LEN: usize;
-    fn fill_any_view<'a>(&'a self, any_view: &mut [AnyView<'a>]);
+    /// Call `f` with the arguments as views, which live until `f` returns.
+    fn with_packed_args<R>(self, f: impl FnOnce(&[AnyView<'_>]) -> R) -> R;
 }
 
-macro_rules! impl_tuple_as_packed_args {
-    ( $len:expr; $($T:ident),* ; $($idx:tt),* ) => {
-        impl<$($T),*> TupleAsPackedArgs for ($($T,)*)
-        where
-            $(
-                $T: ArgIntoRef,
-                $T::Target: PackedArg,
-            )*
-        {
+macro_rules! impl_into_packed_args {
+    ($len:literal; $($T:ident),*; $($idx:tt),*) => {
+        impl<$($T: PackedCallArg),*> PackedCallArgs for ($($T,)*) {
             const LEN: usize = $len;
-
-            fn fill_any_view<'a>(&'a self, _any_view: &mut [AnyView<'a>]) {
-                $(
-                    _any_view[$idx] = self.$idx.to_ref().as_packed_arg();
-                )*
+            #[inline(always)]
+            fn with_packed_args<R>(self, f: impl FnOnce(&[AnyView<'_>]) -> R) -> R {
+                let _holders = ($(self.$idx.into_packed_arg(),)*);
+                let views: [AnyView<'_>; $len] = [$($T::as_packed_arg(&_holders.$idx)),*];
+                f(&views)
             }
         }
     };
 }
 
-impl_tuple_as_packed_args!(0;;);
-impl_tuple_as_packed_args!(1; T0; 0);
-impl_tuple_as_packed_args!(2; T0, T1; 0, 1);
-impl_tuple_as_packed_args!(3; T0, T1, T2; 0, 1, 2);
-impl_tuple_as_packed_args!(4; T0, T1, T2, T3; 0, 1, 2, 3);
-impl_tuple_as_packed_args!(5; T0, T1, T2, T3, T4; 0, 1, 2, 3, 4);
-impl_tuple_as_packed_args!(6; T0, T1, T2, T3, T4, T5; 0, 1, 2, 3, 4, 5);
-impl_tuple_as_packed_args!(7; T0, T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5, 6);
-impl_tuple_as_packed_args!(8; T0, T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6, 7);
+impl_into_packed_args!(0;;);
+impl_into_packed_args!(1; T0; 0);
+impl_into_packed_args!(2; T0, T1; 0, 1);
+impl_into_packed_args!(3; T0, T1, T2; 0, 1, 2);
+impl_into_packed_args!(4; T0, T1, T2, T3; 0, 1, 2, 3);
+impl_into_packed_args!(5; T0, T1, T2, T3, T4; 0, 1, 2, 3, 4);
+impl_into_packed_args!(6; T0, T1, T2, T3, T4, T5; 0, 1, 2, 3, 4, 5);
+impl_into_packed_args!(7; T0, T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5, 6);
+impl_into_packed_args!(8; T0, T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6, 7);

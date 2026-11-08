@@ -117,11 +117,11 @@ pub use crate::extra::structural_visit::{
 pub use crate::extra::structural_walk::{structural_walk, IntoWalkResult, WalkOrder, WalkResult};
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
-pub use crate::object::{IntoObjectRef, Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
+pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
 pub use crate::optional::Optional;
 pub use crate::static_init::run_static_init_blocks;
 pub use crate::string::{Bytes, String};
-pub use crate::type_traits::AnyCompatible;
+pub use crate::type_traits::{AnyCompatible, IntoArg};
 /// Generate runtime type dispatch from the `prefix_*` methods of an impl.
 ///
 /// `#[dispatch(prefix, (First, Args...), Ret)]` on an inherent impl makes its
@@ -260,7 +260,7 @@ pub use tvm_ffi_macros::match_any;
 ///   infers as it, and any other field as `impl Into<T>`. This is the
 ///   object-level allocator, which sees only tokens and so cannot tell an
 ///   object reference from a value; a constructor on the reference takes an
-///   object reference as [`impl IntoObjectRef<T>`](IntoObjectRef), as the
+///   object reference as [`impl IntoArg<T>`](IntoArg), as the
 ///   ones `tvm-ffi-stubgen` generates do.
 ///
 /// # Arguments
