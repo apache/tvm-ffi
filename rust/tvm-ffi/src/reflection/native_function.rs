@@ -42,7 +42,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 /// it. Reading a hook with [`from_any`](Self::from_any) is `unsafe`, the
 /// caller vouching for the signature, and then calling it is safe. Building a
 /// hook from a Rust function with `into()` is safe; storing it, with
-/// [`TypeAttrDef::native_fn_attr`](super::TypeAttrDef::native_fn_attr) or
+/// [`TypeAttrDef::set_native_fn_attr`](super::TypeAttrDef::set_native_fn_attr) or
 /// [`EnumDef::set_native_fn_attr`](super::EnumDef::set_native_fn_attr), or
 /// converting it to [`Any`] for another registry with
 /// [`into_any`](Self::into_any), is `unsafe`, the caller vouching that the
@@ -67,7 +67,7 @@ use crate::{Any, AnyView, Error, Function, Result, TYPE_ERROR};
 ///
 /// let hook: NativeFunction<(&MyPairObj,), i64> = sum.into();
 /// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.
-/// unsafe { TypeAttrDef::<MyPairObj>::new().native_fn_attr("my_ext.sum", hook)? };
+/// unsafe { TypeAttrDef::<MyPairObj>::new().set_native_fn_attr("my_ext.sum", hook)? };
 ///
 /// let stored = TypeAttrColumn::lookup("my_ext.sum").unwrap().get(MyPairObj::type_index()).unwrap();
 /// // SAFETY: `my_ext.sum` holds `i64(const MyPairObj*)` hooks.

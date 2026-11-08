@@ -608,7 +608,7 @@ fn test_native_function() -> Result<()> {
     };
     let hook = NativeFunction::<(&PointObj,), i64>::from(x_of);
     // SAFETY: `testing.x_of` holds `i64(const PointObj*)` hooks.
-    unsafe { TypeAttrDef::<PointObj>::new().native_fn_attr("testing.x_of", hook)? };
+    unsafe { TypeAttrDef::<PointObj>::new().set_native_fn_attr("testing.x_of", hook)? };
     let stored = TypeAttrColumn::lookup("testing.x_of")
         .unwrap()
         .get(PointObj::type_index());
@@ -629,7 +629,7 @@ fn test_native_function() -> Result<()> {
         }
     }
     let error = TypeAttrDef::<PointObj>::new()
-        .attr("testing.raw", RawPointer)
+        .set_attr("testing.raw", RawPointer)
         .err()
         .unwrap();
     assert_eq!(error.kind(), TYPE_ERROR);

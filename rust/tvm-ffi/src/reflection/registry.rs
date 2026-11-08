@@ -485,7 +485,7 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 }
 
 /// Registers type attributes of the object type `T`, each as soon as
-/// [`attr`](Self::attr) names it, for every language to read with
+/// [`set_attr`](Self::set_attr) names it, for every language to read with
 /// [`TypeAttrColumn`](crate::reflection::TypeAttrColumn).
 ///
 /// As in C++, attributes register during static initialization, such as in a
@@ -505,7 +505,7 @@ pub unsafe fn register_object<N: ObjectCore + ShallowCopy>(
 ///     base_: Object,
 /// }
 ///
-/// TypeAttrDef::<MyPairObj>::new().attr("my_ext.arity", 2_i64)?;
+/// TypeAttrDef::<MyPairObj>::new().set_attr("my_ext.arity", 2_i64)?;
 ///
 /// let column = TypeAttrColumn::lookup("my_ext.arity").unwrap();
 /// let arity: i64 = column.get(MyPairObj::type_index()).unwrap().try_into()?;
@@ -539,8 +539,8 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     ///
     /// Returns an error if `T` already has the attribute `name`, or a
     /// `TypeError` if `value` is an opaque pointer: register a native hook
-    /// with [`native_fn_attr`](Self::native_fn_attr).
-    pub fn attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
+    /// with [`set_native_fn_attr`](Self::set_native_fn_attr).
+    pub fn set_attr(self, name: &str, value: impl Into<Any> + Send + Sync) -> Result<Self> {
         let value = value.into();
         ensure_not_opaque_ptr(name, &value)?;
         self.register(name, value)
@@ -565,7 +565,7 @@ impl<T: ObjectCore> TypeAttrDef<T> {
     ///
     /// Every caller of the column `name` calls its hooks with exactly `Args`
     /// and reads `R`: a native caller calls the function pointer unchecked.
-    pub unsafe fn native_fn_attr<Args, R>(
+    pub unsafe fn set_native_fn_attr<Args, R>(
         self,
         name: &str,
         f: NativeFunction<Args, R>,
