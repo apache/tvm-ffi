@@ -22,15 +22,15 @@
 
 // The Rust side of C++ `tvm/ffi/extra/visit_error_context.h`.
 
-use super::cold_init_lazy_lock::ColdInitLazyLock;
 use crate::any::AnyView;
 use crate::collections::array::Array;
 use crate::derive::Object;
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectRef, ObjectRefCore};
-use crate::reflection::TypeAttrColumn;
+use crate::reflection::{AccessPath, TypeAttrColumn};
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex};
+use crate::type_traits::AnyCompatible;
 
 /// The payload that `Error::extra_context` carries to name the nodes a failed
 /// visit unwound through, laid out as the C++ `VisitErrorContextObj`.
@@ -49,10 +49,6 @@ pub(crate) struct VisitErrorContextObj {
 /// `(Error, ObjectRef) -> Error`, as C++ `type_attr::kEnrichVisitError`.
 const ENRICH_VISIT_ERROR_ATTR: &str = "__ffi_enrich_visit_error__";
 
-// Absent when no hook is registered; enrichment is then skipped.
-static ENRICH_VISIT_ERROR_COLUMN: ColdInitLazyLock<Option<TypeAttrColumn>> =
-    ColdInitLazyLock::new(|| TypeAttrColumn::lookup(ENRICH_VISIT_ERROR_ATTR));
-
 /// `context` as a visit error context, if it is one.
 fn as_context(context: &ObjectRef) -> Option<&VisitErrorContextObj> {
     let object = ObjectArc::as_ptr(ObjectRef::data(context));
@@ -61,6 +57,28 @@ fn as_context(context: &ObjectRef) -> Option<&VisitErrorContextObj> {
         object::is_instance_of::<VisitErrorContextObj>((*object.cast::<TVMFFIObject>()).type_index)
             .then(|| &*object.cast::<VisitErrorContextObj>())
     }
+}
+
+/// The access paths from `root` to where a failed structural traversal of `root`
+/// stopped, as recorded in `error`'s visit context; empty if `error` has none.
+// As C++ `VisitErrorContext::TryGetFromError` then `FindAccessPaths`, full matches only.
+pub fn find_access_paths<R>(root: &R, error: &Error) -> Result<Array<AccessPath>>
+where
+    R: ObjectRefCore + AnyCompatible,
+{
+    let Some(context) = error
+        .extra_context()
+        .filter(|context| as_context(context).is_some())
+    else {
+        return Ok(Array::default());
+    };
+    Function::get_global("ffi.VisitErrorContext.FindAccessPaths")?
+        .call_packed(&[
+            AnyView::from(root),
+            AnyView::from(context),
+            AnyView::from(&false),
+        ])?
+        .try_into()
 }
 
 /// Pass `error` from a traversal of the borrowed `root` to the hook that
@@ -75,8 +93,8 @@ pub(crate) fn enrich_visit_error(error: Error, root: TVMFFIAny) -> Error {
     {
         return error;
     }
-    let Some(hook) = ENRICH_VISIT_ERROR_COLUMN
-        .as_ref()
+    // Looked up on each error, so a column or hook registered later is found.
+    let Some(hook) = TypeAttrColumn::lookup(ENRICH_VISIT_ERROR_ATTR)
         .and_then(|column| column.get(root.type_index))
         .and_then(|hook| Function::try_from(hook).ok())
     else {

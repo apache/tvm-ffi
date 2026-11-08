@@ -35,7 +35,7 @@ pub mod structural_mutate;
 pub mod structural_visit;
 pub mod structural_walk;
 pub mod unchanged;
-mod visit_error_context;
+pub mod visit_error_context;
 
 /// Borrow guarantees of the structural views, checked as `compile_fail` doctests.
 ///
