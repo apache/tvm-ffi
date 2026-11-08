@@ -189,9 +189,11 @@ impl RecursiveEntryMutator {
 
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "testing.rust.MutationRemapNode"]
-#[type_register]
-#[type_s_eq_hash_kind = "DAGNode"]
+#[object(
+    type_key = "testing.rust.MutationRemapNode",
+    register,
+    s_eq_hash_kind = "DAGNode"
+)]
 struct RemapNodeObj {
     base_: Object,
     #[reflect]
@@ -206,8 +208,7 @@ struct RemapNode {
 
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "testing.rust.MutationFieldNode"]
-#[type_register]
+#[object(type_key = "testing.rust.MutationFieldNode", register)]
 struct FieldNodeObj {
     base_: Object,
     a: Array<i64>,
@@ -704,7 +705,7 @@ fn owned_entry_mode_is_forwarded_by_generated_callbacks() {
                 assert_eq!(owner.debug_strong_count(), Some(count));
                 let result = change.value_or_unchanged(owner);
                 if let Some(alias) = alias {
-                    assert_eq!(Array::<i64>::try_from(alias)?.get(0)?, 1);
+                    assert_eq!(Array::<i64>::try_from(alias)?[0], 1);
                 }
                 Ok(UnchangedOr::changed(result))
             })
@@ -917,7 +918,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
         structural_mutate(true, &mut inner)?;
         let result = inner.result;
         if let Some(alias) = alias {
-            assert_eq!(alias.get(0)?, 1);
+            assert_eq!(alias[0], 1);
         }
         result.try_into()
     }
@@ -1118,7 +1119,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
     );
     #[repr(C)]
     #[derive(tvm_ffi::derive::Object)]
-    #[type_key = "ffi.VisitErrorContext"]
+    #[object(type_key = "ffi.VisitErrorContext")]
     struct VisitErrorContextObj {
         base_: Object,
     }

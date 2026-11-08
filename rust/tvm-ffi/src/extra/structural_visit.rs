@@ -123,9 +123,11 @@ impl Default for StructuralVisitorObj {
 /// Native `ffi.VisitInterrupt` object containing the interruption payload.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.VisitInterrupt"]
-#[type_index(unsafe TVMFFITypeIndex::kTVMFFIVisitInterrupt)]
-#[type_final]
+#[object(
+    type_key = "ffi.VisitInterrupt",
+    unsafe type_index = TVMFFITypeIndex::kTVMFFIVisitInterrupt,
+    final
+)]
 pub struct VisitInterruptObj {
     base_: Object,
     /// Payload returned with the interrupt, or FFI `None` for no payload.

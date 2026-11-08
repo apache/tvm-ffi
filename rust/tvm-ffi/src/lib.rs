@@ -295,7 +295,7 @@ pub use tvm_ffi_macros::match_any;
 /// field's type must take all-zero bytes as a value. An optional field is an
 /// `Option` of an object reference or an [`Optional`] of any other value. The parent's object must
 /// implement `ShallowCopy` and `UnsafeInit`, as `rs_object` types and
-/// `#[type_rs_parent]` bindings, such as the non-final ones `tvm-ffi-stubgen`
+/// `#[object(rs_parent)]` bindings, such as the non-final ones `tvm-ffi-stubgen`
 /// generates, do.
 ///
 /// # Registration

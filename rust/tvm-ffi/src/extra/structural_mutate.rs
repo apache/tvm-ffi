@@ -835,7 +835,7 @@ impl<D, Base: StructuralMutatorBase> StructuralMutatorView<'_, D, Base> {
 ///
 /// let root = Array::from_vec(vec![Array::from_vec(vec![1_i64, 2]), Array::from_vec(vec![3_i64])]);
 /// let result = Array::<Array<i64>>::try_from(structural_mutate(root, Double)?)?;
-/// assert_eq!(result.get(0)?.iter().copied().collect::<Vec<_>>(), vec![2, 4]);
+/// assert_eq!(result[0].iter().copied().collect::<Vec<_>>(), vec![2, 4]);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 pub fn structural_mutate<R, H, M, D, O>(root: R, dispatcher: H) -> Result<Any>

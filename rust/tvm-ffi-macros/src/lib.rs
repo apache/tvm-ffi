@@ -45,22 +45,7 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 // Documented on the `tvm_ffi::derive::Object` re-export, whose examples run
 // as tvm-ffi doctests.
 #[proc_macro_error]
-#[proc_macro_derive(
-    Object,
-    attributes(
-        type_key,
-        type_index,
-        type_final,
-        type_immutable,
-        type_rs_parent,
-        type_register,
-        type_child_slots,
-        type_child_slots_can_overflow,
-        type_s_eq_hash_kind,
-        type_reflection,
-        reflect
-    )
-)]
+#[proc_macro_derive(Object, attributes(object, reflect))]
 pub fn derive_object(input: TokenStream) -> TokenStream {
     object_macros::derive_object(input)
 }

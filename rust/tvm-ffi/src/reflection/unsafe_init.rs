@@ -48,7 +48,7 @@ use crate::{Error, INTERNAL_ERROR};
 /// [`unsafe_init`], which a JSON graph read back, `__ffi_init__` and
 /// `__ffi_new__` then fill. `#[rs_object]` implements it for its object, so the
 /// parent's object must implement it too: [`Object`] does, and so does a
-/// binding with `#[type_rs_parent]` on its [`derive(Object)`](crate::derive::Object).
+/// binding with `#[object(rs_parent)]` on its [`derive(Object)`](crate::derive::Object).
 ///
 /// `__ffi_init__` leaves an `init_off` field as the creator made it, so such a
 /// field's type must take all-zero bytes as a value, as a scalar, `Option<T>`

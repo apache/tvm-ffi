@@ -48,8 +48,7 @@ pub enum AccessKind {
 /// The object behind an [`AccessStep`], laid out as the C++ `AccessStepObj`.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.reflection.AccessStep"]
-#[type_final]
+#[object(type_key = "ffi.reflection.AccessStep", final)]
 pub struct AccessStepObj {
     object: Object,
     /// What the step accesses.
@@ -68,8 +67,7 @@ pub struct AccessStep {
 /// The object behind an [`AccessPath`], laid out as the C++ `AccessPathObj`.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.reflection.AccessPath"]
-#[type_final]
+#[object(type_key = "ffi.reflection.AccessPath", final)]
 pub struct AccessPathObj {
     object: Object,
     /// The path without its last step; `None` at the root.

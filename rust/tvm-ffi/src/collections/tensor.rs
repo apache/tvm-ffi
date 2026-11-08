@@ -115,8 +115,7 @@ unsafe fn data_size(tensor: &DLTensor) -> usize {
 /// The object behind a [`Tensor`]: an object header followed by a `DLTensor`.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.Tensor"]
-#[type_index(unsafe TypeIndex::kTVMFFITensor)]
+#[object(type_key = "ffi.Tensor", unsafe type_index = TypeIndex::kTVMFFITensor)]
 pub struct TensorObj {
     object: Object,
     dltensor: DLTensor,

@@ -31,8 +31,7 @@ use tvm_ffi_sys::{
 /// The object behind an [`Error`]: its kind, message, backtrace, cause and context.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.Error"]
-#[type_index(unsafe TVMFFITypeIndex::kTVMFFIError)]
+#[object(type_key = "ffi.Error", unsafe type_index = TVMFFITypeIndex::kTVMFFIError)]
 pub struct ErrorObj {
     object: Object,
     cell: TVMFFIErrorCell,

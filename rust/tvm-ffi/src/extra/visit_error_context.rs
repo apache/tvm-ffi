@@ -33,8 +33,7 @@ use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex};
 /// visit unwound through, laid out as the C++ `VisitErrorContextObj`.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.VisitErrorContext"]
-#[type_final]
+#[object(type_key = "ffi.VisitErrorContext", final)]
 pub(crate) struct VisitErrorContextObj {
     base_: Object,
     /// Visited nodes, innermost first; an entry may be `None`.

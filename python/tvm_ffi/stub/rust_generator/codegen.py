@@ -30,7 +30,7 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
   one ``from_fields``. A type that is not final
   can be the parent of a type defined in Rust (``tvm_ffi::rs_object``): its
   ``<Leaf>Obj::new`` is public, and its object derives ``ShallowCopy`` and
-  ``UnsafeInit`` (``#[type_rs_parent]``) when every ancestor's is generated
+  ``UnsafeInit`` (``rs_parent``) when every ancestor's is generated
   too (a ``ty-map``'d one is hand-written and may not). ``<Leaf>Obj::new`` of a final type is crate-private.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
@@ -577,16 +577,23 @@ class _ObjectRenderer:
                 lines.append(f"tvm_ffi::impl_object_ref_upcast!({prefix}{pairs});")
         return lines
 
+    def _object_attr(self, verdict: Verdict) -> str:
+        """Render the ``#[object(...)]`` attribute of the object struct."""
+        options = [
+            f'type_key = "{self.type_key}"',
+            *(["final"] if self.info.is_final else []),
+            *(["immutable"] if self._is_immutable() else []),
+            *(["rs_parent"] if self._is_rs_parent(verdict) else []),
+        ]
+        return f"#[object({', '.join(options)})]"
+
     def _struct_lines(self, verdict: Verdict, base: str) -> list[str]:
         """Render the object struct: every field when complete, the parent alone when opaque."""
         header = [
             *self._allow_missing_docs(),
             "#[repr(C)]",
             "#[derive(tvm_ffi::derive::Object)]",
-            f'#[type_key = "{self.type_key}"]',
-            *(["#[type_final]"] if self.info.is_final else []),
-            *(["#[type_immutable]"] if self._is_immutable() else []),
-            *(["#[type_rs_parent]"] if self._is_rs_parent(verdict) else []),
+            self._object_attr(verdict),
             f"pub struct {self.obj_struct} {{",
             f"    base_: {base},",  # a reflected `base_` is rejected (`rust_ident`)
         ]
@@ -787,7 +794,7 @@ class _ObjectRenderer:
         return all(field.frozen for each in [*chain, info] for field in each.fields)
 
     def _is_rs_parent(self, verdict: Verdict) -> bool:
-        """Whether the object derives ``ShallowCopy`` and ``UnsafeInit`` (``#[type_rs_parent]``).
+        """Whether the object derives ``ShallowCopy`` and ``UnsafeInit`` (``rs_parent``).
 
         A subtype defined in Rust needs both of its parent's object. They are derived
         for a complete type that is not final and whose ancestors below ``ffi.Object``
@@ -925,7 +932,7 @@ def _builtin_mirror_lines(type_key: str, base: str) -> list[str]:
         "#[allow(dead_code)]",
         "#[repr(C)]",
         "#[derive(tvm_ffi::derive::Object)]",
-        f'#[type_key = "{type_key}"]',
+        f'#[object(type_key = "{type_key}")]',
         f"pub struct {builtin_mirror_name(type_key)} {{",
         f"    base_: {base},",
         "}",

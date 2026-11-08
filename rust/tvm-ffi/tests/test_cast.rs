@@ -28,9 +28,7 @@ use tvm_ffi::*;
 // must have repr(C) for the object header to stay in the same position
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.CastBase"]
-#[type_register]
-#[type_immutable]
+#[object(type_key = "testing.rust.CastBase", register, immutable)]
 struct TestBaseObj {
     base_: Object,
     value: i64,
@@ -52,10 +50,7 @@ struct TestBase {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.rust.CastDerived"]
-#[type_register]
-#[type_final]
-#[type_immutable]
+#[object(type_key = "testing.rust.CastDerived", register, final, immutable)]
 struct TestDerivedObj {
     base_: TestBaseObj,
     extra: i64,
@@ -127,7 +122,7 @@ fn test_is_instance_of() {
 // Bindings of the C++ testing.TestObjectBase and testing.TestObjectDerived.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.TestObjectBase"]
+#[object(type_key = "testing.TestObjectBase")]
 struct CxxTestBaseObj {
     base_: Object,
     v_i64: i64,
@@ -137,8 +132,7 @@ struct CxxTestBaseObj {
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.TestObjectDerived"]
-#[type_final]
+#[object(type_key = "testing.TestObjectDerived", final)]
 struct CxxTestDerivedObj {
     base_: CxxTestBaseObj,
     v_map: Map<Any, Any>,

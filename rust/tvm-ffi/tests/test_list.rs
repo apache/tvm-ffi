@@ -78,9 +78,8 @@ fn test_list_mutation() {
     assert!(list.capacity() >= 100);
     assert_eq!(list.get(99).unwrap(), 99);
 
-    list.set(0, -1).unwrap();
+    list.set(0, -1);
     assert_eq!(list.get(0).unwrap(), -1);
-    assert!(list.set(100, 0).is_err());
 
     list.insert(1, 7).unwrap();
     assert_eq!(list.get(1).unwrap(), 7);
@@ -147,7 +146,7 @@ fn test_list_releases_elements() {
     list.insert(0, array.clone()).unwrap();
     assert_eq!(probe.debug_strong_count().unwrap(), base + 3);
 
-    list.set(0, Array::from_vec(vec![2i64])).unwrap();
+    list.set(0, Array::from_vec(vec![2i64]));
     assert_eq!(probe.debug_strong_count().unwrap(), base + 2);
     drop(list.remove(1).unwrap());
     assert_eq!(probe.debug_strong_count().unwrap(), base + 1);
@@ -158,7 +157,7 @@ fn test_list_releases_elements() {
     list.extend([array.clone(), array.clone(), array.clone()])
         .unwrap();
     assert_eq!(probe.debug_strong_count().unwrap(), base + 3);
-    list.remove_range(0, 2).unwrap();
+    list.remove_range(0..2);
     assert_eq!(probe.debug_strong_count().unwrap(), base + 1);
     list.reverse();
     list.truncate(0);
@@ -268,12 +267,10 @@ fn test_list_bulk_edits() {
     list.extend(std::iter::empty()).unwrap();
     assert!(list.insert_many(list.len() + 1, [0i64]).is_err());
 
-    list.remove_range(2, 4).unwrap();
+    list.remove_range(2..4);
     assert_eq!(list.len(), len);
     assert_eq!(list.get(2).unwrap(), 2);
-    list.remove_range(1, 1).unwrap();
-    assert!(list.remove_range(3, 2).is_err());
-    assert!(list.remove_range(0, list.len() + 1).is_err());
+    list.remove_range(1..1);
 
     list.truncate(3);
     assert_eq!(
@@ -390,7 +387,7 @@ fn test_list_mismatched_element_is_reported() {
     // Another handle to the same object puts a `String` where an `i64` is expected.
     let ints: List<i64> = [1i64, 2, 3].into_iter().collect();
     let as_any: List<Any> = Any::from(ints.clone()).try_into().unwrap();
-    as_any.set(1, Any::from(String::from("x"))).unwrap();
+    as_any.set(1, Any::from(String::from("x")));
 
     // `get` and the iterator report that element instead of truncating.
     assert!(ints.get(1).is_err());

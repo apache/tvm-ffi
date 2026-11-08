@@ -48,6 +48,7 @@
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ops::{Bound, RangeBounds};
 use std::ptr;
 
 use crate::any::TryFromTemp;
@@ -64,8 +65,7 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 /// runtime replaces when the list grows.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.List"]
-#[type_index(unsafe TypeIndex::kTVMFFIList)]
+#[object(type_key = "ffi.List", unsafe type_index = TypeIndex::kTVMFFIList)]
 pub struct ListObj {
     pub(crate) object: Object,
     // `List` mutates these through `&self` (`push`, `set`, growth), so they are
@@ -310,20 +310,24 @@ impl<T: ContainerElement> List<T> {
         }
     }
 
-    /// Replaces the element at `index`.
+    /// Replaces the element at `index`, as `vec[index] = value`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= len`.
     #[inline]
-    pub fn set(&self, index: usize, value: T) -> Result<()> {
+    pub fn set(&self, index: usize, value: T) {
         let obj = self.obj();
         unsafe {
-            if index >= (*(*obj).size.get()) as usize {
-                return index_error("set");
+            let size = (*(*obj).size.get()) as usize;
+            if index >= size {
+                panic!("Index out of bounds: the len is {size} but the index is {index}");
             }
             let cell = ListObj::cell(obj, index);
             let old = take_cell(cell);
             write_cell(cell, value);
             drop(old);
         }
-        Ok(())
     }
 
     /// Appends `value` to the end of the list.
@@ -427,16 +431,38 @@ impl<T: ContainerElement> List<T> {
         unsafe { ListObj::truncate(self.obj(), len) }
     }
 
-    /// Removes the elements in `start..end`, shifting the ones after them.
-    pub fn remove_range(&self, start: usize, end: usize) -> Result<()> {
+    /// Removes the elements in `range`, shifting the ones after them, as
+    /// [`Vec::drain`] does without returning them.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `range` starts after it ends or ends past the list.
+    pub fn remove_range(&self, range: impl RangeBounds<usize>) {
         let obj = self.obj();
         unsafe {
             let size = (*(*obj).size.get()) as usize;
-            if start > end || end > size {
-                return index_error("remove_range");
+            let start = match range.start_bound() {
+                Bound::Included(&start) => start,
+                Bound::Excluded(&start) => start
+                    .checked_add(1)
+                    .expect("attempted to index slice from after maximum usize"),
+                Bound::Unbounded => 0,
+            };
+            let end = match range.end_bound() {
+                Bound::Included(&end) => end
+                    .checked_add(1)
+                    .expect("attempted to index slice up to maximum usize"),
+                Bound::Excluded(&end) => end,
+                Bound::Unbounded => size,
+            };
+            if start > end {
+                panic!("slice index starts at {start} but ends at {end}");
+            }
+            if end > size {
+                panic!("range end index {end} out of range for slice of length {size}");
             }
             if start == end {
-                return Ok(());
+                return;
             }
             // Rotate the removed cells to the back and drop them from there,
             // so the list is consistent while each element is released.
@@ -444,7 +470,6 @@ impl<T: ContainerElement> List<T> {
                 .rotate_left(end - start);
             ListObj::truncate(obj, size - (end - start));
         }
-        Ok(())
     }
 
     /// Inserts every item of `iter`, in order, at `index`, shifting the

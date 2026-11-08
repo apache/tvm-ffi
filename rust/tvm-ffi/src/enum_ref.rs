@@ -33,8 +33,7 @@ use crate::{AnyView, Error, Result, String, VALUE_ERROR};
 /// `base_: EnumObj`.
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.Enum"]
-#[type_immutable]
+#[object(type_key = "ffi.Enum", immutable)]
 pub struct EnumObj {
     base_: Object,
     // The registration order, which can differ between processes, so values
@@ -77,10 +76,7 @@ impl EnumObj {
 ///
 /// #[repr(C)]
 /// #[derive(Object)]
-/// #[type_key = "my_ext.Color"]
-/// #[type_register]
-/// #[type_final]
-/// #[type_immutable]
+/// #[object(type_key = "my_ext.Color", register, final, immutable)]
 /// pub struct ColorObj {
 ///     base_: EnumObj,
 /// }

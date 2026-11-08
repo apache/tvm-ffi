@@ -57,10 +57,7 @@ use crate::{Any, AnyView, EnumRef, Error, List, Result, String, TYPE_ERROR, VALU
 ///
 /// #[repr(C)]
 /// #[derive(Object)]
-/// #[type_key = "my_ext.Color"]
-/// #[type_register]
-/// #[type_final]
-/// #[type_immutable]
+/// #[object(type_key = "my_ext.Color", register, final, immutable)]
 /// pub struct ColorObj {
 ///     base_: EnumObj,
 /// }
@@ -294,8 +291,7 @@ const ENUM_STATE_ATTR: &str = "__ffi_enum__";
 /// columns (`Dict<String, Dict<ObjectRef, Any>>`).
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "ffi.EnumState"]
-#[type_final]
+#[object(type_key = "ffi.EnumState", final)]
 pub(crate) struct EnumStateObj {
     base_: Object,
     entries: List<Any>,

@@ -35,7 +35,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
 /// registers reflection, naming the tvm-ffi crate `tvm_ffi_crate`.
 ///
 /// `rs_object` registers the reflection of a type without `#[reflect]` fields
-/// or `#[type_s_eq_hash_kind]` too, with the creator of its `UnsafeInit`, as
+/// or `s_eq_hash_kind` too, with the creator of its `UnsafeInit`, as
 /// `#[rs_object]` does.
 pub(crate) fn expand_object(
     derive_input: &DeriveInput,
@@ -43,63 +43,37 @@ pub(crate) fn expand_object(
     rs_object: bool,
 ) -> TokenStream2 {
     let struct_name = derive_input.ident.clone();
+    let options = object_options(derive_input);
 
-    let type_key = get_attr(derive_input, "type_key")
-        .map(attr_to_str)
-        .expect("Expect #[type_key = \"<my_type_key>\"] attribute");
-    let type_final = match get_attr(derive_input, "type_final") {
-        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
-        Some(_) => panic!("Expect #[type_final] attribute"),
-        None => false,
-    };
-
-    let type_immutable = match get_attr(derive_input, "type_immutable") {
-        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
-        Some(_) => panic!("Expect #[type_immutable] attribute"),
-        None => false,
-    };
-
+    let type_key = options
+        .type_key
+        .clone()
+        .expect("Expect #[object(type_key = \"<my_type_key>\")]");
+    let type_final = options.type_final;
+    let type_immutable = options.immutable;
     // Whether an `rs_object` can derive from this type, which needs its
     // `ShallowCopy` and `UnsafeInit`.
-    let type_rs_parent = match get_attr(derive_input, "type_rs_parent") {
-        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
-        Some(_) => panic!("Expect #[type_rs_parent] attribute"),
-        None => false,
-    };
-
+    let type_rs_parent = options.rs_parent;
     // Whether this type is defined here, so that it registers its key, as C++
     // `TVM_FFI_DECLARE_OBJECT_INFO` does. Without it, the type binds a key
     // that its defining library, usually C++, has registered.
-    let type_register = match get_attr(derive_input, "type_register") {
-        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
-        Some(_) => panic!("Expect #[type_register] attribute"),
-        None => false,
-    };
+    let type_register = options.register;
 
     // Reserved child slots and whether children may exceed them, as C++
     // `_type_child_slots` and `_type_child_slots_can_overflow` declare them.
-    let child_slots = match get_attr(derive_input, "type_child_slots").map(|a| a.parse_meta()) {
-        Some(Ok(syn::Meta::NameValue(syn::MetaNameValue {
-            lit: syn::Lit::Int(n),
-            ..
-        }))) => n
+    let child_slots = match &options.child_slots {
+        Some(n) => n
             .base10_parse::<i32>()
-            .expect("Expect #[type_child_slots = <non-negative integer>]"),
-        Some(_) => panic!("Expect #[type_child_slots = <non-negative integer>]"),
+            .expect("Expect `child_slots = <non-negative integer>`"),
         None => 0,
     };
-    let child_slots_can_overflow =
-        match get_attr(derive_input, "type_child_slots_can_overflow").map(|a| a.parse_meta()) {
-            Some(Ok(syn::Meta::NameValue(syn::MetaNameValue {
-                lit: syn::Lit::Bool(b),
-                ..
-            }))) => b.value,
-            Some(_) => panic!("Expect #[type_child_slots_can_overflow = <bool>]"),
-            None => true,
-        };
+    let child_slots_can_overflow = options
+        .child_slots_can_overflow
+        .as_ref()
+        .is_none_or(|b| b.value);
     assert!(
         child_slots >= 0,
-        "Expect #[type_child_slots = <non-negative integer>]"
+        "Expect `child_slots = <non-negative integer>`"
     );
     assert!(
         !(type_final && child_slots > 0),
@@ -107,9 +81,8 @@ pub(crate) fn expand_object(
     );
     assert!(
         type_register
-            || (get_attr(derive_input, "type_child_slots").is_none()
-                && get_attr(derive_input, "type_child_slots_can_overflow").is_none()),
-        "#[type_child_slots] and #[type_child_slots_can_overflow] need #[type_register]"
+            || (options.child_slots.is_none() && options.child_slots_can_overflow.is_none()),
+        "`child_slots` and `child_slots_can_overflow` need `register`"
     );
     // Upcasts reinterpret a pointer to the object as one to its parent, which
     // only `repr(C)` keeps at offset zero.
@@ -123,7 +96,7 @@ pub(crate) fn expand_object(
     }
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
-    let reflection = Reflection::parse(derive_input, rs_object);
+    let reflection = Reflection::parse(derive_input, &options, rs_object);
     let writable = reflection
         .iter()
         .flat_map(|reflection| &reflection.reflected)
@@ -143,9 +116,8 @@ pub(crate) fn expand_object(
         quote! {}
     };
     assert!(
-        reflection.is_none() || (type_register && get_attr(derive_input, "type_index").is_none()),
-        "#[reflect], #[type_s_eq_hash_kind] and #[type_reflection] need #[type_register] and no \
-         #[type_index]"
+        reflection.is_none() || (type_register && options.type_index.is_none()),
+        "#[reflect], `s_eq_hash_kind` and `reflection` need `register` and no `type_index`"
     );
     let register_reflection = match &reflection {
         Some(reflection) => reflection.register_tokens(&struct_name, &type_key, tvm_ffi_crate),
@@ -161,7 +133,7 @@ pub(crate) fn expand_object(
         if !derive_input.generics.params.is_empty() {
             abort!(
                 struct_name,
-                "#[type_rs_parent] needs a struct without generic parameters"
+                "`rs_parent` needs a struct without generic parameters"
             );
         }
         unsafe_init_tokens(&struct_name, &base_ty, &base_id, &field_ids, tvm_ffi_crate)
@@ -174,22 +146,10 @@ pub(crate) fn expand_object(
     // calls at load, or takes the index the key already has,
     // as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does; any other type binds the
     // index its defining library registered.
-    let type_index_tokens = match get_attr(derive_input, "type_index") {
-        Some(attr) => {
-            // A static index is trusted: the type must be the one the runtime
-            // gives that index.
-            let type_index_expr = attr
-                .parse_args_with(|input: syn::parse::ParseStream| {
-                    input.parse::<syn::Token![unsafe]>()?;
-                    input.parse::<syn::Expr>()
-                })
-                .unwrap_or_else(|error| {
-                    abort!(
-                        attr,
-                        "expected #[type_index(unsafe TypeIndex::...)]: {}",
-                        error
-                    )
-                });
+    let type_index_tokens = match &options.type_index {
+        // A static index is trusted: the type must be the one the runtime
+        // gives that index.
+        Some(type_index_expr) => {
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
@@ -255,7 +215,8 @@ pub(crate) fn expand_object(
                             if ret != 0 {
                                 ::core::panic!(
                                     "Type key {} is not registered: load the library that defines \
-                                     it first, or add #[type_register] if this crate defines it",
+                                     it first, or add #[object(register)] if this crate defines \
+                                     it",
                                     #type_key
                                 );
                             }
@@ -291,11 +252,11 @@ pub(crate) fn expand_object(
     // A type defined here registers when its library loads, as a C++ type does
     // through `refl::ObjectDef` in a static init block; a binding stays lazy,
     // and so does a type under a binding whose library is not loaded yet.
-    let register_at_load = if type_register && get_attr(derive_input, "type_index").is_none() {
+    let register_at_load = if type_register && options.type_index.is_none() {
         if !derive_input.generics.params.is_empty() {
             abort!(
                 struct_name,
-                "#[type_register] needs a struct without generic parameters"
+                "`register` needs a struct without generic parameters"
             );
         }
         // The key is in the text of the block, which identifies the block, so
@@ -402,12 +363,12 @@ pub(crate) fn expand_object(
     }
 }
 
-/// The reflection a `#[type_register]` type declares: its `#[reflect]` fields,
-/// its `#[type_s_eq_hash_kind]` and its `#[type_reflection]` function.
+/// The reflection a `register` type declares: its `#[reflect]` fields, its
+/// `s_eq_hash_kind` and its `reflection` function.
 struct Reflection {
     /// The structural kind; `None` inherits the parent's.
     kind: Option<syn::Ident>,
-    /// The function `#[type_reflection(path)]` names, which registers methods.
+    /// The function `reflection = path` names, which registers methods.
     methods: Option<syn::Path>,
     /// The reflected fields.
     reflected: Vec<ReflectedField>,
@@ -501,15 +462,12 @@ fn doc_comment(attrs: &[syn::Attribute]) -> String {
 impl Reflection {
     /// The type's reflection, or `None` when it declares none and is not an
     /// `rs_object`.
-    fn parse(derive_input: &DeriveInput, rs_object: bool) -> Option<Self> {
-        let kind = get_attr(derive_input, "type_s_eq_hash_kind").map(|attr| {
-            let kind = attr_to_str(attr);
-            syn::Ident::new(&kind.value(), kind.span())
-        });
-        let methods = get_attr(derive_input, "type_reflection").map(|attr| {
-            attr.parse_args::<syn::Path>()
-                .expect("Expect #[type_reflection(<path to fn(&mut ObjectDef<Self>)>)]")
-        });
+    fn parse(derive_input: &DeriveInput, options: &ObjectOptions, rs_object: bool) -> Option<Self> {
+        let kind = options
+            .s_eq_hash_kind
+            .as_ref()
+            .map(|kind| syn::Ident::new(&kind.value(), kind.span()));
+        let methods = options.reflection.clone();
         let syn::Data::Struct(s) = &derive_input.data else {
             return None;
         };
@@ -577,7 +535,7 @@ impl Reflection {
                 )?;
             }
         });
-        // The `#[type_reflection]` function registers the methods after the
+        // The `reflection` function registers the methods after the
         // fields, as a C++ `ObjectDef` chains `def` after `def_ro`.
         let methods = self.methods.as_ref().map(|path| {
             // The registration is a `static` initializer, where `Self` does
@@ -985,6 +943,89 @@ fn object_ref_options(derive_input: &DeriveInput) -> ObjectRefOptions {
                 ),
             }
         }
+    }
+    options
+}
+
+/// The options of `#[object(...)]` on an `Object` derive.
+#[derive(Default)]
+struct ObjectOptions {
+    type_key: Option<syn::LitStr>,
+    type_index: Option<syn::Expr>,
+    type_final: bool,
+    immutable: bool,
+    register: bool,
+    rs_parent: bool,
+    child_slots: Option<syn::LitInt>,
+    child_slots_can_overflow: Option<syn::LitBool>,
+    s_eq_hash_kind: Option<syn::LitStr>,
+    reflection: Option<syn::Path>,
+}
+
+impl ObjectOptions {
+    /// Parses one `#[object(...)]` item: a flag, `name = value` or
+    /// `unsafe type_index = expr`.
+    fn parse_item(&mut self, input: syn::parse::ParseStream) -> syn::Result<()> {
+        let is_unsafe = input.parse::<Option<syn::Token![unsafe]>>()?.is_some();
+        // `final` is a keyword.
+        let name: syn::Ident = input.call(syn::Ident::parse_any)?;
+        if is_unsafe != (name == "type_index") {
+            let message = if is_unsafe {
+                "only `type_index` takes `unsafe`"
+            } else {
+                "expected `unsafe type_index = ...`: the type must be the one the runtime gives \
+                 that index"
+            };
+            return Err(syn::Error::new(name.span(), message));
+        }
+        match name.to_string().as_str() {
+            "final" => self.type_final = true,
+            "immutable" => self.immutable = true,
+            "register" => self.register = true,
+            "rs_parent" => self.rs_parent = true,
+            "type_key" => self.type_key = Some(parse_value(input)?),
+            "type_index" => self.type_index = Some(parse_value(input)?),
+            "child_slots" => self.child_slots = Some(parse_value(input)?),
+            "child_slots_can_overflow" => self.child_slots_can_overflow = Some(parse_value(input)?),
+            "s_eq_hash_kind" => self.s_eq_hash_kind = Some(parse_value(input)?),
+            "reflection" => self.reflection = Some(parse_value(input)?),
+            _ => {
+                return Err(syn::Error::new(
+                    name.span(),
+                    "unknown `object` option; expected `type_key = \"...\"`, \
+                     `unsafe type_index = ...`, `final`, `immutable`, `register`, `rs_parent`, \
+                     `child_slots = <n>`, `child_slots_can_overflow = <bool>`, \
+                     `s_eq_hash_kind = \"<kind>\"` or `reflection = <path>`",
+                ))
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The `= value` of a `name = value` option.
+fn parse_value<T: syn::parse::Parse>(input: syn::parse::ParseStream) -> syn::Result<T> {
+    input.parse::<syn::Token![=]>()?;
+    input.parse()
+}
+
+fn object_options(derive_input: &DeriveInput) -> ObjectOptions {
+    let mut options = ObjectOptions::default();
+    for attr in derive_input
+        .attrs
+        .iter()
+        .filter(|a| a.path.is_ident("object"))
+    {
+        attr.parse_args_with(|input: syn::parse::ParseStream| {
+            while !input.is_empty() {
+                options.parse_item(input)?;
+                if !input.is_empty() {
+                    input.parse::<syn::Token![,]>()?;
+                }
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|error| abort!(error.span(), "{}", error));
     }
     options
 }

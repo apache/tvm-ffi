@@ -24,29 +24,51 @@
 /// parent. Define a new type in Rust with [`rs_object`](macro@crate::rs_object)
 /// instead.
 ///
-/// `#[type_key = "..."]` names the type. `type_index()` takes the index the
+/// Without `register` or `type_index`, `type_index()` takes the index the
 /// defining library registered for the key, and panics if that library is not
 /// loaded yet, so a binding never registers a key with the wrong child slots.
 /// Such a panic is final: `type_index()` of the type, and of every type under
 /// it, keeps panicking after the library loads, so call it only once the
 /// library is loaded. It also panics unless the registered key has the type's
 /// parent and depth and, when the type table records a size, a size no
-/// smaller than the type's. `#[type_index(unsafe ...)]` gives the type a
-/// static index instead; the `unsafe` marks the caller's promise that the
-/// runtime gives that index to this type.
+/// smaller than the type's.
 ///
 /// A binding that declares only part of its object must not be constructed:
 /// keep its fields private.
 ///
-/// * `#[type_final]` - The type has no subtypes, as C++ `_type_final`.
-/// * `#[type_immutable]` - Implement
+/// # Options
+///
+/// `#[object(...)]` takes a comma-separated list, as in
+/// `#[object(type_key = "ffi.String", unsafe type_index = TypeIndex::kTVMFFIStr)]`:
+///
+/// * `type_key = "..."` - The type key; required.
+/// * `unsafe type_index = expr` - A static index instead of the registered
+///   one; the `unsafe` marks the caller's promise that the runtime gives that
+///   index to this type.
+/// * `final` - The type has no subtypes, as C++ `_type_final`.
+/// * `immutable` - Implement
 ///   [`ImmutableObject`](crate::object::ImmutableObject), as for a C++ type
 ///   not registered as `_type_mutable`; every subtype must be immutable too.
-/// * `#[type_rs_parent]` - Implement `ShallowCopy` and
+/// * `rs_parent` - Implement `ShallowCopy` and
 ///   [`UnsafeInit`](crate::reflection::UnsafeInit), so an `rs_object` can
 ///   derive from the type. Each field other than the parent must be `Clone`
 ///   and implement [`AnyCompatible`](crate::AnyCompatible), be an
 ///   [`Any`](crate::Any) or have no drop glue.
+/// * `register` - The type is defined here: register its key under its
+///   parent when the library loads, as `rs_object` does.
+/// * `child_slots = N`, `child_slots_can_overflow = bool` - Type indices kept
+///   for subtypes, as C++ `_type_child_slots` and
+///   `_type_child_slots_can_overflow`; 0 and `true` by default. Needs
+///   `register`.
+/// * `s_eq_hash_kind = "TreeNode"` - The
+///   [`SEqHashKind`](crate::reflection::SEqHashKind) of structural equality;
+///   by default the parent's.
+/// * `reflection = path` - A `fn(&mut ObjectDef<Self>)` that registers the
+///   type's methods.
+///
+/// `s_eq_hash_kind`, `reflection` and field `#[reflect(...)]`, as
+/// [`rs_object`](macro@crate::rs_object) takes it, need `register` and no
+/// `type_index`.
 pub use tvm_ffi_macros::Object;
 
 /// Declare an object reference: the managed, reference-counted handle to an

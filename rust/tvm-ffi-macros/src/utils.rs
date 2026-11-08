@@ -26,36 +26,3 @@ use quote::quote;
 pub(crate) fn get_tvm_ffi_crate() -> TokenStream {
     quote!(::tvm_ffi)
 }
-
-/// Get an attribute by name from a derive input
-///
-/// # Arguments
-/// * `derive_input` - The derive input to get the attribute from
-/// * `name` - The name of the attribute to get
-///
-/// # Returns
-/// * `Option<&syn::Attribute>` - The attribute if it exists
-pub(crate) fn get_attr<'a>(
-    derive_input: &'a syn::DeriveInput,
-    name: &str,
-) -> Option<&'a syn::Attribute> {
-    derive_input.attrs.iter().find(|a| a.path.is_ident(name))
-}
-
-/// Convert an attribute to a string
-///
-/// # Arguments
-/// * `attr` - The attribute to convert
-///
-/// # Returns
-/// * `syn::LitStr` - The string value of the attribute
-pub(crate) fn attr_to_str(attr: &syn::Attribute) -> syn::LitStr {
-    match attr.parse_meta() {
-        Ok(syn::Meta::NameValue(syn::MetaNameValue {
-            lit: syn::Lit::Str(s),
-            ..
-        })) => s,
-        Ok(_m) => panic!("Expected a string literal, got"),
-        Err(e) => panic!("{}", e),
-    }
-}

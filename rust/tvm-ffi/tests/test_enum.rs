@@ -27,9 +27,7 @@ use tvm_ffi::{EnumRef, ObjectArc, ObjectRefCore, Result, VALUE_ERROR};
 
 #[repr(C)]
 #[derive(Object)]
-#[type_key = "testing.TestEnumVariant"]
-#[type_final]
-#[type_immutable]
+#[object(type_key = "testing.TestEnumVariant", final, immutable)]
 struct TestEnumVariantObj {
     base_: EnumObj,
 }

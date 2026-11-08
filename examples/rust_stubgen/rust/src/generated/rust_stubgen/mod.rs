@@ -74,9 +74,7 @@ impl TryFrom<i64> for PairKind {
 /// Complete: reflected fields fill [24, 48) exactly (alignment padding [44, 48)).
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
-#[type_key = "rust_stubgen.IntPair"]
-#[type_final]
-#[type_immutable]
+#[object(type_key = "rust_stubgen.IntPair", final, immutable)]
 pub struct IntPairObj {
     base_: Object,
     pub a: i64,
