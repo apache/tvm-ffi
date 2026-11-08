@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use std::ops::Bound;
 use tvm_ffi::*;
 
 /// Address of the element buffer and of its deleter, read through the C ABI
@@ -158,7 +159,7 @@ fn test_list_releases_elements() {
     list.extend([array.clone(), array.clone(), array.clone()])
         .unwrap();
     assert_eq!(probe.debug_strong_count().unwrap(), base + 3);
-    list.remove_range(0, 2).unwrap();
+    list.remove_range(0..2).unwrap();
     assert_eq!(probe.debug_strong_count().unwrap(), base + 1);
     list.reverse();
     list.truncate(0);
@@ -268,12 +269,14 @@ fn test_list_bulk_edits() {
     list.extend(std::iter::empty()).unwrap();
     assert!(list.insert_many(list.len() + 1, [0i64]).is_err());
 
-    list.remove_range(2, 4).unwrap();
+    list.remove_range(2..4).unwrap();
     assert_eq!(list.len(), len);
     assert_eq!(list.get(2).unwrap(), 2);
-    list.remove_range(1, 1).unwrap();
-    assert!(list.remove_range(3, 2).is_err());
-    assert!(list.remove_range(0, list.len() + 1).is_err());
+    list.remove_range(1..1).unwrap();
+    assert!(list
+        .remove_range((Bound::Included(3), Bound::Excluded(2)))
+        .is_err());
+    assert!(list.remove_range(..list.len() + 1).is_err());
 
     list.truncate(3);
     assert_eq!(

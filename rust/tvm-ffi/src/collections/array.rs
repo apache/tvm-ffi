@@ -20,7 +20,6 @@
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::Deref;
 
 use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
@@ -92,8 +91,8 @@ impl Drop for ArrayObj {
 ///
 /// let mut array = Array::from_vec(vec![1_i64, 2, 3]);
 /// assert_eq!(array.len(), 3);
-/// assert_eq!(array.get(1)?, 2);
-/// assert!(array.get(3).is_err());
+/// assert_eq!(array.get(1), Some(2));
+/// assert_eq!(array.get(3), None);
 ///
 /// let snapshot = array.clone();
 /// array.push(4);
@@ -102,7 +101,6 @@ impl Drop for ArrayObj {
 ///
 /// let doubled: Array<i64> = array.iter().map(|x| x * 2).collect();
 /// assert_eq!(doubled.iter().copied().collect::<Vec<_>>(), vec![2, 4, 6, 8]);
-/// # Ok::<(), tvm_ffi::Error>(())
 /// ```
 #[repr(C)]
 #[derive(Clone)]
@@ -304,17 +302,18 @@ impl<T: ContainerElement + Clone> Array<T> {
         container.size += 1;
     }
 
-    /// Insert `value` at `index`, shifting the elements after it.
+    /// Insert `value` at `index`, shifting the elements after it, as
+    /// [`Vec::insert`].
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns an `IndexError` if `index > len`.
+    /// Panics if `index > len`.
     ///
     /// See also [`List::insert`](crate::List::insert).
-    pub fn insert(&mut self, index: usize, value: T) -> Result<(), crate::Error> {
+    pub fn insert(&mut self, index: usize, value: T) {
         let size = self.len();
         if index > size {
-            crate::bail!(crate::error::INDEX_ERROR, "Array insert index out of bound");
+            panic!("insertion index (is {index}) should be <= len (is {size})");
         }
         let container = self.make_mut(size + 1);
         // SAFETY: `make_mut` left room for one more cell; the tail moves up by one.
@@ -324,7 +323,6 @@ impl<T: ContainerElement + Clone> Array<T> {
             write_cell(cell, value);
         }
         container.size += 1;
-        Ok(())
     }
 
     /// Remove and return the last element, or `None` if the array is empty,
@@ -367,17 +365,17 @@ impl<T: ContainerElement + Clone> Array<T> {
         }
     }
 
-    /// Replace the element at `index`.
+    /// Replace the element at `index`, as `vec[index] = value`.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns an `IndexError` if `index >= len`.
+    /// Panics if `index >= len`.
     ///
     /// See also [`List::set`](crate::List::set).
-    pub fn set(&mut self, index: usize, value: T) -> Result<(), crate::Error> {
+    pub fn set(&mut self, index: usize, value: T) {
         let size = self.len();
         if index >= size {
-            crate::bail!(crate::error::INDEX_ERROR, "Array set index out of bound");
+            panic!("Index out of bounds: the len is {size} but the index is {index}");
         }
         let container = self.make_mut(size);
         // SAFETY: the cell at `index` is initialized; its old value is dropped
@@ -388,7 +386,6 @@ impl<T: ContainerElement + Clone> Array<T> {
             write_cell(cell, value);
             drop(old);
         }
-        Ok(())
     }
 
     /// Return the number of elements.
@@ -409,39 +406,17 @@ impl<T: ContainerElement + Clone> Array<T> {
         self.len() == 0
     }
 
-    /// Return the element at `index`.
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - The position of the element.
-    ///
-    /// # Returns
-    ///
-    /// The element at `index`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an `IndexError` if `index` is out of bounds, or a `TypeError`
-    /// if the element is not a `T`.
-    pub fn get(&self, index: usize) -> Result<T, crate::Error> {
-        if index >= self.len() {
-            crate::bail!(crate::error::INDEX_ERROR, "Array get index out of bound");
-        }
-        unsafe {
-            let container = self.data.deref();
-            let base_ptr = container.data as *const TVMFFIAny;
-            let raw_any_ref = &*base_ptr.add(index);
-
-            match T::container_try_cast_from_any_view(raw_any_ref) {
-                Ok(val) => Ok(val),
-                Err(_) => crate::bail!(
-                    crate::error::TYPE_ERROR,
-                    "Failed to cast element at {} to {}",
-                    index,
-                    T::container_type_str()
-                ),
-            }
-        }
+    /// Return the element at `index`, or `None` if it is out of bounds, as
+    /// [`slice::get`]. `array[index]` borrows it instead, and panics when out
+    /// of bounds.
+    pub fn get(&self, index: usize) -> Option<T> {
+        let cell = self.cells().get(index)?;
+        // SAFETY: every cell of an `Array<T>` holds a `T`, checked when the
+        // array is built.
+        Some(unsafe {
+            debug_assert!(T::container_check_any_strict(cell));
+            T::container_copy_from_any_view_after_check(cell)
+        })
     }
 
     /// An array of `items` with room for `capacity` elements.

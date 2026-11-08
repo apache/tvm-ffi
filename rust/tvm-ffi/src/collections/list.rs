@@ -48,6 +48,7 @@
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ops::{Bound, RangeBounds};
 use std::ptr;
 
 use crate::any::TryFromTemp;
@@ -426,11 +427,30 @@ impl<T: ContainerElement> List<T> {
         unsafe { ListObj::truncate(self.obj(), len) }
     }
 
-    /// Removes the elements in `start..end`, shifting the ones after them.
-    pub fn remove_range(&self, start: usize, end: usize) -> Result<()> {
+    /// Removes the elements in `range`, shifting the ones after them, as
+    /// [`Vec::drain`] does without returning them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `IndexError` if `range` starts after it ends or ends past the
+    /// list.
+    pub fn remove_range(&self, range: impl RangeBounds<usize>) -> Result<()> {
         let obj = self.obj();
         unsafe {
             let size = (*(*obj).size.get()) as usize;
+            let start = match range.start_bound() {
+                Bound::Included(&start) => Some(start),
+                Bound::Excluded(&start) => start.checked_add(1),
+                Bound::Unbounded => Some(0),
+            };
+            let end = match range.end_bound() {
+                Bound::Included(&end) => end.checked_add(1),
+                Bound::Excluded(&end) => Some(end),
+                Bound::Unbounded => Some(size),
+            };
+            let (Some(start), Some(end)) = (start, end) else {
+                return index_error("remove_range");
+            };
             if start > end || end > size {
                 return index_error("remove_range");
             }

@@ -181,21 +181,19 @@ fn test_array_copy_on_write() {
 
     let mut array = Array::from_vec(vec![s("a"), s("b"), s("c")]);
     let shared = array.clone();
-    array.set(0, s("x")).unwrap();
+    array.set(0, s("x"));
     assert_ne!(ptr(&array), ptr(&shared));
     assert_eq!(values(&shared), ["a", "b", "c"]);
 
     let unique = ptr(&array);
-    array.set(1, s("y")).unwrap();
+    array.set(1, s("y"));
     array.truncate(2);
     assert_eq!(array.pop().unwrap().as_str(), "y");
     assert_eq!(ptr(&array), unique);
 
     array.push(s("z"));
-    array.insert(0, s("w")).unwrap();
+    array.insert(0, s("w"));
     assert_eq!(values(&array), ["w", "x", "z"]);
 
-    assert!(array.set(3, s("q")).is_err());
-    assert!(array.insert(4, s("q")).is_err());
     assert!(Array::<String>::new().pop().is_none());
 }

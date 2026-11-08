@@ -184,6 +184,5 @@ pub fn get_first_structural_mismatch_with<'l, 'r>(
         crate::cached_global_func!("ffi.GetFirstStructuralMismatch")
             .call_packed(&args)?
             .try_into()?;
-    pair.map(|pair| Ok((pair.get(0)?, pair.get(1)?)))
-        .transpose()
+    Ok(pair.map(|pair| (pair[0].clone(), pair[1].clone())))
 }
