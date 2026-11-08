@@ -17,8 +17,40 @@
  * under the License.
  */
 
+// Expansion sketch, hidden names shortened. Input:
+//
+//     match_any!(value {
+//         i64(n) if n > 0 => a,
+//         AddObj(ref add) => b,
+//         _ => c,
+//     })
+//
+// Output:
+//
+//     {
+//         let mut probe = SourceProbe::new(value);
+//         let mut source = probe.prepare(); // view, borrow or mutation source by type
+//         if let Some(n) = <i64 as ValuePattern<_>>::try_match(&mut source) && (n > 0) {
+//             a
+//         } else if let Some(holder) = {
+//             use RefPattern as _;
+//             (&&&RefPatternProbe::<AddObj>::new()).try_match_ref(&mut source)
+//         } {
+//             let add: &AddObj = Borrow::<AddObj>::borrow(&holder);
+//             b
+//         } else {
+//             c
+//         }
+//     }
+//
+// A guarded reference arm binds the name in its guard too:
+// `&& { let add: &AddObj = Borrow::<AddObj>::borrow(&holder); (guard) }`.
+// With MIN_LOOKUP_TABLE_ARMS or more unguarded arms, a per-call-site jump table
+// picks the arm first and each condition starts with
+// `(lookup.is_err() || lookup == Ok(Some(ID))) &&`.
+
 use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
-use quote::quote;
+use quote::{quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::{Expr, Pat, Result, Token, Type, braced};
 
@@ -142,64 +174,59 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
     } else {
         quote!()
     };
-    let dispatch = arms.iter().enumerate().rev().fold(quote!({ #fallback }), |next, (id, arm)| {
+    let some = quote!(::core::option::Option::Some);
+    let holder = Ident::new("__tvm_ffi_match_any_ref_holder", span);
+    let mut dispatch = TokenStream::new();
+    for (id, arm) in arms.iter().enumerate() {
         let id = id as u32;
         let matcher = &arm.matcher;
-        let binding = &arm.binding;
         let body = &arm.body;
-        let guard = arm.guard.as_ref().map(|guard| quote!(if #guard));
-        let conversion = if shared_ref_binding(binding).is_some() {
-            quote!({
-                use #tvm_ffi::match_any_internal::RefPattern as _;
-                let probe = #tvm_ffi::match_any_internal::RefPatternProbe::<#matcher>::new();
-                (&&&probe).try_match_ref(&mut #source)
-            })
-        } else {
-            quote!(<#matcher as #tvm_ffi::match_any_internal::ValuePattern<_>>::try_match(&mut #source))
-        };
-        let conversion = if can_lookup {
-            quote!(if #lookup.is_err() || #lookup == ::core::result::Result::Ok(::core::option::Option::Some(#id)) {
-                #conversion
-            } else { ::core::option::Option::None })
-        } else { conversion };
-        let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
-        // Drop a rejected value before later arms check uniqueness.
-        let drop_rejected = quote!(#[allow(clippy::drop_non_drop)] ::core::mem::drop(#rejected););
-        if let Some(binding) = shared_ref_binding(binding) {
-            let holder = Ident::new("__tvm_ffi_match_any_ref_holder", span);
-            let converted = Ident::new("__tvm_ffi_match_any_ref_converted", span);
-            let accepted = Ident::new("__tvm_ffi_match_any_ref_accepted", span);
-            let test_guard = arm.guard.as_ref().map(|guard| quote!(#guard)).unwrap_or_else(|| quote!(true));
-            quote! {{
-                let #converted = #conversion;
-                let #accepted = if let ::core::option::Option::Some(#holder) = &#converted {
-                    #[allow(unused_variables)]
-                    let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(#holder);
-                    #test_guard
-                } else { false };
-                if #accepted {
-                    let #holder = #converted.as_ref().unwrap();
-                    #[allow(unused_variables)]
-                    let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(#holder);
+        let jump = can_lookup.then(|| {
+            quote_spanned!(span=> (#lookup.is_err() || #lookup == ::core::result::Result::Ok(#some(#id))) &&)
+        });
+        let arm_tokens = if let Some(binding) = shared_ref_binding(&arm.binding) {
+            let borrow = quote_spanned! {span=>
+                #[allow(unused_variables)]
+                let #binding: &#matcher = ::core::borrow::Borrow::<#matcher>::borrow(&#holder);
+            };
+            let guard = arm
+                .guard
+                .as_ref()
+                .map(|guard| quote_spanned!(span=> && { #borrow (#guard) }));
+            quote_spanned! {span=>
+                if #jump let #some(#holder) = {
+                    use #tvm_ffi::match_any_internal::RefPattern as _;
+                    (&&&#tvm_ffi::match_any_internal::RefPatternProbe::<#matcher>::new()).try_match_ref(&mut #source)
+                } #guard {
+                    #borrow
                     #body
-                } else {
-                    let #rejected = #converted;
-                    #drop_rejected
-                    #next
-                }
-            }}
-        } else {
-            quote! {
-                match #conversion {
-                    ::core::option::Option::Some(#binding) #guard => { #body },
-                    #rejected => {
-                        #drop_rejected
-                        #next
-                    }
                 }
             }
+        } else {
+            let binding = &arm.binding;
+            let guard = arm
+                .guard
+                .as_ref()
+                .map(|guard| quote_spanned!(span=> && (#guard)));
+            quote_spanned! {span=>
+                if #jump let #some(#binding) =
+                    <#matcher as #tvm_ffi::match_any_internal::ValuePattern<_>>::try_match(&mut #source)
+                    #guard
+                {
+                    #body
+                }
+            }
+        };
+        if id > 0 {
+            dispatch.extend(quote_spanned!(span=> else));
         }
-    });
+        dispatch.extend(arm_tokens);
+    }
+    if arms.is_empty() {
+        dispatch = quote!({ #fallback });
+    } else {
+        dispatch.extend(quote_spanned!(span=> else { #fallback }));
+    }
     quote! {{
         use #tvm_ffi::match_any_internal::PrepareSource as _;
         let mut #probe = #tvm_ffi::match_any_internal::SourceProbe::new(#scrutinee);

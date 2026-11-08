@@ -105,7 +105,7 @@ fn matches_concrete_object_containers_in_source_order() {
     };
     assert_eq!(size, 3);
     assert_eq!(count(), 1);
-    let mut saved = None;
+    let saved;
     assert_eq!(
         match_any! {
             &source {
