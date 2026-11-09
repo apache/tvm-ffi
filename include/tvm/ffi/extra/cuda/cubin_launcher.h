@@ -556,12 +556,11 @@ class CubinKernel {
     bool any_success = false;
     for (int device_id = 0; device_id < device_count; ++device_id) {
       auto device = cuda_api::GetDeviceHandle(device_id);
-      // Query device's maximum shared memory per block
+      // Query the maximum shared memory per block a kernel can opt into
+      // (CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN /
+      // cudaDevAttrMaxSharedMemoryPerBlockOptin), not the 48 KiB default limit
       int max_shared_mem = 0;
-      err = cuda_api::GetDeviceAttribute(
-          &max_shared_mem,
-          /* CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK/cudaDevAttrMaxSharedMemoryPerBlock */
-          cuda_api::DeviceAttrType(8), device);
+      err = cuda_api::GetDeviceAttribute(&max_shared_mem, cuda_api::DeviceAttrType(97), device);
       if (err != cuda_api::kSuccess) {
         continue;  // Skip this device if we can't get its attribute
       }
