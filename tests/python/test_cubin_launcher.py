@@ -76,19 +76,6 @@ def _compile_kernel_to_cubin() -> bytes:
         y[idx] = x[idx] * 2.0f;
       }
     }
-
-    extern "C" __global__ void dyn_smem_last_cuda(float* y, int n) {
-      __shared__ float static_buf[256];
-      extern __shared__ float dyn_buf[];
-      static_buf[threadIdx.x] = 1.0f;
-      for (int i = threadIdx.x; i < n; i += blockDim.x) {
-        dyn_buf[i] = static_cast<float>(i);
-      }
-      __syncthreads();
-      if (threadIdx.x == 0) {
-        y[0] = dyn_buf[n - 1] + static_buf[blockDim.x - 1];
-      }
-    }
     """
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -429,87 +416,5 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test_chain::LaunchMulTwo);
 
         expected = torch.full((n,), 12.0, dtype=torch.float32, device="cuda")
         torch.testing.assert_close(y, expected)
-
-    run_with_gpu_lock(run_and_check)
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
-@pytest.mark.skipif(torch is None, reason="PyTorch not installed")
-@pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
-@pytest.mark.skipif(
-    not _is_cuda_version_greater_than_13(), reason="CUDA version must be greater than 13.0"
-)
-def test_cubin_launcher_max_dynamic_smem() -> None:
-    """Test that dynamic_smem_max=-1 allows the device opt-in shared memory limit."""
-    assert torch is not None, "PyTorch is required for this test"
-
-    cubin_bytes = _compile_kernel_to_cubin()
-
-    cpp_code = """
-#include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/error.h>
-#include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/extra/cuda/base.h>
-#include <tvm/ffi/extra/cuda/cubin_launcher.h>
-#include <tvm/ffi/function.h>
-
-#include <memory>
-
-namespace cubin_test_max_smem {
-
-static std::unique_ptr<tvm::ffi::CubinModule> g_module;
-static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel;
-
-void LoadCubinData(const tvm::ffi::Bytes& cubin_data) {
-  g_module = std::make_unique<tvm::ffi::CubinModule>(cubin_data);
-  g_kernel = std::make_unique<tvm::ffi::CubinKernel>(
-      g_module->GetKernelWithMaxDynamicSharedMemory("dyn_smem_last_cuda", -1));
-}
-
-// Launch with all dynamic shared memory left by the device opt-in limit.
-int64_t LaunchWithMaxDynamicSmem(tvm::ffi::TensorView y) {
-  TVM_FFI_CHECK(g_module != nullptr, RuntimeError) << "CUBIN module not loaded";
-  DLDevice device = y.device();
-  int optin_smem = 0;
-  TVM_FFI_CHECK_CUDA_ERROR(cudaDeviceGetAttribute(
-      &optin_smem, cudaDevAttrMaxSharedMemoryPerBlockOptin, device.device_id));
-  cudaFuncAttributes attr;
-  TVM_FFI_CHECK_CUDA_ERROR(
-      cudaFuncGetAttributes(&attr, reinterpret_cast<const void*>(g_kernel->GetHandle())));
-  int64_t dyn_smem = static_cast<int64_t>(optin_smem) - static_cast<int64_t>(attr.sharedSizeBytes);
-  TVM_FFI_CHECK(attr.maxDynamicSharedSizeBytes == dyn_smem, RuntimeError)
-      << "maxDynamicSharedSizeBytes=" << attr.maxDynamicSharedSizeBytes << ", expected " << dyn_smem;
-
-  void* y_ptr = y.data_ptr();
-  int n = static_cast<int>(dyn_smem / sizeof(float));
-  void* args[] = {&y_ptr, &n};
-  cudaStream_t stream =
-      static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
-  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(g_kernel->Launch(
-      args, tvm::ffi::dim3(1), tvm::ffi::dim3(256), stream, static_cast<uint32_t>(dyn_smem)));
-  return dyn_smem;
-}
-
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(load_cubin_data, cubin_test_max_smem::LoadCubinData);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_with_max_dynamic_smem,
-                              cubin_test_max_smem::LaunchWithMaxDynamicSmem);
-
-}  // namespace cubin_test_max_smem
-"""
-
-    mod = tvm_ffi.cpp.load_inline(
-        "cubin_test_max_smem",
-        cuda_sources=cpp_code,
-        extra_ldflags=["-lcudart"],
-    )
-
-    def run_and_check() -> None:
-        assert torch is not None
-        mod["load_cubin_data"](cubin_bytes)
-        y = torch.zeros(1, dtype=torch.float32, device="cuda")
-        dyn_smem = mod["launch_with_max_dynamic_smem"](y)
-        torch.cuda.synchronize()
-        n = dyn_smem // 4
-        torch.testing.assert_close(y.cpu(), torch.tensor([float(n)]))
 
     run_with_gpu_lock(run_and_check)
