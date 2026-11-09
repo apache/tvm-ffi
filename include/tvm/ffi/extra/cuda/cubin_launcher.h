@@ -537,7 +537,7 @@ class CubinKernel {
    *
    * \param dynamic_smem_max Maximum dynamic shared memory in bytes to set.
    *                         -1 (default) means maximum available dynamic shared memory,
-   *                         which is computed as (device max shared memory - static shared memory).
+   *                         which is computed as (device opt-in max shared memory per block - static shared memory).
    *                         For -1, the method queries the kernel's static shared memory usage
    *                         and sets the attribute to the remaining available shared memory.
    *
@@ -574,7 +574,7 @@ class CubinKernel {
         }
 
         // Calculate available dynamic shared memory:
-        // device max shared memory - static shared memory used by kernel
+        // device opt-in max shared memory per block - static shared memory used by kernel
         int64_t max_shared = static_cast<int64_t>(max_shared_mem);
         int64_t available = max_shared - static_shared;
         shared_mem_to_set = (available > 0) ? static_cast<int>(available) : 0;
