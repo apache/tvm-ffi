@@ -310,12 +310,13 @@ cdef int TVMFFIPyArgSetterDLPack_(
     """Setter for __dlpack__ mechanism through python, not as fast as c exporter"""
     cdef TVMFFIObjectHandle temp_chandle
     cdef object arg = <object>py_arg
+    cdef long long temp_ptr
     _from_dlpack_universal(arg, 0, 0, &temp_chandle)
     out.type_index = kTVMFFITensor
     out.v_ptr = temp_chandle
     # record the stream from the source framework context when possible
     temp_dltensor = TVMFFITensorGetDLTensorPtr(temp_chandle)
-    if (temp_dltensor.device.device_type != kDLCPU and ctx.device_type != -1):
+    if (temp_dltensor.device.device_type != kDLCPU and ctx.device_type == -1):
         # __tvm_ffi_env_stream__ returns the expected stream that should be set
         # through TVMFFIEnvSetStream when calling a TVM FFI function
         if hasattr(arg, "__tvm_ffi_env_stream__"):

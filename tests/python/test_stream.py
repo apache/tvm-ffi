@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import ctypes
+from typing import Any
 
 import pytest
 import tvm_ffi
@@ -159,6 +160,64 @@ def test_torch_graph() -> None:
             x = x + 1
 
     run_with_gpu_lock(run_and_check)
+
+
+class _DLPackEnvStreamWrapper:
+    """Tensor wrapper that only exposes ``__dlpack__`` and ``__tvm_ffi_env_stream__``."""
+
+    def __init__(self, tensor: Any, stream: int) -> None:
+        self.tensor = tensor
+        self.stream = stream
+
+    def __dlpack__(self, **kwargs: Any) -> Any:
+        return self.tensor.__dlpack__(**kwargs)
+
+    def __dlpack_device__(self) -> tuple[int, int]:
+        return self.tensor.__dlpack_device__()
+
+    def __tvm_ffi_env_stream__(self) -> int:
+        return self.stream
+
+
+def test_dlpack_env_stream_protocol() -> None:
+    # The tensor lives in host memory but is labelled as a CUDA tensor, so the
+    # stream exchange runs without a GPU; no device memory is ever touched.
+    mod = tvm_ffi.cpp.load_inline(
+        name="check_dlpack_env_stream",
+        cpp_sources="""
+        #include <cstdlib>
+
+        struct HostAlloc {
+            void AllocData(DLTensor* tensor) { tensor->data = std::malloc(16); }
+            void FreeData(DLTensor* tensor) { std::free(tensor->data); }
+        };
+
+        tvm::ffi::Tensor make_cuda_labelled_tensor() {
+            return tvm::ffi::Tensor::FromNDAlloc(HostAlloc(), tvm::ffi::Shape({4}),
+                                                 DLDataType{kDLFloat, 32, 1}, DLDevice{kDLCUDA, 0});
+        }
+
+        uint64_t get_stream(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+            return reinterpret_cast<uint64_t>(
+                TVMFFIEnvGetStream(x.device().device_type, x.device().device_id));
+        }
+    """,
+        functions=["make_cuda_labelled_tensor", "get_stream"],
+    )
+    x = mod.make_cuda_labelled_tensor()
+    stream_1 = 123456789
+    stream_2 = 987654321
+    w1 = _DLPackEnvStreamWrapper(x, stream_1)
+    w2 = _DLPackEnvStreamWrapper(x, stream_2)
+    # the stream of the first device argument is recorded in the call context
+    assert mod.get_stream(w1, w2) == stream_1
+    assert mod.get_stream(w2, w1) == stream_2
+    # a later argument does not override the stream set by an earlier one
+    device = tvm_ffi.device("cuda:0")
+    stream_3 = 192837465
+    with tvm_ffi.use_raw_stream(device, stream_3):
+        x_exchange = tvm_ffi.core.DLTensorTestWrapper(x)
+        assert mod.get_stream(x_exchange, w1) == stream_3
 
 
 @pytest.mark.skipif(torch is None or not torch.xpu.is_available(), reason="Requires torch and XPU")
