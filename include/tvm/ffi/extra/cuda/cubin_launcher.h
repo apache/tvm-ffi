@@ -537,7 +537,8 @@ class CubinKernel {
    *
    * \param dynamic_smem_max Maximum dynamic shared memory in bytes to set.
    *                         -1 (default) means maximum available dynamic shared memory,
-   *                         which is computed as (device max shared memory - static shared memory).
+   *                         which is computed as (device opt-in max shared memory per block
+   *                         - static shared memory).
    *                         For -1, the method queries the kernel's static shared memory usage
    *                         and sets the attribute to the remaining available shared memory.
    *
@@ -556,12 +557,11 @@ class CubinKernel {
     bool any_success = false;
     for (int device_id = 0; device_id < device_count; ++device_id) {
       auto device = cuda_api::GetDeviceHandle(device_id);
-      // Query device's maximum shared memory per block
+      // Query the maximum shared memory per block a kernel can opt into
+      // (CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN /
+      // cudaDevAttrMaxSharedMemoryPerBlockOptin), not the 48 KiB default limit
       int max_shared_mem = 0;
-      err = cuda_api::GetDeviceAttribute(
-          &max_shared_mem,
-          /* CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK/cudaDevAttrMaxSharedMemoryPerBlock */
-          cuda_api::DeviceAttrType(8), device);
+      err = cuda_api::GetDeviceAttribute(&max_shared_mem, cuda_api::DeviceAttrType(97), device);
       if (err != cuda_api::kSuccess) {
         continue;  // Skip this device if we can't get its attribute
       }
@@ -575,7 +575,7 @@ class CubinKernel {
         }
 
         // Calculate available dynamic shared memory:
-        // device max shared memory - static shared memory used by kernel
+        // device opt-in max shared memory per block - static shared memory used by kernel
         int64_t max_shared = static_cast<int64_t>(max_shared_mem);
         int64_t available = max_shared - static_shared;
         shared_mem_to_set = (available > 0) ? static_cast<int>(available) : 0;
