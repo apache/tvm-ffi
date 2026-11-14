@@ -17,6 +17,8 @@
  * under the License.
  */
 #include <tvm/ffi/dtype.h>
+#include <tvm/ffi/optional.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
 #include <string>
@@ -25,6 +27,10 @@
 namespace tvm {
 namespace ffi {
 namespace detail {
+// Keep dtype parse failures cheap for callers probing candidate strings.
+#define TVM_FFI_THROW_NO_BACKTRACE(ErrorKind) \
+  ::tvm::ffi::detail::ErrorBuilder(#ErrorKind, std::string(), false).stream()
+
 /*!
  * \brief Get the custom type name for a given type code.
  */
@@ -46,7 +52,8 @@ inline int ParseCustomDataTypeCode(const std::string_view& str, const char** sca
   *scan = str.data() + 6;
   TVM_FFI_ICHECK(str.data() == tmp);
   if (**scan != '[') {
-    TVM_FFI_THROW(ValueError) << "expected opening brace after 'custom' type in" << str;
+    TVM_FFI_THROW_NO_BACKTRACE(ValueError)
+        << "expected opening brace after 'custom' type in" << str;
   }
   TVM_FFI_ICHECK(str.data() == tmp);
   *scan += 1;
@@ -59,7 +66,8 @@ inline int ParseCustomDataTypeCode(const std::string_view& str, const char** sca
   }
   TVM_FFI_ICHECK(str.data() == tmp);
   if (*(*scan + custom_name_len) != ']') {
-    TVM_FFI_THROW(ValueError) << "expected closing brace after 'custom' type in" << str;
+    TVM_FFI_THROW_NO_BACKTRACE(ValueError)
+        << "expected closing brace after 'custom' type in" << str;
   }
   TVM_FFI_ICHECK(str.data() == tmp);
   *scan += custom_name_len + 1;
@@ -250,9 +258,9 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
       (*ptr)++;
     }
     if (value > UINT32_MAX) {
-      TVM_FFI_THROW(ValueError) << "Integer value in dtype string '"
-                                << std::string_view(start_ptr, *ptr - start_ptr)
-                                << "' is out of range for uint32_t";
+      TVM_FFI_THROW_NO_BACKTRACE(ValueError)
+          << "Integer value in dtype string '" << std::string_view(start_ptr, *ptr - start_ptr)
+          << "' is out of range for uint32_t";
     }
     return static_cast<uint32_t>(value);
   };
@@ -275,12 +283,13 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     const char* digits_start = *ptr;
     uint32_t lanes_val = parse_digits(ptr, end);
     if (*ptr == digits_start || lanes_val == 0) {
-      TVM_FFI_THROW(ValueError) << "Invalid lanes specification in dtype '" << dtype_str
-                                << "'. Lanes must be a positive integer.";
+      TVM_FFI_THROW_NO_BACKTRACE(ValueError) << "Invalid lanes specification in dtype '"
+                                             << dtype_str << "'. Lanes must be a positive integer.";
     }
     if (lanes_val > UINT16_MAX) {
-      TVM_FFI_THROW(ValueError) << "Lanes value " << lanes_val
-                                << " is out of range for uint16_t in dtype '" << dtype_str << "'";
+      TVM_FFI_THROW_NO_BACKTRACE(ValueError)
+          << "Lanes value " << lanes_val << " is out of range for uint16_t in dtype '" << dtype_str
+          << "'";
     }
     return static_cast<uint16_t>(multiplier * lanes_val);
   };
@@ -297,7 +306,7 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     dtype.lanes = parse_lanes(&endpt, str_end, str);
     scan = endpt;
     if (scan != str_end) {
-      TVM_FFI_THROW(ValueError) << "unknown dtype `" << str << '`';
+      TVM_FFI_THROW_NO_BACKTRACE(ValueError) << "unknown dtype `" << str << '`';
     }
     return dtype;
   };
@@ -332,7 +341,7 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     } else if (int end = match_float_variant(offset, "e5m2"); end >= 0) {
       return parse_float(str, end, kDLFloat8_e5m2, 8);
     } else {
-      TVM_FFI_THROW(ValueError) << "unknown float8 type `" << str << '`';
+      TVM_FFI_THROW_NO_BACKTRACE(ValueError) << "unknown float8 type `" << str << '`';
       TVM_FFI_UNREACHABLE();
     }
   };
@@ -343,7 +352,7 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     } else if (int end = match_float_variant(offset, "e3m2fn"); end >= 0) {
       return parse_float(str, end, kDLFloat6_e3m2fn, 6);
     } else {
-      TVM_FFI_THROW(ValueError) << "unknown float6 type `" << str << '`';
+      TVM_FFI_THROW_NO_BACKTRACE(ValueError) << "unknown float6 type `" << str << '`';
       TVM_FFI_UNREACHABLE();
     }
   };
@@ -353,7 +362,7 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
         end >= 0) {
       return parse_float(str, end, kDLFloat4_e2m1fn, 4, /*allow_underscore_lanes=*/true);
     } else {
-      TVM_FFI_THROW(ValueError) << "unknown float4 type `" << str << '`';
+      TVM_FFI_THROW_NO_BACKTRACE(ValueError) << "unknown float4 type `" << str << '`';
       TVM_FFI_UNREACHABLE();
     }
   };
@@ -419,24 +428,38 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     dtype.code = static_cast<uint8_t>(detail::ParseCustomDataTypeCode(str, &scan));
   } else {
     scan = str.data();
-    TVM_FFI_THROW(ValueError) << "unknown dtype `" << str << '`';
+    TVM_FFI_THROW_NO_BACKTRACE(ValueError) << "unknown dtype `" << str << '`';
   }
   // Parse bits manually to handle non-null-terminated string_view
   const char* xdelim = scan;
   uint32_t bits_val = parse_digits(&xdelim, str_end);
   if (bits_val > UINT8_MAX) {
-    TVM_FFI_THROW(ValueError) << "Bits value " << bits_val
-                              << " is out of range for uint8_t in dtype '" << str << "'";
+    TVM_FFI_THROW_NO_BACKTRACE(ValueError)
+        << "Bits value " << bits_val << " is out of range for uint8_t in dtype '" << str << "'";
   }
   uint8_t bits = static_cast<uint8_t>(bits_val);
   if (bits != 0) dtype.bits = bits;
   const char* endpt = xdelim;
   dtype.lanes = parse_lanes(&endpt, str_end, str, /*allow_scalable=*/true);
   if (endpt != str_end) {
-    TVM_FFI_THROW(ValueError) << "unknown dtype `" << str << '`';
+    TVM_FFI_THROW_NO_BACKTRACE(ValueError) << "unknown dtype `" << str << '`';
   }
   return dtype;
 }
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  reflection::GlobalDef().def(
+      "ffi.DataTypeTryParse", [](const String& str) -> Optional<DLDataType> {
+        try {
+          return StringViewToDLDataType_(std::string_view(str.data(), str.size()));
+        } catch (const Error& error) {
+          if (error.kind() == "ValueError") return std::nullopt;
+          throw;
+        }
+      });
+}
+
+#undef TVM_FFI_THROW_NO_BACKTRACE
 
 }  // namespace ffi
 }  // namespace tvm

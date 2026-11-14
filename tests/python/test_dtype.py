@@ -16,6 +16,7 @@
 # under the License.
 
 import pickle
+import time
 from typing import Any
 
 import numpy as np
@@ -318,3 +319,49 @@ def test_dtype_kind_properties(
     assert dtype.is_integer is is_integer
     assert dtype.is_float is is_float
     assert dtype.is_handle is is_handle
+
+
+@pytest.mark.parametrize(
+    "dtype_str", ["int32", "f32x2", "bf16", "float8_e4m3fn", "fp4_e2m1fn", "bool", "void"]
+)
+def test_data_type_try_parse_a_dtype(dtype_str: str) -> None:
+    result = tvm_ffi.dtype.try_parse(dtype_str)
+    assert isinstance(result, tvm_ffi.dtype)
+    expected = tvm_ffi.dtype(dtype_str)
+    assert (result.type_code, result.bits, result.lanes) == (
+        expected.type_code,
+        expected.bits,
+        expected.lanes,
+    )
+
+
+@pytest.mark.parametrize(
+    "dtype_str", ["mbarrier", "fill_from", "int32x", "float8_e9m9", "custom[", "i32x0"]
+)
+def test_data_type_try_parse_no_dtype_without_an_error(dtype_str: str) -> None:
+    assert tvm_ffi.dtype.try_parse(dtype_str) is None
+    # Constructing the dtype still raises the error the parse reports.
+    with pytest.raises(ValueError):
+        tvm_ffi.dtype(dtype_str)
+
+
+def test_data_type_try_parse_a_miss_cheaply() -> None:
+    # Expected misses should not capture a backtrace.
+    try_parse = tvm_ffi.dtype.try_parse
+    start = time.perf_counter()
+    for _ in range(1000):
+        assert try_parse("mbarrier") is None
+    assert time.perf_counter() - start < 1.0
+
+
+def test_unknown_dtype_message() -> None:
+    with pytest.raises(ValueError, match="unknown dtype `mbarrier`"):
+        tvm_ffi.dtype("mbarrier")
+
+
+def test_data_type_try_parse_ffi() -> None:
+    try_parse = tvm_ffi.get_global_func("ffi.DataTypeTryParse")
+    result = try_parse("float32")
+    assert isinstance(result, tvm_ffi.dtype)
+    assert result == "float32"
+    assert try_parse("not_a_dtype") is None
