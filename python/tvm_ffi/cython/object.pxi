@@ -222,39 +222,46 @@ cdef class CContainerBase(CObject):
         self._dlpack_exchange_api = NULL
 
 
-# Whether an Object class was given a virtual subclass (``register``) or defines ``__subclasshook__``.
-# Until one is, ``isinstance`` and ``issubclass`` against an Object class follow the MRO alone, which
-# is what ``ABCMeta`` answers then too, without its Python-level check: a negative ``issubclass``
-# there walks every subclass of the class, adding overhead for large class hierarchies.
-cdef bint _OBJECT_ABC_VIRTUAL = False
+# Whether Object checks require ABCMeta's extended subclass machinery.
+# Most Object classes use ordinary inheritance, so Python's faster MRO-based
+# subtype checks suffice. Registering a virtual subclass or defining a custom
+# __subclasshook__ enables ABCMeta checks for all Object classes thereafter.
+cdef bint _OBJECT_USE_ABC_CHECKS = False
 
 
 class _ObjectSlotsMeta(ABCMeta):
     def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
-        global _OBJECT_ABC_VIRTUAL
+        # Creates the class, defaulting to no additional instance slots.
+        global _OBJECT_USE_ABC_CHECKS
         if "__slots__" not in ns:
             ns["__slots__"] = ()
+        # ABCMeta calls __subclasshook__ to customize subclass recognition:
+        # True/False decides the result; NotImplemented defers to normal ABC checks.
         if "__subclasshook__" in ns:
-            _OBJECT_ABC_VIRTUAL = True
+            _OBJECT_USE_ABC_CHECKS = True
         return super().__new__(mcls, name, bases, ns, **kwargs)
 
     def __init__(cls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
+        # Initializes the newly created class through ABCMeta.
         super().__init__(name, bases, ns, **kwargs)
 
     def register(cls, subclass):
-        global _OBJECT_ABC_VIRTUAL
-        _OBJECT_ABC_VIRTUAL = True
+        # Registers a virtual subclass without changing its inheritance or MRO.
+        global _OBJECT_USE_ABC_CHECKS
+        _OBJECT_USE_ABC_CHECKS = True
         return ABCMeta.register(cls, subclass)
 
     def __instancecheck__(cls, instance):
-        if _OBJECT_ABC_VIRTUAL:
+        # Implements isinstance(instance, cls).
+        if _OBJECT_USE_ABC_CHECKS:
             return ABCMeta.__instancecheck__(cls, instance)
         if PyType_IsSubtype(type(instance), <type>cls):
             return True
         return type.__instancecheck__(cls, instance)  # a ``__class__`` other than the type
 
     def __subclasscheck__(cls, subclass):
-        if _OBJECT_ABC_VIRTUAL:
+        # Implements issubclass(subclass, cls).
+        if _OBJECT_USE_ABC_CHECKS:
             return ABCMeta.__subclasscheck__(cls, subclass)
         if PyType_Check(subclass):
             return PyType_IsSubtype(<type>subclass, <type>cls)
