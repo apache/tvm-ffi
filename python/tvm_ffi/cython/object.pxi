@@ -16,6 +16,7 @@
 # under the License.
 import json
 from abc import ABCMeta
+from cpython.type cimport PyType_Check, PyType_IsSubtype
 from typing import Any
 
 
@@ -221,14 +222,50 @@ cdef class CContainerBase(CObject):
         self._dlpack_exchange_api = NULL
 
 
+# Whether Object checks require ABCMeta's extended subclass machinery.
+# Most Object classes use ordinary inheritance, so Python's faster MRO-based
+# subtype checks suffice. Registering a virtual subclass or defining a custom
+# __subclasshook__ enables ABCMeta checks for all Object classes thereafter.
+cdef bint _OBJECT_USE_ABC_CHECKS = False
+
+
 class _ObjectSlotsMeta(ABCMeta):
     def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
+        # Creates the class, defaulting to no additional instance slots.
+        global _OBJECT_USE_ABC_CHECKS
         if "__slots__" not in ns:
             ns["__slots__"] = ()
+        # ABCMeta calls __subclasshook__ to customize subclass recognition:
+        # True/False decides the result; NotImplemented defers to normal ABC checks.
+        if "__subclasshook__" in ns:
+            _OBJECT_USE_ABC_CHECKS = True
         return super().__new__(mcls, name, bases, ns, **kwargs)
 
     def __init__(cls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
+        # Initializes the newly created class through ABCMeta.
         super().__init__(name, bases, ns, **kwargs)
+
+    def register(cls, subclass):
+        # Registers a virtual subclass without changing its inheritance or MRO.
+        global _OBJECT_USE_ABC_CHECKS
+        _OBJECT_USE_ABC_CHECKS = True
+        return ABCMeta.register(cls, subclass)
+
+    def __instancecheck__(cls, instance):
+        # Implements isinstance(instance, cls).
+        if _OBJECT_USE_ABC_CHECKS:
+            return ABCMeta.__instancecheck__(cls, instance)
+        if PyType_IsSubtype(type(instance), <type>cls):
+            return True
+        return type.__instancecheck__(cls, instance)  # a ``__class__`` other than the type
+
+    def __subclasscheck__(cls, subclass):
+        # Implements issubclass(subclass, cls).
+        if _OBJECT_USE_ABC_CHECKS:
+            return ABCMeta.__subclasscheck__(cls, subclass)
+        if PyType_Check(subclass):
+            return PyType_IsSubtype(<type>subclass, <type>cls)
+        return type.__subclasscheck__(cls, subclass)
 
 
 class Object(CObject, metaclass=_ObjectSlotsMeta):
