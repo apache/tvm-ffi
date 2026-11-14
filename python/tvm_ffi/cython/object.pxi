@@ -16,6 +16,7 @@
 # under the License.
 import json
 from abc import ABCMeta
+from cpython.type cimport PyType_Check, PyType_IsSubtype
 from typing import Any
 
 
@@ -221,14 +222,43 @@ cdef class CContainerBase(CObject):
         self._dlpack_exchange_api = NULL
 
 
+# Whether an Object class was given a virtual subclass (``register``) or defines ``__subclasshook__``.
+# Until one is, ``isinstance`` and ``issubclass`` against an Object class follow the MRO alone, which
+# is what ``ABCMeta`` answers then too, without its Python-level check: a negative ``issubclass``
+# there walks every subclass of the class, adding overhead for large class hierarchies.
+cdef bint _OBJECT_ABC_VIRTUAL = False
+
+
 class _ObjectSlotsMeta(ABCMeta):
     def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
+        global _OBJECT_ABC_VIRTUAL
         if "__slots__" not in ns:
             ns["__slots__"] = ()
+        if "__subclasshook__" in ns:
+            _OBJECT_ABC_VIRTUAL = True
         return super().__new__(mcls, name, bases, ns, **kwargs)
 
     def __init__(cls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
         super().__init__(name, bases, ns, **kwargs)
+
+    def register(cls, subclass):
+        global _OBJECT_ABC_VIRTUAL
+        _OBJECT_ABC_VIRTUAL = True
+        return ABCMeta.register(cls, subclass)
+
+    def __instancecheck__(cls, instance):
+        if _OBJECT_ABC_VIRTUAL:
+            return ABCMeta.__instancecheck__(cls, instance)
+        if PyType_IsSubtype(type(instance), <type>cls):
+            return True
+        return type.__instancecheck__(cls, instance)  # a ``__class__`` other than the type
+
+    def __subclasscheck__(cls, subclass):
+        if _OBJECT_ABC_VIRTUAL:
+            return ABCMeta.__subclasscheck__(cls, subclass)
+        if PyType_Check(subclass):
+            return PyType_IsSubtype(<type>subclass, <type>cls)
+        return type.__subclasscheck__(cls, subclass)
 
 
 class Object(CObject, metaclass=_ObjectSlotsMeta):

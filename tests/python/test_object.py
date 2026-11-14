@@ -16,6 +16,7 @@
 # under the License.
 from __future__ import annotations
 
+import subprocess
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -476,6 +477,46 @@ class TestIsinstanceIssubclass:
         """User-defined types should be subclasses of Object."""
         assert issubclass(tvm_ffi.testing.TestObjectBase, tvm_ffi.Object)
         assert issubclass(tvm_ffi.testing.TestObjectDerived, tvm_ffi.Object)
+
+    def test_non_object_values(self) -> None:
+        """Values and classes outside the hierarchy are no Object, and a non-class is refused."""
+        for value in (1, "a", None, [1], object()):
+            assert not isinstance(value, tvm_ffi.Object)
+            assert not isinstance(value, tvm_ffi.testing.TestObjectBase)
+        assert not issubclass(int, tvm_ffi.Object)
+        with pytest.raises(TypeError):
+            issubclass(1, tvm_ffi.Object)  # type: ignore[arg-type]
+
+    def test_containers_keep_their_collection_abcs(self) -> None:
+        """The collections.abc bases of a container answer as before."""
+        assert isinstance(tvm_ffi.Array([1]), Sequence)
+        assert not isinstance(tvm_ffi.Map({"a": 1}), Sequence)
+
+    def test_virtual_subclass_after_register(self) -> None:
+        """``register`` and ``__subclasshook__`` keep ABCMeta's meaning, from the first one on.
+
+        Each runs in its own process: it switches the checks of every Object class there to ABCMeta's.
+        """
+        register = (
+            "import tvm_ffi.testing as t\n"
+            "class Virtual: pass\n"
+            "assert not isinstance(Virtual(), t.TestObjectBase)\n"
+            "t.TestObjectBase.register(Virtual)\n"
+            "assert isinstance(Virtual(), t.TestObjectBase) and issubclass(Virtual, t.TestObjectBase)\n"
+            "assert not isinstance(Virtual(), t.TestObjectDerived)\n"
+            "assert isinstance(t.TestObjectBase(), t.TestObjectBase)\n"
+        )
+        hook = (
+            "import tvm_ffi\n"
+            "class Hooked(tvm_ffi.Object):\n"
+            "    @classmethod\n"
+            "    def __subclasshook__(cls, other):\n"
+            "        return True if other is int else NotImplemented\n"
+            "assert issubclass(int, Hooked) and isinstance(1, Hooked)\n"
+            "assert not issubclass(str, Hooked)\n"
+        )
+        for code in (register, hook):
+            subprocess.run([sys.executable, "-c", code], check=True)
 
     def test_issubclass_sibling_containers(self) -> None:
         """Sibling container types should not be subclasses of each other."""
