@@ -34,6 +34,8 @@
 #include <tvm/ffi/string.h>
 
 #include <cstdint>
+#include <optional>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -188,6 +190,73 @@ namespace type_attr {
 /*! \brief Per-class enum state: ordered entries, canonical indices, and extensible attrs. */
 inline constexpr reflection::AttrKey<EnumState> kEnumState{"__ffi_enum__"};
 }  // namespace type_attr
+
+namespace reflection {
+
+/*!
+ * \brief A typed enum attribute column indexed by singleton identity.
+ *
+ * Construction resolves an existing column once. Like TypeAttrColumn, it throws
+ * if the column is missing; construct it after the attribute is registered.
+ * The shared column reflects subsequent EnumDef::set_attr calls, including new
+ * entries and updates. Registration must not run concurrently with lookups.
+ *
+ * \tparam T The attribute value type, extracted strictly as with AttrKey::ValueFrom.
+ * \sa EnumDef
+ */
+template <typename T>
+class EnumAttrColumn {
+ public:
+  /*!
+   * \brief Resolve an enum type's existing attribute column.
+   * \param type_index The enum's runtime type index.
+   * \param attr_name The attribute name.
+   * \throws Error if the enum state or attribute column is missing.
+   */
+  EnumAttrColumn(int32_t type_index, std::string_view attr_name)
+      : column_(GetColumn(type_index, attr_name)) {}
+
+  /*! \brief Resolve a column using its key's declared value type. */
+  EnumAttrColumn(int32_t type_index, AttrKey<T> key) : EnumAttrColumn(type_index, key.name) {}
+
+  /*!
+   * \brief Look up an attribute by enum singleton identity.
+   * \param instance The enum singleton; names and integer indices are not used.
+   * \return The typed value, or std::nullopt for a missing or None entry.
+   * \throws Error if a present value has the wrong type. No fallback conversion is run.
+   * \note Borrowed results remain valid only while the stored value remains alive.
+   */
+  std::optional<T> operator[](const Enum& instance) const {
+    auto value = column_.Get(instance);
+    if (!value || *value == nullptr) return std::nullopt;
+    return value->template as_or_throw<T>();
+  }
+
+ private:
+  static Dict<ObjectRef, Any> GetColumn(int32_t type_index, std::string_view attr_name) {
+    TypeAttrColumn states(type_attr::kEnumState);
+    AnyView value = states[type_index];
+    if (value != nullptr) {
+      if (value.type_index() != EnumStateObj::_GetOrAllocRuntimeTypeIndex()) {
+        TVM_FFI_THROW(TypeError) << "Expected `" << EnumStateObj::_type_key
+                                 << "` in enum state column, but got `" << value.GetTypeKey()
+                                 << "`";
+      }
+      // Inline type indices may not be initialized yet during static registration.
+      const auto* state = static_cast<const EnumStateObj*>(value.cast<ObjectRef>().get());
+      if (auto column = state->attrs.Get(String(attr_name.data(), attr_name.size()))) {
+        return *column;
+      }
+    }
+    TVM_FFI_THROW(RuntimeError) << "Cannot find enum attribute " << attr_name << " for type `"
+                                << TypeIndexToTypeKey(type_index) << "`";
+    TVM_FFI_UNREACHABLE();
+  }
+
+  Dict<ObjectRef, Any> column_;
+};
+
+}  // namespace reflection
 
 template <typename Index>
 inline Enum EnumObj::GetByIndex(int32_t type_index, const Index& index) {

@@ -482,6 +482,35 @@ and container fields. Payload normalization recurses through ``Array``, ``List``
 ``Map``, and ``Dict`` values.
 
 
+C++ Enum Attribute Columns
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``reflection::EnumAttrColumn<T>`` from ``<tvm/ffi/enum.h>`` to resolve an
+enum type and attribute name once, then look up typed values by singleton
+identity. An ``AttrKey<T>`` deduces the column's value type:
+
+.. code-block:: cpp
+
+   constexpr ffi::reflection::AttrKey<int64_t> kCost{"cost"};
+   ffi::reflection::EnumDef<OpcodeObj>("Add").set_attr(kCost, 1);
+
+   const ffi::reflection::EnumAttrColumn costs(OpcodeObj::RuntimeTypeIndex(), kCost);
+   ffi::Enum add = ffi::EnumObj::_GetByStrIndex<OpcodeObj>("Add");
+   std::optional<int64_t> cost = costs[add];  // 1
+
+Construct the column after registering the attribute: a missing enum state or
+column throws, just as a missing column does for ``TypeAttrColumn``. Construction
+can be retried after registration; it does not create or cache an empty column.
+A missing entry or ``None`` returns ``std::nullopt``; a present value of the wrong
+type throws without conversion. Values from another enum type do not match,
+even if their names or integer indices are equal.
+
+Cached columns share the registry dictionary and see later ``EnumDef::set_attr``
+updates and newly registered entries. Registration and lookup must not run
+concurrently. Borrowed results, such as native function views, require the
+stored value to remain alive.
+
+
 Inheritance
 -----------
 
