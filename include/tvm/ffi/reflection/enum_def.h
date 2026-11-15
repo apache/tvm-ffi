@@ -37,6 +37,7 @@
 #include <tvm/ffi/string.h>
 
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -174,6 +175,81 @@ class EnumDef : public ReflectionDefBase {
   int32_t type_index_;
   Enum instance_{UnsafeInit{}};
 };
+
+/*!
+ * \brief A typed enum attribute column indexed by singleton identity.
+ *
+ * Construction resolves an existing column once. Like TypeAttrColumn, it throws
+ * if the column is missing; construct it after the attribute is registered.
+ * The shared column reflects subsequent EnumDef::set_attr calls, including new
+ * entries and updates. Registration must not run concurrently with lookups.
+ *
+ * \tparam EnumClsObj An Object subclass deriving from EnumObj.
+ * \tparam T The attribute value type, extracted strictly with AttrKey::ValueFrom.
+ * \sa GetEnumAttrColumn
+ */
+template <typename EnumClsObj, typename T>
+class EnumAttrColumn {
+  static_assert(std::is_base_of_v<EnumObj, EnumClsObj>, "EnumClsObj must derive from EnumObj");
+
+ public:
+  /*!
+   * \brief Resolve an enum type's existing attribute column using a typed key.
+   * \param key The attribute key.
+   * \throws Error if the enum state or attribute column is missing.
+   */
+  explicit EnumAttrColumn(AttrKey<T> key) : column_(GetColumn(key)), key_(key) {}
+
+  /*!
+   * \brief Look up an attribute by enum singleton identity.
+   * \param instance The enum singleton; names and integer indices are not used.
+   * \return The typed value, or std::nullopt for a missing or None entry.
+   * \throws Error if a present value has the wrong type. No fallback conversion is run.
+   * \note Borrowed results remain valid only while the stored value remains alive.
+   */
+  std::optional<T> operator[](const Enum& instance) const {
+    if (auto value = column_.Get(instance)) return key_.ValueFrom(*value);
+    return std::nullopt;
+  }
+
+ private:
+  static Dict<ObjectRef, Any> GetColumn(AttrKey<T> key) {
+    int32_t type_index = EnumClsObj::_GetOrAllocRuntimeTypeIndex();
+    TypeAttrColumn states(type_attr::kEnumState);
+    AnyView value = states[type_index];
+    if (value != nullptr) {
+      if (value.type_index() != EnumStateObj::_GetOrAllocRuntimeTypeIndex()) {
+        TVM_FFI_THROW(TypeError) << "Expected `" << EnumStateObj::_type_key
+                                 << "` in enum state column, but got `" << value.GetTypeKey()
+                                 << "`";
+      }
+      // Inline type indices may not be initialized yet during static registration.
+      const auto* state = static_cast<const EnumStateObj*>(value.cast<ObjectRef>().get());
+      if (auto column = state->attrs.Get(String(key.name))) {
+        return *column;
+      }
+    }
+    TVM_FFI_THROW(RuntimeError) << "Cannot find enum attribute " << key.name << " for type `"
+                                << TypeIndexToTypeKey(type_index) << "`";
+    TVM_FFI_UNREACHABLE();
+  }
+
+  Dict<ObjectRef, Any> column_;
+  AttrKey<T> key_;
+};
+
+/*!
+ * \brief Resolve a typed enum attribute column, deducing the value type from its key.
+ * \tparam EnumClsObj An Object subclass deriving from EnumObj.
+ * \tparam T The attribute value type.
+ * \param key The attribute key.
+ * \return The existing attribute column for the enum type.
+ * \throws Error if the enum state or attribute column is missing.
+ */
+template <typename EnumClsObj, typename T>
+EnumAttrColumn<EnumClsObj, T> GetEnumAttrColumn(AttrKey<T> key) {
+  return EnumAttrColumn<EnumClsObj, T>(key);
+}
 
 }  // namespace reflection
 }  // namespace ffi

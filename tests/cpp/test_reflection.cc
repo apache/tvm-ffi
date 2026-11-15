@@ -76,6 +76,11 @@ class QueryEnumObj : public EnumObj {
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.QueryEnum", QueryEnumObj, EnumObj);
 };
 
+class AttrEnumObj : public EnumObj {
+ public:
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.AttrEnum", AttrEnumObj, EnumObj);
+};
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
 
@@ -149,6 +154,15 @@ TEST(Reflection, EnumIsDefined) {
   EXPECT_TRUE(Definition::IsDefined("Beta"));
   EXPECT_TRUE(EnumObj::_GetByStrIndex<QueryEnumObj>("Beta").same_as(
       EnumObj::_GetByIntIndex<QueryEnumObj>(1)));
+}
+
+TEST(Reflection, EnumAttrColumn) {
+  constexpr reflection::AttrKey<int64_t> kCost{"cost"};
+  reflection::EnumDef<AttrEnumObj>("Alpha").set_attr(kCost, 7);
+  reflection::EnumDef<AttrEnumObj>("Beta");  // NOLINT(bugprone-unused-raii)
+  const auto costs = reflection::GetEnumAttrColumn<AttrEnumObj>(kCost);
+  EXPECT_EQ(costs[EnumObj::_GetByStrIndex<AttrEnumObj>("Alpha")], 7);
+  EXPECT_FALSE(costs[EnumObj::_GetByStrIndex<AttrEnumObj>("Beta")].has_value());
 }
 
 TEST(Reflection, FieldGetter) {
