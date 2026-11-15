@@ -454,12 +454,14 @@ class PyNativeObject:
 
 
 def _object_type_key_to_index(str type_key):
-    """get the type index of object class"""
+    """get the type index of object class, or None when no type of that key is registered"""
     cdef int32_t tidx
-    type_key_arg = ByteArrayArg(c_str(type_key))
-    if TVMFFITypeKeyToIndex(type_key_arg.cptr(), &tidx) == 0:
-        return tidx
-    return None
+    cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
+    # Query only (parent_type_index=-2): a miss returns -2. TVMFFITypeKeyToIndex raises on a
+    # miss instead, and the error captures a backtrace: in the first error of a process,
+    # libbacktrace reads the symbols of every loaded library, most of a second with torch loaded.
+    tidx = TVMFFITypeGetOrAllocIndex(type_key_arg.cptr(), -1, 0, 0, 0, -2)
+    return None if tidx == -2 else tidx
 
 
 cdef inline str _type_index_to_key(int32_t tindex):

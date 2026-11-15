@@ -23,7 +23,7 @@ import builtins
 from enum import IntEnum
 from typing import Any, ClassVar
 
-from . import core
+from . import _ffi_api, core
 
 
 class DataTypeCode(IntEnum):
@@ -113,6 +113,23 @@ class dtype(str):
         val = str.__new__(cls, content)
         val._tvm_ffi_dtype = core.DataType(content)
         return val
+
+    @staticmethod
+    def try_parse(text: str) -> dtype | None:
+        """Parse a dtype string, returning None if it is not a valid dtype.
+
+        Expected parse failures do not capture a backtrace. Other errors,
+        such as an unregistered custom type, propagate to the caller.
+
+        Examples
+        --------
+        >>> tvm_ffi.dtype.try_parse("float32")
+        'float32'
+        >>> tvm_ffi.dtype.try_parse("not_a_dtype") is None
+        True
+
+        """
+        return _ffi_api.DataTypeTryParse(text)
 
     @staticmethod
     def from_dlpack_data_type(dltype_data_type: tuple[int, int, int]) -> dtype:

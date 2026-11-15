@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -524,3 +525,19 @@ class TestIsinstanceIssubclass:
         assert not issubclass(tvm_ffi.Dict, tvm_ffi.Map)
         assert not issubclass(tvm_ffi.Array, tvm_ffi.List)
         assert not issubclass(tvm_ffi.Map, tvm_ffi.Dict)
+
+
+def test_object_type_key_to_index_registered_and_missing() -> None:
+    tindex = tvm_ffi.core._object_type_key_to_index("testing.TestObjectBase")
+    type_info = tvm_ffi.core._type_cls_to_type_info(tvm_ffi.testing.TestObjectBase)
+    assert type_info is not None
+    assert tindex == type_info.type_index
+    assert tvm_ffi.core._object_type_key_to_index("testing.NoSuchTypeKey") is None
+
+
+def test_object_type_key_to_index_miss_is_cheap() -> None:
+    # A miss raises no error, whose backtrace would cost milliseconds per call.
+    start = time.perf_counter()
+    for _ in range(1000):
+        assert tvm_ffi.core._object_type_key_to_index("testing.NoSuchTypeKey") is None
+    assert time.perf_counter() - start < 1.0

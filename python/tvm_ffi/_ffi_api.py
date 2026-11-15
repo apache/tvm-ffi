@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
     from ctypes import c_void_p
-    from tvm_ffi import Device, Module, Object, StructuralKey as _StructuralKey, StructuralMutator as _StructuralMutator, StructuralVisitor as _StructuralVisitor, VisitInterrupt as _VisitInterrupt
+    from tvm_ffi import dtype, Device, Module, Object, StructuralKey as _StructuralKey, StructuralMutator as _StructuralMutator, StructuralVisitor as _StructuralVisitor, VisitInterrupt as _VisitInterrupt
     from tvm_ffi.access_path import AccessPath
     from typing import Any, Callable
 # isort: on
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     def ArraySize(_0: Sequence[Any], /) -> int: ...
     def Bytes(_0: bytes, /) -> bytes: ...
     def ContainerFindFirstNonCPUDevice(_0: Any, /) -> Device: ...
+    def DataTypeTryParse(_0: str, /) -> dtype | None: ...
     def DeepCopy(_0: Any, /) -> Any: ...
     def Dict(*args: Any) -> Any: ...
     def DictClear(_0: MutableMapping[Any, Any], /) -> None: ...
@@ -144,6 +145,7 @@ __all__ = [
     "ArraySize",
     "Bytes",
     "ContainerFindFirstNonCPUDevice",
+    "DataTypeTryParse",
     "DeepCopy",
     "Dict",
     "DictClear",
