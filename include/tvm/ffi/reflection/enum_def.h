@@ -177,7 +177,7 @@ class EnumDef : public ReflectionDefBase {
 };
 
 /*!
- * \brief A typed enum attribute column indexed by singleton identity.
+ * \brief A typed enum attribute map indexed by singleton identity.
  *
  * Construction resolves an existing column once. Like TypeAttrColumn, it throws
  * if the column is missing; construct it after the attribute is registered.
@@ -186,10 +186,10 @@ class EnumDef : public ReflectionDefBase {
  *
  * \tparam EnumClsObj An Object subclass deriving from EnumObj.
  * \tparam T The attribute value type, extracted strictly with AttrKey::ValueFrom.
- * \sa GetEnumAttrColumn
+ * \sa GetEnumAttrMap
  */
 template <typename EnumClsObj, typename T>
-class EnumAttrColumn {
+class EnumAttrMap {
   static_assert(std::is_base_of_v<EnumObj, EnumClsObj>, "EnumClsObj must derive from EnumObj");
 
  public:
@@ -198,7 +198,7 @@ class EnumAttrColumn {
    * \param key The attribute key.
    * \throws Error if the enum state or attribute column is missing.
    */
-  explicit EnumAttrColumn(AttrKey<T> key) : column_(GetColumn(key)), key_(key) {}
+  explicit EnumAttrMap(AttrKey<T> key) : column_(GetColumn(key)), key_(key) {}
 
   /*!
    * \brief Look up an attribute by enum singleton identity.
@@ -239,16 +239,16 @@ class EnumAttrColumn {
 };
 
 /*!
- * \brief Resolve a typed enum attribute column, deducing the value type from its key.
+ * \brief Resolve a typed enum attribute map, deducing the value type from its key.
  * \tparam EnumClsObj An Object subclass deriving from EnumObj.
  * \tparam T The attribute value type.
  * \param key The attribute key.
- * \return The existing attribute column for the enum type.
+ * \return The attribute map for the enum type.
  * \throws Error if the enum state or attribute column is missing.
  */
 template <typename EnumClsObj, typename T>
-EnumAttrColumn<EnumClsObj, T> GetEnumAttrColumn(AttrKey<T> key) {
-  return EnumAttrColumn<EnumClsObj, T>(key);
+EnumAttrMap<EnumClsObj, T> GetEnumAttrMap(AttrKey<T> key) {
+  return EnumAttrMap<EnumClsObj, T>(key);
 }
 
 }  // namespace reflection
