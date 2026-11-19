@@ -188,7 +188,7 @@ int TVMFFIFunctionGetGlobal(const TVMFFIByteArray* name, TVMFFIObjectHandle* out
   TVM_FFI_SAFE_CALL_END();
 }
 
-int TVMFFIFunctionCall(TVMFFIObjectHandle func, TVMFFIAny* args, int32_t num_args,
+int TVMFFIFunctionCall(TVMFFIObjectHandle func, const TVMFFIAny* args, int32_t num_args,
                        TVMFFIAny* result) {
   using namespace tvm::ffi;
 #ifdef _MSC_VER
