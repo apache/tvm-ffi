@@ -288,7 +288,7 @@ cdef extern from "tvm/ffi/c_api.h":
     int TVMFFIObjectCreateOpaque(void* handle, int32_t type_index,
                                  void (*deleter)(void*), TVMFFIObjectHandle* out) nogil
     int TVMFFIObjectGetTypeIndex(TVMFFIObjectHandle obj) nogil
-    int TVMFFIFunctionCall(TVMFFIObjectHandle func, TVMFFIAny* args, int32_t num_args,
+    int TVMFFIFunctionCall(TVMFFIObjectHandle func, const TVMFFIAny* args, int32_t num_args,
                            TVMFFIAny* result) nogil
     int TVMFFIFunctionCreate(void* self, TVMFFISafeCallType safe_call,
                              void (*deleter)(void*), TVMFFIObjectHandle* out) nogil
