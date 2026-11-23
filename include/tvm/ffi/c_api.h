@@ -755,7 +755,7 @@ TVM_FFI_DLL int TVMFFIAnyViewToOwnedAny(const TVMFFIAny* any_view, TVMFFIAny* ou
  * \param result The output result, caller must ensure result->type_index is set to kTVMFFINone.
  * \return 0 on success, nonzero on failure.
  */
-TVM_FFI_DLL int TVMFFIFunctionCall(TVMFFIObjectHandle func, TVMFFIAny* args, int32_t num_args,
+TVM_FFI_DLL int TVMFFIFunctionCall(TVMFFIObjectHandle func, const TVMFFIAny* args, int32_t num_args,
                                    TVMFFIAny* result);
 
 /*!
